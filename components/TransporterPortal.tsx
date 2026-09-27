@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Truck, DollarSign, Plus, RefreshCw, X, CheckCircle2, Clock, AlertCircle, 
   MapPin, Phone, User, FileText, Upload, ChevronRight, LogOut, ShieldCheck, 
-  ArrowRight, Search, Filter, Calendar, Building, Eye, Camera, Check
+  ArrowRight, Search, Filter, Calendar, Building, Eye, Camera, Check, Menu
 } from 'lucide-react';
 import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
@@ -42,6 +42,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
 
   // Navigation
   const [activeTab, setActiveTab] = useState<'vehicles' | 'ready_vehicles' | 'finance' | 'assigned_cases'>('vehicles');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Transporter Identity State
   const [selectedTransporterName, setSelectedTransporterName] = useState<string>(() => {
@@ -341,101 +342,133 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
   return (
     <div className="flex flex-col lg:flex-row min-h-screen bg-slate-950 text-gray-100 font-sans">
       
+      {/* Mobile Drawer Overlay */}
+      {mobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-40 lg:hidden animate-fade-in"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
       {/* ========================================================================= */}
       {/* TRANSPORTER SIDEBAR */}
       {/* ========================================================================= */}
-      <aside className="w-full lg:w-64 bg-slate-900/90 border-b lg:border-b-0 lg:border-r border-white/10 flex flex-col shrink-0 no-print">
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-slate-900/98 backdrop-blur-xl border-r border-white/10 flex flex-col justify-between shrink-0 shadow-2xl transition-transform duration-300 lg:static lg:w-64 lg:translate-x-0 no-print ${
+        mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+      }`}>
         
-        {/* Brand Header */}
-        <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="bg-slate-950 p-1.5 rounded-xl border border-white/10">
-              <Logo className="h-7 w-auto" />
+        <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar">
+          {/* Brand Header */}
+          <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="bg-slate-950 p-1.5 rounded-xl border border-white/10">
+                <Logo className="h-7 w-auto" />
+              </div>
+              <div>
+                <h1 className="text-sm font-bold text-white tracking-wide">Transporter Desk</h1>
+                <p className="text-[10px] text-amber-400 font-medium">Fleet & Transport Hub</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-sm font-bold text-white tracking-wide">Transporter Desk</h1>
-              <p className="text-[10px] text-amber-400 font-medium">Fleet & Transport Hub</p>
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(false)}
+              className="lg:hidden text-gray-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition"
+              title="Close Menu"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          {/* Transporter Identity Card */}
+          <div className="p-3.5 mx-3 my-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-1">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center font-bold text-xs">
+                🚛
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-xs font-bold text-white truncate">{selectedTransporterName}</h4>
+                <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                  <ShieldCheck size={11} /> Verified Fleet Carrier
+                </span>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Transporter Identity Card */}
-        <div className="p-3.5 mx-3 my-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-1">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center font-bold text-xs">
-              🚛
-            </div>
-            <div className="min-w-0 flex-1">
-              <h4 className="text-xs font-bold text-white truncate">{selectedTransporterName}</h4>
-              <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-                <ShieldCheck size={11} /> Verified Fleet Carrier
+          {/* Navigation Menu */}
+          <nav className="flex-1 p-3 space-y-1.5">
+            <button
+              onClick={() => {
+                setActiveTab('vehicles');
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'vehicles'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Truck size={17} />
+              <span>Vehicles Management</span>
+              <span className="ml-auto text-[11px] font-mono font-bold bg-black/30 px-2 py-0.5 rounded-full">
+                {myVehicles.length}
               </span>
-            </div>
-          </div>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab('ready_vehicles');
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'ready_vehicles'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <MapPin size={17} />
+              <span>Available / Ready Fleet</span>
+              <span className="ml-auto text-[11px] font-mono font-bold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full">
+                {availableVehicles.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab('assigned_cases');
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'assigned_cases'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Building size={17} />
+              <span>Assigned Shipments</span>
+              <span className="ml-auto text-[11px] font-mono font-bold bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full">
+                {myAssignedCases.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab('finance');
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'finance'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <DollarSign size={17} />
+              <span>Finance & Ledger</span>
+            </button>
+          </nav>
         </div>
-
-        {/* Navigation Menu */}
-        <nav className="flex-1 p-3 space-y-1.5">
-          <button
-            onClick={() => setActiveTab('vehicles')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'vehicles'
-                ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <Truck size={17} />
-            <span>Vehicles Management</span>
-            <span className="ml-auto text-[11px] font-mono font-bold bg-black/30 px-2 py-0.5 rounded-full">
-              {myVehicles.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('ready_vehicles')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'ready_vehicles'
-                ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <MapPin size={17} />
-            <span>Available / Ready Fleet</span>
-            <span className="ml-auto text-[11px] font-mono font-bold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full">
-              {availableVehicles.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('assigned_cases')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'assigned_cases'
-                ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <Building size={17} />
-            <span>Assigned Shipments</span>
-            <span className="ml-auto text-[11px] font-mono font-bold bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full">
-              {myAssignedCases.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('finance')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'finance'
-                ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <DollarSign size={17} />
-            <span>Finance & Ledger</span>
-          </button>
-        </nav>
 
         {/* Sign Out Button */}
-        <div className="p-3 border-t border-white/10">
+        <div className="p-3 border-t border-white/10 bg-slate-950/40">
           <button
             onClick={onSignOut}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl text-xs font-semibold transition"
@@ -450,7 +483,46 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
       {/* ========================================================================= */}
       {/* MAIN VIEW AREA */}
       {/* ========================================================================= */}
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto space-y-6">
+      <main className="flex-1 p-3.5 sm:p-6 lg:p-8 overflow-y-auto space-y-4 sm:space-y-6">
+
+        {/* Mobile Sticky Header Bar */}
+        <header className="lg:hidden -mx-3.5 -mt-3.5 mb-3 sm:-mx-6 sm:-mt-6 h-14 bg-slate-900/95 backdrop-blur-md border-b border-white/10 px-3 sm:px-4 flex items-center justify-between shrink-0 z-20 sticky top-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition active:scale-95"
+              title="Open Navigation Menu"
+            >
+              <Menu size={20} />
+            </button>
+            <div className="flex items-center gap-2 min-w-0">
+              <Logo variant="icon" className="h-7 w-auto shrink-0" />
+              <div className="min-w-0">
+                <span className="text-xs font-bold text-white block truncate">
+                  Transporter Desk
+                </span>
+                <span className="text-[10px] text-amber-400 block font-medium truncate max-w-[150px]">
+                  {selectedTransporterName}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
+              {activeTab.replace('_', ' ')}
+            </span>
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="p-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition active:scale-95"
+              title="Sign Out"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
+        </header>
 
         {/* ======================================================================= */}
         {/* VIEW 1: VEHICLES MANAGEMENT */}

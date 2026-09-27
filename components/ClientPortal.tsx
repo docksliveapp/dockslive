@@ -5,7 +5,7 @@ import {
   Camera, Upload, X, Eye, ChevronRight, ShieldCheck, 
   MapPin, Anchor, Box, ArrowUpRight, ArrowDownLeft, CreditCard,
   Building, RefreshCw, FileCheck, Layers, ExternalLink, User, Download, Loader2, LogOut, UserPlus,
-  Receipt, Printer, Check, Phone, Info, Bell
+  Receipt, Printer, Check, Phone, Info, Bell, Menu
 } from 'lucide-react';
 import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
@@ -102,6 +102,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   // Navigation: 'cases' | 'case_status' | 'finance' | 'available_vehicles'
   const [activeTab, setActiveTab] = useState<'cases' | 'case_status' | 'finance' | 'available_vehicles'>('cases');
   const [isClientRegModalOpen, setIsClientRegModalOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
   // Data States
   const [casesList, setCasesList] = useState<Case[]>([]);
@@ -586,130 +587,168 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   return (
     <div className="flex flex-col lg:flex-row min-h-screen bg-slate-950 text-gray-100 font-sans">
 
+      {/* Mobile Drawer Overlay */}
+      {mobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-40 lg:hidden animate-fade-in"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
       {/* ========================================================================= */}
       {/* 1. LEFT SIDEBAR NAVIGATION (REQUESTED BY USER) */}
       {/* ========================================================================= */}
-      <aside className="w-full lg:w-64 bg-slate-900/95 border-b lg:border-b-0 lg:border-r border-white/10 flex flex-col shrink-0 no-print">
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-slate-900/98 backdrop-blur-xl border-r border-white/10 flex flex-col justify-between shrink-0 shadow-2xl transition-transform duration-300 lg:static lg:w-64 lg:translate-x-0 no-print ${
+        mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+      }`}>
         
-        {/* Brand Header */}
-        <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-slate-950 p-1.5 rounded-xl border border-white/10">
-              <Logo className="h-7 w-auto" />
+        <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar">
+          {/* Brand Header */}
+          <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="bg-slate-950 p-1.5 rounded-xl border border-white/10">
+                <Logo className="h-7 w-auto" />
+              </div>
+              <div>
+                <h1 className="text-sm font-bold text-white tracking-wide">Client Portal</h1>
+                <p className="text-[10px] text-amber-400 font-medium">Importer & Logistics Desk</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-sm font-bold text-white tracking-wide">Client Portal</h1>
-              <p className="text-[10px] text-amber-400 font-medium">Importer & Logistics Desk</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Client Identity Display */}
-        <div className="p-3.5 mx-3 my-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-1.5">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-amber-600/20 text-amber-300 font-bold text-xs flex items-center justify-center border border-amber-500/30 uppercase">
-              {selectedClientName.slice(0, 2)}
-            </div>
-            <div className="min-w-0 flex-1">
-              <h4 className="text-xs font-bold text-white truncate" title={selectedClientName}>
-                {selectedClientName}
-              </h4>
-              <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
-                <ShieldCheck size={11} /> Verified Corporate Client
-              </span>
-            </div>
-          </div>
-
-          <div className="pt-1 flex items-center justify-between text-[11px] border-t border-white/10">
             <button
-              onClick={() => setIsClientRegModalOpen(true)}
-              className="text-purple-300 hover:text-white flex items-center gap-1 text-[10px] font-semibold"
+              type="button"
+              onClick={() => setMobileMenuOpen(false)}
+              className="lg:hidden text-gray-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition"
+              title="Close Menu"
             >
-              <UserPlus size={11} /> Profile & Universal Rates
+              <X size={18} />
             </button>
           </div>
-        </div>
 
-        {/* 3 Main Sidebar Options Requested by User */}
-        <nav className="flex-1 p-3 space-y-1.5">
-          
-          {/* Option 1: Cases */}
-          <button
-            onClick={() => setActiveTab('cases')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'cases'
-                ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <FolderKanban size={17} />
-            <span>Cases</span>
-            <span className="ml-auto text-[11px] font-mono font-bold bg-black/30 px-2 py-0.5 rounded-full">
-              {clientCases.length}
-            </span>
-          </button>
+          {/* Client Identity Display */}
+          <div className="p-3.5 mx-3 my-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-1.5">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-amber-600/20 text-amber-300 font-bold text-xs flex items-center justify-center border border-amber-500/30 uppercase">
+                {selectedClientName.slice(0, 2)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-xs font-bold text-white truncate" title={selectedClientName}>
+                  {selectedClientName}
+                </h4>
+                <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                  <ShieldCheck size={11} /> Verified Corporate Client
+                </span>
+              </div>
+            </div>
 
-          {/* Option 2: Check Case Status */}
-          <button
-            onClick={() => setActiveTab('case_status')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all relative ${
-              activeTab === 'case_status'
-                ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <Clock size={17} />
-            <span>Check Case Status</span>
-            {clientActionNeededCount > 0 && (
-              <span className="ml-auto bg-amber-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded-full animate-pulse">
-                Action Req
+            <div className="pt-1 flex items-center justify-between text-[11px] border-t border-white/10">
+              <button
+                onClick={() => {
+                  setIsClientRegModalOpen(true);
+                  setMobileMenuOpen(false);
+                }}
+                className="text-purple-300 hover:text-white flex items-center gap-1 text-[10px] font-semibold"
+              >
+                <UserPlus size={11} /> Profile & Universal Rates
+              </button>
+            </div>
+          </div>
+
+          {/* 3 Main Sidebar Options Requested by User */}
+          <nav className="flex-1 p-3 space-y-1.5">
+            
+            {/* Option 1: Cases */}
+            <button
+              onClick={() => {
+                setActiveTab('cases');
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'cases'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <FolderKanban size={17} />
+              <span>Cases</span>
+              <span className="ml-auto text-[11px] font-mono font-bold bg-black/30 px-2 py-0.5 rounded-full">
+                {clientCases.length}
               </span>
-            )}
-          </button>
+            </button>
 
-          {/* Option 3: Finance */}
-          <button
-            onClick={() => setActiveTab('finance')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'finance'
-                ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <DollarSign size={17} />
-            <span>Finance</span>
-            {payableToDpl + payableToLoading + payableToVehicleRent > 0 && (
-              <span className="ml-auto text-[10px] font-mono font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded">
-                Due
+            {/* Option 2: Check Case Status */}
+            <button
+              onClick={() => {
+                setActiveTab('case_status');
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all relative ${
+                activeTab === 'case_status'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Clock size={17} />
+              <span>Check Case Status</span>
+              {clientActionNeededCount > 0 && (
+                <span className="ml-auto bg-amber-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded-full animate-pulse">
+                  Action Req
+                </span>
+              )}
+            </button>
+
+            {/* Option 3: Finance */}
+            <button
+              onClick={() => {
+                setActiveTab('finance');
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'finance'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <DollarSign size={17} />
+              <span>Finance</span>
+              {payableToDpl + payableToLoading + payableToVehicleRent > 0 && (
+                <span className="ml-auto text-[10px] font-mono font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded">
+                  Due
+                </span>
+              )}
+            </button>
+
+            {/* Option 4: Available & Ready Vehicles (Transporters) */}
+            <button
+              onClick={() => {
+                setActiveTab('available_vehicles');
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'available_vehicles'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Truck size={17} />
+              <span>Available / Ready Fleet</span>
+              <span className="ml-auto text-[11px] font-mono font-bold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full">
+                {availableVehiclesList.length}
               </span>
-            )}
-          </button>
+            </button>
 
-          {/* Option 4: Available & Ready Vehicles (Transporters) */}
-          <button
-            onClick={() => setActiveTab('available_vehicles')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-              activeTab === 'available_vehicles'
-                ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <Truck size={17} />
-            <span>Available / Ready Fleet</span>
-            <span className="ml-auto text-[11px] font-mono font-bold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full">
-              {availableVehiclesList.length}
-            </span>
-          </button>
+          </nav>
 
-        </nav>
-
-        {/* Quick Amount Widget */}
-        <div className="p-3 border-t border-white/10">
-          <GoldenAmountWidget onOpenFinance={() => setActiveTab('finance')} />
+          {/* Quick Amount Widget */}
+          <div className="p-3 border-t border-white/10">
+            <GoldenAmountWidget onOpenFinance={() => {
+              setActiveTab('finance');
+              setMobileMenuOpen(false);
+            }} />
+          </div>
         </div>
 
         {/* Sign Out Button */}
-        <div className="p-3 border-t border-white/10 flex items-center justify-between">
+        <div className="p-3 border-t border-white/10 flex items-center justify-between bg-slate-950/40">
           <button
             onClick={onSignOut}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl text-xs font-semibold transition"
@@ -724,7 +763,46 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       {/* ========================================================================= */}
       {/* 2. MAIN CLIENT CONTENT AREA */}
       {/* ========================================================================= */}
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto space-y-6">
+      <main className="flex-1 p-3.5 sm:p-6 lg:p-8 overflow-y-auto space-y-4 sm:space-y-6">
+
+        {/* Mobile Sticky Header Bar */}
+        <header className="lg:hidden -mx-3.5 -mt-3.5 mb-3 sm:-mx-6 sm:-mt-6 h-14 bg-slate-900/95 backdrop-blur-md border-b border-white/10 px-3 sm:px-4 flex items-center justify-between shrink-0 z-20 sticky top-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition active:scale-95"
+              title="Open Navigation Menu"
+            >
+              <Menu size={20} />
+            </button>
+            <div className="flex items-center gap-2 min-w-0">
+              <Logo variant="icon" className="h-7 w-auto shrink-0" />
+              <div className="min-w-0">
+                <span className="text-xs font-bold text-white block truncate">
+                  Client Portal
+                </span>
+                <span className="text-[10px] text-amber-400 block font-medium truncate max-w-[150px]">
+                  {selectedClientName}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
+              {activeTab.replace('_', ' ')}
+            </span>
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="p-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition active:scale-95"
+              title="Sign Out"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
+        </header>
 
         {/* ======================================================================= */}
         {/* PAGE 1: CASES VIEW (SEARCH + PENDING SECTION + COMPLETE SECTION) */}

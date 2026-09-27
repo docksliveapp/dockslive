@@ -1509,6 +1509,180 @@ export async function downloadClientLedgerPdf(data: ClientLedgerExportData): Pro
 }
 
 // -------------------------------------------------------------
+// 3.5. CASHBOOK LEDGER STATEMENT (STRICTLY CASH & BANK TRANSACTIONS)
+// -------------------------------------------------------------
+export interface CashbookLedgerExportData {
+  dateRange?: string;
+  generatedDate: string;
+  totalInflow: number;
+  totalOutflow: number;
+  netBalance: number;
+  entries: Array<{
+    date: string;
+    reference: string;
+    party: string;
+    description: string;
+    paymentMethod?: string;
+    bankName?: string;
+    inflow: number;
+    outflow: number;
+    balance: number;
+  }>;
+  companyName?: string;
+  customLogo?: string | null;
+  branding?: BrandingInfo;
+}
+
+export async function downloadCashbookLedgerPdf(data: CashbookLedgerExportData): Promise<{ success: boolean; filename: string; blobUrl: string }> {
+  try {
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+      compress: true
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 14;
+    let currentY = 16;
+
+    const drawHeader = async (pageNum: number) => {
+      currentY = await drawPdfCorporateHeader(doc, {
+        title: 'CASHBOOK LEDGER',
+        refNo: data.dateRange ? `Period: ${data.dateRange}` : 'Official Cashbook Records',
+        date: data.generatedDate,
+        subRef: `Page ${pageNum}`,
+        branding: {
+          companyName: data.companyName,
+          customLogo: data.customLogo,
+          ...data.branding
+        },
+        accentColor: [15, 23, 42]
+      });
+      currentY += 4;
+    };
+
+    await drawHeader(1);
+
+    // Summary Card
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(margin, currentY, pageWidth - (margin * 2), 18, 2, 2, 'FD');
+
+    const colWidth = (pageWidth - (margin * 2)) / 3;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text('TOTAL RECEIPTS (INFLOW)', margin + 6, currentY + 6);
+    doc.text('TOTAL PAYMENTS (OUTFLOW)', margin + colWidth + 6, currentY + 6);
+    doc.text('NET CASHBOOK BALANCE', margin + (colWidth * 2) + 6, currentY + 6);
+
+    doc.setFontSize(10);
+    doc.setTextColor(22, 163, 74);
+    doc.text(`PKR ${Number(data.totalInflow).toLocaleString()}`, margin + 6, currentY + 13);
+
+    doc.setTextColor(185, 28, 28);
+    doc.text(`PKR ${Number(data.totalOutflow).toLocaleString()}`, margin + colWidth + 6, currentY + 13);
+
+    doc.setTextColor(15, 23, 42);
+    doc.text(`PKR ${Number(data.netBalance).toLocaleString()}`, margin + (colWidth * 2) + 6, currentY + 13);
+
+    currentY += 24;
+
+    const drawTableHeader = () => {
+      doc.setFillColor(15, 23, 42);
+      doc.rect(margin, currentY, pageWidth - (margin * 2), 7, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(255, 255, 255);
+
+      doc.text('DATE', margin + 3, currentY + 4.8);
+      doc.text('REF / SERIAL', margin + 22, currentY + 4.8);
+      doc.text('PARTY / BENEFICIARY', margin + 46, currentY + 4.8);
+      doc.text('DESCRIPTION & MODE', margin + 82, currentY + 4.8);
+      doc.text('INFLOW (PKR)', pageWidth - margin - 52, currentY + 4.8, { align: 'right' });
+      doc.text('OUTFLOW (PKR)', pageWidth - margin - 26, currentY + 4.8, { align: 'right' });
+      doc.text('BALANCE', pageWidth - margin - 4, currentY + 4.8, { align: 'right' });
+      currentY += 7;
+    };
+
+    drawTableHeader();
+
+    let pageNum = 1;
+
+    for (let idx = 0; idx < data.entries.length; idx++) {
+      const entry = data.entries[idx];
+      if (currentY > pageHeight - 38) {
+        doc.addPage();
+        pageNum++;
+        await drawHeader(pageNum);
+        drawTableHeader();
+      }
+
+      if (idx % 2 === 1) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(margin, currentY, pageWidth - (margin * 2), 6.5, 'F');
+      }
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.2);
+      doc.setTextColor(71, 85, 105);
+      doc.text(entry.date || '-', margin + 3, currentY + 4.4);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(37, 99, 235);
+      doc.text((entry.reference || '-').substring(0, 12), margin + 22, currentY + 4.4);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(15, 23, 42);
+      const partyStr = (entry.party || '-').length > 20 ? (entry.party || '-').substring(0, 18) + '..' : (entry.party || '-');
+      doc.text(partyStr, margin + 46, currentY + 4.4);
+
+      const modeStr = entry.paymentMethod === 'BANK' ? (entry.bankName ? `[${entry.bankName}]` : '[Bank]') : '[Cash]';
+      const descFull = `${entry.description || '-'} ${modeStr}`;
+      const desc = descFull.length > 30 ? descFull.substring(0, 28) + '..' : descFull;
+      doc.setTextColor(71, 85, 105);
+      doc.text(desc, margin + 82, currentY + 4.4);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(entry.inflow > 0 ? 22 : 156, entry.inflow > 0 ? 163 : 163, entry.inflow > 0 ? 74 : 175);
+      doc.text(entry.inflow > 0 ? Number(entry.inflow).toLocaleString() : '-', pageWidth - margin - 52, currentY + 4.4, { align: 'right' });
+
+      doc.setTextColor(entry.outflow > 0 ? 185 : 156, entry.outflow > 0 ? 28 : 163, entry.outflow > 0 ? 28 : 175);
+      doc.text(entry.outflow > 0 ? Number(entry.outflow).toLocaleString() : '-', pageWidth - margin - 26, currentY + 4.4, { align: 'right' });
+
+      doc.setTextColor(15, 23, 42);
+      doc.text(Number(entry.balance).toLocaleString(), pageWidth - margin - 4, currentY + 4.4, { align: 'right' });
+
+      currentY += 6.5;
+    }
+
+    // Check if we have enough room for signatures & stamp, otherwise add page
+    if (currentY > pageHeight - 40) {
+      doc.addPage();
+      pageNum++;
+      await drawHeader(pageNum);
+      currentY += 10;
+    } else {
+      currentY += 8;
+    }
+
+    // Stamp & Accountant Signature
+    drawAccountantStampAndSignature(doc, currentY, margin, pageWidth);
+
+    // Corporate footer
+    drawPdfCorporateFooter(doc, 'ERP Verified Cashbook Ledger', data.branding);
+
+    const filename = `Cashbook_Ledger_${new Date().toISOString().split('T')[0]}.pdf`;
+    return triggerDirectDownload(doc, filename);
+  } catch (error) {
+    console.error('Failed to generate cashbook ledger PDF:', error);
+    throw error;
+  }
+}
+
+// -------------------------------------------------------------
 // 4. GENERAL LEDGER STATEMENT
 // -------------------------------------------------------------
 export interface GeneralLedgerExportData {

@@ -84,6 +84,13 @@ export interface AvailableVehicle {
   createdAt: string;
 }
 
+export interface PortItem {
+  name: string;
+  code: string;
+  type?: 'Sea Port' | 'Dry Port' | 'Border Terminal' | string;
+  containerInquiryLink?: string;
+}
+
 export interface TransporterRequest {
   id: string;
   transporterId: string | number;

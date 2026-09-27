@@ -89,7 +89,7 @@ export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({ onOpenFi
     >
       {/* 100% Solid Opaque Modal Card */}
       <div 
-        className="w-full max-w-md rounded-2xl border-2 border-amber-400 shadow-2xl shadow-black overflow-hidden relative mb-6 animate-scale-up select-none"
+        className="w-full max-w-md rounded-2xl border-2 border-amber-400 shadow-2xl shadow-black overflow-hidden relative mb-6 animate-scale-up select-none max-h-[92vh] flex flex-col"
         style={{ backgroundColor: '#0b1120' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -133,7 +133,7 @@ export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({ onOpenFi
         </div>
 
         {/* Content Breakdown - Completely Solid Cards */}
-        <div className="p-4 sm:p-5 space-y-3" style={{ backgroundColor: '#0b1120' }}>
+        <div className="p-4 sm:p-5 space-y-3 overflow-y-auto flex-1 custom-scrollbar" style={{ backgroundColor: '#0b1120' }}>
           
           {/* Card 1: Cash in Hand & Bank */}
           <div 
@@ -251,20 +251,20 @@ export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({ onOpenFi
         type="button"
         id="golden-amount-header-btn"
         onClick={() => setIsOpen(true)}
-        className="relative group overflow-hidden flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3.5 py-1.5 rounded-xl border transition-all duration-300 transform active:scale-95 cursor-pointer shadow-lg
+        className="relative group overflow-hidden flex items-center gap-1.5 sm:gap-2.5 px-2 sm:px-3.5 py-1.5 rounded-xl border transition-all duration-300 transform active:scale-95 cursor-pointer shadow-lg
           bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-600
           hover:from-amber-400 hover:via-yellow-300 hover:to-amber-500
           border-yellow-200/60 hover:border-yellow-100
-          shadow-amber-500/25 hover:shadow-amber-500/40"
+          shadow-amber-500/25 hover:shadow-amber-500/40 shrink-0"
         title="DOCKS Corporate Treasury & Amount"
       >
         {/* Animated Light Sweep Effect Across the Gold Surface */}
         <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/40 to-transparent pointer-events-none" />
 
         {/* Golden Coin Icon with Sparkle */}
-        <div className="relative flex items-center justify-center w-6 h-6 rounded-lg bg-amber-950/30 text-amber-950 font-black shadow-inner">
-          <Coins size={15} className="text-amber-950 animate-pulse" />
-          <Sparkles size={8} className="absolute -top-1 -right-1 text-white animate-spin-slow" />
+        <div className="relative flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-amber-950/30 text-amber-950 font-black shadow-inner shrink-0">
+          <Coins size={13} className="text-amber-950 animate-pulse sm:w-[15px] sm:h-[15px]" />
+          <Sparkles size={8} className="absolute -top-1 -right-1 text-white animate-spin-slow hidden sm:block" />
         </div>
 
         {/* Amount Display with Crisp Typography */}
@@ -272,14 +272,14 @@ export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({ onOpenFi
           <span className="text-[9px] uppercase tracking-wider font-extrabold text-amber-950/80 leading-none hidden sm:block">
             Treasury Balance
           </span>
-          <span className="text-xs sm:text-sm font-black text-amber-950 tracking-tight leading-tight flex items-center gap-1 font-mono">
+          <span className="text-[11px] sm:text-sm font-black text-amber-950 tracking-tight leading-tight flex items-center gap-1 font-mono whitespace-nowrap">
             <span className="hidden sm:inline">{formatPKR(totalRevenue)}</span>
-            <span className="inline sm:hidden font-bold">Rs {(totalRevenue / 1000000).toFixed(2)}M</span>
+            <span className="inline sm:hidden font-bold">Rs {(totalRevenue / 1000000).toFixed(1)}M</span>
           </span>
         </div>
 
         {/* Subtle Indicator Arrow */}
-        <ChevronRight size={14} className="text-amber-950/70 group-hover:translate-x-0.5 transition-transform hidden sm:block" />
+        <ChevronRight size={14} className="text-amber-950/70 group-hover:translate-x-0.5 transition-transform hidden md:block" />
       </button>
 
       {/* Render Portal Modal directly to document.body */}

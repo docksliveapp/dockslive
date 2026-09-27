@@ -70,22 +70,33 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
     const multiMap = formData.multiFiles || {};
     const key = urlField as string;
     if (multiMap[key] && Array.isArray(multiMap[key]) && multiMap[key].length > 0) {
+      if (isPhotoOnly) {
+        return multiMap[key].map(f => {
+          const isRealPdf = f.url.startsWith('data:application/pdf');
+          const isImg = isPhotoOnly || f.url.startsWith('data:image/') || /\.(jpe?g|png|webp|gif|bmp)$/i.test(f.name);
+          return {
+            ...f,
+            type: (isRealPdf ? 'pdf' : (isImg ? 'image' : f.type)) as 'pdf' | 'image'
+          };
+        });
+      }
       return multiMap[key];
     }
     const singleUrl = formData[urlField] as string | undefined;
     const singleName = (formData[nameField] as string | undefined) || '';
     if (singleUrl && typeof singleUrl === 'string' && singleUrl.trim()) {
-      const isPdf = singleUrl.startsWith('data:application/pdf') || singleName.toLowerCase().endsWith('.pdf');
+      const isImg = isPhotoOnly || singleUrl.startsWith('data:image/') || /\.(jpe?g|png|webp|gif|bmp)$/i.test(singleName);
+      const isPdf = !isImg && (singleUrl.startsWith('data:application/pdf') || singleName.toLowerCase().endsWith('.pdf'));
       return [{
         id: 'file-default-1',
         url: singleUrl,
-        name: singleName || 'Document Page 1',
-        type: isPdf ? 'pdf' : 'image',
+        name: singleName || (isPhotoOnly ? 'Captured Photo 1.jpg' : 'Document Page 1'),
+        type: (isPhotoOnly || isImg) ? 'image' : (isPdf ? 'pdf' : 'image'),
         uploadedAt: new Date().toISOString()
       }];
     }
     return [];
-  }, [formData, urlField, nameField]);
+  }, [formData, urlField, nameField, isPhotoOnly]);
 
   // Update helper: synchronizes both the primary URL/name fields and the multiFiles map
   const syncFiles = (newFiles: StepFileItem[]) => {
@@ -129,8 +140,8 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
     const readPromises = fileList.map(async file => {
       const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
       
-      // If captured from camera, automatically scan and convert to high-fidelity PDF
-      if (isFromCamera && !isPdf) {
+      // If captured from camera for document fields (NOT isPhotoOnly), automatically scan and convert to high-fidelity PDF
+      if (isFromCamera && !isPdf && !isPhotoOnly) {
         try {
           const converted = await convertImageToPdf(file, file.name, true);
           return {
@@ -153,7 +164,7 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
             id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             url: result,
             name: file.name,
-            type: isPdf ? 'pdf' : 'image',
+            type: (isPhotoOnly || !isPdf) ? 'image' : 'pdf',
             uploadedAt: new Date().toISOString()
           });
         };
@@ -274,6 +285,30 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
+    // If isPhotoOnly, save directly as high-res image format without converting to PDF
+    if (isPhotoOnly) {
+      const cleanLabel = (label || 'Photo').replace(/[^a-zA-Z0-9]/g, '_');
+      const baseName = `${cleanLabel}_${currentFiles.length + 1}_${Date.now()}.jpg`;
+      const newItem: StepFileItem = {
+        id: `cam-${Date.now()}`,
+        url: dataUrl,
+        name: baseName,
+        type: 'image',
+        uploadedAt: new Date().toISOString()
+      };
+
+      if (replaceIndex !== null && replaceIndex >= 0) {
+        const updated = [...currentFiles];
+        updated[replaceIndex] = newItem;
+        syncFiles(updated);
+        setReplaceIndex(null);
+      } else {
+        syncFiles([...currentFiles, newItem]);
+      }
+      closeLiveWebcam();
+      return;
+    }
+
     try {
       const baseName = `Scanned_Camera_${currentFiles.length + 1}_${new Date().toLocaleTimeString().replace(/:/g, '-')}`;
       const converted = await convertImageToPdf(dataUrl, `${baseName}.pdf`, true);
@@ -386,7 +421,7 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
             {hasFiles && (
               <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                 <CheckCircle2 size={11} />
-                {currentFiles.length} {currentFiles.length === 1 ? 'Page / File' : 'Pages / Files'}
+                {currentFiles.length} {isPhotoOnly ? (currentFiles.length === 1 ? 'Photo / Image' : 'Photos / Images') : (currentFiles.length === 1 ? 'Page / File' : 'Pages / Files')}
               </span>
             )}
           </div>
@@ -413,7 +448,7 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
               </button>
             )}
 
-            {/* Add More Pages / Files Button */}
+            {/* Add More Pages / Photos Button */}
             {currentFiles.length < maxFiles && (
               <button
                 type="button"
@@ -422,10 +457,10 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
                   fileInputRef.current?.click();
                 }}
                 className="px-2.5 py-1.5 rounded-xl bg-brand-600/20 hover:bg-brand-600/30 text-brand-300 border border-brand-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                title="Add additional pages or documents"
+                title={isPhotoOnly ? "Add additional photo or image" : "Add additional pages or documents"}
               >
                 <Plus size={13} />
-                <span>+ Add Page</span>
+                <span>{isPhotoOnly ? '+ Add Photo' : '+ Add Page'}</span>
               </button>
             )}
 
@@ -434,7 +469,7 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
               type="button"
               onClick={handleRemoveAll}
               className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs transition-colors"
-              title="Remove / Clear all uploaded documents"
+              title="Remove / Clear all uploaded items"
             >
               <Trash2 size={13} />
             </button>
@@ -457,10 +492,14 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
                 setReplaceIndex(null);
                 fileInputRef.current?.click();
               }}
-              className="flex-1 py-2.5 px-3.5 rounded-xl border border-dashed border-white/20 hover:border-brand-400/80 bg-slate-800/50 hover:bg-slate-800 active:bg-slate-700 text-gray-300 hover:text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all group"
+              className="flex-1 py-2.5 px-3.5 rounded-xl border border-dashed border-white/20 hover:border-amber-400/80 bg-slate-800/50 hover:bg-slate-800 active:bg-slate-700 text-gray-300 hover:text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all group"
             >
-              <Upload size={15} className="text-brand-400 group-hover:scale-110 transition-transform shrink-0" />
-              <span className="truncate">Upload Document</span>
+              {isPhotoOnly ? (
+                <ImageIcon size={15} className="text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
+              ) : (
+                <Upload size={15} className="text-brand-400 group-hover:scale-110 transition-transform shrink-0" />
+              )}
+              <span className="truncate">{isPhotoOnly ? 'Upload Picture / Photo' : 'Upload Document'}</span>
             </button>
 
             {/* Single Camera Button - Only Camera Icon */}
@@ -481,8 +520,11 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
         /* Populated State: Itemized Pages & File List */
         <div className="space-y-2 mt-2">
           {currentFiles.map((file, idx) => {
-            const isPdf = file.type === 'pdf' || file.name.toLowerCase().endsWith('.pdf');
-            const pageLabel = currentFiles.length > 1 ? `Page ${idx + 1}` : 'Document';
+            const isImgUrl = file.url.startsWith('data:image/') || /\.(jpe?g|png|webp|gif|bmp)$/i.test(file.name);
+            const isPdf = !isPhotoOnly && !isImgUrl && (file.type === 'pdf' || file.name.toLowerCase().endsWith('.pdf'));
+            const pageLabel = isPhotoOnly
+              ? (currentFiles.length > 1 ? `Photo ${idx + 1}` : 'Picture')
+              : (currentFiles.length > 1 ? `Page ${idx + 1}` : 'Document');
 
             return (
               <div 
@@ -491,9 +533,9 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
               >
                 {/* File Info */}
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <div className="w-8 h-8 rounded-lg bg-slate-700/80 border border-white/10 flex items-center justify-center shrink-0 overflow-hidden">
+                  <div className="w-10 h-10 rounded-lg bg-slate-700/80 border border-white/10 flex items-center justify-center shrink-0 overflow-hidden relative">
                     {isPdf ? (
-                      <FileText size={16} className="text-rose-400" />
+                      <FileText size={18} className="text-rose-400" />
                     ) : (
                       <img 
                         src={file.url} 
@@ -507,15 +549,23 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <span className="px-1.5 py-0.2 rounded bg-brand-500/20 text-brand-300 font-mono text-[10px] font-bold shrink-0">
+                      <span className={`px-1.5 py-0.2 rounded font-mono text-[10px] font-bold shrink-0 ${
+                        isPhotoOnly ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-brand-500/20 text-brand-300'
+                      }`}>
                         {pageLabel}
                       </span>
                       <p className="text-white font-medium truncate text-xs" title={file.name}>
                         {file.name}
                       </p>
                     </div>
-                    <span className="text-[10px] text-gray-400">
-                      {isPdf ? 'PDF Document' : 'Photo / Scanned Image'}
+                    <span className="text-[10px] flex items-center gap-1 mt-0.5">
+                      {isPdf ? (
+                        <span className="text-gray-400">PDF Document</span>
+                      ) : (
+                        <span className="text-emerald-400 font-medium flex items-center gap-1">
+                          <ImageIcon size={11} /> Picture / Image Format (JPG/PNG)
+                        </span>
+                      )}
                     </span>
                   </div>
                 </div>
@@ -527,10 +577,10 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
                     type="button"
                     onClick={() => onPreview({ url: file.url, title: `${label} - ${pageLabel}` })}
                     className="px-2 py-1 rounded-lg bg-brand-500/15 hover:bg-brand-500/25 text-brand-300 border border-brand-500/30 text-[11px] font-semibold flex items-center gap-1 transition-colors"
-                    title="View Document Preview"
+                    title={isPhotoOnly ? "View Photo Preview" : "View Document Preview"}
                   >
                     <Eye size={12} />
-                    <span className="hidden sm:inline">View</span>
+                    <span className="hidden sm:inline">{isPhotoOnly ? 'View Photo' : 'View'}</span>
                   </button>
 
                   {!isReadOnly && (
@@ -540,10 +590,10 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
                         type="button"
                         onClick={() => triggerReplace(idx)}
                         className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 text-[11px] font-medium flex items-center gap-1 transition-colors"
-                        title="Replace with another file"
+                        title={isPhotoOnly ? "Retake or replace with another photo" : "Replace with another file"}
                       >
                         <RefreshCw size={11} />
-                        <span className="hidden sm:inline">Replace</span>
+                        <span className="hidden sm:inline">{isPhotoOnly ? 'Retake' : 'Replace'}</span>
                       </button>
 
                       {/* Remove Document */}
@@ -551,7 +601,7 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
                         type="button"
                         onClick={() => handleRemoveFile(idx)}
                         className="p-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 transition-colors"
-                        title="Remove this document (if uploaded mistakenly)"
+                        title={isPhotoOnly ? "Remove this photo" : "Remove this document"}
                       >
                         <Trash2 size={12} />
                       </button>
@@ -574,7 +624,7 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
                 className="flex-1 py-1.5 px-3 rounded-lg border border-dashed border-white/15 hover:border-brand-400 text-gray-400 hover:text-white text-[11px] font-medium flex items-center justify-center gap-1.5 transition-colors"
               >
                 <Plus size={12} />
-                <span>Attach Page {currentFiles.length + 1} / Extra Document</span>
+                <span>{isPhotoOnly ? `Attach Photo ${currentFiles.length + 1} / Extra Image` : `Attach Page ${currentFiles.length + 1} / Extra Document`}</span>
               </button>
 
               {allowCamera && (

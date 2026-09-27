@@ -1710,10 +1710,12 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <WorkflowMultiUploader
                       label="Driver CNIC Front Side"
-                      sublabel="Upload or take photo of CNIC front"
+                      sublabel="Upload or take photo of CNIC front (Image / Picture Format)"
                       urlField="driverCnicFrontUrl"
                       nameField="driverCnicFrontName"
                       required={true}
+                      isPhotoOnly={true}
+                      accept="image/*"
                       allowCamera={true}
                       compact={true}
                       formData={formData}
@@ -1723,10 +1725,12 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
                     <WorkflowMultiUploader
                       label="Driver CNIC Back Side"
-                      sublabel="Upload or take photo of CNIC back"
+                      sublabel="Upload or take photo of CNIC back (Image / Picture Format)"
                       urlField="driverCnicBackUrl"
                       nameField="driverCnicBackName"
                       required={true}
+                      isPhotoOnly={true}
+                      accept="image/*"
                       allowCamera={true}
                       compact={true}
                       formData={formData}
@@ -1875,9 +1879,11 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <WorkflowMultiUploader
                     label="Vehicle Photo at Port"
-                    sublabel="Upload or take photo of container loaded on trailer"
+                    sublabel="Upload or take photo of container loaded on trailer (Image / Picture Format)"
                     urlField="vehiclePhotoUrl"
                     nameField="vehiclePhotoName"
+                    isPhotoOnly={true}
+                    accept="image/*"
                     allowCamera={true}
                     compact={true}
                     formData={formData}
@@ -2050,10 +2056,12 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <WorkflowMultiUploader
                       label="Customs Seal Photo"
-                      sublabel="Capture or upload high-res photo of container seal"
+                      sublabel="Capture or upload high-res photo of container seal (Image / Picture Format)"
                       urlField="customsSealPhotoUrl"
                       nameField="customsSealPhotoName"
                       required={true}
+                      isPhotoOnly={true}
+                      accept="image/*"
                       allowCamera={true}
                       compact={true}
                       formData={formData}
@@ -2100,10 +2108,12 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                 <div className="pt-1">
                   <WorkflowMultiUploader
                     label="Driver Live Picture at Gate Out *"
-                    sublabel="Capture or upload live verification photo of driver passing gate out (Camera or multi-file supported)"
+                    sublabel="Capture or upload live verification photo of driver passing gate out (Image / Picture Format)"
                     urlField="driverGateOutPhotoUrl"
                     nameField="driverGateOutPhotoName"
                     required={true}
+                    isPhotoOnly={true}
+                    accept="image/*"
                     allowCamera={true}
                     formData={formData}
                     setFormData={setFormData}
@@ -2202,9 +2212,11 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
               {/* Transit Completion Trigger: Port Gate Arrival Picture */}
               <WorkflowMultiUploader
                 label="Port Gate Arrival Picture"
-                sublabel="Capture or upload arrival photo at destination dry port"
+                sublabel="Capture or upload arrival photo of vehicle at destination dry port (Image / Picture Format)"
                 urlField="portGateArrivalPhotoUrl"
                 nameField="portGateArrivalPhotoName"
+                isPhotoOnly={true}
+                accept="image/*"
                 allowCamera={true}
                 formData={formData}
                 setFormData={setFormData}
@@ -2243,10 +2255,12 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <WorkflowMultiUploader
                       label="Secondary Customs Seal Photo"
-                      sublabel="Capture or upload intact seal photo"
+                      sublabel="Capture or upload intact seal photo (Image / Picture Format)"
                       urlField="secondaryCustomsSealPhotoUrl"
                       nameField="secondaryCustomsSealPhotoName"
                       required={true}
+                      isPhotoOnly={true}
+                      accept="image/*"
                       allowCamera={true}
                       compact={true}
                       formData={formData}

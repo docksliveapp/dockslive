@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
-import { X, Receipt, Plus, Trash2, Download, CheckCircle2, FileText, Camera, Upload, AlertCircle } from 'lucide-react';
+import { X, Receipt, Plus, Trash2, Download, CheckCircle2, FileText, Camera, Upload, AlertCircle, ExternalLink } from 'lucide-react';
 import { Case, CaseCharge } from '../types';
 import { downloadLoadingBillPdf, LoadingBillData, LoadingBillItem } from '../services/pdfExportService';
 import { WorkflowMultiUploader } from './WorkflowMultiUploader';
+import { getPortInquiryLink } from '../services/portInquiryService';
+import { saveStaffBillToFirestore, saveStaffPrivateLedgerEntryToFirestore } from '../services/dbService';
+import { safeAppStorage } from '../services/storage';
 
 interface ExtraChargeItem {
   id: string;
@@ -309,6 +312,63 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
       ]
     };
 
+    // Also add the Loading Bill PDF document to the case's document downloads list
+    newDocs.push({
+      id: `doc_lb_${billNo}`,
+      name: `Loading Bill - ${billNo}.pdf`,
+      type: 'Port Loading Bill',
+      billNo,
+      totalAmount: grandTotal,
+      url: '',
+      uploadedAt: new Date().toISOString()
+    });
+
+    const staffId = safeAppStorage.getItem('dpl_current_user_id') || 'mohsin';
+    const staffName = safeAppStorage.getItem('dpl_current_user_name') || 'Mohsin Khan';
+
+    // Save to Staff Loading Bills repository
+    saveStaffBillToFirestore({
+      id: `bill_${billNo}`,
+      billNo,
+      caseId: targetCase.id,
+      caseNo: targetCase.caseNo,
+      containerNo: containerNo || '',
+      clientName: targetCase.clientName || '',
+      vehicleNo: vehicleNo || '',
+      driverName: driverName || '',
+      portTerminal: portTerminal || '',
+      date: billDate,
+      totalAmount: grandTotal,
+      paidAmount: 0,
+      balanceDue: grandTotal,
+      status: 'PENDING',
+      charges: billData.items,
+      remarks,
+      staffUserId: staffId,
+      staffName,
+      createdAt: new Date().toISOString()
+    }).catch(err => console.warn('Could not save staff bill to db:', err));
+
+    // Post to Client's dedicated Loading Ledger as a DEBIT
+    if (targetCase.clientName && grandTotal > 0) {
+      saveStaffPrivateLedgerEntryToFirestore({
+        id: `ledger_${billNo}_${Date.now()}`,
+        staffUserId: staffId,
+        staffName,
+        clientName: targetCase.clientName,
+        date: billDate,
+        reference: billNo,
+        description: `Port Loading Bill - Case #${targetCase.caseNo} (${containerNo || 'Container'})`,
+        type: 'DEBIT',
+        debit: grandTotal,
+        credit: 0,
+        balance: grandTotal,
+        caseNo: targetCase.caseNo,
+        containerNo: containerNo || '',
+        createdAt: new Date().toISOString()
+      }).catch(err => console.warn('Could not save client loading ledger entry:', err));
+    }
+
     if (onSaveBill) {
       onSaveBill(billData, newCharges, newDocs);
     }
@@ -420,7 +480,19 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
                 <span className="font-bold text-white block">Wharfage Payment</span>
                 <span className="text-[11px] text-gray-400">Terminal handling & port wharfage slip</span>
               </div>
-              <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const inquiryLink = getPortInquiryLink(portTerminal || targetCase.pol);
+                    window.open(inquiryLink, '_blank', 'noopener,noreferrer');
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-[11px] flex items-center gap-1.5 transition active:scale-95 shrink-0"
+                  title="Check wharfage amount on official port terminal website"
+                >
+                  <ExternalLink size={12} />
+                  <span>Check Wharfage Amount</span>
+                </button>
                 <div className="relative w-36">
                   <span className="absolute left-2.5 top-2 text-[10px] text-gray-400">PKR</span>
                   <input

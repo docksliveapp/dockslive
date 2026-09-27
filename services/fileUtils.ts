@@ -486,30 +486,15 @@ export function readBlobAsBase64(blob: Blob): Promise<string> {
   });
 }
 
+import { exportTableToExcel } from './excelExportService';
+
 /**
- * Generates and triggers download of a clean CSV file
+ * Generates and triggers download of an Excel (.xlsx) file (replaces legacy CSV with native Excel)
  */
 export function exportCSVFile(filename: string, headers: string[], rows: (string | number)[][]): void {
-  const escapeCsv = (val: string | number | undefined | null) => {
-    if (val === undefined || val === null) return '""';
-    const str = String(val).replace(/"/g, '""');
-    return `"${str}"`;
-  };
-
-  const csvContent = [
-    headers.map(escapeCsv).join(','),
-    ...rows.map(row => row.map(escapeCsv).join(','))
-  ].join('\r\n');
-
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  const url = URL.createObjectURL(blob);
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename.endsWith('.csv') ? filename : `${filename}.csv`);
-  link.style.visibility = 'hidden';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  const xlsxFilename = filename.toLowerCase().endsWith('.xlsx') 
+    ? filename 
+    : `${filename.replace(/\.csv$/i, '')}.xlsx`;
+  exportTableToExcel(xlsxFilename, 'Report', headers, rows);
 }
 

@@ -10,6 +10,7 @@ import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
 import { autoFillCaseData, downloadFile, docDataCache, detectShippingDocumentType } from '../services/geminiService';
 import { downloadCasePdf, sharePdfFile, downloadCustomsDeliveryOrderPdf, downloadLoadingBillPdf } from '../services/pdfExportService';
+import { exportTableToExcel } from '../services/excelExportService';
 import { PdfViewerModal } from './PdfViewerModal';
 import { detectMimeType, compressAndPrepareFile, convertImageToPdf } from '../services/fileUtils';
 import { Container, ExtractedData, CaseStatus, Case, MockDocument, UserRole, CaseCharge, Client, ClientDefaultCharge, CaseStepDetail, WORKFLOW_8_STEPS, Vehicle } from '../types';
@@ -81,37 +82,39 @@ export interface PortItem {
   name: string;
   code: string;
   type?: 'Sea Port' | 'Dry Port' | 'Border Terminal' | string;
+  containerInquiryLink?: string;
 }
 
 const INITIAL_PORTS: PortItem[] = [
   // Sea Ports / Terminal
-  { name: "Karachi Port Trust", code: "KPT", type: "Sea Port" },
-  { name: "Port Qasim", code: "QICT", type: "Sea Port" },
-  { name: "South Asia Pakistan Terminals", code: "SAPT", type: "Sea Port" },
-  { name: "Karachi International Container Terminal", code: "KICT", type: "Sea Port" },
-  { name: "Karachi Gateway Terminal", code: "KGTL", type: "Sea Port" },
-  { name: "Karachi Gateway Terminal Multipurpose", code: "KGTML", type: "Sea Port" },
-  { name: "Al-Hamd International Container Terminal", code: "AICT", type: "Sea Port" },
-  { name: "Gwadar Port", code: "GWADAR", type: "Sea Port" },
-  { name: "NLC Sultanabad", code: "NLC Sultanabad", type: "Sea Port" },
+  { name: "Karachi Port Trust", code: "KPT", type: "Sea Port", containerInquiryLink: "https://kpt.gov.pk" },
+  { name: "Port Qasim", code: "QICT", type: "Sea Port", containerInquiryLink: "https://www.dpworld.com/karachi" },
+  { name: "South Asia Pakistan Terminals", code: "SAPT", type: "Sea Port", containerInquiryLink: "https://www.sapt.com.pk" },
+  { name: "Karachi International Container Terminal", code: "KICT", type: "Sea Port", containerInquiryLink: "https://www.kictl.com" },
+  { name: "Karachi Gateway Terminal", code: "KGTL", type: "Sea Port", containerInquiryLink: "https://kpt.gov.pk" },
+  { name: "Karachi Gateway Terminal Multipurpose", code: "KGTML", type: "Sea Port", containerInquiryLink: "https://kpt.gov.pk" },
+  { name: "Al-Hamd International Container Terminal", code: "AICT", type: "Sea Port", containerInquiryLink: "https://www.kictl.com" },
+  { name: "Pakistan International Container Terminal", code: "PICT", type: "Sea Port", containerInquiryLink: "https://pict.com.pk" },
+  { name: "Gwadar Port", code: "GWADAR", type: "Sea Port", containerInquiryLink: "https://gpa.gov.pk" },
+  { name: "NLC Sultanabad", code: "NLC Sultanabad", type: "Sea Port", containerInquiryLink: "https://nlc.com.pk" },
 
   // Dry Ports
-  { name: "Faisalabad Dry Port", code: "Faisalabad Dry Port", type: "Dry Port" },
-  { name: "Lahore Dry Port", code: "Lahore Dry Port", type: "Dry Port" },
-  { name: "Lahore NLC Dry Port", code: "Lahore NLC", type: "Dry Port" },
-  { name: "Lahore MICT Dry Port", code: "Lahore MICT", type: "Dry Port" },
-  { name: "Lahore DPW Dry Port", code: "Lahore DPW", type: "Dry Port" },
-  { name: "Rawalpindi Dry Port", code: "Rawalpindi Dry Port", type: "Dry Port" },
-  { name: "Multan Dry Port", code: "Multan Dry Port", type: "Dry Port" },
-  { name: "Sialkot Dry Port", code: "SICT", type: "Dry Port" },
-  { name: "Islamabad Dry Port", code: "Islamabad Dry Port", type: "Dry Port" },
-  { name: "Azakhel Dry Port", code: "Azakhel Dry Port", type: "Dry Port" },
-  { name: "Havelian Dry Port", code: "Havelian Dry Port", type: "Dry Port" },
-  { name: "Peshawar Dry Port", code: "Peshawar Dry Port", type: "Dry Port" },
-  { name: "Jamrud Dry Port", code: "Jamrud Dry Port", type: "Dry Port" },
-  { name: "Quetta Railway Dry Port", code: "Quetta Railway", type: "Dry Port" },
-  { name: "Quetta NLC Dry Port", code: "Quetta NLC", type: "Dry Port" },
-  { name: "Gilgit Dry Port", code: "Gilgit Dry Port", type: "Dry Port" },
+  { name: "Faisalabad Dry Port", code: "Faisalabad Dry Port", type: "Dry Port", containerInquiryLink: "https://customs.gov.pk" },
+  { name: "Lahore Dry Port", code: "Lahore Dry Port", type: "Dry Port", containerInquiryLink: "https://customs.gov.pk" },
+  { name: "Lahore NLC Dry Port", code: "Lahore NLC", type: "Dry Port", containerInquiryLink: "https://nlc.com.pk" },
+  { name: "Lahore MICT Dry Port", code: "Lahore MICT", type: "Dry Port", containerInquiryLink: "https://customs.gov.pk" },
+  { name: "Lahore DPW Dry Port", code: "Lahore DPW", type: "Dry Port", containerInquiryLink: "https://dpworld.com" },
+  { name: "Rawalpindi Dry Port", code: "Rawalpindi Dry Port", type: "Dry Port", containerInquiryLink: "https://customs.gov.pk" },
+  { name: "Multan Dry Port", code: "Multan Dry Port", type: "Dry Port", containerInquiryLink: "https://customs.gov.pk" },
+  { name: "Sialkot Dry Port", code: "SICT", type: "Dry Port", containerInquiryLink: "https://sict.com.pk" },
+  { name: "Islamabad Dry Port", code: "Islamabad Dry Port", type: "Dry Port", containerInquiryLink: "https://customs.gov.pk" },
+  { name: "Azakhel Dry Port", code: "Azakhel Dry Port", type: "Dry Port", containerInquiryLink: "https://customs.gov.pk" },
+  { name: "Havelian Dry Port", code: "Havelian Dry Port", type: "Dry Port", containerInquiryLink: "https://customs.gov.pk" },
+  { name: "Peshawar Dry Port", code: "Peshawar Dry Port", type: "Dry Port", containerInquiryLink: "https://customs.gov.pk" },
+  { name: "Jamrud Dry Port", code: "Jamrud Dry Port", type: "Dry Port", containerInquiryLink: "https://customs.gov.pk" },
+  { name: "Quetta Railway Dry Port", code: "Quetta Railway", type: "Dry Port", containerInquiryLink: "https://pakrail.gov.pk" },
+  { name: "Quetta NLC Dry Port", code: "Quetta NLC", type: "Dry Port", containerInquiryLink: "https://nlc.com.pk" },
+  { name: "Gilgit Dry Port", code: "Gilgit Dry Port", type: "Dry Port", containerInquiryLink: "https://customs.gov.pk" },
   { name: "Sost Dry Port", code: "Sost Dry Port", type: "Dry Port" },
   { name: "Muzaffarabad Dry Port", code: "Muzaffarabad", type: "Dry Port" },
   { name: "Karachi Dry Port", code: "Karachi Dry Port", type: "Dry Port" },
@@ -518,6 +521,15 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   const [newPortName, setNewPortName] = useState('');
   const [newPortCode, setNewPortCode] = useState('');
   const [newPortType, setNewPortType] = useState('Dry Port');
+  const [newPortInquiryLink, setNewPortInquiryLink] = useState('');
+
+  // Edit Port Modal State
+  const [showEditPortModal, setShowEditPortModal] = useState(false);
+  const [selectedPortToEdit, setSelectedPortToEdit] = useState<string>('');
+  const [editPortName, setEditPortName] = useState('');
+  const [editPortCode, setEditPortCode] = useState('');
+  const [editPortType, setEditPortType] = useState('Sea Port');
+  const [editPortInquiryLink, setEditPortInquiryLink] = useState('');
 
   // Client Modal State & Default Charges State
   const [showAddClientModal, setShowAddClientModal] = useState(false);
@@ -623,7 +635,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     if (!newPortName.trim()) return;
     const trimmed = newPortName.trim();
     const code = newPortCode.trim() || (trimmed.length <= 4 ? trimmed.toUpperCase() : trimmed.substring(0, 4).toUpperCase());
-    const newPortObj: PortItem = { name: trimmed, code, type: newPortType };
+    const newPortObj: PortItem = { 
+      name: trimmed, 
+      code, 
+      type: newPortType,
+      containerInquiryLink: newPortInquiryLink.trim()
+    };
     const updatedPorts = [...ports.filter(p => p.name.toLowerCase() !== trimmed.toLowerCase()), newPortObj];
     setPorts(updatedPorts);
     safeAppStorage.setJSON('dpl_ports', updatedPorts);
@@ -646,9 +663,54 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     setNewPortName('');
     setNewPortCode('');
     setNewPortType('Dry Port');
+    setNewPortInquiryLink('');
     setShowPortModal(false);
     setPortTargetField(null);
     setDraftToast(`✓ Port "${trimmed}" added to all port lists!`);
+  };
+
+  const handleOpenEditPort = (portNameToSelect?: string) => {
+    if (ports.length === 0) return;
+    const portName = portNameToSelect || ports[0].name;
+    setSelectedPortToEdit(portName);
+    const found = ports.find(p => p.name === portName) || ports[0];
+    setEditPortName(found.name);
+    setEditPortCode(found.code);
+    setEditPortType(found.type || 'Sea Port');
+    setEditPortInquiryLink(found.containerInquiryLink || '');
+    setShowEditPortModal(true);
+  };
+
+  const handleSelectPortToEdit = (portName: string) => {
+    setSelectedPortToEdit(portName);
+    const found = ports.find(p => p.name === portName);
+    if (found) {
+      setEditPortName(found.name);
+      setEditPortCode(found.code);
+      setEditPortType(found.type || 'Sea Port');
+      setEditPortInquiryLink(found.containerInquiryLink || '');
+    }
+  };
+
+  const handleSaveEditedPort = () => {
+    if (!editPortName.trim()) {
+      alert('Please enter a Port / Terminal name');
+      return;
+    }
+    const trimmedName = editPortName.trim();
+    const trimmedCode = editPortCode.trim() || (trimmedName.length <= 4 ? trimmedName.toUpperCase() : trimmedName.substring(0, 4).toUpperCase());
+    const updatedPortObj: PortItem = {
+      name: trimmedName,
+      code: trimmedCode,
+      type: editPortType,
+      containerInquiryLink: editPortInquiryLink.trim()
+    };
+
+    const updatedPorts = ports.map(p => p.name === selectedPortToEdit ? updatedPortObj : p);
+    setPorts(updatedPorts);
+    safeAppStorage.setJSON('dpl_ports', updatedPorts);
+    setShowEditPortModal(false);
+    setDraftToast(`✓ Port "${trimmedName}" updated successfully!`);
   };
 
   const handleOpenAddPort = (targetField?: 'pol' | 'pod' | null, initialName?: string) => {
@@ -2532,19 +2594,14 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     c.pol || c.extractedData?.pol || '',
                     c.pod || c.extractedData?.pod || '',
                   ]);
-                  const csvContent = [headers.join(','), ...rows.map(r => r.map(f => `"${String(f).replace(/"/g, '""')}"`).join(','))].join('\n');
-                  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `Case_Report_${new Date().toISOString().split('T')[0]}.csv`;
-                  a.click();
-                  URL.revokeObjectURL(url);
+                  const filename = `Case_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
+                  exportTableToExcel(filename, 'Case Report', headers, rows, [8, 22, 16, 28, 22, 18, 20, 20]);
                 }}
                 className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-medium flex items-center gap-2 shadow-lg shadow-emerald-600/30 transition-all cursor-pointer"
+                title="Download Case Report as Excel (.xlsx) spreadsheet"
               >
                 <Download size={15} />
-                <span>Download Report (CSV)</span>
+                <span>Download Report (Excel .xlsx)</span>
               </button>
            </div>
         </div>
@@ -2797,6 +2854,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
            </button>
            <button onClick={() => setShowPortModal(true)} className="bg-white/5 hover:bg-white/10 text-white border border-white/10 px-4 py-2.5 rounded-lg flex items-center gap-2 font-medium transition-colors">
              <Anchor size={18} className="text-brand-400" /> Add Port
+           </button>
+           <button onClick={() => handleOpenEditPort()} className="bg-white/5 hover:bg-white/10 text-white border border-white/10 px-4 py-2.5 rounded-lg flex items-center gap-2 font-medium transition-colors" title="Edit Port & Container Inquiry Link">
+             <Edit size={18} className="text-amber-400" /> Edit Port
            </button>
            <button onClick={() => setShowFilterModal(true)} className="bg-white/5 hover:bg-white/10 text-white border border-white/10 px-4 py-2.5 rounded-lg flex items-center gap-2 font-medium transition-colors">
              <ListFilter size={18} className="text-brand-400" /> View List / Reports
@@ -7963,6 +8023,25 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
               <div>
                 <label className="text-xs font-semibold text-gray-300 block mb-1">
+                  Container Inquiry Link (Official Website URL)
+                </label>
+                <div className="relative">
+                  <ExternalLink size={15} className="absolute left-3 top-3 text-gray-400" />
+                  <input 
+                    type="url" 
+                    placeholder="e.g. https://www.kictl.com or https://www.dpworld.com/karachi" 
+                    value={newPortInquiryLink}
+                    onChange={(e) => setNewPortInquiryLink(e.target.value)}
+                    className="w-full glass-input rounded-xl pl-9 pr-3 py-2.5 outline-none text-white text-xs bg-black/50 border border-white/15 focus:border-brand-400 font-mono"
+                  />
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Official website link for wharfage payment checking & container status enquiry.
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-300 block mb-1">
                   Destination Selection
                 </label>
                 <select
@@ -7992,6 +8071,139 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 className="flex-1 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white py-2.5 rounded-xl font-semibold text-xs sm:text-sm shadow-lg shadow-brand-600/20 transition-all flex items-center justify-center gap-1.5"
               >
                 <Plus size={16} /> {portTargetField ? 'Add & Select Port' : 'Save Port to All Lists'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Port Modal with Container Inquiry Link */}
+      {showEditPortModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-start justify-center pt-8 sm:pt-14 p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="glass-card p-5 sm:p-6 rounded-2xl w-full max-w-md border border-white/10 shadow-2xl bg-slate-900/95 space-y-4">
+            <div className="flex justify-between items-center pb-2 border-b border-white/10">
+              <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                <Edit size={20} className="text-amber-400" />
+                <span>Edit Port & Wharfage Inquiry</span>
+              </h3>
+              <button 
+                type="button"
+                onClick={() => setShowEditPortModal(false)}
+                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-400">
+              Select a port to modify its particulars, type, or official container inquiry / wharfage payment check website link.
+            </p>
+
+            <div className="space-y-3.5">
+              <div>
+                <label className="text-xs font-semibold text-gray-300 block mb-1">
+                  Select Port to Edit <span className="text-amber-400">*</span>
+                </label>
+                <select
+                  value={selectedPortToEdit}
+                  onChange={(e) => handleSelectPortToEdit(e.target.value)}
+                  className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/60 border border-white/15 focus:border-amber-400"
+                >
+                  {ports.map((p) => (
+                    <option key={p.name} value={p.name} className="bg-slate-900">
+                      {p.name} ({p.code || 'PORT'}) {p.type ? `• ${p.type}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-300 block mb-1">
+                  Port / Terminal Name <span className="text-red-400">*</span>
+                </label>
+                <input 
+                  type="text" 
+                  value={editPortName}
+                  onChange={(e) => setEditPortName(e.target.value)}
+                  placeholder="Port Name"
+                  className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/50 border border-white/15 focus:border-amber-400"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-300 block mb-1">
+                    Port Code / Acronym
+                  </label>
+                  <input 
+                    type="text" 
+                    value={editPortCode}
+                    onChange={(e) => setEditPortCode(e.target.value.toUpperCase())}
+                    placeholder="e.g. KICT, QICT"
+                    className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/50 border border-white/15 focus:border-amber-400 uppercase font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-gray-300 block mb-1">
+                    Port Type
+                  </label>
+                  <select
+                    value={editPortType}
+                    onChange={(e) => setEditPortType(e.target.value)}
+                    className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/50 border border-white/15 focus:border-amber-400"
+                  >
+                    <option value="Dry Port" className="bg-slate-900">Dry Port (Inland)</option>
+                    <option value="Sea Port" className="bg-slate-900">Sea Port (Coastal)</option>
+                    <option value="Border Terminal" className="bg-slate-900">Border Terminal</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-300 block mb-1">
+                  Container Inquiry Link (Wharfage Official Website)
+                </label>
+                <div className="relative">
+                  <ExternalLink size={15} className="absolute left-3 top-3 text-gray-400" />
+                  <input 
+                    type="url" 
+                    placeholder="https://www.kictl.com or official port link" 
+                    value={editPortInquiryLink}
+                    onChange={(e) => setEditPortInquiryLink(e.target.value)}
+                    className="w-full glass-input rounded-xl pl-9 pr-3 py-2.5 outline-none text-white text-xs bg-black/50 border border-white/15 focus:border-amber-400 font-mono"
+                  />
+                </div>
+                <div className="flex items-center justify-between mt-1 text-[11px]">
+                  <span className="text-gray-400">This link opens when clicking 'Check Wharfage'</span>
+                  {editPortInquiryLink && (
+                    <button
+                      type="button"
+                      onClick={() => window.open(editPortInquiryLink, '_blank', 'noopener,noreferrer')}
+                      className="text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold underline"
+                    >
+                      <ExternalLink size={11} /> Test Link
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2.5 pt-2">
+              <button 
+                type="button"
+                onClick={() => setShowEditPortModal(false)}
+                className="flex-1 bg-white/10 hover:bg-white/15 text-gray-300 py-2.5 rounded-xl font-medium text-xs sm:text-sm transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                type="button"
+                onClick={handleSaveEditedPort}
+                disabled={!editPortName.trim()}
+                className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Save size={16} /> Save Changes
               </button>
             </div>
           </div>

@@ -133,7 +133,7 @@ const App: React.FC = () => {
     { id: 'drive', label: 'Google Drive', icon: HardDrive },
     { id: 'finance', label: 'Finance', icon: FileText },
     { id: 'vehicles', label: 'Vehicles', icon: Truck },
-    { id: 'available_vehicles', label: 'Available Fleet (Ready)', icon: MapPin },
+    { id: 'available_vehicles', label: 'Available Fleet', icon: MapPin },
     { id: 'users', label: 'User Management', icon: Users },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
@@ -142,7 +142,7 @@ const App: React.FC = () => {
   const clientNavItems = [
     { id: 'cases', label: 'Cases & Shipments', icon: FolderKanban },
     { id: 'finance', label: 'Finance & Invoices', icon: FileText },
-    { id: 'available_vehicles', label: 'Available Fleet (Ready)', icon: MapPin },
+    { id: 'available_vehicles', label: 'Available Fleet', icon: MapPin },
   ];
 
   // Dynamic navigation items based on active portal mode & multi-roles
@@ -157,7 +157,7 @@ const App: React.FC = () => {
     if (currentRole === UserRole.TRANSPORTER) {
       return [
         { id: 'vehicles', label: 'Fleet & Vehicles', icon: Truck },
-        { id: 'available_vehicles', label: 'Available Fleet (Ready)', icon: MapPin },
+        { id: 'available_vehicles', label: 'Available Fleet', icon: MapPin },
         { id: 'cases', label: 'Assigned Shipments', icon: FolderKanban },
       ];
     }
@@ -180,7 +180,7 @@ const App: React.FC = () => {
     }
     if (hasVehiclesAccess) {
       items.push({ id: 'vehicles', label: 'Fleet & Vehicles', icon: Truck });
-      items.push({ id: 'available_vehicles', label: 'Available Fleet (Ready)', icon: MapPin });
+      items.push({ id: 'available_vehicles', label: 'Available Fleet', icon: MapPin });
     }
 
     if (items.length === 0) {
@@ -409,6 +409,67 @@ const App: React.FC = () => {
     );
   }
 
+  // Check if current active session is a dedicated full-page portal
+  const isDedicatedPortal = 
+    currentRole === UserRole.CLIENT || 
+    currentRole === UserRole.TRANSPORTER || 
+    currentRole === UserRole.LOADING_PORT_STAFF || 
+    currentRole === UserRole.UNLOADING_PORT_STAFF || 
+    currentRole === UserRole.DESTINATION_PORT_STAFF;
+
+  if (isDedicatedPortal) {
+    return (
+      <ErrorBoundary>
+        <div className="h-screen h-[100dvh] min-h-[100dvh] max-h-[100dvh] w-full bg-slate-950 text-gray-100 font-sans overflow-hidden relative">
+          {renderContent()}
+
+          {/* Action Center Sidebar */}
+          {isActionCenterOpen && (
+            <div 
+              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]" 
+              onClick={() => setIsActionCenterOpen(false)}
+            />
+          )}
+
+          {/* Action Center Modal / Notifications */}
+          <NotificationModal 
+            isOpen={isNotificationModalOpen}
+            notification={selectedNotification}
+            onClose={() => setIsNotificationModalOpen(false)}
+            onAction={handleNotificationAction}
+          />
+
+          {/* Firebase Authentication Modal */}
+          <AuthModal 
+            isOpen={isAuthModalOpen}
+            onClose={() => setIsAuthModalOpen(false)}
+            currentUser={firebaseUser}
+            currentRole={currentRole}
+            onRoleChange={(role) => setCurrentRole(role)}
+          />
+
+          {/* Session & Draft Restoration Toast Banner */}
+          {sessionToast && (
+            <div className="fixed bottom-6 right-6 z-50 max-w-md bg-slate-900/95 border border-amber-400/50 text-amber-200 px-4 py-3 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center justify-between gap-3 animate-fade-in">
+              <div className="flex items-center gap-2.5 text-xs font-semibold">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping flex-shrink-0" />
+                <span className="leading-snug">{sessionToast}</span>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setSessionToast(null)} 
+                className="text-gray-400 hover:text-white text-xs p-1 rounded-lg hover:bg-white/10 transition"
+                title="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </div>
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <div className="flex h-screen h-[100dvh] min-h-[100dvh] max-h-[100dvh] w-full bg-transparent text-gray-100 font-sans overflow-hidden relative">
@@ -498,7 +559,7 @@ const App: React.FC = () => {
           </div>
 
           {/* Client Role Badge in Sidebar */}
-          {currentRole === UserRole.CLIENT && (
+          {(currentRole as string) === UserRole.CLIENT && (
             <div className={`mt-1 text-center ${!desktopSidebarExpanded && 'lg:hidden'}`}>
               <span className="bg-brand-500/20 text-brand-300 text-[11px] px-2.5 py-0.5 rounded-full border border-brand-500/30 font-medium">
                 Client Portal
@@ -545,7 +606,7 @@ const App: React.FC = () => {
                   : `Role: ${currentRole}`}
               </span>
               <span className="text-[11px] text-gray-300 font-bold block truncate">
-                {currentRole === UserRole.CLIENT ? currentClientName : 'Active User'}
+                {(currentRole as string) === UserRole.CLIENT ? currentClientName : 'Active User'}
               </span>
             </div>
           </div>
@@ -566,9 +627,9 @@ const App: React.FC = () => {
 
       {/* Content Area */}
       <main className="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden relative">
-        <header className="h-14 sm:h-16 bg-slate-900/40 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-3 sm:px-6 z-10 flex-shrink-0">
-          <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
-            <button onClick={() => window.innerWidth < 1024 ? setMobileSidebarOpen(!mobileSidebarOpen) : setDesktopSidebarExpanded(!desktopSidebarExpanded)} className="text-gray-400 hover:text-white p-1">
+        <header className="h-14 sm:h-16 bg-slate-900/40 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-2.5 sm:px-6 z-10 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-4 min-w-0 flex-1">
+            <button onClick={() => window.innerWidth < 1024 ? setMobileSidebarOpen(!mobileSidebarOpen) : setDesktopSidebarExpanded(!desktopSidebarExpanded)} className="text-gray-400 hover:text-white p-1 shrink-0">
               <Menu size={22} />
             </button>
 
@@ -579,7 +640,7 @@ const App: React.FC = () => {
                 setActiveView('dashboard');
                 setNavigationFilter(null);
               }}
-              className="flex items-center gap-2 cursor-pointer hover:opacity-85 transition-opacity"
+              className="flex items-center gap-2 cursor-pointer hover:opacity-85 transition-opacity shrink-0"
               title="DOCKS Dashboard"
             >
               <Logo variant="icon" className="h-7 w-auto max-w-[36px]" />
@@ -587,12 +648,12 @@ const App: React.FC = () => {
 
             {/* View Title - ONLY shown for inner views (Cases, Finance, Vehicles, Users, Settings). NEVER show "Dashboard" or "Admin Portal" when on dashboard */}
             {activeView !== 'dashboard' && (
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <h2 className="text-sm sm:text-base font-semibold text-gray-100 capitalize tracking-wide">
-                  {currentRole === UserRole.CLIENT ? 'Client Portal' : activeView.replace('-', ' ')}
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                <h2 className="text-xs sm:text-base font-semibold text-gray-100 capitalize tracking-wide truncate max-w-[100px] xs:max-w-[140px] sm:max-w-none">
+                  {(currentRole as string) === UserRole.CLIENT ? 'Client Portal' : activeView.replace('-', ' ')}
                 </h2>
-                {currentRole === UserRole.CLIENT && (
-                  <span className="bg-brand-500/20 text-brand-300 text-[10px] sm:text-xs px-2 py-0.5 rounded-full border border-brand-500/30 font-medium">
+                {(currentRole as string) === UserRole.CLIENT && (
+                  <span className="bg-brand-500/20 text-brand-300 text-[10px] sm:text-xs px-2 py-0.5 rounded-full border border-brand-500/30 font-medium truncate max-w-[90px] xs:max-w-[130px] sm:max-w-none">
                     {currentClientName}
                   </span>
                 )}
@@ -600,7 +661,7 @@ const App: React.FC = () => {
             )}
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             {/* Sone se Amount Option (Golden Amount Display & Treasury Breakdown) */}
             <GoldenAmountWidget 
               onOpenFinance={() => setActiveView('finance')}

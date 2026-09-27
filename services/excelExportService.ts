@@ -369,3 +369,77 @@ export function downloadBulkVehicleExcelTemplate() {
   XLSX.utils.book_append_sheet(wb, ws, 'Vehicle Import Template');
   XLSX.writeFile(wb, 'DPL_Bulk_Vehicle_Registration_Template.xlsx');
 }
+
+/**
+ * Generic function to export tabular data directly into a Microsoft Excel (.xlsx) file
+ */
+export function exportTableToExcel(
+  filename: string,
+  sheetName: string,
+  headers: string[],
+  rows: (string | number | undefined | null)[][],
+  columnWidths?: number[]
+): void {
+  const wb = XLSX.utils.book_new();
+  const cleanRows = rows.map(r => r.map(val => (val === undefined || val === null ? '' : val)));
+  const data = [headers, ...cleanRows];
+  const ws = XLSX.utils.aoa_to_sheet(data);
+
+  if (columnWidths && columnWidths.length > 0) {
+    ws['!cols'] = columnWidths.map(w => ({ wch: w }));
+  } else {
+    // Auto-compute column widths based on maximum cell lengths
+    const colWidths = headers.map((header, colIdx) => {
+      let maxLen = String(header).length;
+      for (const row of cleanRows) {
+        const cellLen = String(row[colIdx] || '').length;
+        if (cellLen > maxLen) maxLen = cellLen;
+      }
+      return { wch: Math.min(Math.max(maxLen + 3, 12), 45) };
+    });
+    ws['!cols'] = colWidths;
+  }
+
+  const cleanSheetName = (sheetName || 'Data').slice(0, 31).replace(/[:\\\/\?\*\[\]]/g, '_');
+  XLSX.utils.book_append_sheet(wb, ws, cleanSheetName);
+
+  const cleanFilename = filename.toLowerCase().endsWith('.xlsx')
+    ? filename
+    : `${filename.replace(/\.csv$/i, '')}.xlsx`;
+
+  XLSX.writeFile(wb, cleanFilename);
+}
+
+/**
+ * Exports vehicle trips history to a formatted Microsoft Excel (.xlsx) file
+ */
+export function exportVehicleTripsToExcel(
+  vehicleReg: string,
+  trips: Array<{
+    date: string;
+    containerNumber: string;
+    driverName: string;
+    importerName: string;
+    clientName: string;
+    status: string;
+  }>
+): void {
+  const headers = [
+    'Trip Date',
+    'Container Number',
+    'Driver Name',
+    'Importer / Consignee',
+    'Client Name',
+    'Trip Status'
+  ];
+  const rows = trips.map(t => [
+    t.date || '',
+    t.containerNumber || '',
+    t.driverName || '',
+    t.importerName || '',
+    t.clientName || '',
+    t.status || ''
+  ]);
+  const filename = `${vehicleReg.replace(/[^a-zA-Z0-9_-]/g, '_')}_trips_${new Date().toISOString().split('T')[0]}.xlsx`;
+  exportTableToExcel(filename, 'Vehicle Trips', headers, rows, [15, 20, 22, 28, 25, 18]);
+}

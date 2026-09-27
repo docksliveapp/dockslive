@@ -20,7 +20,7 @@ import {
 import { AvailableVehiclesView } from './AvailableVehiclesView';
 import { subscribeToTransporterRequests, updateTransporterRequestInFirestore } from '../services/dbService';
 import { TransporterRequest } from '../types';
-import { exportVehiclesToExcel } from '../services/excelExportService';
+import { exportVehiclesToExcel, exportVehicleTripsToExcel } from '../services/excelExportService';
 import { parseVehicleFile, isCorruptedVehicleRecord } from '../services/documentParserService';
 import { OfficialDocumentsModal, DocumentType } from './OfficialDocumentsModal';
 import { 
@@ -1398,7 +1398,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
               onClick={() => setActiveTab('ready_vehicles')}
               className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'ready_vehicles' ? 'bg-brand-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
             >
-              <MapPin size={16} /> Available Fleet (Ready for Loading)
+              <MapPin size={16} /> Available Fleet
             </button>
           </div>
         </div>
@@ -2368,61 +2368,8 @@ const VehicleProfileModal = ({
     setDownloadSuccess(null);
     setDownloadError(null);
     try {
-      const nowStr = new Date().toISOString().slice(0, 10);
-      const escape = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
-      const csvRows: string[] = [];
-
-      csvRows.push(`"=== DPL VEHICLE TRIP & FLEET REPORT ==="`);
-      csvRows.push(`"Report Date",${escape(nowStr)}`);
-      csvRows.push(`"Vehicle Registration Number",${escape(vehicle.registrationNumber)}`);
-      csvRows.push(`"Category",${escape(vehicle.category)}`);
-      csvRows.push(`"Vehicle Type",${escape(vehicle.type)}`);
-      csvRows.push(`"Vehicle Size",${escape(vehicle.size)}`);
-      csvRows.push(`"Weight Capacity",${escape(vehicle.weightCapacity || 'N/A')}`);
-      csvRows.push(`"Engine Number",${escape(vehicle.engineNo || 'N/A')}`);
-      csvRows.push(`"Chassis Number",${escape(vehicle.chassisNo || 'N/A')}`);
-      csvRows.push(`"Make / Model",${escape(vehicle.makeModel || 'N/A')}`);
-      csvRows.push(`"Registration Date",${escape(vehicle.registrationDate || 'N/A')}`);
-      csvRows.push(`"Operational Status",${escape(vehicle.status)}`);
-      csvRows.push(`"Validation Expiry Date",${escape(vehicle.validationExpiryDate || 'N/A')}`);
-      csvRows.push(`"Validation Start Date",${escape(vehicle.validationStartDate || 'N/A')}`);
-      csvRows.push(`"Transporter / Broker Company",${escape(vehicle.brokerName || vehicle.transporterName || 'N/A')}`);
-      csvRows.push(`"Driver Name",${escape(vehicle.driverName || 'N/A')}`);
-      csvRows.push(`"Driver CNIC",${escape(vehicle.driverCnic || 'N/A')}`);
-      csvRows.push(`"Driver Contact Phone",${escape(vehicle.driverContact || 'N/A')}`);
-      csvRows.push(`"Vehicle Owner Name",${escape(vehicle.ownerName || 'N/A')}`);
-      csvRows.push(`"Vehicle Owner CNIC",${escape(vehicle.ownerCnic || 'N/A')}`);
-      csvRows.push(`"Vehicle Owner Address",${escape(vehicle.ownerAddress || 'N/A')}`);
-      csvRows.push(`"Tracker Provider",${escape(vehicle.tracker?.provider || 'None')}`);
-      csvRows.push(`"Tracker ID / Account",${escape(vehicle.tracker?.id || vehicle.tracker?.companyName || 'N/A')}`);
-      csvRows.push(`"Tracker Status",${escape(vehicle.tracker?.status || 'N/A')}`);
-      csvRows.push(`""`);
-
-      csvRows.push(`"=== VEHICLE TRIP & DISPATCH HISTORY ==="`);
-      csvRows.push(`"Trip Date","Container No","Driver Name","Importer Name","Client Name","Status"`);
-
-      trips.forEach(t => {
-        csvRows.push([
-          escape(t.date),
-          escape(t.containerNumber),
-          escape(t.driverName),
-          escape(t.importerName),
-          escape(t.clientName),
-          escape(t.status)
-        ].join(','));
-      });
-
-      const csvContent = '\uFEFF' + csvRows.join('\n');
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', `${vehicle.registrationNumber}_trips.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      setDownloadSuccess(`Trip report downloaded for ${vehicle.registrationNumber}`);
+      exportVehicleTripsToExcel(vehicle.registrationNumber, trips);
+      setDownloadSuccess(`Trip report (Excel .xlsx) downloaded for ${vehicle.registrationNumber}`);
     } catch (err) {
       console.error(err);
       setDownloadError('Failed to generate vehicle trip report.');
@@ -2736,9 +2683,9 @@ const VehicleProfileModal = ({
                  type="button"
                  onClick={handleDownloadTripAndFleetReport}
                  className="text-xs text-brand-300 hover:text-white flex items-center gap-1 bg-brand-500/10 hover:bg-brand-500/20 px-2.5 py-1 rounded-lg border border-brand-500/20 transition-all"
-                 title="Download Trip Report for this vehicle"
+                 title="Download Trip Report for this vehicle as Excel (.xlsx)"
                >
-                 <Download size={12} /> Export Vehicle Trip Report
+                 <Download size={12} /> Export Vehicle Trips (Excel .xlsx)
                </button>
              </div>
 

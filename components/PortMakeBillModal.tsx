@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { 
   X, Receipt, Plus, Trash2, Download, CheckCircle2, 
-  UploadCloud, FileText, Camera, DollarSign, AlertCircle, Clock 
+  UploadCloud, FileText, Camera, DollarSign, AlertCircle, Clock, ExternalLink 
 } from 'lucide-react';
 import { Case, CaseCharge, StaffLoadingBill, StaffPrivateLedgerEntry } from '../types';
 import { downloadLoadingBillPdf, LoadingBillData, LoadingBillItem } from '../services/pdfExportService';
 import { saveStaffBillToFirestore, saveStaffPrivateLedgerEntryToFirestore, saveCaseToFirestore } from '../services/dbService';
 import { compressAndPrepareFile, convertImageToPdf } from '../services/fileUtils';
 import { useBranding } from '../services/brandingService';
+import { getPortInquiryLink } from '../services/portInquiryService';
 
 interface ExtraChargeItem {
   id: string;
@@ -457,7 +458,19 @@ export const PortMakeBillModal: React.FC<PortMakeBillModalProps> = ({
                   <span className="text-white font-bold text-xs block">1. Wharfage Payment</span>
                   <span className="text-[10px] text-gray-400">Port authority terminal dues and wharfage fee</span>
                 </div>
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const inquiryLink = getPortInquiryLink(portTerminal || targetCase.pol);
+                      window.open(inquiryLink, '_blank', 'noopener,noreferrer');
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-[11px] flex items-center gap-1.5 transition active:scale-95 shrink-0"
+                    title="Check wharfage amount on official port terminal website"
+                  >
+                    <ExternalLink size={12} />
+                    <span>Check Wharfage Amount</span>
+                  </button>
                   <div className="relative w-full sm:w-44">
                     <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-[11px]">PKR</span>
                     <input

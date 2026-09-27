@@ -4,7 +4,7 @@ import {
   Search, Filter, Download, CreditCard, Banknote, Briefcase, X, Save, Calendar, Camera,
   BookOpen, ChevronDown, ChevronUp, CheckCircle2, User, Layers, RefreshCw, AlertCircle, ArrowRight,
   Eye, Loader2, Share2, Upload, Zap, Trash2, Building, Truck, Clock, ShieldCheck, ArrowLeft,
-  ArrowLeftRight, FileSpreadsheet, UserPlus, FileCheck
+  ArrowLeftRight, FileSpreadsheet, UserPlus, FileCheck, Paperclip
 } from 'lucide-react';
 import Logo from './Logo';
 import { PdfViewerModal } from './PdfViewerModal';
@@ -40,6 +40,7 @@ import {
   downloadReceivableInvoicePdf, 
   downloadClientLedgerPdf, 
   downloadGeneralLedgerPdf,
+  downloadCashbookLedgerPdf,
   numberToWordsRupees,
   PaymentReceiptData,
   ReceivableInvoiceData,
@@ -241,6 +242,11 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
   // Payment Completion & Receipt Download Popup Modal (SRS)
   const [completedTransactionReceipt, setCompletedTransactionReceipt] = useState<FinanceEntry | null>(null);
   const [showPaymentSuccessModal, setShowPaymentSuccessModal] = useState(false);
+
+  // Attach / View Proof Modal for Cashbook Transactions
+  const [proofModalEntry, setProofModalEntry] = useState<FinanceEntry | null>(null);
+  const [isUploadingProof, setIsUploadingProof] = useState(false);
+  const [proofSuccessMsg, setProofSuccessMsg] = useState<string | null>(null);
 
   // Vendors & Utilities State
   const [vendors, setVendors] = useState<Vendor[]>(() => getStoredVendors());
@@ -1535,6 +1541,48 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     }
   };
 
+  // Upload or replace deposit slip / bill for any existing transaction directly from Cashbook
+  const handleAttachProofForEntry = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!proofModalEntry) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingProof(true);
+    setProofSuccessMsg(null);
+    try {
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      let finalUrl = '';
+      if (!isPdf) {
+        const converted = await convertImageToPdf(file, file.name || `Proof_${Date.now()}.pdf`, true);
+        finalUrl = converted.pdfDataUrl;
+      } else {
+        const processed = await compressAndPrepareFile(file);
+        finalUrl = processed.dataUrl || `data:application/pdf;base64,${processed.base64}`;
+      }
+
+      const updatedEntry: FinanceEntry = {
+        ...proofModalEntry,
+        documentUrl: finalUrl,
+        slipUrl: finalUrl,
+        documentName: file.name
+      };
+
+      setFinanceData(prev => prev.map(f => f.id === updatedEntry.id ? updatedEntry : f));
+      setProofModalEntry(updatedEntry);
+      await updateFinanceInFirestore(updatedEntry).catch(() => {});
+      logActivity(`Proof document attached for transaction ${updatedEntry.reference || updatedEntry.id}`, 'FINANCE');
+      setProofSuccessMsg('Deposit proof / bill attached successfully!');
+    } catch (err) {
+      console.error("Failed to attach proof:", err);
+      alert("Failed to upload file. Please try again.");
+    } finally {
+      setIsUploadingProof(false);
+      try {
+        e.target.value = '';
+      } catch (_) {}
+    }
+  };
+
   const handleStatusChange = (id: number, list: FinanceEntry[], setList: React.Dispatch<React.SetStateAction<FinanceEntry[]>>) => {
     setPendingPaymentEntry({ id, list, setList });
     setNewTransaction({ ...newTransaction, paymentMethod: 'CASH', amount: list.find(e => e.id === id)?.amount || 0 });
@@ -2060,6 +2108,120 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       setPdfErrorMessage('Failed to generate vendor ledger PDF.');
     } finally {
       setIsExportingPdf(false);
+    }
+  };
+
+  // Download Cashbook Ledger Statement PDF (Strictly Cashbook Entries: Payments Received & Payments Paid)
+  const handleDownloadCashbookLedger = async () => {
+    // Strictly cashbook data (INCOME and EXPENSE only)
+    let entriesToExport = financeData.filter(entry => entry.type === 'INCOME' || entry.type === 'EXPENSE');
+
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      entriesToExport = entriesToExport.filter(e => 
+        (e.party && e.party.toLowerCase().includes(q)) ||
+        (e.description && e.description.toLowerCase().includes(q)) ||
+        (e.reference && e.reference.toLowerCase().includes(q))
+      );
+    }
+
+    if (dateFilter !== 'ALL') {
+      const today = new Date().toISOString().split('T')[0];
+      if (dateFilter === 'TODAY') {
+        entriesToExport = entriesToExport.filter(e => e.date === today);
+      } else if (dateFilter === 'WEEK') {
+        const d = new Date();
+        d.setDate(d.getDate() - 7);
+        const weekAgo = d.toISOString().split('T')[0];
+        entriesToExport = entriesToExport.filter(e => e.date >= weekAgo && e.date <= today);
+      } else if (dateFilter === 'MONTH') {
+        const currentMonth = today.substring(0, 7);
+        entriesToExport = entriesToExport.filter(e => e.date && e.date.startsWith(currentMonth));
+      }
+    }
+
+    if (entriesToExport.length === 0) {
+      alert('No Cashbook entries found for the selected filter.');
+      return;
+    }
+
+    setIsExportingPdf(true);
+    setPdfSuccessMessage(null);
+    setPdfErrorMessage(null);
+
+    try {
+      // Sort chronologically (oldest to newest) to calculate running balance accurately
+      const sortedEntries = [...entriesToExport].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.id - b.id));
+
+      let runningBal = 0;
+      let totalInflow = 0;
+      let totalOutflow = 0;
+
+      const processedEntries = sortedEntries.map(e => {
+        const isInflow = e.type === 'INCOME';
+        const amt = Number(e.amount) || 0;
+        if (isInflow) {
+          totalInflow += amt;
+          runningBal += amt;
+        } else {
+          totalOutflow += amt;
+          runningBal -= amt;
+        }
+
+        return {
+          date: e.date,
+          reference: e.reference || '-',
+          party: e.party || '-',
+          description: e.description || (isInflow ? 'Payment Received' : 'Payment Paid'),
+          paymentMethod: e.paymentMethod || 'CASH',
+          bankName: e.bankName,
+          inflow: isInflow ? amt : 0,
+          outflow: !isInflow ? amt : 0,
+          balance: runningBal
+        };
+      });
+
+      const dateLabel = dateFilter === 'ALL' 
+        ? 'All History' 
+        : dateFilter === 'TODAY' 
+          ? 'Today' 
+          : dateFilter === 'WEEK' 
+            ? 'This Week' 
+            : 'This Month';
+
+      const res = await downloadCashbookLedgerPdf({
+        dateRange: dateLabel,
+        generatedDate: new Date().toLocaleDateString(),
+        totalInflow,
+        totalOutflow,
+        netBalance: runningBal,
+        entries: processedEntries,
+        companyName,
+        customLogo: activeLogo,
+        branding
+      });
+
+      setPdfSuccessMessage(`Cashbook Ledger downloaded: ${res.filename}`);
+      setDirectDownloadFilename(res.filename);
+      setDirectDownloadUrl(res.blobUrl);
+    } catch (err) {
+      console.error(err);
+      setPdfErrorMessage('Failed to generate Cashbook Ledger PDF.');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
+  // Context-aware Statement Download based on Active Tab
+  const handleToolbarDownloadStatement = () => {
+    if (activeTab === 'cashbook') {
+      handleDownloadCashbookLedger();
+    } else if (activeTab === 'client_ledger') {
+      handleDownloadClientLedger();
+    } else if (activeTab === 'vendor_ledger') {
+      handleDownloadVendorLedger();
+    } else {
+      handleDownloadGeneralLedger();
     }
   };
 
@@ -3920,14 +4082,6 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                   <FileSpreadsheet size={14} className="text-emerald-400 group-hover:text-white" />
                   <span>Export Excel (.xlsx)</span>
                 </button>
-                <button 
-                  onClick={handleExportClientLedgerCSV}
-                  className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all"
-                  title="Download CSV spreadsheet"
-                >
-                  <Download size={14} className="text-gray-400" />
-                  <span>CSV</span>
-                </button>
               </div>
             </div>
 
@@ -4259,14 +4413,6 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 >
                   <FileSpreadsheet size={14} className="text-white" />
                   <span>Export GL (Excel .xlsx)</span>
-                </button>
-                <button 
-                  onClick={handleExportGeneralLedgerCSV}
-                  className="px-3 py-2 bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all"
-                  title="Download legacy CSV spreadsheet"
-                >
-                  <Download size={14} className="text-gray-400" />
-                  <span>CSV</span>
                 </button>
                 {generalLedgerEntries.length > 0 && (
                   <button 
@@ -5425,12 +5571,29 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
       case 'cashbook':
       default: {
-        const filteredFinance = financeData.filter(entry => 
-          !searchTerm || 
-          entry.party.toLowerCase().includes(searchTerm.toLowerCase()) || 
-          entry.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          (entry.reference && entry.reference.toLowerCase().includes(searchTerm.toLowerCase()))
-        );
+        const filteredFinance = financeData.filter(entry => {
+          const matchesSearch = !searchTerm || 
+            entry.party.toLowerCase().includes(searchTerm.toLowerCase()) || 
+            entry.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (entry.reference && entry.reference.toLowerCase().includes(searchTerm.toLowerCase()));
+
+          if (!matchesSearch) return false;
+
+          if (dateFilter === 'ALL') return true;
+          const today = new Date().toISOString().split('T')[0];
+          if (dateFilter === 'TODAY') return entry.date === today;
+          if (dateFilter === 'WEEK') {
+            const d = new Date();
+            d.setDate(d.getDate() - 7);
+            const weekAgo = d.toISOString().split('T')[0];
+            return entry.date >= weekAgo && entry.date <= today;
+          }
+          if (dateFilter === 'MONTH') {
+            const currentMonth = today.substring(0, 7);
+            return !!(entry.date && entry.date.startsWith(currentMonth));
+          }
+          return true;
+        });
 
         return (
           <>
@@ -5476,6 +5639,21 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                         PKR {entry.amount.toLocaleString()}
                       </div>
                       <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            setProofModalEntry(entry);
+                            setProofSuccessMsg(null);
+                          }}
+                          className={`text-[11px] font-semibold px-2 py-0.5 rounded border flex items-center gap-1 transition ${
+                            entry.documentUrl || entry.slipUrl
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
+                              : 'bg-white/5 text-gray-400 border-white/10 hover:text-white hover:bg-white/10'
+                          }`}
+                          title={entry.documentUrl || entry.slipUrl ? "View / Update Attached Proof" : "Attach Deposit Proof / Bill"}
+                        >
+                          <Paperclip size={11} />
+                          <span>{entry.documentUrl || entry.slipUrl ? 'Proof' : '+ Proof'}</span>
+                        </button>
                         <button 
                           onClick={() => handleOpenReceipt(entry)}
                           className="text-brand-400 hover:text-white text-[11px] font-semibold px-2 py-0.5 rounded bg-brand-600/20 border border-brand-500/30 flex items-center gap-1"
@@ -5539,6 +5717,21 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                       </td>
                       <td className="p-4 text-center no-print">
                         <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              setProofModalEntry(entry);
+                              setProofSuccessMsg(null);
+                            }}
+                            className={`text-xs font-semibold px-2.5 py-1 rounded border flex items-center gap-1 transition ${
+                              entry.documentUrl || entry.slipUrl
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
+                                : 'bg-white/5 text-gray-400 border-white/10 hover:text-white hover:bg-white/10'
+                            }`}
+                            title={entry.documentUrl || entry.slipUrl ? "View / Update Attached Proof" : "Attach Deposit Proof / Bill"}
+                          >
+                            <Paperclip size={12} />
+                            <span>{entry.documentUrl || entry.slipUrl ? 'Proof' : '+ Proof'}</span>
+                          </button>
                           <button 
                             onClick={() => handleOpenReceipt(entry)}
                             className="text-brand-400 hover:text-white transition-colors text-xs font-semibold px-2.5 py-1 rounded bg-brand-600/20 border border-brand-500/30 flex items-center gap-1"
@@ -5780,91 +5973,6 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         </button>
       </div>
 
-      {/* Quick Action Navigation Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-slate-900/80 border border-white/10 rounded-2xl no-print">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => {
-              setTransactionType('INCOME');
-              setNewTransaction({
-                description: 'Bank Deposit Payment Received',
-                amount: 0,
-                party: activeTab === 'client_ledger' ? selectedLedgerClient : '',
-                paymentMethod: 'BANK',
-                bankId: '',
-                bankName: 'Meezan Bank Ltd',
-                transactionId: '',
-                slipUrl: ''
-              });
-              setIsOtherClient(false);
-              setOtherClientName('');
-              setShowAddModal(true);
-            }}
-            className="px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
-          >
-            <Banknote size={15} />
-            <span>Add Payment (Deposit Proof Only)</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('client_ledger')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all ${
-              activeTab === 'client_ledger'
-                ? 'bg-brand-600 border-brand-500 text-white shadow-sm'
-                : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white'
-            }`}
-          >
-            <Briefcase size={15} />
-            <span>Check Ledger</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('receivables')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all ${
-              activeTab === 'receivables'
-                ? 'bg-brand-600 border-brand-500 text-white shadow-sm'
-                : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white'
-            }`}
-          >
-            <FileText size={15} />
-            <span>Check Invoice</span>
-          </button>
-
-          <button
-            onClick={() => setShowAllInvoicesModal(true)}
-            className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all"
-          >
-            <Layers size={15} className="text-amber-400" />
-            <span>All Invoices (Table & Download)</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('vendor_ledger');
-              setSelectedVendorForLedger(null);
-            }}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all ${
-              activeTab === 'vendor_ledger'
-                ? 'bg-brand-600 border-brand-500 text-white shadow-sm'
-                : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white'
-            }`}
-          >
-            <Building size={15} className="text-purple-400" />
-            <span>Vendor Details</span>
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowAddVendorModal(true)}
-            className="px-3 py-2 bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/30 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all"
-          >
-            <Plus size={14} />
-            <span>+ Add Vendor</span>
-          </button>
-        </div>
-      </div>
-
       {/* Client Portal Online Deposit Slips - Verification Desk */}
       {pendingClientDeposits.length > 0 && (
         <div className="glass-card rounded-2xl p-5 border border-amber-500/40 bg-gradient-to-r from-amber-950/40 via-slate-900/90 to-amber-950/30 space-y-4 no-print shadow-xl shadow-amber-950/20 animate-fade-in">
@@ -6018,7 +6126,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               <Filter size={16} /> Date Filter
             </button>
             <button 
-              onClick={handleDownloadGeneralLedger}
+              onClick={handleToolbarDownloadStatement}
               className="flex items-center gap-2 px-3.5 py-2 bg-white/5 border border-white/10 text-gray-300 rounded-lg text-sm hover:bg-white/10 transition-colors"
               title="Download Statement (PDF)"
             >
@@ -7421,6 +7529,152 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 type="button"
                 onClick={() => setShowAllInvoicesModal(false)}
                 className="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-300 rounded-xl text-xs font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TRANSACTION PROOF & ATTACHMENT MODAL */}
+      {proofModalEntry && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-start justify-center z-50 pt-3 sm:pt-6 pb-6 px-3 sm:px-4 overflow-y-auto animate-in fade-in duration-200 no-print">
+          <div className="glass-card w-full max-w-lg rounded-2xl border border-white/15 shadow-2xl overflow-hidden flex flex-col mb-6 bg-slate-900/95">
+            <div className="p-5 border-b border-white/10 flex justify-between items-center bg-slate-950/80">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-500/20 text-amber-300 rounded-xl border border-amber-500/30">
+                  <Paperclip size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Deposit Proof & Bill Attachment</h3>
+                  <p className="text-xs text-gray-400 font-mono">
+                    Ref: {proofModalEntry.reference || proofModalEntry.id} • {proofModalEntry.party}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setProofModalEntry(null);
+                  setProofSuccessMsg(null);
+                }}
+                className="text-gray-400 hover:text-white p-1"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              {/* Transaction Summary Card */}
+              <div className="p-3.5 bg-white/5 rounded-xl border border-white/10 grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-[10px] text-gray-400 uppercase font-semibold block">Date</span>
+                  <span className="text-white font-medium">{proofModalEntry.date}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-400 uppercase font-semibold block">Transaction Type</span>
+                  <span className={`font-bold ${proofModalEntry.type === 'INCOME' ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {proofModalEntry.type === 'INCOME' ? 'Payment Received' : 'Payment Paid'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-400 uppercase font-semibold block">Party Name</span>
+                  <span className="text-white font-bold truncate block">{proofModalEntry.party}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-gray-400 uppercase font-semibold block">Amount</span>
+                  <span className="text-white font-mono font-bold">PKR {proofModalEntry.amount.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Status & Feedback */}
+              {proofSuccessMsg && (
+                <div className="p-3 bg-emerald-500/20 border border-emerald-500/40 rounded-xl text-emerald-300 flex items-center gap-2 animate-in fade-in">
+                  <CheckCircle2 size={16} className="shrink-0" />
+                  <span>{proofSuccessMsg}</span>
+                </div>
+              )}
+
+              {/* Current Attached Proof Status */}
+              {(proofModalEntry.documentUrl || proofModalEntry.slipUrl) ? (
+                <div className="p-4 bg-emerald-950/20 border border-emerald-500/30 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                      <CheckCircle2 size={14} className="text-emerald-400" />
+                      Document Currently Attached
+                    </span>
+                    <span className="text-[11px] text-gray-400 font-mono">
+                      {proofModalEntry.documentName || 'Proof Document'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetUrl = proofModalEntry.documentUrl || proofModalEntry.slipUrl;
+                        if (!targetUrl) return;
+                        const link = document.createElement('a');
+                        link.href = targetUrl;
+                        const isPdf = targetUrl.startsWith('data:application/pdf');
+                        link.download = proofModalEntry.documentName || `Proof_${proofModalEntry.reference || proofModalEntry.id}${isPdf ? '.pdf' : '.jpg'}`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                      }}
+                      className="flex-1 py-2 px-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-semibold flex items-center justify-center gap-1.5 shadow-md shadow-brand-600/20 cursor-pointer"
+                    >
+                      <Download size={14} />
+                      <span>Download / View Attached File</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 bg-white/5 border border-dashed border-white/20 rounded-xl text-center text-gray-400">
+                  <Paperclip size={24} className="mx-auto text-gray-500 mb-1.5" />
+                  <p className="font-medium text-white">No proof attached yet</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    Upload deposit slip photo, cheque copy, or vendor bill for this transaction.
+                  </p>
+                </div>
+              )}
+
+              {/* Upload or Replace File */}
+              <div className="space-y-1.5 pt-1">
+                <label className="text-xs font-semibold text-gray-300 block">
+                  {proofModalEntry.documentUrl || proofModalEntry.slipUrl 
+                    ? 'Replace Attached Proof / Bill (Image or PDF)' 
+                    : 'Upload Deposit Proof / Bill (Image or PDF)'}
+                </label>
+                <label className={`flex items-center justify-center gap-2 p-3.5 border-2 border-dashed border-amber-500/30 rounded-xl hover:bg-amber-500/10 hover:border-amber-500/60 transition-all cursor-pointer bg-slate-950/60 group ${isUploadingProof ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <input 
+                    type="file" 
+                    className="hidden" 
+                    accept="image/*,.pdf" 
+                    onChange={handleAttachProofForEntry}
+                    disabled={isUploadingProof}
+                  />
+                  {isUploadingProof ? (
+                    <Loader2 size={18} className="text-amber-400 animate-spin" />
+                  ) : (
+                    <Upload size={18} className="text-amber-400 group-hover:scale-110 transition-transform" />
+                  )}
+                  <span className="text-xs text-gray-200 font-semibold">
+                    {isUploadingProof ? 'Processing & saving file...' : 'Choose File to Attach'}
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-950/80 border-t border-white/10 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setProofModalEntry(null);
+                  setProofSuccessMsg(null);
+                }}
+                className="px-5 py-2 bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-semibold"
               >
                 Close
               </button>

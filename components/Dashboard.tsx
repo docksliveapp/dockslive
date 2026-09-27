@@ -17,6 +17,7 @@ import {
   StationMovementDetail, 
   StationAnalyticsSummary 
 } from '../services/stationAnalytics';
+import { exportTableToExcel } from '../services/excelExportService';
 
 // Data Generator based on real cases per date
 const generateGraphData = (startStr: string, endStr: string, casesList: Case[] = []) => {
@@ -537,19 +538,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                                  ] : []),
                                  ...generatedGraphData.map(d => [d.name, String(d.value)])
                                ];
-                               const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-                               const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                               const url = URL.createObjectURL(blob);
-                               const a = document.createElement('a');
-                               a.href = url;
-                               a.download = `Station_Analytics_Report_${new Date().toISOString().split('T')[0]}.csv`;
-                               a.click();
-                               URL.revokeObjectURL(url);
+                               const filename = `Station_Analytics_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
+                               exportTableToExcel(filename, 'Station Analytics', ['Metric / Period', 'Value / Movements'], rows, [30, 20]);
                              }}
                              className="px-3.5 py-2 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 border border-emerald-600/60"
                            >
                               <Download size={15} />
-                              Download Report (CSV)
+                              Download Report (Excel .xlsx)
                            </button>
                            <button 
                              onClick={() => {
