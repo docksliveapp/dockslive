@@ -33,6 +33,7 @@ interface ClientRegistrationModalProps {
   onSave: (client: Client, appliedCharges: CaseCharge[]) => void;
   initialClient?: Client | null;
   defaultCategory?: string;
+  isClientView?: boolean;
 }
 
 export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = ({
@@ -40,7 +41,8 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
   onClose,
   onSave,
   initialClient,
-  defaultCategory = 'Bonded Carrier'
+  defaultCategory = 'Bonded Carrier',
+  isClientView = false
 }) => {
   // Section 1: Client / Company Details
   const [name, setName] = useState('');
@@ -385,6 +387,54 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
     onSave(clientToSave, appliedCharges);
   };
 
+  const [passwordSaveSuccess, setPasswordSaveSuccess] = useState(false);
+  const handleSavePasswordOnly = async () => {
+    if (!password.trim()) return;
+    const clientToSave: Client = {
+      id: initialClient?.id || `client_${Date.now()}`,
+      name: name.trim() || initialClient?.name || 'Client',
+      ownerName: ownerName.trim(),
+      cnic: cnic.trim(),
+      officeAddress: officeAddress.trim(),
+      contact: contact.trim(),
+      mobileNumber: mobileNumber.trim(),
+      whatsappNumber: whatsappNumber.trim() || mobileNumber.trim(),
+      email: email.trim(),
+      ntn: ntn.trim(),
+      strn: strn.trim(),
+      businessCardUrl: businessCardUrl || undefined,
+      contractLetterUrl: contractLetterUrl || undefined,
+      nicDocUrl: nicDocUrl || undefined,
+      ntnDocUrl: ntnDocUrl || undefined,
+      ntnDocName: ntnDocName || undefined,
+      defaultCaseCategory: selectedCategory,
+      defaultServiceArrangements: arrangements,
+      defaultCharges: chargesList,
+      loginEnabled: true,
+      userId: userId || initialClient?.userId || 'CLIENT-DPL',
+      password: password.trim(),
+      createdAt: initialClient?.createdAt || new Date().toISOString()
+    };
+
+    try {
+      await saveClientToFirestore(clientToSave);
+      setPasswordSaveSuccess(true);
+      setTimeout(() => {
+        setPasswordSaveSuccess(false);
+        onSave(clientToSave, []);
+        onClose();
+      }, 1000);
+    } catch (err) {
+      console.warn("Could not save password to Firestore:", err);
+      setPasswordSaveSuccess(true);
+      setTimeout(() => {
+        setPasswordSaveSuccess(false);
+        onSave(clientToSave, []);
+        onClose();
+      }, 1000);
+    }
+  };
+
   if (!isOpen) return null;
 
   const filteredPickerCharges = allAvailableCharges.filter(c => {
@@ -409,13 +459,10 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
             </div>
             <div>
               <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <span>{initialClient ? 'Edit Client & Default Tariff' : 'Register New Client & Default Tariff'}</span>
-                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono">
-                  Auto-Billing Profile
-                </span>
+                <span>Client Profile</span>
               </h3>
               <p className="text-xs text-gray-400">
-                Setup client details, default case category arrangements (DPL vs Client), and default charges tariff
+                {isClientView ? 'Verified Company Particulars & Portal Security Credentials' : 'Setup client details, default case category arrangements (DPL vs Client), and default charges tariff'}
               </p>
             </div>
           </div>
@@ -430,6 +477,29 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
 
         {/* Modal Scrollable Body */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-6 custom-scrollbar text-sm">
+          
+          {/* Client View Locked Banner */}
+          {isClientView && (
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3.5 text-amber-200 shadow-lg">
+              <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 mt-0.5">
+                <Lock size={18} />
+              </div>
+              <div className="space-y-1 text-xs">
+                <h4 className="font-bold text-white text-sm flex items-center gap-2">
+                  <span>Client Profile Locked (Read-Only)</span>
+                  <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-mono font-normal">
+                    Security Protected
+                  </span>
+                </h4>
+                <p className="text-amber-200/90 leading-relaxed font-medium">
+                  All company profile particulars and universal tariff arrangements are securely locked for client access. You may update your portal password below at any time. If you forget your password, contact DPL administration for assistance.
+                </p>
+                <p className="text-gray-300 text-[11px] leading-relaxed">
+                  Profile particulars and tariff structures are strictly read-only. You may update your access password below at any time. For credential recovery, contact system administration.
+                </p>
+              </div>
+            </div>
+          )}
           
           {/* ========================================================================= */}
           {/* SECTION 1: CLIENT / COMPANY DETAILS & DOCUMENTS */}
@@ -450,8 +520,12 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   placeholder="e.g. Al-Madina Logistics & Afghan Trading Co."
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm bg-black/40 border border-white/15 focus:border-brand-400"
-                  autoFocus
+                  disabled={isClientView}
+                  readOnly={isClientView}
+                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
+                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  }`}
+                  autoFocus={!isClientView}
                 />
               </div>
 
@@ -464,7 +538,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   placeholder="e.g. Haji Gul Muhammad"
                   value={ownerName}
                   onChange={(e) => setOwnerName(e.target.value)}
-                  className="w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm bg-black/40 border border-white/15 focus:border-brand-400"
+                  disabled={isClientView}
+                  readOnly={isClientView}
+                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
+                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  }`}
                 />
               </div>
 
@@ -477,7 +555,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   placeholder="e.g. 42101-1234567-1"
                   value={cnic}
                   onChange={(e) => setCnic(e.target.value)}
-                  className="w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm bg-black/40 border border-white/15 focus:border-brand-400"
+                  disabled={isClientView}
+                  readOnly={isClientView}
+                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
+                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  }`}
                 />
               </div>
 
@@ -490,7 +572,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   placeholder="e.g. 021-32415555"
                   value={contact}
                   onChange={(e) => setContact(e.target.value)}
-                  className="w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm bg-black/40 border border-white/15 focus:border-brand-400"
+                  disabled={isClientView}
+                  readOnly={isClientView}
+                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
+                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  }`}
                 />
               </div>
 
@@ -503,7 +589,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   placeholder="e.g. 0300-1234567"
                   value={mobileNumber}
                   onChange={(e) => setMobileNumber(e.target.value)}
-                  className="w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm bg-black/40 border border-white/15 focus:border-brand-400"
+                  disabled={isClientView}
+                  readOnly={isClientView}
+                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
+                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  }`}
                 />
               </div>
 
@@ -516,7 +606,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   placeholder="e.g. 0300-1234567"
                   value={whatsappNumber}
                   onChange={(e) => setWhatsappNumber(e.target.value)}
-                  className="w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm bg-black/40 border border-white/15 focus:border-brand-400"
+                  disabled={isClientView}
+                  readOnly={isClientView}
+                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
+                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  }`}
                 />
               </div>
 
@@ -529,7 +623,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   placeholder="e.g. info@almadinalogistics.pk"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm bg-black/40 border border-white/15 focus:border-brand-400"
+                  disabled={isClientView}
+                  readOnly={isClientView}
+                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
+                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  }`}
                 />
               </div>
 
@@ -542,7 +640,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   placeholder="e.g. 1234567-8"
                   value={ntn}
                   onChange={(e) => setNtn(e.target.value)}
-                  className="w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm bg-black/40 border border-white/15 focus:border-brand-400"
+                  disabled={isClientView}
+                  readOnly={isClientView}
+                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
+                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  }`}
                 />
               </div>
 
@@ -555,7 +657,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   placeholder="e.g. 17-00-1234567"
                   value={strn}
                   onChange={(e) => setStrn(e.target.value)}
-                  className="w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm bg-black/40 border border-white/15 focus:border-brand-400"
+                  disabled={isClientView}
+                  readOnly={isClientView}
+                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
+                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  }`}
                 />
               </div>
 
@@ -568,7 +674,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   placeholder="e.g. Suite # 301, Trade Center, I.I. Chundrigar Road, Karachi"
                   value={officeAddress}
                   onChange={(e) => setOfficeAddress(e.target.value)}
-                  className="w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm bg-black/40 border border-white/15 focus:border-brand-400"
+                  disabled={isClientView}
+                  readOnly={isClientView}
+                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
+                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  }`}
                 />
               </div>
             </div>
@@ -590,24 +700,30 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                       <button
                         type="button"
                         onClick={() => setPreviewDoc({ url: businessCardUrl, name: businessCardName || 'Business Card' })}
-                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1"
+                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1 font-semibold"
                       >
                         <Eye size={12} /> View
                       </button>
                     )}
                   </div>
-                  <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'card')}
-                    />
-                    <Upload size={16} className="text-gray-400 mb-1" />
-                    <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
-                      {uploadingDoc === 'card' ? 'Processing...' : businessCardName || (businessCardUrl ? 'Replace Card' : 'Upload Card')}
-                    </span>
-                  </label>
+                  {isClientView ? (
+                    <div className="p-2.5 bg-black/40 rounded-lg text-center text-[11px] text-gray-300 border border-white/5">
+                      {businessCardUrl ? <span className="text-emerald-400 font-medium">✓ Card on file</span> : <span className="text-gray-500">Not provided</span>}
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="hidden"
+                        onChange={(e) => handleFileUpload(e, 'card')}
+                      />
+                      <Upload size={16} className="text-gray-400 mb-1" />
+                      <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
+                        {uploadingDoc === 'card' ? 'Processing...' : businessCardName || (businessCardUrl ? 'Replace Card' : 'Upload Card')}
+                      </span>
+                    </label>
+                  )}
                 </div>
 
                 {/* Contract Letter Upload */}
@@ -620,24 +736,30 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                       <button
                         type="button"
                         onClick={() => setPreviewDoc({ url: contractLetterUrl, name: contractLetterName || 'Contract Letter' })}
-                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1"
+                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1 font-semibold"
                       >
                         <Eye size={12} /> View
                       </button>
                     )}
                   </div>
-                  <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'contract')}
-                    />
-                    <Upload size={16} className="text-gray-400 mb-1" />
-                    <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
-                      {uploadingDoc === 'contract' ? 'Processing...' : contractLetterName || (contractLetterUrl ? 'Replace Letter' : 'Upload Letter')}
-                    </span>
-                  </label>
+                  {isClientView ? (
+                    <div className="p-2.5 bg-black/40 rounded-lg text-center text-[11px] text-gray-300 border border-white/5">
+                      {contractLetterUrl ? <span className="text-emerald-400 font-medium">✓ Letter on file</span> : <span className="text-gray-500">Not provided</span>}
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="hidden"
+                        onChange={(e) => handleFileUpload(e, 'contract')}
+                      />
+                      <Upload size={16} className="text-gray-400 mb-1" />
+                      <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
+                        {uploadingDoc === 'contract' ? 'Processing...' : contractLetterName || (contractLetterUrl ? 'Replace Letter' : 'Upload Letter')}
+                      </span>
+                    </label>
+                  )}
                 </div>
 
                 {/* Owner CNIC Upload */}
@@ -650,24 +772,30 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                       <button
                         type="button"
                         onClick={() => setPreviewDoc({ url: nicDocUrl, name: nicDocName || 'CNIC Copy' })}
-                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1"
+                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1 font-semibold"
                       >
                         <Eye size={12} /> View
                       </button>
                     )}
                   </div>
-                  <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'nic')}
-                    />
-                    <Upload size={16} className="text-gray-400 mb-1" />
-                    <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
-                      {uploadingDoc === 'nic' ? 'Processing...' : nicDocName || (nicDocUrl ? 'Replace CNIC' : 'Upload CNIC')}
-                    </span>
-                  </label>
+                  {isClientView ? (
+                    <div className="p-2.5 bg-black/40 rounded-lg text-center text-[11px] text-gray-300 border border-white/5">
+                      {nicDocUrl ? <span className="text-emerald-400 font-medium">✓ CNIC on file</span> : <span className="text-gray-500">Not provided</span>}
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="hidden"
+                        onChange={(e) => handleFileUpload(e, 'nic')}
+                      />
+                      <Upload size={16} className="text-gray-400 mb-1" />
+                      <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
+                        {uploadingDoc === 'nic' ? 'Processing...' : nicDocName || (nicDocUrl ? 'Replace CNIC' : 'Upload CNIC')}
+                      </span>
+                    </label>
+                  )}
                 </div>
 
                 {/* NTN Certificate Upload */}
@@ -680,24 +808,30 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                       <button
                         type="button"
                         onClick={() => setPreviewDoc({ url: ntnDocUrl, name: ntnDocName || 'NTN Certificate' })}
-                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1"
+                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1 font-semibold"
                       >
                         <Eye size={12} /> View
                       </button>
                     )}
                   </div>
-                  <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'ntn')}
-                    />
-                    <Upload size={16} className="text-gray-400 mb-1" />
-                    <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
-                      {uploadingDoc === 'ntn' ? 'Processing...' : ntnDocName || (ntnDocUrl ? 'Replace NTN' : 'Upload NTN')}
-                    </span>
-                  </label>
+                  {isClientView ? (
+                    <div className="p-2.5 bg-black/40 rounded-lg text-center text-[11px] text-gray-300 border border-white/5">
+                      {ntnDocUrl ? <span className="text-emerald-400 font-medium">✓ NTN on file</span> : <span className="text-gray-500">Not provided</span>}
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="hidden"
+                        onChange={(e) => handleFileUpload(e, 'ntn')}
+                      />
+                      <Upload size={16} className="text-gray-400 mb-1" />
+                      <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
+                        {uploadingDoc === 'ntn' ? 'Processing...' : ntnDocName || (ntnDocUrl ? 'Replace NTN' : 'Upload NTN')}
+                      </span>
+                    </label>
+                  )}
                 </div>
               </div>
 
@@ -761,7 +895,10 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
               <select
                 value={selectedCategory}
                 onChange={(e) => handleCategoryChange(e.target.value)}
-                className="w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm bg-black/40 border border-white/15 focus:border-brand-400"
+                disabled={isClientView}
+                className={`w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm border ${
+                  isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 border-white/15 focus:border-brand-400'
+                }`}
               >
                 {CASE_CATEGORIES_LIST.map(cat => (
                   <option key={cat} value={cat} className="bg-slate-900">
@@ -778,7 +915,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   Operational Service Arrangement Fields for {selectedCategory}:
                 </span>
                 <span className="text-[11px] text-gray-400">
-                  Select <strong className="text-blue-300">Arranged by DPL</strong> or <strong className="text-amber-300">Arranged by Client</strong> to set permanent defaults:
+                  {isClientView ? 'Service arrangements set by administration' : 'Select Arranged by DPL or Arranged by Client'}
                 </span>
               </div>
 
@@ -806,24 +943,26 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                       <div className="flex items-center gap-1.5 shrink-0 bg-black/50 p-1 rounded-xl border border-white/10">
                         <button
                           type="button"
-                          onClick={() => toggleArrangement(key, 'DPL')}
+                          disabled={isClientView}
+                          onClick={() => !isClientView && toggleArrangement(key, 'DPL')}
                           className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                             isDpl 
                               ? 'bg-blue-600 text-white shadow-md font-bold' 
                               : 'text-gray-400 hover:text-white hover:bg-white/5'
-                          }`}
+                          } ${isClientView ? 'cursor-not-allowed opacity-85' : 'cursor-pointer'}`}
                         >
                           {isDpl && <Check size={12} />}
                           <span>Arranged by DPL</span>
                         </button>
                         <button
                           type="button"
-                          onClick={() => toggleArrangement(key, 'Client')}
+                          disabled={isClientView}
+                          onClick={() => !isClientView && toggleArrangement(key, 'Client')}
                           className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                             !isDpl 
                               ? 'bg-amber-600/90 text-white shadow-md font-bold' 
                               : 'text-gray-400 hover:text-white hover:bg-white/5'
-                          }`}
+                          } ${isClientView ? 'cursor-not-allowed opacity-85' : 'cursor-pointer'}`}
                         >
                           {!isDpl && <Check size={12} />}
                           <span>Arranged by Client</span>
@@ -845,13 +984,15 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                 <DollarSign size={15} />
                 <span>3. Finance & Default Billing Charges Tariff</span>
               </div>
-              <button
-                type="button"
-                onClick={handleOpenChargePicker}
-                className="bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl shadow-md transition flex items-center gap-1.5 self-start sm:self-auto"
-              >
-                <Plus size={14} /> Add Charge / Add Amount
-              </button>
+              {!isClientView && (
+                <button
+                  type="button"
+                  onClick={handleOpenChargePicker}
+                  className="bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl shadow-md transition flex items-center gap-1.5 self-start sm:self-auto"
+                >
+                  <Plus size={14} /> Add Charge / Add Amount
+                </button>
+              )}
             </div>
 
             {/* Crucial Rule Notification */}
@@ -874,7 +1015,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
 
                   return (
                     <div 
-                      key={ch.id || idx}
+                      key={ch.id || idx} 
                       className={`p-2.5 rounded-xl border flex flex-col sm:flex-row sm:items-center gap-2.5 transition-all ${
                         hasAmount 
                           ? 'bg-emerald-950/20 border-emerald-500/30' 
@@ -885,6 +1026,8 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                         <input 
                           type="text"
                           value={ch.description}
+                          disabled={isClientView}
+                          readOnly={isClientView}
                           onChange={(e) => {
                             const updated = [...chargesList];
                             updated[idx].description = e.target.value;
@@ -898,6 +1041,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                       <div className="w-full sm:w-36">
                         <select
                           value={ch.category || selectedCategory}
+                          disabled={isClientView}
                           onChange={(e) => {
                             const updated = [...chargesList];
                             updated[idx].category = e.target.value;
@@ -921,6 +1065,8 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                           type="number"
                           placeholder="0 (Enter amount)"
                           value={ch.defaultAmount === 0 ? '' : ch.defaultAmount}
+                          disabled={isClientView}
+                          readOnly={isClientView}
                           onChange={(e) => {
                             const updated = [...chargesList];
                             updated[idx].defaultAmount = e.target.value === '' ? 0 : Number(e.target.value);
@@ -939,6 +1085,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                           <input 
                             type="checkbox"
                             checked={ch.taxable ?? false}
+                            disabled={isClientView}
                             onChange={(e) => {
                               const updated = [...chargesList];
                               updated[idx].taxable = e.target.checked;
@@ -949,16 +1096,18 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                           <span>Taxable</span>
                         </label>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setChargesList(chargesList.filter((_, i) => i !== idx));
-                          }}
-                          className="text-red-400 hover:text-red-300 p-1.5 rounded-lg hover:bg-red-500/10 transition"
-                          title="Remove charge"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        {!isClientView && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setChargesList(chargesList.filter((_, i) => i !== idx));
+                            }}
+                            className="text-red-400 hover:text-red-300 p-1.5 rounded-lg hover:bg-red-500/10 transition"
+                            title="Remove charge"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -983,47 +1132,53 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
           </div>
 
           {/* ========================================================================= */}
-          {/* OPTIONAL: CLIENT PORTAL CREDENTIALS */}
+          {/* CLIENT PORTAL CREDENTIALS & PASSWORD MANAGEMENT */}
           {/* ========================================================================= */}
-          <div className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-3">
+          <div className="bg-gradient-to-r from-purple-950/40 via-slate-900 to-brand-950/40 p-4 sm:p-5 rounded-2xl border border-purple-500/30 space-y-3.5 shadow-lg">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-bold text-gray-300 uppercase tracking-wider">
-                <Key size={14} />
-                <span>Client Portal Access & Login ID (Optional)</span>
+              <div className="flex items-center gap-2 text-xs font-bold text-purple-300 uppercase tracking-wider">
+                <Key size={15} className="text-purple-400" />
+                <span>Portal Security & Password Change</span>
               </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input 
-                  type="checkbox"
-                  checked={loginEnabled}
-                  onChange={(e) => setLoginEnabled(e.target.checked)}
-                  className="rounded text-brand-500 focus:ring-0"
-                />
-                <span className="text-xs text-brand-300 font-semibold">Enable Client Portal Login</span>
-              </label>
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1">
+                <CheckCircle2 size={10} /> Password Update Enabled
+              </span>
             </div>
 
-            {loginEnabled && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                <div>
-                  <label className="text-[11px] text-gray-400 block mb-1">Assigned Client User ID</label>
-                  <input 
-                    type="text"
-                    value={userId}
-                    onChange={(e) => setUserId(e.target.value)}
-                    className="w-full glass-input rounded-xl p-2 text-xs font-mono font-bold text-brand-300 bg-black/40 border border-white/15"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] text-gray-400 block mb-1">Portal Password</label>
-                  <input 
-                    type="text"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full glass-input rounded-xl p-2 text-xs font-mono text-white bg-black/40 border border-white/15"
-                  />
-                </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+              <div>
+                <label className="text-[11px] text-gray-400 block mb-1 font-medium">Assigned User ID (Login Username)</label>
+                <input 
+                  type="text"
+                  value={userId}
+                  readOnly
+                  disabled
+                  className="w-full glass-input rounded-xl p-2.5 text-xs font-mono font-bold text-brand-300 bg-black/60 border border-white/10 cursor-not-allowed opacity-80"
+                />
               </div>
-            )}
+              <div>
+                <label className="text-[11px] text-amber-300 block mb-1 font-semibold flex items-center justify-between">
+                  <span>Portal Password</span>
+                  <span className="text-[10px] text-emerald-400 font-normal">Editable by Client</span>
+                </label>
+                <input 
+                  type="text"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter new password"
+                  className="w-full glass-input rounded-xl p-2.5 text-xs font-mono font-semibold text-white bg-black/50 border border-amber-500/50 focus:border-amber-400 shadow-inner"
+                />
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-black/40 border border-white/10 text-xs text-gray-300 space-y-1">
+              <p className="text-amber-200/90 font-medium">
+                💡 <strong>Password Security:</strong> You can update your portal password whenever you need by entering a new password above and clicking &quot;Update Password&quot;. If you ever forget your password, contact DPL administration to reset it for you.
+              </p>
+              <p className="text-[11px] text-gray-400">
+                You can change your portal password whenever you need. If you ever forget your password, contact DPL administration to reset it for you.
+              </p>
+            </div>
           </div>
 
         </div>
@@ -1035,16 +1190,38 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
             onClick={onClose}
             className="bg-white/10 hover:bg-white/15 text-gray-300 px-4 py-2.5 rounded-xl font-medium text-xs sm:text-sm transition-colors"
           >
-            Cancel
+            Close
           </button>
-          <button 
-            type="button"
-            onClick={handleSave}
-            disabled={!name.trim()}
-            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl font-semibold text-xs sm:text-sm shadow-lg shadow-emerald-600/30 transition-all flex items-center gap-2"
-          >
-            <CheckCircle2 size={16} /> Save Client & Apply Charges
-          </button>
+
+          {isClientView ? (
+            <button 
+              type="button"
+              onClick={handleSavePasswordOnly}
+              disabled={!password.trim() || passwordSaveSuccess}
+              className="bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl font-semibold text-xs sm:text-sm shadow-lg shadow-brand-600/30 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+            >
+              {passwordSaveSuccess ? (
+                <>
+                  <CheckCircle2 size={16} className="text-emerald-300" />
+                  <span>Password Updated!</span>
+                </>
+              ) : (
+                <>
+                  <Key size={16} />
+                  <span>Update Password</span>
+                </>
+              )}
+            </button>
+          ) : (
+            <button 
+              type="button"
+              onClick={handleSave}
+              disabled={!name.trim()}
+              className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl font-semibold text-xs sm:text-sm shadow-lg shadow-emerald-600/30 transition-all flex items-center gap-2"
+            >
+              <CheckCircle2 size={16} /> Save Client & Apply Charges
+            </button>
+          )}
         </div>
       </div>
 

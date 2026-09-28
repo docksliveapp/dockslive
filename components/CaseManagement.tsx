@@ -77,6 +77,7 @@ import {
   saveClientToFirestore,
   DEFAULT_CLIENTS
 } from '../services/dbService';
+import { sendAppNotification } from '../services/notificationService';
 
 export interface PortItem {
   name: string;
@@ -1766,6 +1767,22 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       safeAppStorage.setJSON('dpl_live_cases', updatedCases);
       window.dispatchEvent(new CustomEvent('dpl_cases_updated', { detail: updatedCases }));
       saveCaseToFirestore(newCase).catch((e) => console.warn("Firestore saveCase error:", e));
+
+      // Dispatch real-time notification to Operations Manager, Client & Admin
+      sendAppNotification({
+        title: `New Case Registered: #${newCase.caseNo}`,
+        description: `New shipment #${newCase.caseNo} registered for ${newCase.clientName} (${newCase.containers?.length || 1} Containers: ${newCase.portOfLoading} → ${newCase.portOfDischarge}).`,
+        targetRole: UserRole.OPERATIONS_MANAGER,
+        targetClientName: newCase.clientName,
+        targetView: 'cases',
+        targetFilter: { caseNo: newCase.caseNo },
+        type: 'INFO',
+        actionLabel: 'View Case',
+        performedBy: effectiveRole,
+        performedByRole: String(effectiveRole),
+        category: 'CASE'
+      }).catch(e => console.warn("Could not dispatch case notif:", e));
+
       if (formData.client) {
         saveClientToFirestore({ name: formData.client }).catch(() => {});
       }
@@ -1962,6 +1979,36 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     setCases(updatedCases);
     setSelectedCase(updatedCase);
     updateCaseInFirestore(updatedCase).catch((e) => console.warn("Firestore approveCase error:", e));
+
+    // Dispatch real-time workflow notification to related roles
+    if (newStatus === CaseStatus.LOADING_PORT_PROCESSING) {
+      sendAppNotification({
+        title: `Shipment Ready for Port Loading: #${target.caseNo}`,
+        description: `Case #${target.caseNo} (${target.clientName}) has reached Port Loading Stage at ${target.portOfLoading || 'Loading Port'}. Ready for Gate Pass and Loading Operations.`,
+        targetRole: UserRole.LOADING_PORT_STAFF,
+        targetView: 'cases',
+        targetFilter: { caseNo: target.caseNo },
+        type: 'ACTION',
+        notificationSubType: 'CASE_APPROVAL',
+        actionLabel: 'View Case',
+        performedBy: effectiveRole,
+        performedByRole: String(effectiveRole),
+        category: 'CASE'
+      }).catch(e => console.warn(e));
+    } else if (newStatus === CaseStatus.IN_TRANSIT) {
+      sendAppNotification({
+        title: `Shipment In Transit to Destination: #${target.caseNo}`,
+        description: `Case #${target.caseNo} has cleared loading port and is in transit towards ${target.portOfDischarge || target.destinationCity || 'Destination Terminal'}.`,
+        targetRole: UserRole.DESTINATION_PORT_STAFF,
+        targetView: 'cases',
+        targetFilter: { caseNo: target.caseNo },
+        type: 'INFO',
+        performedBy: effectiveRole,
+        performedByRole: String(effectiveRole),
+        category: 'CASE'
+      }).catch(e => console.warn(e));
+    }
+
     logActivity(
       `Case Approved: ${target.caseNo}`,
       `Case ${target.caseNo} (${target.clientName}) was officially approved by ${effectiveRole}. Status advanced to ${newStatus}.`,
@@ -2357,11 +2404,20 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                       <span className="text-gray-400">Sub-Category:</span>
                       <span className="text-gray-200">{c.subCategory || 'Standard'}</span>
                     </div>
-                    <div className="flex justify-between py-0.5">
+                    <div className="flex justify-between py-0.5 items-center">
                       <span className="text-gray-400">DO Arranged By:</span>
-                      <span className="font-semibold text-amber-300">
-                        {c.serviceArrangements?.shippingLineDO?.arrangedBy === 'DPL' ? 'DPL (Docks Pvt Ltd)' : 'Client Arranged'}
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedCase(c);
+                          handleOpenStepModal(CaseStatus.SHIPPING_LINE_DO, 0, c);
+                        }}
+                        className="font-semibold text-amber-300 hover:text-amber-200 underline decoration-dotted flex items-center gap-1 cursor-pointer transition-colors"
+                        title="Click to view/update Shipping Line DO step"
+                      >
+                        <span>{c.serviceArrangements?.shippingLineDO?.arrangedBy === 'DPL' ? 'DPL (Docks Pvt Ltd)' : 'Client Arranged'}</span>
+                        <ExternalLink size={11} className="text-amber-400" />
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -2634,7 +2690,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
              <div className="flex items-center justify-between text-xs text-gray-400 px-1 no-print">
                <span className="flex items-center gap-1.5 text-brand-300">
                  <Sparkles size={14} className="text-amber-400" />
-                 Row par click karein case ki mukammal detail aur documents download karne ke liye
+                 Click on any row to view complete case particulars and download all paperwork
                </span>
                <span className="font-mono text-gray-400">{reportData.length} cases</span>
              </div>
@@ -7083,7 +7139,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                         Set as Default Charge for {selectedCase.clientName}
                       </span>
                       <span className="text-[11px] text-gray-300 leading-tight">
-                        Ye charge is client ke aainda har case aur invoice par by default automatically apply hoga.
+                        This charge will automatically apply as default tariff on all future cases and invoices for this client.
                       </span>
                     </div>
                   </label>

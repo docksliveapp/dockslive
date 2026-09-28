@@ -101,8 +101,18 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     if (rolesList.includes(UserRole.ADMIN)) {
       return true;
     }
-    // Client is strictly read-only
-    if (rolesList.includes(UserRole.CLIENT) && rolesList.length === 1) return false;
+    // Client can edit if the step is arranged by client (e.g. Shipping Line DO)
+    if (rolesList.includes(UserRole.CLIENT) && rolesList.length === 1) {
+      if (stepIndex === 0 || stepStatus === CaseStatus.SHIPPING_LINE_DO) {
+        const isClientDo = targetCase.serviceArrangements?.['delivery_order']?.arrangedBy === 'Client' ||
+                           targetCase.serviceArrangements?.shippingLineDO?.arrangedBy === 'Client' ||
+                           targetCase.workflowDetails?.[CaseStatus.SHIPPING_LINE_DO]?.doDueChargesArrangedBy === 'Client' ||
+                           formData.doDueChargesArrangedBy === 'Client' ||
+                           !targetCase.workflowDetails?.[CaseStatus.SHIPPING_LINE_DO]?.doDueChargesArrangedBy;
+        if (isClientDo) return true;
+      }
+      return false;
+    }
 
     let canEdit = false;
 

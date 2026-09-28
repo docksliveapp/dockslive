@@ -68,7 +68,8 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     if (!pdfUrl) return;
     const a = document.createElement('a');
     a.href = pdfUrl;
-    a.download = filename || 'document.pdf';
+    const defaultExt = isImage ? 'image.jpg' : 'document.pdf';
+    a.download = filename || defaultExt;
     a.rel = 'noopener noreferrer';
     document.body.appendChild(a);
     a.click();
@@ -153,7 +154,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
             id="btn-viewer-download"
           >
             <Download size={16} className="text-white shrink-0" />
-            <span>Download PDF</span>
+            <span>{isImage ? 'Download Image' : 'Download PDF'}</span>
           </button>
 
           {/* Optional Web Share */}

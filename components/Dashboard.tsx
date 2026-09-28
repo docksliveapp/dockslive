@@ -131,6 +131,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const [logs, setLogs] = useState<LogEntry[]>(INITIAL_LOGS);
   const [liveLogs, setLiveLogs] = useState<ActivityLogRecord[]>([]);
   const [showAllLogs, setShowAllLogs] = useState(false);
+  const [activityRoleFilter, setActivityRoleFilter] = useState<string>('ALL');
+  const [activitySearchQuery, setActivitySearchQuery] = useState<string>('');
 
   // Live Data from Firestore
   const [liveCases, setLiveCases] = useState<Case[]>([]);
@@ -161,6 +163,29 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       unsubLogs();
     };
   }, []);
+
+  const filteredLiveLogs = useMemo(() => {
+    return liveLogs.filter((item) => {
+      if (activityRoleFilter !== 'ALL') {
+        const itemRole = String(item.role || item.userRole || '').toUpperCase();
+        if (activityRoleFilter === 'TRANSPORTER' && !itemRole.includes('TRANSPORTER')) return false;
+        if (activityRoleFilter === 'LOADING_PORT_STAFF' && !itemRole.includes('LOADING')) return false;
+        if (activityRoleFilter === 'DESTINATION_PORT_STAFF' && !itemRole.includes('DESTINATION') && !itemRole.includes('UNLOADING')) return false;
+        if (activityRoleFilter === 'FINANCE' && !itemRole.includes('FINANCE')) return false;
+        if (activityRoleFilter === 'OPERATIONS' && !itemRole.includes('OPERATIONS') && !itemRole.includes('CASE')) return false;
+        if (activityRoleFilter === 'CLIENT' && !itemRole.includes('CLIENT')) return false;
+        if (activityRoleFilter === 'ADMIN' && !itemRole.includes('ADMIN')) return false;
+      }
+      if (activitySearchQuery.trim()) {
+        const q = activitySearchQuery.toLowerCase();
+        const matchTitle = (item.title || item.action || '').toLowerCase().includes(q);
+        const matchDesc = (item.description || item.details || '').toLowerCase().includes(q);
+        const matchUser = (item.performedBy || item.userId || '').toLowerCase().includes(q);
+        return matchTitle || matchDesc || matchUser;
+      }
+      return true;
+    });
+  }, [liveLogs, activityRoleFilter, activitySearchQuery]);
 
   // Compute Live Metrics from real Firestore data
   const casePendingApproval = liveCases.filter(c => c.status === CaseStatus.SHIPPING_LINE_DO).length;
@@ -1248,76 +1273,221 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* 6. Activity Log */}
-        <div className="glass-card rounded-2xl p-6 flex flex-col">
-          <div className="flex justify-between items-center mb-4">
-            <SectionHeader title="Activity Log" icon={Clock} />
-            <button 
-                onClick={handleViewAllLogs}
-                className="text-xs text-brand-400 hover:text-brand-300 transition-colors bg-brand-500/10 px-2 py-1 rounded flex items-center gap-1"
-            >
-                {showAllLogs ? 'Show Less' : 'View All'} {showAllLogs ? '' : <ArrowRight size={12}/>}
-            </button>
+        {/* 5b. Operations & Approvals Radar */}
+        <div className="glass-card rounded-2xl p-6 flex flex-col justify-between">
+          <div>
+            <div className="flex justify-between items-center mb-4">
+              <SectionHeader title="Operational Action Radar" icon={Activity} />
+              <span className="text-xs text-emerald-400 font-mono flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                Live Network Active
+              </span>
+            </div>
+
+            {liveCases.filter(c => c.approvalStatus === 'PENDING').length > 0 && (
+              <div 
+                onClick={() => onNavigate('cases', {})}
+                className="mb-4 p-3 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-between cursor-pointer hover:bg-amber-500/25 transition-all text-xs text-amber-300 shadow-lg shadow-amber-500/5"
+              >
+                <div className="flex items-center gap-2.5">
+                  <AlertTriangle size={18} className="text-amber-400 shrink-0" />
+                  <div>
+                    <strong className="text-white font-bold">{liveCases.filter(c => c.approvalStatus === 'PENDING').length}</strong> Client Case(s) awaiting approval
+                    <p className="text-[10px] text-amber-400/80">Case Management authorization required to dispatch</p>
+                  </div>
+                </div>
+                <span className="text-xs font-bold bg-amber-500/30 px-3 py-1 rounded-xl text-amber-200 flex items-center gap-1">Review <ArrowRight size={13} /></span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div 
+                onClick={() => onNavigate('cases', { status: 'LOADING' })}
+                className="p-3.5 rounded-xl bg-slate-900/80 border border-white/5 hover:border-amber-500/30 transition cursor-pointer"
+              >
+                <span className="text-[10px] uppercase font-bold text-gray-400 block">Port Loading Queue</span>
+                <span className="text-xl font-bold font-mono text-cyan-400 mt-1 block">{loadingPortProcessing} Cases</span>
+                <span className="text-[10px] text-gray-400">Loading Port Staff active</span>
+              </div>
+              <div 
+                onClick={() => onNavigate('vehicles', { filter: 'ready' })}
+                className="p-3.5 rounded-xl bg-slate-900/80 border border-white/5 hover:border-amber-500/30 transition cursor-pointer"
+              >
+                <span className="text-[10px] uppercase font-bold text-gray-400 block">Available / Ready Fleet</span>
+                <span className="text-xl font-bold font-mono text-emerald-400 mt-1 block">{vehiclesAvailable} Ready</span>
+                <span className="text-[10px] text-gray-400">Broadcasting for dispatch</span>
+              </div>
+            </div>
           </div>
 
-          {liveCases.filter(c => c.approvalStatus === 'PENDING').length > 0 && (
-            <div 
-              onClick={() => onNavigate('cases', {})}
-              className="mb-3 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-between cursor-pointer hover:bg-amber-500/25 transition-all text-xs text-amber-300"
-            >
-              <div className="flex items-center gap-2">
-                <AlertTriangle size={15} className="text-amber-400 shrink-0" />
-                <span><strong>{liveCases.filter(c => c.approvalStatus === 'PENDING').length}</strong> Client Case(s) awaiting authorization</span>
-              </div>
-              <span className="text-[10px] font-bold bg-amber-500/30 px-2 py-0.5 rounded text-amber-200">Review →</span>
-            </div>
-          )}
-          
-          <div className="flex-1 overflow-y-auto custom-scrollbar px-2 space-y-3 max-h-[400px]">
-            {liveLogs.length > 0 ? (
-              (showAllLogs ? liveLogs : liveLogs.slice(0, 10)).map((item) => (
-                <div key={item.id} className="flex gap-3 items-start border-l-2 border-brand-500/40 pl-3 relative group animate-in fade-in slide-in-from-left-2">
-                  <div className="absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-brand-950 bg-brand-400 shadow-[0_0_8px_rgba(59,130,246,0.6)]" />
-                  <div className="flex-1 -mt-1 group-hover:bg-white/5 p-2 rounded-lg transition-colors">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs sm:text-sm text-gray-200 font-semibold leading-snug">{item.title}</p>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold uppercase ${
-                        item.role === 'CLIENT' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
-                        item.role === 'ADMIN' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' :
-                        'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                      }`}>
-                        {item.role}
-                      </span>
-                    </div>
-                    {item.description && (
-                      <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{item.description}</p>
-                    )}
-                    <div className="flex justify-between items-center mt-1 pt-1 border-t border-white/5">
-                      <p className="text-[11px] text-brand-400 font-medium truncate">{item.performedBy || 'System'}</p>
-                      <p className="text-[10px] text-gray-500">{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</p>
-                    </div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              logs.map((log) => (
-                <div key={log.id} className="flex gap-4 items-start border-l-2 border-white/10 pl-4 relative group animate-in fade-in slide-in-from-left-2">
-                  <div className={`absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-brand-950
-                    ${log.type === 'SUCCESS' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 
-                      log.type === 'ERROR' ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]' : 
-                      log.type === 'WARNING' ? 'bg-yellow-500' : 'bg-blue-500'}`} 
-                  />
-                  <div className="flex-1 -mt-1 group-hover:bg-white/5 p-2 rounded-lg transition-colors">
-                    <p className="text-sm text-gray-200 font-medium leading-snug">{log.action}</p>
-                    <div className="flex justify-between items-center mt-1">
-                      <p className="text-xs text-brand-400">{log.user}</p>
-                      <p className="text-[10px] text-gray-500">{log.timestamp}</p>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
+          <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between text-xs">
+            <span className="text-gray-400">Transit Deliveries in Progress:</span>
+            <span className="font-bold text-white font-mono">{inTransitCases} Shipments Active</span>
           </div>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 6. DEDICATED FULL-WIDTH SECTION: ALL USERS & ROLES LIVE ACTIVITY STREAM */}
+      {/* ========================================================================= */}
+      <div className="glass-card rounded-3xl p-6 sm:p-7 border border-white/10 shadow-2xl space-y-5 bg-slate-900/90 backdrop-blur-xl">
+        
+        {/* Section Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center font-bold text-xl shadow-lg shadow-amber-500/10">
+              <Activity size={22} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h3 className="text-base sm:text-lg font-extrabold text-white tracking-wide">
+                  All Users & Roles Live Activity Stream
+                </h3>
+                <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                  {filteredLiveLogs.length} Records
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Real-time operational audit log tracking Transporters, Port Staff, Finance, Operations, and Clients
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-end md:self-auto">
+            <span className="text-xs text-emerald-400 font-medium flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-xl">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              Live Firestore Feed
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setShowAllLogs(!showAllLogs)}
+              className="text-xs text-amber-400 hover:text-amber-300 font-semibold px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 transition active:scale-95 flex items-center gap-1"
+            >
+              <span>{showAllLogs ? 'Show Latest 10' : 'View All Activities'}</span>
+              <ArrowRight size={13} />
+            </button>
+          </div>
+        </div>
+
+        {/* Filter Controls Bar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          {/* Role Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1 text-xs">
+            {[
+              { id: 'ALL', label: 'All Roles' },
+              { id: 'TRANSPORTER', label: '🚛 Transporters' },
+              { id: 'LOADING_PORT_STAFF', label: '⚓ Port Loading' },
+              { id: 'DESTINATION_PORT_STAFF', label: '🏁 Destination' },
+              { id: 'FINANCE', label: '💰 Finance' },
+              { id: 'OPERATIONS', label: '📦 Operations' },
+              { id: 'CLIENT', label: '🏢 Clients' },
+              { id: 'ADMIN', label: '⚡ Admin' }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActivityRoleFilter(tab.id)}
+                className={`px-3 py-1.5 rounded-xl font-semibold whitespace-nowrap transition text-[11px] ${
+                  activityRoleFilter === tab.id
+                    ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/20'
+                    : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 border border-white/5'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Search Box */}
+          <div className="relative min-w-[200px] sm:w-64">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search user, action, case #..."
+              value={activitySearchQuery}
+              onChange={(e) => setActivitySearchQuery(e.target.value)}
+              className="w-full bg-slate-950 border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-gray-500 focus:border-amber-500/50 outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Live Activity Stream List */}
+        <div className="space-y-2.5 max-h-[500px] overflow-y-auto custom-scrollbar pr-1">
+          {filteredLiveLogs.length === 0 ? (
+            <div className="p-8 text-center bg-slate-950/60 rounded-2xl border border-white/5 text-gray-500 space-y-2">
+              <Clock size={32} className="mx-auto text-gray-600 opacity-60" />
+              <h4 className="text-xs font-semibold text-gray-400">No activities recorded for this filter</h4>
+              <p className="text-[11px] text-gray-500">
+                New user transactions, workflow advancements, and vehicle requests will automatically appear here live.
+              </p>
+            </div>
+          ) : (
+            (showAllLogs ? filteredLiveLogs : filteredLiveLogs.slice(0, 10)).map((item) => {
+              const roleUpper = String(item.role || item.userRole || '').toUpperCase();
+              const isTransporter = roleUpper.includes('TRANSPORTER');
+              const isPort = roleUpper.includes('LOADING') || roleUpper.includes('DESTINATION') || roleUpper.includes('PORT');
+              const isFinance = roleUpper.includes('FINANCE');
+              const isClient = roleUpper.includes('CLIENT');
+              const isAdmin = roleUpper.includes('ADMIN');
+
+              return (
+                <div 
+                  key={item.id} 
+                  className="p-3.5 rounded-2xl bg-slate-950/70 border border-white/5 hover:border-white/15 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
+                >
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 ${
+                      isTransporter ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' :
+                      isPort ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30' :
+                      isFinance ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' :
+                      isClient ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30' :
+                      isAdmin ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30' :
+                      'bg-gray-500/15 text-gray-300 border border-gray-500/30'
+                    }`}>
+                      {isTransporter ? '🚛' : isPort ? '⚓' : isFinance ? '💰' : isClient ? '🏢' : '⚡'}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded-md ${
+                          isTransporter ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30' :
+                          isPort ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/30' :
+                          isFinance ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30' :
+                          isClient ? 'bg-blue-500/10 text-blue-300 border border-blue-500/30' :
+                          'bg-purple-500/10 text-purple-300 border border-purple-500/30'
+                        }`}>
+                          {item.role || item.userRole || 'System'}
+                        </span>
+                        <strong className="text-xs text-white font-semibold truncate">
+                          {item.performedBy || item.userId || 'Operations'}
+                        </strong>
+                      </div>
+
+                      <h4 className="text-xs sm:text-sm font-bold text-gray-100 mt-1 leading-snug group-hover:text-amber-300 transition-colors">
+                        {item.title || item.action}
+                      </h4>
+
+                      {(item.description || item.details) && (
+                        <p className="text-xs text-gray-400 mt-0.5 leading-relaxed line-clamp-2">
+                          {item.description || item.details}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1.5 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                    <span className="text-[11px] text-gray-400 font-mono">
+                      {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                    <span className="text-[10px] text-gray-500">
+                      {new Date(item.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 

@@ -15,6 +15,7 @@ import { WorkflowStepModal } from './WorkflowStepModal';
 import { PortSearchCaseModal } from './PortSearchCaseModal';
 import { DownloadLoadingBillSearchModal, DownloadClientLedgerModal, AddStaffPaymentModal } from './PortFinanceModals';
 import { downloadLoadingBillPdf } from '../services/pdfExportService';
+import { LiveNotificationCenter } from './LiveNotificationCenter';
 
 interface LoadingPortStaffPortalProps {
   onSignOut: () => void;
@@ -471,6 +472,34 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
       {/* ============================================================ */}
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto custom-scrollbar">
         
+        {/* Desktop Header Bar */}
+        <header className="hidden lg:flex h-16 bg-slate-900/60 backdrop-blur-md border-b border-white/10 px-6 items-center justify-between shrink-0 sticky top-0 z-20">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-bold text-white tracking-wide">
+              {isDestinationStaff ? 'Destination Staff Operations' : 'Loading Port Staff Operations'}
+            </span>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              {activeTab === 'cases' ? 'All Cases' : activeTab === 'pending' ? 'Pending Loading' : 'Port Finance'}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <LiveNotificationCenter
+              currentRole={userRole}
+              currentRoles={userRoles}
+              userIdentifier={staffUserId}
+              onNavigateToCase={(caseNo) => {
+                setActiveTab('cases');
+                setCasesSearchQuery(caseNo);
+              }}
+              onNavigateToTab={(tab) => {
+                if (tab === 'finance') setActiveTab('finance');
+                else if (tab === 'pending') setActiveTab('pending');
+                else setActiveTab('cases');
+              }}
+            />
+          </div>
+        </header>
+
         {/* Mobile Header Bar */}
         <header className="lg:hidden h-14 bg-slate-900/95 backdrop-blur-md border-b border-white/10 px-3 sm:px-4 flex items-center justify-between shrink-0 z-30 sticky top-0">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -496,6 +525,20 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <LiveNotificationCenter
+              currentRole={userRole}
+              currentRoles={userRoles}
+              userIdentifier={staffUserId}
+              onNavigateToCase={(caseNo) => {
+                setActiveTab('cases');
+                setCasesSearchQuery(caseNo);
+              }}
+              onNavigateToTab={(tab) => {
+                if (tab === 'finance') setActiveTab('finance');
+                else if (tab === 'pending') setActiveTab('pending');
+                else setActiveTab('cases');
+              }}
+            />
             <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
               {activeTab}
             </span>

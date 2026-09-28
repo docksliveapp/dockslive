@@ -24,14 +24,18 @@ import GoldenAmountWidget from './GoldenAmountWidget';
 import { safeAppStorage } from '../services/storage';
 import { logActivity } from '../services/activityLogService';
 import { ClientRegistrationModal } from './ClientRegistrationModal';
+import { WorkflowStepModal } from './WorkflowStepModal';
 import { 
   subscribeToCases, 
   saveCaseToFirestore, 
   subscribeToFinances, 
   saveFinanceToFirestore,
-  subscribeToAvailableVehicles 
+  subscribeToAvailableVehicles,
+  subscribeToClients
 } from '../services/dbService';
 import { AvailableVehiclesView } from './AvailableVehiclesView';
+import { LiveNotificationCenter } from './LiveNotificationCenter';
+import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
 
 // Standard Route Pricing Matrix
 export const DEFAULT_ROUTE_RATES: Record<string, number> = {
@@ -108,6 +112,20 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const [casesList, setCasesList] = useState<Case[]>([]);
   const [financesList, setFinancesList] = useState<FinanceEntry[]>([]);
   const [availableVehiclesList, setAvailableVehiclesList] = useState<AvailableVehicle[]>([]);
+  const [clientsList, setClientsList] = useState<Client[]>([]);
+
+  // 8-Step Interactive Workflow Modal for Client
+  const [showWorkflowStepModal, setShowWorkflowStepModal] = useState(false);
+  const [selectedStepCase, setSelectedStepCase] = useState<Case | null>(null);
+  const [selectedStepStatus, setSelectedStepStatus] = useState<CaseStatus | null>(null);
+  const [stepModalIndex, setStepModalIndex] = useState<number>(0);
+
+  const handleOpenClientStepModal = (status: CaseStatus, index: number, target: Case) => {
+    setSelectedStepCase(target);
+    setSelectedStepStatus(status);
+    setStepModalIndex(index);
+    setShowWorkflowStepModal(true);
+  };
 
   // Active Client Identity State
   const [selectedClientName, setSelectedClientName] = useState<string>(() => {
@@ -137,12 +155,35 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     const unsubVehicles = subscribeToAvailableVehicles((items) => {
       if (items) setAvailableVehiclesList(items);
     });
+    const unsubClients = subscribeToClients((clients) => {
+      if (clients) setClientsList(clients);
+    });
     return () => {
       unsubCases();
       unsubFinances();
       unsubVehicles();
+      unsubClients();
     };
   }, []);
+
+  const currentClientObj = useMemo(() => {
+    const found = clientsList.find(c => c.name?.toLowerCase().trim() === selectedClientName?.toLowerCase().trim());
+    if (found) return found;
+    return {
+      id: 'clt-current',
+      name: selectedClientName,
+      ownerName: 'Executive Director',
+      contact: '021-32415555',
+      mobileNumber: '0300-1234567',
+      whatsappNumber: '0300-1234567',
+      email: 'client@logistics.com',
+      officeAddress: 'Port / Industrial Area, Pakistan',
+      defaultCaseCategory: 'Bonded Carrier',
+      userId: 'CLIENT-DPL',
+      password: 'password123',
+      loginEnabled: true
+    } as Client;
+  }, [clientsList, selectedClientName]);
 
   // Client matcher helper
   const isMatchClient = (name?: string) => {
@@ -238,6 +279,348 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const [selectedCase, setSelectedCase] = useState<Case | null>(null);
   const [showCaseManagerViewModal, setShowCaseManagerViewModal] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+
+  // Smart Camera Scanner State
+  const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
+  const [scannerDocTitle, setScannerDocTitle] = useState('Payment Deposit Slip');
+  const [scannerCallback, setScannerCallback] = useState<((result: any) => void) | null>(null);
+
+  // Comprehensive Case Documents & Paperwork List for Selected Case (Requested by User)
+  const caseDownloadableDocs = useMemo(() => {
+    if (!selectedCase) return [];
+    const list: Array<{
+      id: string;
+      name: string;
+      category: string;
+      type: 'pdf' | 'image' | 'doc';
+      url?: string;
+      date?: string;
+      downloadAction?: () => void;
+    }> = [];
+
+    // 1. Loading In-Bill / Loading Port Bill
+    list.push({
+      id: 'doc_loading_bill',
+      name: `Port Loading Bill - ${selectedCase.caseNo}`,
+      category: 'Port Loading Bill',
+      type: 'pdf',
+      date: selectedCase.createdAt,
+      downloadAction: async () => {
+        const bData: LoadingBillData = {
+          billNo: `LB-26-${selectedCase.caseNo.split('-').pop() || '001'}`,
+          caseNo: selectedCase.caseNo,
+          clientName: selectedCase.clientName,
+          containerNo: selectedCase.containers?.[0]?.number || 'MSKU-8876541',
+          portTerminal: selectedCase.pol || 'Port Terminal',
+          date: new Date().toISOString().slice(0, 10),
+          items: (selectedCase.charges && selectedCase.charges.length > 0)
+            ? selectedCase.charges.map((c: any) => ({
+                head: c.description || 'Terminal Handling',
+                amount: Number(c.amount) || 0,
+                receiptUrl: c.receiptUrl
+              }))
+            : [
+                { head: 'Terminal Handling Charges (THC)', amount: 15000 },
+                { head: 'Wharfage & Demurrage Settlement', amount: 8500 },
+                { head: 'Port Gate Pass & Crane Handling', amount: 4500 }
+              ],
+          totalAmount: (selectedCase.charges && selectedCase.charges.length > 0)
+            ? selectedCase.charges.reduce((sum: number, ch: any) => sum + (Number(ch.amount) || 0), 0)
+            : 28000,
+          officerName: (selectedCase as any).loadingStaffName || 'Mohsin Khan (Port Operations Officer)',
+          branding: { companyName, customLogo: activeLogo }
+        };
+        await downloadLoadingBillPdf(bData);
+      }
+    });
+
+    // 2. Company Freight Commercial Invoice
+    list.push({
+      id: 'doc_company_invoice',
+      name: `Company Freight Invoice - ${selectedCase.caseNo}`,
+      category: 'Company Invoice',
+      type: 'pdf',
+      date: selectedCase.createdAt,
+      downloadAction: async () => {
+        const rate = getRouteRate(selectedCase.pol, selectedCase.pod);
+        const cntr = selectedCase.containers?.[0] || { number: 'MSKU-DEFAULT', size: '40ft', weight: 28000 };
+        await downloadContainerInvoicePdf({
+          invoiceNo: `INV-26-${(cntr.number || '0000').slice(-4)}`,
+          clientName: selectedClientName,
+          containerNo: cntr.number,
+          size: (cntr as any).size || '40ft',
+          route: `${selectedCase.pol} -> ${selectedCase.pod}`,
+          rate: rate,
+          date: selectedCase.createdAt,
+          companyName: companyName
+        });
+      }
+    });
+
+    // 3. Official Case Detail Summary Profile PDF
+    list.push({
+      id: 'doc_case_summary',
+      name: `Official Case Summary - ${selectedCase.caseNo}`,
+      category: 'Case Profile',
+      type: 'pdf',
+      date: selectedCase.createdAt,
+      downloadAction: () => downloadCasePdf(selectedCase, { onlyCaseDetails: true })
+    });
+
+    // 4. Customs Delivery Order (DO / NOC)
+    if (
+      selectedCase.status === CaseStatus.COMPLETED || 
+      selectedCase.status === CaseStatus.DESTINATION_PORT_ARRIVAL ||
+      (selectedCase as any).destinationGateInToggled
+    ) {
+      list.push({
+        id: 'doc_customs_do',
+        name: `Customs Delivery Order (DO / NOC) - ${selectedCase.caseNo}`,
+        category: 'Delivery Order (DO)',
+        type: 'pdf',
+        date: selectedCase.createdAt,
+        downloadAction: async () => {
+          await downloadCustomsDeliveryOrderPdf({
+            targetCase: selectedCase,
+            branding: { companyName, customLogo: activeLogo }
+          });
+        }
+      });
+    }
+
+    // 5. Loading Bills & Receipts (attached inside selectedCase.loadingBills)
+    if (Array.isArray((selectedCase as any).loadingBills)) {
+      (selectedCase as any).loadingBills.forEach((b: any, bIdx: number) => {
+        list.push({
+          id: `loading_bill_${b.id || bIdx}`,
+          name: `Loading Bill #${b.billNo || bIdx + 1} (${b.portTerminal || selectedCase.pol})`,
+          category: 'Port Loading Bill',
+          type: 'pdf',
+          date: b.date || selectedCase.createdAt,
+          downloadAction: async () => {
+            await downloadLoadingBillPdf({
+              billNo: b.billNo,
+              caseNo: selectedCase.caseNo,
+              clientName: selectedCase.clientName,
+              containerNo: b.containerNo || selectedCase.containers?.[0]?.number,
+              vehicleNo: b.vehicleNo || selectedCase.containers?.[0]?.vehicleNo,
+              driverName: b.driverName || selectedCase.containers?.[0]?.driverName,
+              portTerminal: b.portTerminal || selectedCase.pol,
+              date: b.date,
+              items: (b.charges || []).map((ch: any) => ({
+                head: ch.head,
+                amount: ch.amount,
+                receiptName: ch.receiptName,
+                receiptUrl: ch.receiptUrl
+              })),
+              totalAmount: b.totalAmount,
+              officerName: b.staffName || 'Port Staff',
+              branding: { companyName, customLogo: activeLogo }
+            });
+          }
+        });
+
+        // Loading Bill individual uploaded charge receipts
+        if (Array.isArray(b.charges)) {
+          b.charges.forEach((ch: any, chIdx: number) => {
+            if (ch.receiptUrl) {
+              list.push({
+                id: `lb_receipt_${b.id || bIdx}_${chIdx}`,
+                name: ch.receiptName || `Loading Bill Receipt - ${ch.head} (PKR ${Number(ch.amount || 0).toLocaleString()})`,
+                category: `Loading Bill Receipt (${ch.head})`,
+                type: 'image',
+                url: ch.receiptUrl,
+                date: b.date || selectedCase.createdAt
+              });
+            }
+          });
+        }
+      });
+    }
+
+    // 6. Workflow Stages Uploaded Documents & Receipts
+    const sc = selectedCase as any;
+
+    if (sc.clientDoPhotoUrl) {
+      list.push({
+        id: 'wf_client_do_receipt',
+        name: sc.clientDoPhotoName || `Shipping Line Delivery Order (DO) Document / Receipt`,
+        category: 'Workflow Stage 2 (DO)',
+        type: 'image',
+        url: sc.clientDoPhotoUrl
+      });
+    }
+
+    if (sc.customsGdDocUrl) {
+      list.push({
+        id: 'wf_customs_gd_copy',
+        name: sc.customsGdDocName || `Customs Goods Declaration (GD Copy)`,
+        category: 'Workflow Stage 3 (Customs GD)',
+        type: 'pdf',
+        url: sc.customsGdDocUrl
+      });
+    }
+
+    if (sc.commercialInvoiceUrl) {
+      list.push({
+        id: 'wf_comm_invoice_doc',
+        name: sc.commercialInvoiceName || `Commercial Cargo Invoice Copy`,
+        category: 'Cargo Documents',
+        type: 'pdf',
+        url: sc.commercialInvoiceUrl
+      });
+    }
+
+    if (sc.packingListUrl) {
+      list.push({
+        id: 'wf_packing_list_doc',
+        name: sc.packingListName || `Packing List & Container Specs`,
+        category: 'Cargo Documents',
+        type: 'pdf',
+        url: sc.packingListUrl
+      });
+    }
+
+    if (sc.portGatePassUrl) {
+      list.push({
+        id: 'wf_port_gate_pass_slip',
+        name: sc.portGatePassName || `Port Terminal Gate Pass Slip`,
+        category: 'Workflow Stage 4 (Port Processing)',
+        type: 'image',
+        url: sc.portGatePassUrl
+      });
+    }
+
+    if (sc.weightSlipUrl) {
+      list.push({
+        id: 'wf_weighbridge_slip',
+        name: sc.weightSlipName || `Port Weighbridge Scale Weight Slip`,
+        category: 'Workflow Stage 4 (Weighbridge)',
+        type: 'image',
+        url: sc.weightSlipUrl
+      });
+    }
+
+    if (sc.sealSlipUrl) {
+      list.push({
+        id: 'wf_seal_verification_slip',
+        name: sc.sealSlipName || `Customs Bullet Seal Verification Slip`,
+        category: 'Workflow Stage 4 (Customs Seal)',
+        type: 'image',
+        url: sc.sealSlipUrl
+      });
+    }
+
+    if (sc.customsSealPhotoUrl) {
+      list.push({
+        id: 'wf_customs_seal_img',
+        name: sc.customsSealPhotoName || `Customs Bullet Seal Inspection Photo`,
+        category: 'Workflow Stage 4 (Customs Seal)',
+        type: 'image',
+        url: sc.customsSealPhotoUrl
+      });
+    }
+
+    if (sc.vehiclePhotoUrl) {
+      list.push({
+        id: 'wf_carrier_vehicle_photo',
+        name: sc.vehiclePhotoName || `Carrier Vehicle Condition & Container Photo`,
+        category: 'Workflow Stage 5 (Fleet)',
+        type: 'image',
+        url: sc.vehiclePhotoUrl
+      });
+    }
+
+    if (sc.registrationBookUrl) {
+      list.push({
+        id: 'wf_carrier_reg_book',
+        name: sc.registrationBookName || `Carrier Registration Book`,
+        category: 'Workflow Stage 5 (Fleet Carrier)',
+        type: 'pdf',
+        url: sc.registrationBookUrl
+      });
+    }
+
+    if (sc.driverGateOutPhotoUrl) {
+      list.push({
+        id: 'wf_driver_gate_out_img',
+        name: sc.driverGateOutPhotoName || `Driver Terminal Gate Out Verification Photo`,
+        category: 'Workflow Stage 6 (Terminal Gate Out)',
+        type: 'image',
+        url: sc.driverGateOutPhotoUrl
+      });
+    }
+
+    if (sc.portGateArrivalPhotoUrl) {
+      list.push({
+        id: 'wf_dest_arrival_photo',
+        name: sc.portGateArrivalPhotoName || `Destination Port Gate Arrival Photo`,
+        category: 'Workflow Stage 8 (Destination Arrival)',
+        type: 'image',
+        url: sc.portGateArrivalPhotoUrl
+      });
+    }
+
+    if (sc.destinationWeightSlipUrl) {
+      list.push({
+        id: 'wf_dest_weight_scale_slip',
+        name: sc.destinationWeightSlipName || `Destination Weighbridge Scale Slip`,
+        category: 'Workflow Stage 8 (Destination Weighbridge)',
+        type: 'image',
+        url: sc.destinationWeightSlipUrl
+      });
+    }
+
+    if (sc.finalSignedTransportNoteUrl) {
+      list.push({
+        id: 'wf_consignee_delivery_note',
+        name: sc.finalSignedTransportNoteName || `Consignee Signed Delivery Note & Transport Receipt`,
+        category: 'Workflow Stage 8 (Delivery Receipt)',
+        type: 'image',
+        url: sc.finalSignedTransportNoteUrl
+      });
+    }
+
+    if (sc.dryPortGatePassUrl) {
+      list.push({
+        id: 'wf_dry_port_gate_pass_slip',
+        name: sc.dryPortGatePassName || `Dry Port Terminal Gate Pass Slip`,
+        category: 'Workflow Stage 8 (Dry Port Gate Pass)',
+        type: 'image',
+        url: sc.dryPortGatePassUrl
+      });
+    }
+
+    // 7. Case charges receipts
+    if (Array.isArray(selectedCase.charges)) {
+      selectedCase.charges.forEach((ch: any, cIdx: number) => {
+        if (ch.receiptUrl) {
+          list.push({
+            id: `charge_receipt_${ch.id || cIdx}`,
+            name: ch.receiptName || `${ch.description || 'Charge'} Payment Receipt (PKR ${Number(ch.amount || 0).toLocaleString()})`,
+            category: `Workflow Payment Receipt (${ch.category || 'Charge'})`,
+            type: 'image',
+            url: ch.receiptUrl
+          });
+        }
+      });
+    }
+
+    // 8. General Uploaded Documents in selectedCase.documents
+    if (Array.isArray(selectedCase.documents)) {
+      selectedCase.documents.forEach((d: any, dIdx: number) => {
+        list.push({
+          id: `general_doc_${d.id || dIdx}`,
+          name: d.name || `Case Document #${dIdx + 1}`,
+          category: d.type || 'Customs & Logistics Paperwork',
+          type: d.name?.endsWith('.pdf') ? 'pdf' : 'image',
+          url: d.url
+        });
+      });
+    }
+
+    return list;
+  }, [selectedCase, companyName, activeLogo, selectedClientName]);
 
   // Selected Case for Workflow Only Short Modal
   const [selectedWorkflowCase, setSelectedWorkflowCase] = useState<Case | null>(null);
@@ -585,7 +968,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   }, [pendingCases]);
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-screen bg-slate-950 text-gray-100 font-sans">
+    <div className="flex flex-col lg:flex-row h-screen h-[100dvh] max-h-[100dvh] w-full bg-slate-950 text-gray-100 font-sans overflow-hidden">
 
       {/* Mobile Drawer Overlay */}
       {mobileMenuOpen && (
@@ -646,9 +1029,11 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   setIsClientRegModalOpen(true);
                   setMobileMenuOpen(false);
                 }}
-                className="text-purple-300 hover:text-white flex items-center gap-1 text-[10px] font-semibold"
+                className="text-purple-300 hover:text-white flex items-center gap-1.5 text-[11px] font-semibold cursor-pointer hover:underline transition-colors"
+                title="View locked corporate profile and manage portal password"
               >
-                <UserPlus size={11} /> Profile & Universal Rates
+                <User size={13} className="text-purple-400" /> 
+                <span>View Profile</span>
               </button>
             </div>
           </div>
@@ -761,9 +1146,47 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       </aside>
 
       {/* ========================================================================= */}
-      {/* 2. MAIN CLIENT CONTENT AREA */}
+      {/* 2. MAIN CLIENT CONTENT AREA (Fixed full-height container with smooth native vertical scrolling) */}
       {/* ========================================================================= */}
-      <main className="flex-1 p-3.5 sm:p-6 lg:p-8 overflow-y-auto space-y-4 sm:space-y-6">
+      <main className="flex-1 h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-3.5 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 custom-scrollbar overscroll-contain">
+
+        {/* Desktop Sticky Header Bar with Live Notification Center */}
+        <header className="hidden lg:flex items-center justify-between pb-4 mb-2 border-b border-white/10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm uppercase">
+              {selectedClientName.slice(0, 2)}
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white tracking-wide flex items-center gap-2">
+                <span>{selectedClientName}</span>
+                <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full font-semibold">
+                  Verified Importer
+                </span>
+              </h2>
+              <p className="text-xs text-gray-400">
+                Logistics consignments, customs tracking, bills and freight accounts
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Live Notification Center */}
+            <LiveNotificationCenter 
+              currentRole={UserRole.CLIENT}
+              clientName={selectedClientName}
+              onNavigateToTab={(tab) => setActiveTab(tab as any)}
+            />
+
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="px-3.5 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-semibold flex items-center gap-1.5 transition active:scale-95"
+            >
+              <LogOut size={14} />
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </header>
 
         {/* Mobile Sticky Header Bar */}
         <header className="lg:hidden -mx-3.5 -mt-3.5 mb-3 sm:-mx-6 sm:-mt-6 h-14 bg-slate-900/95 backdrop-blur-md border-b border-white/10 px-3 sm:px-4 flex items-center justify-between shrink-0 z-20 sticky top-0">
@@ -790,6 +1213,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Live Notification Center */}
+            <LiveNotificationCenter 
+              currentRole={UserRole.CLIENT}
+              clientName={selectedClientName}
+              onNavigateToTab={(tab) => setActiveTab(tab as any)}
+            />
+
             <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
               {activeTab.replace('_', ' ')}
             </span>
@@ -1063,12 +1493,25 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         </span>
                       </div>
 
-                      {/* Managed by Client Badge */}
+                      {/* Managed by Client Badge - Clickable to open step modal */}
                       {isClientAction && (
-                        <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-xl flex items-center gap-2 text-xs text-amber-300">
-                          <AlertCircle size={14} className="text-amber-400 shrink-0" />
-                          <span className="font-medium">
-                            ⚠️ MANAGED BY CLIENT: Document / Clearance action required by client
+                        <div 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenClientStepModal(c.status as CaseStatus, 0, c);
+                          }}
+                          className="bg-amber-500/15 border border-amber-500/40 hover:border-amber-500/80 p-2.5 rounded-xl flex items-center justify-between text-xs text-amber-200 cursor-pointer transition-all hover:bg-amber-500/25 group/btn"
+                          title="Click to open Delivery Order (DO) step and upload documents"
+                        >
+                          <div className="flex items-center gap-2">
+                            <AlertCircle size={14} className="text-amber-400 shrink-0" />
+                            <span className="font-semibold text-amber-300">
+                              ⚠️ MANAGED BY CLIENT: Shipping Line DO / Clearance action required
+                            </span>
+                          </div>
+                          <span className="text-[10px] bg-amber-500 text-slate-950 font-bold px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0 group-hover/btn:bg-amber-400 shadow">
+                            <span>Open Step</span>
+                            <ChevronRight size={12} />
                           </span>
                         </div>
                       )}
@@ -1380,14 +1823,14 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
               {(() => {
                 const stages = [
-                  { id: '1', title: 'Case Registration & B/L Upload', isClientAction: false },
-                  { id: '2', title: 'Shipping Line Delivery Order (DO) & Terminal Fee Settlement', isClientAction: true, clientInstruction: 'Please complete this action: Ensure shipping line clearance & settlement.' },
-                  { id: '3', title: 'Goods Declaration (GD) Filing & Customs Clearance', isClientAction: false },
-                  { id: '4', title: 'Port Terminal Handling & Container Loading', isClientAction: false },
-                  { id: '5', title: 'Transporter Allocation & Gate-Out Clearance', isClientAction: false },
-                  { id: '6', title: 'In-Transit Transport & Route Dispatch', isClientAction: false },
-                  { id: '7', title: 'Destination Dry Port Arrival & Offloading', isClientAction: false },
-                  { id: '8', title: 'Final Customs Release & Consignment Delivery', isClientAction: false }
+                  { id: '1', title: 'Case Registration & B/L Upload', status: CaseStatus.SHIPPING_LINE_DO, isClientAction: false },
+                  { id: '2', title: 'Shipping Line Delivery Order (DO) & Terminal Fee Settlement', status: CaseStatus.SHIPPING_LINE_DO, isClientAction: true, clientInstruction: 'Please complete this action: Upload DO receipt & verify shipping line clearance.' },
+                  { id: '3', title: 'Goods Declaration (GD) Filing & Customs Clearance', status: CaseStatus.TP_FILING, isClientAction: false },
+                  { id: '4', title: 'Port Terminal Handling & Container Loading', status: CaseStatus.LOADING_PORT_PROCESSING, isClientAction: false },
+                  { id: '5', title: 'Transporter Allocation & Gate-Out Clearance', status: CaseStatus.VEHICLE_ASSIGNMENT, isClientAction: false },
+                  { id: '6', title: 'In-Transit Transport & Route Dispatch', status: CaseStatus.IN_TRANSIT, isClientAction: false },
+                  { id: '7', title: 'Destination Dry Port Arrival & Offloading', status: CaseStatus.DESTINATION_PORT_ARRIVAL, isClientAction: false },
+                  { id: '8', title: 'Final Customs Release & Consignment Delivery', status: CaseStatus.COMPLETED, isClientAction: false }
                 ];
 
                 // Determine active step index based on case status
@@ -1407,55 +1850,73 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       return (
                         <div 
                           key={st.id} 
-                          className={`p-3 rounded-xl border transition-all ${
+                          onClick={() => handleOpenClientStepModal(st.status, sIdx, selectedWorkflowCase)}
+                          className={`p-3 sm:p-3.5 rounded-xl border transition-all cursor-pointer group hover:scale-[1.01] ${
                             isComplete 
-                              ? 'bg-emerald-500/10 border-emerald-500/30' 
+                              ? 'bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500/60' 
                               : isCurrent 
-                                ? 'bg-amber-500/15 border-amber-500/50 shadow-md' 
-                                : 'bg-slate-950 border-white/5 opacity-60'
+                                ? 'bg-amber-500/15 border-amber-500/50 shadow-md hover:border-amber-500/80 ring-2 ring-amber-500/20' 
+                                : 'bg-slate-950 border-white/5 opacity-80 hover:opacity-100 hover:border-white/20'
                           }`}
+                          title="Click to view stage details, documentation & upload files"
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
+                            <div className="flex items-center gap-2.5 min-w-0">
                               {isComplete ? (
-                                <div className="w-6 h-6 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center font-bold">
+                                <div className="w-6 h-6 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center font-bold shrink-0">
                                   <Check size={14} />
                                 </div>
                               ) : isCurrent ? (
-                                <div className="w-6 h-6 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-bold text-xs animate-pulse">
+                                <div className="w-6 h-6 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-bold text-xs animate-pulse shrink-0">
                                   {sIdx + 1}
                                 </div>
                               ) : (
-                                <div className="w-6 h-6 rounded-full bg-white/10 text-gray-400 flex items-center justify-center text-xs">
+                                <div className="w-6 h-6 rounded-full bg-white/10 text-gray-400 flex items-center justify-center text-xs shrink-0">
                                   {sIdx + 1}
                                 </div>
                               )}
-                              <span className={`text-xs font-semibold ${isComplete ? 'text-emerald-300' : isCurrent ? 'text-white' : 'text-gray-400'}`}>
+                              <span className={`text-xs font-semibold truncate ${isComplete ? 'text-emerald-300' : isCurrent ? 'text-white' : 'text-gray-400'}`}>
                                 {st.title}
                               </span>
                             </div>
 
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                              isComplete 
-                                ? 'bg-emerald-500/20 text-emerald-300' 
-                                : isCurrent 
-                                  ? 'bg-amber-500/20 text-amber-300 animate-pulse' 
-                                  : 'text-gray-500'
-                            }`}>
-                              {isComplete ? 'Complete' : isCurrent ? 'Active' : 'Pending'}
-                            </span>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                                isComplete 
+                                  ? 'bg-emerald-500/20 text-emerald-300' 
+                                  : isCurrent 
+                                    ? 'bg-amber-500/20 text-amber-300 animate-pulse' 
+                                    : 'text-gray-500'
+                              }`}>
+                                {isComplete ? 'Complete' : isCurrent ? 'Active' : 'Pending'}
+                              </span>
+                              <ChevronRight size={14} className="text-gray-400 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />
+                            </div>
                           </div>
 
-                          {/* Managed by Client Prompt in English */}
-                          {st.isClientAction && isCurrent && (
-                            <div className="mt-2.5 p-2.5 bg-amber-500/20 border border-amber-500/40 rounded-lg text-xs text-amber-200 space-y-1">
-                              <p className="font-bold flex items-center gap-1.5">
-                                <AlertCircle size={13} className="text-amber-400" />
-                                <span>⚠️ MANAGED BY CLIENT: Action Required by Client</span>
-                              </p>
-                              <p className="text-[11px] text-gray-200">
-                                {st.clientInstruction}
-                              </p>
+                          {/* Managed by Client Prompt with Direct Open Button */}
+                          {st.isClientAction && (
+                            <div className="mt-2.5 p-2.5 bg-amber-500/20 border border-amber-500/40 rounded-lg text-xs text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
+                              <div className="space-y-0.5">
+                                <p className="font-bold flex items-center gap-1.5 text-amber-300">
+                                  <AlertCircle size={13} className="text-amber-400 shrink-0" />
+                                  <span>⚠️ MANAGED BY CLIENT: Action Required by Client</span>
+                                </p>
+                                <p className="text-[11px] text-gray-200">
+                                  {st.clientInstruction}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenClientStepModal(st.status, sIdx, selectedWorkflowCase);
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shrink-0 shadow flex items-center gap-1 self-start sm:self-auto cursor-pointer transition-colors"
+                              >
+                                <span>Open Step Window</span>
+                                <ChevronRight size={13} />
+                              </button>
                             </div>
                           )}
                         </div>
@@ -1559,176 +2020,114 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             </div>
 
             {/* =================================================================== */}
-            {/* DOCUMENT DOWNLOAD LIST (ALL DOCUMENTS JUST LIKE CASE MANAGER) */}
+            {/* COMPREHENSIVE CASE DOCUMENTS & PAPERWORK DOWNLOAD HUB (REQUESTED BY USER) */}
+            {/* Includes: Loading In-Bill, Company Invoice, Loading Bill Receipts, and all Workflow Uploads & Receipts */}
             {/* =================================================================== */}
             <div className="space-y-3 pt-2">
-              <h4 className="text-xs font-semibold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
-                <FileCheck size={16} />
-                <span>Complete Case Documents & Downloads:</span>
-              </h4>
-
-              <div className="divide-y divide-white/10 rounded-2xl border border-white/10 bg-slate-950/60 overflow-hidden shadow-sm text-xs">
-                
-                {/* 1. Case Detail PDF */}
-                <div className="p-3.5 flex items-center justify-between gap-3 hover:bg-white/[0.03]">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-brand-600/20 text-brand-400 flex items-center justify-center shrink-0">
-                      <FileText size={16} />
-                    </div>
-                    <div>
-                      <h5 className="font-bold text-white">Case Detail Summary</h5>
-                      <p className="text-[11px] text-gray-400">Official case profile, containers, and route specifications</p>
-                    </div>
-                  </div>
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b border-white/10 pb-3">
+                <div>
+                  <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <FileCheck size={16} />
+                    <span>Complete Case Documents & Paperwork Downloads:</span>
+                  </h4>
+                  <p className="text-[11px] text-gray-400">
+                    Official loading in-bills, commercial invoices, and all receipts uploaded across loading and workflows
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                    {caseDownloadableDocs.length} Total Documents
+                  </span>
                   <button
                     type="button"
-                    onClick={() => downloadCasePdf(selectedCase, { onlyCaseDetails: true })}
-                    className="bg-brand-600 hover:bg-brand-500 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow"
+                    onClick={() => downloadCasePdf(selectedCase, { withInvoice: true, withAttachments: true })}
+                    className="bg-brand-600 hover:bg-brand-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95"
+                    title="Download Complete Case Dossier & Attachments PDF"
                   >
                     <Download size={13} />
-                    <span>Download</span>
+                    <span>Download All (Dossier)</span>
                   </button>
                 </div>
+              </div>
 
-                {/* 2. Commercial Freight Invoice */}
-                <div className="p-3.5 flex items-center justify-between gap-3 hover:bg-white/[0.03]">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-amber-600/20 text-amber-400 flex items-center justify-center shrink-0">
-                      <Receipt size={16} />
-                    </div>
-                    <div>
-                      <h5 className="font-bold text-white">Commercial Freight Invoice</h5>
-                      <p className="text-[11px] text-gray-400">Itemized service charges and terminal delivery billing</p>
-                    </div>
+              <div className="divide-y divide-white/10 rounded-2xl border border-white/10 bg-slate-950/70 overflow-hidden shadow-sm text-xs max-h-[360px] overflow-y-auto custom-scrollbar">
+                {caseDownloadableDocs.length === 0 ? (
+                  <div className="p-6 text-center text-gray-400">
+                    <FileText size={24} className="mx-auto text-gray-500 mb-1.5" />
+                    <p className="text-xs">No documents attached to this case yet.</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const rate = getRouteRate(selectedCase.pol, selectedCase.pod);
-                      const cntr = selectedCase.containers?.[0] || { number: 'MSKU-DEFAULT', size: '40ft', weight: 28000 };
-                      await downloadContainerInvoicePdf({
-                        invoiceNo: `INV-26-${(cntr.number || '0000').slice(-4)}`,
-                        clientName: selectedClientName,
-                        containerNo: cntr.number,
-                        size: (cntr as any).size || '40ft',
-                        route: `${selectedCase.pol} -> ${selectedCase.pod}`,
-                        rate: rate,
-                        date: selectedCase.createdAt,
-                        companyName: companyName
-                      });
-                    }}
-                    className="bg-amber-600 hover:bg-amber-500 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow"
-                  >
-                    <Download size={13} />
-                    <span>Download</span>
-                  </button>
-                </div>
-
-                {/* 3. Port Loading / Unloading Bill */}
-                <div className="p-3.5 flex items-center justify-between gap-3 hover:bg-white/[0.03]">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-600/20 text-emerald-400 flex items-center justify-center shrink-0">
-                      <FileCheck size={16} />
-                    </div>
-                    <div>
-                      <h5 className="font-bold text-white">Port Loading / Unloading Bill</h5>
-                      <p className="text-[11px] text-gray-400">Terminal handling bill & permanent port record</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const bData: LoadingBillData = {
-                        billNo: `LB-26-${selectedCase.caseNo.split('-').pop() || '001'}`,
-                        caseNo: selectedCase.caseNo,
-                        clientName: selectedCase.clientName,
-                        containerNo: selectedCase.containers?.[0]?.number || 'MSKU-8876541',
-                        portTerminal: selectedCase.pol || 'Port Terminal',
-                        date: new Date().toISOString().slice(0, 10),
-                        items: (selectedCase.charges || []).map((c: any) => ({
-                          head: c.description || 'Terminal Handling',
-                          amount: Number(c.amount) || 0,
-                          receiptUrl: c.receiptUrl
-                        })),
-                        totalAmount: 25000,
-                        officerName: 'Port Operations Officer',
-                        branding: { companyName, customLogo: activeLogo }
-                      };
-                      await downloadLoadingBillPdf(bData);
-                    }}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow"
-                  >
-                    <Download size={13} />
-                    <span>Download</span>
-                  </button>
-                </div>
-
-                {/* 4. Customs Delivery Order (DO / NOC) */}
-                <div className="p-3.5 flex items-center justify-between gap-3 hover:bg-white/[0.03]">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-teal-600/20 text-teal-400 flex items-center justify-center shrink-0">
-                      <ShieldCheck size={16} />
-                    </div>
-                    <div>
-                      <h5 className="font-bold text-white">Customs Delivery Order (DO / NOC)</h5>
-                      <p className="text-[11px] text-gray-400">Shipping Line Terminal Release Document</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await downloadCustomsDeliveryOrderPdf({
-                          targetCase: selectedCase,
-                          branding: { companyName, customLogo: activeLogo }
-                        });
-                      } catch (err) {
-                        alert("Could not download Delivery Order.");
-                      }
-                    }}
-                    className="bg-teal-600 hover:bg-teal-500 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow"
-                  >
-                    <Download size={13} />
-                    <span>Download</span>
-                  </button>
-                </div>
-
-                {/* 5. Uploaded Documents (BL, GD, Packing List) */}
-                {(selectedCase.documents || []).map((doc, dIdx) => (
-                  <div key={dIdx} className="p-3.5 flex items-center justify-between gap-3 hover:bg-white/[0.03]">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-cyan-600/20 text-cyan-400 flex items-center justify-center shrink-0">
-                        <FileText size={16} />
+                ) : (
+                  caseDownloadableDocs.map((docItem) => (
+                    <div 
+                      key={docItem.id} 
+                      className="p-3.5 flex items-center justify-between gap-3 hover:bg-white/[0.03] transition"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                          docItem.category.includes('Loading Bill') ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25' :
+                          docItem.category.includes('Invoice') ? 'bg-amber-500/15 text-amber-400 border-amber-500/25' :
+                          docItem.category.includes('Receipt') ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/25' :
+                          docItem.category.includes('DO') ? 'bg-teal-500/15 text-teal-400 border-teal-500/25' :
+                          'bg-brand-500/15 text-brand-400 border-brand-500/25'
+                        }`}>
+                          {docItem.category.includes('Invoice') ? <Receipt size={17} /> :
+                           docItem.category.includes('Receipt') ? <Receipt size={17} /> :
+                           docItem.category.includes('DO') ? <ShieldCheck size={17} /> :
+                           <FileText size={17} />}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h5 className="font-bold text-white truncate max-w-[260px] sm:max-w-md" title={docItem.name}>
+                              {docItem.name}
+                            </h5>
+                            <span className="text-[9px] font-mono font-bold bg-white/10 text-amber-300 px-1.5 py-0.2 rounded border border-white/5">
+                              {docItem.category}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-gray-400 mt-0.5 truncate">
+                            {docItem.date ? `Date: ${docItem.date} • ` : ''}Format: <strong className="text-gray-300 uppercase font-mono">{docItem.type}</strong>
+                          </p>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <h5 className="font-bold text-white truncate">{doc.name}</h5>
-                        <p className="text-[11px] text-gray-400">Client / Clearing Uploaded Document</p>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {docItem.url && (
+                          <button
+                            type="button"
+                            onClick={() => setLightboxImage(docItem.url || null)}
+                            className="bg-white/10 hover:bg-white/20 text-white px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition"
+                            title="Preview Document / Photo"
+                          >
+                            <Eye size={13} />
+                            <span className="hidden sm:inline">View</span>
+                          </button>
+                        )}
+
+                        {docItem.downloadAction ? (
+                          <button
+                            type="button"
+                            onClick={docItem.downloadAction}
+                            className="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95"
+                          >
+                            <Download size={13} />
+                            <span>Download</span>
+                          </button>
+                        ) : (
+                          <a
+                            href={docItem.url || '#'}
+                            download={docItem.name}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="bg-brand-600 hover:bg-brand-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95"
+                          >
+                            <Download size={13} />
+                            <span>Download</span>
+                          </a>
+                        )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const url = (doc as any).url || 'https://placehold.co/600x800/png?text=Document+Preview';
-                          setLightboxImage(url);
-                        }}
-                        className="bg-white/10 hover:bg-white/20 text-white px-2.5 py-1 rounded text-xs flex items-center gap-1"
-                      >
-                        <Eye size={12} /> View
-                      </button>
-                      <a
-                        href={(doc as any).url || '#'}
-                        download={doc.name}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-brand-600 hover:bg-brand-500 text-white px-2.5 py-1 rounded text-xs flex items-center gap-1"
-                      >
-                        <Download size={12} /> Download
-                      </a>
-                    </div>
-                  </div>
-                ))}
-
+                  ))
+                )}
               </div>
             </div>
 
@@ -2236,7 +2635,28 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         </div>
       )}
 
-      {/* Client Registration Modal */}
+      {/* 8-Step Interactive Workflow Step Modal for Client */}
+      {showWorkflowStepModal && selectedStepStatus && selectedStepCase && (
+        <WorkflowStepModal
+          isOpen={showWorkflowStepModal}
+          onClose={() => setShowWorkflowStepModal(false)}
+          targetCase={selectedStepCase}
+          stepStatus={selectedStepStatus}
+          stepIndex={stepModalIndex}
+          userRole={UserRole.CLIENT}
+          userRoles={[UserRole.CLIENT]}
+          onSaveCase={(updatedCase) => {
+            setCasesList(prev => prev.map(c => c.id === updatedCase.id ? updatedCase : c));
+            setSelectedStepCase(updatedCase);
+            if (selectedWorkflowCase?.id === updatedCase.id) {
+              setSelectedWorkflowCase(updatedCase);
+            }
+            saveCaseToFirestore(updatedCase).catch(e => console.warn("Firestore step update error:", e));
+          }}
+        />
+      )}
+
+      {/* Client Registration Modal as Locked Client Profile with Password Update */}
       <ClientRegistrationModal
         isOpen={isClientRegModalOpen}
         onClose={() => setIsClientRegModalOpen(false)}
@@ -2244,9 +2664,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           setIsClientRegModalOpen(false);
           setSelectedClientName(savedClient.name);
           safeAppStorage.setItem('dpl_client_name', savedClient.name);
-          alert(`Client profile for "${savedClient.name}" updated successfully!`);
         }}
+        initialClient={currentClientObj}
         defaultCategory="Bonded Carrier"
+        isClientView={true}
       />
 
     </div>

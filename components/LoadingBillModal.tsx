@@ -6,6 +6,7 @@ import { WorkflowMultiUploader } from './WorkflowMultiUploader';
 import { getPortInquiryLink } from '../services/portInquiryService';
 import { saveStaffBillToFirestore, saveStaffPrivateLedgerEntryToFirestore } from '../services/dbService';
 import { safeAppStorage } from '../services/storage';
+import { convertImageToPdf } from '../services/fileUtils';
 
 interface ExtraChargeItem {
   id: string;
@@ -76,6 +77,36 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
   const standardTotal = Number(wharfageAmount || 0) + Number(addnlWharfageAmount || 0) + Number(trackerAmount || 0) + Number(deliveryCharges || 0);
   const extraTotal = extraCharges.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   const grandTotal = standardTotal + extraTotal;
+
+  // Process receipt file upload or camera picture with scan enhancement into PDF
+  const handleReceiptScanOrUpload = async (
+    file: File | undefined,
+    setUrl: (u: string) => void,
+    setName: (n: string) => void,
+    defaultLabel: string
+  ) => {
+    if (!file) return;
+    try {
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (!isPdf) {
+        const converted = await convertImageToPdf(file, `${defaultLabel}_Receipt.pdf`, true);
+        setUrl(converted.pdfDataUrl);
+        setName(converted.name);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          setUrl((e.target?.result as string) || '');
+          setName(file.name);
+        };
+        reader.readAsDataURL(file);
+      }
+    } catch (err) {
+      console.warn("Scan processing fallback:", err);
+      const url = URL.createObjectURL(file);
+      setUrl(url);
+      setName(file.name);
+    }
+  };
 
   const handleAddExtraCharge = () => {
     if (!newExtraHead.trim()) {
@@ -503,25 +534,32 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
                     className="w-full bg-slate-900 border border-white/10 rounded-xl pl-9 pr-2 py-1.5 text-white font-mono font-bold text-right outline-none focus:border-sky-500"
                   />
                 </div>
-                <label className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold cursor-pointer flex items-center gap-1.5 transition-colors shrink-0 ${
-                  wharfageReceiptUrl ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-900 text-gray-300 border-white/10 hover:bg-white/5'
-                }`}>
-                  <Upload size={13} />
-                  <span>{wharfageReceiptUrl ? 'Receipt ✓' : 'Upload Receipt'}</span>
-                  <input 
-                    type="file" 
-                    accept="image/*,application/pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const url = URL.createObjectURL(file);
-                        setWharfageReceiptUrl(url);
-                        setWharfageReceiptName(file.name);
-                      }
-                    }}
-                  />
-                </label>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Camera Snap & AI Scan Button */}
+                  <label className="p-1.5 rounded-xl border border-amber-500/30 bg-amber-500/15 hover:bg-amber-500/25 active:bg-amber-500/35 text-amber-300 cursor-pointer flex items-center justify-center transition-colors shadow-sm" title="Scan receipt with Camera">
+                    <Camera size={14} />
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => handleReceiptScanOrUpload(e.target.files?.[0], setWharfageReceiptUrl, setWharfageReceiptName, 'Wharfage')}
+                    />
+                  </label>
+                  {/* Upload File Button */}
+                  <label className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold cursor-pointer flex items-center gap-1.5 transition-colors ${
+                    wharfageReceiptUrl ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-900 text-gray-300 border-white/10 hover:bg-white/5'
+                  }`}>
+                    <Upload size={13} />
+                    <span className="truncate max-w-[100px]">{wharfageReceiptUrl ? 'Receipt ✓' : 'Upload'}</span>
+                    <input 
+                      type="file" 
+                      accept="image/*,application/pdf"
+                      className="hidden"
+                      onChange={(e) => handleReceiptScanOrUpload(e.target.files?.[0], setWharfageReceiptUrl, setWharfageReceiptName, 'Wharfage')}
+                    />
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -542,25 +580,30 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
                     className="w-full bg-slate-900 border border-white/10 rounded-xl pl-9 pr-2 py-1.5 text-white font-mono font-bold text-right outline-none focus:border-sky-500"
                   />
                 </div>
-                <label className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold cursor-pointer flex items-center gap-1.5 transition-colors shrink-0 ${
-                  addnlWharfageReceiptUrl ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-900 text-gray-300 border-white/10 hover:bg-white/5'
-                }`}>
-                  <Upload size={13} />
-                  <span>{addnlWharfageReceiptUrl ? 'Receipt ✓' : 'Upload Receipt'}</span>
-                  <input 
-                    type="file" 
-                    accept="image/*,application/pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const url = URL.createObjectURL(file);
-                        setAddnlWharfageReceiptUrl(url);
-                        setAddnlWharfageReceiptName(file.name);
-                      }
-                    }}
-                  />
-                </label>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <label className="p-1.5 rounded-xl border border-amber-500/30 bg-amber-500/15 hover:bg-amber-500/25 active:bg-amber-500/35 text-amber-300 cursor-pointer flex items-center justify-center transition-colors shadow-sm" title="Scan receipt with Camera">
+                    <Camera size={14} />
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => handleReceiptScanOrUpload(e.target.files?.[0], setAddnlWharfageReceiptUrl, setAddnlWharfageReceiptName, 'Addnl_Wharfage')}
+                    />
+                  </label>
+                  <label className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold cursor-pointer flex items-center gap-1.5 transition-colors ${
+                    addnlWharfageReceiptUrl ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-900 text-gray-300 border-white/10 hover:bg-white/5'
+                  }`}>
+                    <Upload size={13} />
+                    <span className="truncate max-w-[100px]">{addnlWharfageReceiptUrl ? 'Receipt ✓' : 'Upload'}</span>
+                    <input 
+                      type="file" 
+                      accept="image/*,application/pdf"
+                      className="hidden"
+                      onChange={(e) => handleReceiptScanOrUpload(e.target.files?.[0], setAddnlWharfageReceiptUrl, setAddnlWharfageReceiptName, 'Addnl_Wharfage')}
+                    />
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -581,25 +624,30 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
                     className="w-full bg-slate-900 border border-white/10 rounded-xl pl-9 pr-2 py-1.5 text-white font-mono font-bold text-right outline-none focus:border-sky-500"
                   />
                 </div>
-                <label className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold cursor-pointer flex items-center gap-1.5 transition-colors shrink-0 ${
-                  trackerReceiptUrl ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-900 text-gray-300 border-white/10 hover:bg-white/5'
-                }`}>
-                  <Upload size={13} />
-                  <span>{trackerReceiptUrl ? 'Receipt ✓' : 'Upload Receipt'}</span>
-                  <input 
-                    type="file" 
-                    accept="image/*,application/pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const url = URL.createObjectURL(file);
-                        setTrackerReceiptUrl(url);
-                        setTrackerReceiptName(file.name);
-                      }
-                    }}
-                  />
-                </label>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <label className="p-1.5 rounded-xl border border-amber-500/30 bg-amber-500/15 hover:bg-amber-500/25 active:bg-amber-500/35 text-amber-300 cursor-pointer flex items-center justify-center transition-colors shadow-sm" title="Scan receipt with Camera">
+                    <Camera size={14} />
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => handleReceiptScanOrUpload(e.target.files?.[0], setTrackerReceiptUrl, setTrackerReceiptName, 'Tracker')}
+                    />
+                  </label>
+                  <label className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold cursor-pointer flex items-center gap-1.5 transition-colors ${
+                    trackerReceiptUrl ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-900 text-gray-300 border-white/10 hover:bg-white/5'
+                  }`}>
+                    <Upload size={13} />
+                    <span className="truncate max-w-[100px]">{trackerReceiptUrl ? 'Receipt ✓' : 'Upload'}</span>
+                    <input 
+                      type="file" 
+                      accept="image/*,application/pdf"
+                      className="hidden"
+                      onChange={(e) => handleReceiptScanOrUpload(e.target.files?.[0], setTrackerReceiptUrl, setTrackerReceiptName, 'Tracker')}
+                    />
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -620,25 +668,30 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
                     className="w-full bg-slate-900 border border-white/10 rounded-xl pl-9 pr-2 py-1.5 text-white font-mono font-bold text-right outline-none focus:border-sky-500"
                   />
                 </div>
-                <label className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold cursor-pointer flex items-center gap-1.5 transition-colors shrink-0 ${
-                  deliveryReceiptUrl ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-900 text-gray-300 border-white/10 hover:bg-white/5'
-                }`}>
-                  <Upload size={13} />
-                  <span>{deliveryReceiptUrl ? 'Receipt ✓' : 'Upload Receipt'}</span>
-                  <input 
-                    type="file" 
-                    accept="image/*,application/pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const url = URL.createObjectURL(file);
-                        setDeliveryReceiptUrl(url);
-                        setDeliveryReceiptName(file.name);
-                      }
-                    }}
-                  />
-                </label>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <label className="p-1.5 rounded-xl border border-amber-500/30 bg-amber-500/15 hover:bg-amber-500/25 active:bg-amber-500/35 text-amber-300 cursor-pointer flex items-center justify-center transition-colors shadow-sm" title="Scan receipt with Camera">
+                    <Camera size={14} />
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => handleReceiptScanOrUpload(e.target.files?.[0], setDeliveryReceiptUrl, setDeliveryReceiptName, 'Delivery')}
+                    />
+                  </label>
+                  <label className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold cursor-pointer flex items-center gap-1.5 transition-colors ${
+                    deliveryReceiptUrl ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-900 text-gray-300 border-white/10 hover:bg-white/5'
+                  }`}>
+                    <Upload size={13} />
+                    <span className="truncate max-w-[100px]">{deliveryReceiptUrl ? 'Receipt ✓' : 'Upload'}</span>
+                    <input 
+                      type="file" 
+                      accept="image/*,application/pdf"
+                      className="hidden"
+                      onChange={(e) => handleReceiptScanOrUpload(e.target.files?.[0], setDeliveryReceiptUrl, setDeliveryReceiptName, 'Delivery')}
+                    />
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -776,23 +829,29 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
               </div>
 
               <div>
-                <label className="text-gray-300 font-semibold block mb-1">Receipt Upload</label>
-                <label className="p-3 border border-dashed border-white/20 rounded-xl flex items-center justify-center gap-2 cursor-pointer bg-slate-800 hover:bg-slate-700 text-gray-300">
-                  <Upload size={14} />
-                  <span>{newExtraReceiptUrl ? `Selected: ${newExtraReceiptName || 'File'}` : 'Upload receipt file or take photo'}</span>
-                  <input
-                    type="file"
-                    accept="image/*,application/pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        setNewExtraReceiptUrl(URL.createObjectURL(file));
-                        setNewExtraReceiptName(file.name);
-                      }
-                    }}
-                  />
-                </label>
+                <label className="text-gray-300 font-semibold block mb-1">Receipt Attachment (PDF / Camera Scan)</label>
+                <div className="flex items-center gap-2">
+                  <label className="p-2.5 rounded-xl border border-amber-500/30 bg-amber-500/15 hover:bg-amber-500/25 active:bg-amber-500/35 text-amber-300 cursor-pointer flex items-center justify-center transition-colors shadow-sm" title="Scan receipt with Camera">
+                    <Camera size={16} />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => handleReceiptScanOrUpload(e.target.files?.[0], setNewExtraReceiptUrl, setNewExtraReceiptName, newExtraHead || 'Extra')}
+                    />
+                  </label>
+                  <label className="flex-1 p-2.5 border border-dashed border-white/20 hover:border-amber-400/80 rounded-xl flex items-center justify-center gap-2 cursor-pointer bg-slate-800 hover:bg-slate-700 text-gray-300 transition-colors">
+                    <Upload size={14} />
+                    <span className="truncate text-xs">{newExtraReceiptUrl ? `Attached: ${newExtraReceiptName || 'File'}` : 'Upload receipt file or take photo'}</span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      className="hidden"
+                      onChange={(e) => handleReceiptScanOrUpload(e.target.files?.[0], setNewExtraReceiptUrl, setNewExtraReceiptName, newExtraHead || 'Extra')}
+                    />
+                  </label>
+                </div>
               </div>
             </div>
 

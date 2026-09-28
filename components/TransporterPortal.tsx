@@ -24,6 +24,10 @@ import {
 import { safeAppStorage } from '../services/storage';
 import { compressAndPrepareFile } from '../services/fileUtils';
 import { AvailableVehiclesView } from './AvailableVehiclesView';
+import { LiveNotificationCenter } from './LiveNotificationCenter';
+import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
+import { UserRole } from '../types';
+import { sendAppNotification } from '../services/notificationService';
 
 interface TransporterPortalProps {
   onSignOut?: () => void;
@@ -207,6 +211,21 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     };
     await updateVehicleInFirestore(updatedVehicle);
 
+    // Dispatch real-time notification to Vehicle Manager & Admin
+    await sendAppNotification({
+      title: `Vehicle Broadcast Ready: ${selectedVehicleForReady.registrationNumber}`,
+      description: `${selectedTransporterName} marked vehicle ${selectedVehicleForReady.registrationNumber} ready for loading at ${readyForm.currentCity}. Est. Rent: PKR ${(parseFloat(readyForm.estimatedRent) || 150000).toLocaleString()}`,
+      targetRole: UserRole.VEHICLE_MANAGER,
+      targetView: 'vehicles',
+      targetFilter: { vehicleNo: selectedVehicleForReady.registrationNumber },
+      type: 'INFO',
+      notificationSubType: 'GENERAL',
+      actionLabel: 'View Fleet',
+      performedBy: selectedTransporterName,
+      performedByRole: 'TRANSPORTER',
+      category: 'TRANSPORTER'
+    });
+
     setShowReadyModal(false);
     setSelectedVehicleForReady(null);
     alert(`Vehicle ${selectedVehicleForReady.registrationNumber} is now marked "Ready for Loading" in ${readyForm.currentCity}! It is now visible to all Case Managers, Clients, and Admins.`);
@@ -246,6 +265,22 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     };
 
     await saveTransporterRequestToFirestore(req);
+
+    // Dispatch real-time notification to Vehicle Manager & Admin
+    await sendAppNotification({
+      title: `New Vehicle Registration: ${req.vehicleNo}`,
+      description: `${selectedTransporterName} submitted vehicle ${req.vehicleNo} (${newRegForm.make}) with driver ${newRegForm.driverName || 'N/A'} for inspection & clearance.`,
+      targetRole: UserRole.VEHICLE_MANAGER,
+      targetView: 'vehicles',
+      targetFilter: { vehicleNo: req.vehicleNo },
+      type: 'ACTION',
+      notificationSubType: 'CASE_APPROVAL',
+      actionLabel: 'Inspect & Approve',
+      performedBy: selectedTransporterName,
+      performedByRole: 'TRANSPORTER',
+      category: 'TRANSPORTER'
+    });
+
     setShowNewRegModal(false);
     setNewRegForm({
       vehicleNo: '',
@@ -282,6 +317,22 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     };
 
     await saveTransporterRequestToFirestore(req);
+
+    // Dispatch real-time notification to Vehicle Manager & Admin
+    await sendAppNotification({
+      title: `Vehicle Renewal Request: ${req.vehicleNo}`,
+      description: `${selectedTransporterName} submitted a renewal request for vehicle ${req.vehicleNo}. Reason: ${renewalForm.reason || 'Bonded Route Renewal'}`,
+      targetRole: UserRole.VEHICLE_MANAGER,
+      targetView: 'vehicles',
+      targetFilter: { vehicleNo: req.vehicleNo },
+      type: 'ACTION',
+      notificationSubType: 'CASE_APPROVAL',
+      actionLabel: 'Review Renewal',
+      performedBy: selectedTransporterName,
+      performedByRole: 'TRANSPORTER',
+      category: 'TRANSPORTER'
+    });
+
     setShowRenewalModal(false);
     setSelectedVehicleForRenewal(null);
     alert(`Renewal request for ${req.vehicleNo} sent to Vehicle Manager for verification!`);
@@ -304,6 +355,22 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     };
 
     await saveTransporterRequestToFirestore(req);
+
+    // Dispatch real-time notification to Vehicle Manager & Admin
+    await sendAppNotification({
+      title: `Vehicle Cancellation Request: ${req.vehicleNo}`,
+      description: `${selectedTransporterName} requested cancellation for vehicle ${req.vehicleNo}. Reason: ${cancelReason}`,
+      targetRole: UserRole.VEHICLE_MANAGER,
+      targetView: 'vehicles',
+      targetFilter: { vehicleNo: req.vehicleNo },
+      type: 'ACTION',
+      notificationSubType: 'CANCELLATION_APPROVAL',
+      actionLabel: 'Review Cancellation',
+      performedBy: selectedTransporterName,
+      performedByRole: 'TRANSPORTER',
+      category: 'TRANSPORTER'
+    });
+
     setShowCancelModal(false);
     setSelectedVehicleForCancel(null);
     setCancelReason('');
@@ -316,6 +383,19 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     if (updatedCase.containers && updatedCase.containers[containerIdx]) {
       updatedCase.containers[containerIdx].transporterApproved = true;
       await saveCaseToFirestore(updatedCase);
+
+      await sendAppNotification({
+        title: `Assignment Accepted: Container ${updatedCase.containers[containerIdx].number}`,
+        description: `${selectedTransporterName} confirmed vehicle assignment for Container ${updatedCase.containers[containerIdx].number} on Case #${c.caseNo}.`,
+        targetRole: UserRole.OPERATIONS_MANAGER,
+        targetView: 'cases',
+        targetFilter: { caseNo: c.caseNo },
+        type: 'INFO',
+        performedBy: selectedTransporterName,
+        performedByRole: 'TRANSPORTER',
+        category: 'CASE'
+      });
+
       alert(`Assignment confirmed for Container ${updatedCase.containers[containerIdx].number}! You can now update the driver credentials.`);
     }
   };
@@ -340,7 +420,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
   };
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-screen bg-slate-950 text-gray-100 font-sans">
+    <div className="flex flex-col lg:flex-row h-screen h-[100dvh] max-h-[100dvh] w-full bg-slate-950 text-gray-100 font-sans overflow-hidden">
       
       {/* Mobile Drawer Overlay */}
       {mobileMenuOpen && (
@@ -481,48 +561,101 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
       </aside>
 
       {/* ========================================================================= */}
-      {/* MAIN VIEW AREA */}
+      {/* RIGHT WORKSPACE: LOCKED HEADER REGION + INDEPENDENTLY SCROLLING MAIN BODY */}
       {/* ========================================================================= */}
-      <main className="flex-1 p-3.5 sm:p-6 lg:p-8 overflow-y-auto space-y-4 sm:space-y-6">
+      <div className="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden">
 
-        {/* Mobile Sticky Header Bar */}
-        <header className="lg:hidden -mx-3.5 -mt-3.5 mb-3 sm:-mx-6 sm:-mt-6 h-14 bg-slate-900/95 backdrop-blur-md border-b border-white/10 px-3 sm:px-4 flex items-center justify-between shrink-0 z-20 sticky top-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(true)}
-              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition active:scale-95"
-              title="Open Navigation Menu"
-            >
-              <Menu size={20} />
-            </button>
-            <div className="flex items-center gap-2 min-w-0">
-              <Logo variant="icon" className="h-7 w-auto shrink-0" />
-              <div className="min-w-0">
-                <span className="text-xs font-bold text-white block truncate">
-                  Transporter Desk
-                </span>
-                <span className="text-[10px] text-amber-400 block font-medium truncate max-w-[150px]">
-                  {selectedTransporterName}
-                </span>
+        {/* ======================================================================= */}
+        {/* LOCKED TOP HEADER (Stationary & locked, never scrolls with page) */}
+        {/* ======================================================================= */}
+        <header className="shrink-0 z-30 bg-slate-900 border-b border-white/10 shadow-lg">
+          {/* Top Bar: Menu toggle (mobile), Company Logo & App Brand, Notification Center, Active Tab, Sign Out */}
+          <div className="h-14 px-3.5 sm:px-6 flex items-center justify-between border-b border-white/5 bg-slate-900">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(true)}
+                className="lg:hidden p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition active:scale-95 shrink-0"
+                title="Open Navigation Menu"
+              >
+                <Menu size={20} />
+              </button>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Logo className="h-7 w-auto shrink-0" />
+                <div className="min-w-0">
+                  <span className="text-xs sm:text-sm font-bold text-white block tracking-wide truncate">
+                    Docks (Pvt) Ltd.
+                  </span>
+                  <span className="text-[10px] text-gray-400 block font-medium truncate">
+                    Transporter Desk
+                  </span>
+                </div>
               </div>
+            </div>
+
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              {/* Live Notification Center */}
+              <LiveNotificationCenter 
+                currentRole={UserRole.TRANSPORTER}
+                userIdentifier={selectedTransporterName}
+              />
+
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase hidden sm:inline-block">
+                {activeTab.replace('_', ' ')}
+              </span>
+
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs font-semibold flex items-center gap-1.5 transition active:scale-95"
+                title="Sign Out"
+              >
+                <LogOut size={14} />
+                <span className="hidden sm:inline">Sign Out</span>
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
-              {activeTab.replace('_', ' ')}
-            </span>
-            <button
-              type="button"
-              onClick={onSignOut}
-              className="p-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition active:scale-95"
-              title="Sign Out"
-            >
-              <LogOut size={16} />
-            </button>
+          {/* Dedicated Locked Transporter Heading Sub-Bar (Nichey heading ki tarah - Locked) */}
+          <div className="px-3.5 sm:px-6 py-2.5 sm:py-3 bg-slate-900/95 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center font-bold text-base sm:text-lg shrink-0">
+                🚛
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                    Transporter
+                  </span>
+                  <span className="text-[9px] sm:text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full font-semibold">
+                    Verified Fleet Carrier
+                  </span>
+                </div>
+                <h1 className="text-base sm:text-lg lg:text-xl font-extrabold text-white tracking-wide truncate">
+                  {selectedTransporterName}
+                </h1>
+              </div>
+            </div>
+
+            {/* Quick Metrics Badges */}
+            <div className="flex items-center gap-1.5 sm:gap-2 text-xs shrink-0">
+              <span className="px-2 sm:px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-300 text-[10px] sm:text-[11px]">
+                Vehicles: <strong className="text-amber-400">{myVehicles.length}</strong>
+              </span>
+              <span className="hidden sm:inline-flex px-2 sm:px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] sm:text-[11px]">
+                Ready: <strong className="text-emerald-300">{availableVehicles.length}</strong>
+              </span>
+              <span className="hidden md:inline-flex px-2 sm:px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 text-[10px] sm:text-[11px]">
+                Assigned: <strong className="text-blue-300">{myAssignedCases.length}</strong>
+              </span>
+            </div>
           </div>
         </header>
+
+        {/* ======================================================================= */}
+        {/* MAIN SCROLLABLE VIEW AREA (Only this scrollable body scrolls smoothly) */}
+        {/* ======================================================================= */}
+        <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3.5 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 custom-scrollbar overscroll-contain">
 
         {/* ======================================================================= */}
         {/* VIEW 1: VEHICLES MANAGEMENT */}
@@ -902,7 +1035,8 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
           </div>
         )}
 
-      </main>
+        </main>
+      </div>
 
       {/* ========================================================================= */}
       {/* MODAL 1: MARK READY FOR LOADING POPUP */}

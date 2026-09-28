@@ -20,6 +20,7 @@ import {
 } from './firebase';
 import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest } from '../types';
 import { safeAppStorage } from './storage';
+import { logActivity } from './activityLogService';
 
 /**
  * Sanitizes an object recursively to ensure it is 100% compliant with Firestore:
@@ -147,6 +148,33 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
       updatedAt: new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload);
+
+    // Notify Finance Manager and Admin of finance entries
+    if (entry.amount && Number(entry.amount) > 0) {
+      const notifId = Date.now() + Math.floor(Math.random() * 1000);
+      const notif: AppNotification = {
+        id: notifId,
+        title: `Finance ${entry.type === 'RECEIVABLE' ? 'Receivable' : entry.type === 'PAYABLE' ? 'Payable' : 'Entry'}: PKR ${Number(entry.amount).toLocaleString()}`,
+        description: `${entry.description || entry.category || 'Transaction'} for ${entry.party || 'Account'}. Status: ${entry.status || 'RECORDED'}`,
+        details: `${entry.category || 'Finance'} • Reference: ${entry.reference || 'N/A'} • Payment Method: ${entry.paymentMethod || 'BANK'}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        type: 'INFO',
+        notificationSubType: 'BUYING',
+        status: 'PENDING',
+        actionLabel: 'View Finance',
+        targetRole: UserRole.FINANCE_MANAGER,
+        targetView: 'finance',
+        category: 'FINANCE'
+      };
+      saveNotificationToFirestore(notif).catch(() => {});
+      logActivity(
+        notif.title, 
+        notif.description, 
+        'FINANCE_MANAGER', 
+        entry.party || 'Finance Desk', 
+        { amount: entry.amount, type: entry.type }
+      ).catch(() => {});
+    }
   } catch (error) {
     console.warn(`Firestore saveFinance warning:`, error);
   }
@@ -601,7 +629,7 @@ export async function authenticateDatabaseUser(
 
     // 3. Verify status
     if (matchedUser.status === 'SUSPENDED' || (matchedUser as any).isSuspended) {
-      throw new Error('This account has been suspended by the administrator. Login access is currently blocked. (Admin ki taraf se yeh ID suspend ki gayi hai. Baraye meharbani administration se rabta karein.)');
+      throw new Error('This account has been suspended by the administrator. Login access is currently blocked. Please contact system administration for assistance.');
     }
     if (matchedUser.status === 'INACTIVE') {
       throw new Error('This database account is currently marked as INACTIVE. Please contact administration.');
@@ -1596,6 +1624,31 @@ export async function saveStaffBillToFirestore(bill: StaffLoadingBill): Promise<
       updatedAt: new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload, { merge: true });
+
+    // Notify Finance Manager and Admin
+    const notifId = Date.now() + Math.floor(Math.random() * 1000);
+    const notif: AppNotification = {
+      id: notifId,
+      title: `Port Loading Bill: PKR ${Number(bill.grandTotal || 0).toLocaleString()}`,
+      description: `Staff ${bill.staffName || staffUserId} generated Loading Bill #${bill.billNo || docId} for Case #${bill.caseNo}. Grand Total: PKR ${Number(bill.grandTotal || 0).toLocaleString()}`,
+      details: `Case #${bill.caseNo} • Container: ${bill.containerNumber || 'N/A'} • Port: ${bill.portStation || 'Port Terminal'}`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      type: 'INFO',
+      notificationSubType: 'BUYING',
+      status: 'PENDING',
+      actionLabel: 'Review Bill',
+      targetRole: UserRole.FINANCE_MANAGER,
+      targetView: 'finance',
+      category: 'FINANCE'
+    };
+    saveNotificationToFirestore(notif).catch(() => {});
+    logActivity(
+      notif.title, 
+      notif.description, 
+      'LOADING_PORT_STAFF', 
+      bill.staffName || staffUserId, 
+      { caseNo: bill.caseNo, grandTotal: bill.grandTotal }
+    ).catch(() => {});
   } catch (error) {
     console.warn(`Firestore saveStaffBill warning:`, error);
   }

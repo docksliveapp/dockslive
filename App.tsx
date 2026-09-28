@@ -24,6 +24,7 @@ import { AppNotification, UserRole } from './types';
 import NotificationModal from './components/NotificationModal';
 import AuthModal from './components/AuthModal';
 import Logo from './components/Logo';
+import { LiveNotificationCenter } from './components/LiveNotificationCenter';
 import { auth, onAuthStateChanged, testFirestoreConnection } from './services/firebase';
 import { subscribeToNotifications } from './services/dbService';
 import { approveActionRequest, rejectActionRequest } from './services/approvalService';
@@ -627,7 +628,7 @@ const App: React.FC = () => {
 
       {/* Content Area */}
       <main className="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden relative">
-        <header className="h-14 sm:h-16 bg-slate-900/40 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-2.5 sm:px-6 z-10 flex-shrink-0">
+        <header className="h-14 sm:h-16 bg-slate-900 border-b border-white/10 flex items-center justify-between px-2.5 sm:px-6 z-20 flex-shrink-0 sticky top-0 shadow-md">
           <div className="flex items-center gap-1.5 sm:gap-4 min-w-0 flex-1">
             <button onClick={() => window.innerWidth < 1024 ? setMobileSidebarOpen(!mobileSidebarOpen) : setDesktopSidebarExpanded(!desktopSidebarExpanded)} className="text-gray-400 hover:text-white p-1 shrink-0">
               <Menu size={22} />
@@ -646,8 +647,31 @@ const App: React.FC = () => {
               <Logo variant="icon" className="h-7 w-auto max-w-[36px]" />
             </button>
 
-            {/* View Title - ONLY shown for inner views (Cases, Finance, Vehicles, Users, Settings). NEVER show "Dashboard" or "Admin Portal" when on dashboard */}
-            {activeView !== 'dashboard' && (
+            {/* Transporter Branding Element (Static, non-scrollable, pinned at top) */}
+            {((currentRole as string) === UserRole.TRANSPORTER || activeView === 'vehicles' || activeView === 'available_vehicles') ? (
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center font-bold text-sm sm:text-base shrink-0">
+                  🚛
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    <h2 className="text-xs sm:text-sm font-bold text-white tracking-wide truncate">
+                      {(currentRole as string) === UserRole.TRANSPORTER 
+                        ? (safeAppStorage.getItem('dpl_current_user_name') || 'Bilal Goods Transport Co.')
+                        : (activeView === 'available_vehicles' ? 'Available Fleet Broadcast' : 'Fleet & Vehicle Operations')}
+                    </h2>
+                    <span className="hidden xs:inline-flex text-[9px] sm:text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
+                      Transporter Desk
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-gray-400 font-medium block truncate">
+                    {(currentRole as string) === UserRole.TRANSPORTER
+                      ? 'Verified Fleet Carrier • Logistics Operations'
+                      : 'Registered Transporters, Carriers & Vehicle Panels'}
+                  </span>
+                </div>
+              </div>
+            ) : activeView !== 'dashboard' ? (
               <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                 <h2 className="text-xs sm:text-base font-semibold text-gray-100 capitalize tracking-wide truncate max-w-[100px] xs:max-w-[140px] sm:max-w-none">
                   {(currentRole as string) === UserRole.CLIENT ? 'Client Portal' : activeView.replace('-', ' ')}
@@ -658,7 +682,7 @@ const App: React.FC = () => {
                   </span>
                 )}
               </div>
-            )}
+            ) : null}
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
@@ -667,16 +691,23 @@ const App: React.FC = () => {
               onOpenFinance={() => setActiveView('finance')}
             />
 
-            {/* Notifications Bell */}
-            <button 
-              type="button"
-              onClick={() => setIsActionCenterOpen(!isActionCenterOpen)} 
-              className="relative p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/10 transition"
-              title="Notifications"
-            >
-              <Bell size={18} />
-              {notifications.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-slate-900 animate-pulse"></span>}
-            </button>
+            {/* Live Real-time Notification Center */}
+            <LiveNotificationCenter
+              currentRole={currentRole}
+              currentRoles={currentRoles}
+              userIdentifier={currentClientName || firebaseUser?.displayName || firebaseUser?.email || 'Admin'}
+              clientName={currentClientName}
+              onNavigateToCase={(caseNoOrId) => {
+                setActiveView('cases');
+                setNavigationFilter(caseNoOrId);
+              }}
+              onNavigateToTab={(tabName) => {
+                if (tabName === 'finance') setActiveView('finance');
+                else if (tabName === 'cases') setActiveView('cases');
+                else if (tabName === 'transporter') setActiveView('vehicles');
+                else if (tabName === 'users') setActiveView('users');
+              }}
+            />
 
             {/* Small Squircle (rounded-square) Sign Out Button with LogOut Logo */}
             <button

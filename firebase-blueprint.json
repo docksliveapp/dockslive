@@ -145,6 +145,18 @@
     "/settings/{settingId}": {
       "schema": "Setting",
       "description": "Global company settings and profile"
+    },
+    "/staff_loading_bills/{billId}": {
+      "schema": "FinanceEntry",
+      "description": "Loading port bills created by port staff for terminal charges"
+    },
+    "/available_vehicles/{vehicleId}": {
+      "schema": "Vehicle",
+      "description": "Fleet vehicles currently available and ready for cargo loading"
+    },
+    "/transporter_requests/{requestId}": {
+      "schema": "AppNotification",
+      "description": "Vehicle registration, renewal, or trip update requests from transporters"
     }
   }
 }

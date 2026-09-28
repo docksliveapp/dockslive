@@ -3,7 +3,8 @@ import {
   X, Receipt, Plus, Trash2, Download, CheckCircle2, 
   UploadCloud, FileText, Camera, DollarSign, AlertCircle, Clock, ExternalLink 
 } from 'lucide-react';
-import { Case, CaseCharge, StaffLoadingBill, StaffPrivateLedgerEntry } from '../types';
+import { Case, CaseCharge, StaffLoadingBill, StaffPrivateLedgerEntry, UserRole } from '../types';
+import { sendAppNotification } from '../services/notificationService';
 import { downloadLoadingBillPdf, LoadingBillData, LoadingBillItem } from '../services/pdfExportService';
 import { saveStaffBillToFirestore, saveStaffPrivateLedgerEntryToFirestore, saveCaseToFirestore } from '../services/dbService';
 import { compressAndPrepareFile, convertImageToPdf } from '../services/fileUtils';
@@ -363,6 +364,20 @@ export const PortMakeBillModal: React.FC<PortMakeBillModalProps> = ({
         loadingBills: updatedLoadingBills
       };
       await saveCaseToFirestore(updatedCase);
+
+      // Dispatch real-time notification to Finance Manager & Admin
+      await sendAppNotification({
+        title: `Port Loading Bill Submitted: PKR ${Number(loadingBill.grandTotal || 0).toLocaleString()}`,
+        description: `Port Staff ${staffName || staffUserId} generated Loading Bill #${loadingBill.billNo} for Case #${targetCase.caseNo}. Grand Total: PKR ${Number(loadingBill.grandTotal || 0).toLocaleString()}`,
+        targetRole: UserRole.FINANCE_MANAGER,
+        targetView: 'finance',
+        type: 'INFO',
+        notificationSubType: 'BUYING',
+        actionLabel: 'Review Bill',
+        performedBy: staffName || staffUserId,
+        performedByRole: 'LOADING_PORT_STAFF',
+        category: 'FINANCE'
+      });
 
       if (onBillGenerated) {
         onBillGenerated(loadingBill);

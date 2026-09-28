@@ -1215,6 +1215,10 @@ export interface AppNotification {
   priority?: 'HIGH' | 'MEDIUM' | 'LOW';
   targetView?: string;
   targetFilter?: any;
+  targetRole?: UserRole | string;
+  targetClientName?: string;
+  category?: 'CASE' | 'FINANCE' | 'APPROVAL' | 'TRANSPORTER' | 'GENERAL';
+  read?: boolean;
   approvalData?: {
     entityType: 'case' | 'vehicle';
     entityId: number | string;

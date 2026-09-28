@@ -83,6 +83,21 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Staff Loading Bills
+    match /staff_loading_bills/{billId} {
+      allow read, write: if true;
+    }
+
+    // Available Vehicles Fleet
+    match /available_vehicles/{vehicleId} {
+      allow read, write: if true;
+    }
+
+    // Transporter Requests
+    match /transporter_requests/{requestId} {
+      allow read, write: if true;
+    }
+
     // Destination Staff & Port Officers
     match /destination_staff/{staffId} {
       allow read, write: if true;

@@ -20,6 +20,7 @@ import {
 import { AvailableVehiclesView } from './AvailableVehiclesView';
 import { subscribeToTransporterRequests, updateTransporterRequestInFirestore } from '../services/dbService';
 import { TransporterRequest } from '../types';
+import { sendAppNotification } from '../services/notificationService';
 import { exportVehiclesToExcel, exportVehicleTripsToExcel } from '../services/excelExportService';
 import { parseVehicleFile, isCorruptedVehicleRecord } from '../services/documentParserService';
 import { OfficialDocumentsModal, DocumentType } from './OfficialDocumentsModal';
@@ -117,6 +118,23 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       reviewedAt: new Date().toISOString()
     };
     await updateTransporterRequestInFirestore(updatedReq);
+
+    // Dispatch real-time notification to Transporter & Admin
+    await sendAppNotification({
+      title: `Vehicle Request APPROVED: ${req.vehicleNo}`,
+      description: `Your ${req.type.replace('_', ' ').toLowerCase()} request for vehicle ${req.vehicleNo} has been verified and approved by Vehicle Management.`,
+      targetRole: UserRole.TRANSPORTER,
+      targetClientName: req.transporterName,
+      targetView: 'vehicles',
+      targetFilter: { vehicleNo: req.vehicleNo },
+      type: 'INFO',
+      notificationSubType: 'GENERAL',
+      actionLabel: 'View Vehicle',
+      performedBy: 'Vehicle Manager',
+      performedByRole: 'VEHICLE_MANAGER',
+      category: 'TRANSPORTER'
+    });
+
     alert(`Transporter request for ${req.vehicleNo} has been APPROVED!`);
   };
 
@@ -128,6 +146,23 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       reviewedAt: new Date().toISOString()
     };
     await updateTransporterRequestInFirestore(updatedReq);
+
+    // Dispatch real-time notification to Transporter & Admin
+    await sendAppNotification({
+      title: `Vehicle Request Declined: ${req.vehicleNo}`,
+      description: `Your ${req.type.replace('_', ' ').toLowerCase()} request for vehicle ${req.vehicleNo} was declined by Vehicle Management. Please contact transport desk for details.`,
+      targetRole: UserRole.TRANSPORTER,
+      targetClientName: req.transporterName,
+      targetView: 'vehicles',
+      targetFilter: { vehicleNo: req.vehicleNo },
+      type: 'ALERT',
+      notificationSubType: 'GENERAL',
+      actionLabel: 'Check Status',
+      performedBy: 'Vehicle Manager',
+      performedByRole: 'VEHICLE_MANAGER',
+      category: 'TRANSPORTER'
+    });
+
     alert(`Transporter request for ${req.vehicleNo} has been declined.`);
   };
 

@@ -34,7 +34,11 @@ export const logActivity = async (
     userRole,
     action,
     details,
-    metadata
+    metadata,
+    title: action,
+    role: userRole,
+    description: details,
+    performedBy: userId
   };
 
   // 1. Save locally
