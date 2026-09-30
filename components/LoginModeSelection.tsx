@@ -338,8 +338,17 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
           <ShieldCheck size={14} className="text-emerald-400" />
           <span>Authorized Access • Encrypted Session</span>
         </div>
-        <div className="text-gray-400">
-          DOCKS (PVT) LTD. Enterprise Logistics Cloud
+        <div className="flex items-center gap-3 text-gray-400">
+          <a
+            href="/pwa-512x512-v2.png"
+            download="docks-app-icon-512x512.png"
+            className="text-amber-400/90 hover:text-amber-300 underline flex items-center gap-1 cursor-pointer transition"
+            title="Download high-resolution 512x512 icon for Google Play Store & PWABuilder"
+          >
+            📥 Download App Icon (512×512)
+          </a>
+          <span>•</span>
+          <span>DOCKS (PVT) LTD. Cloud</span>
         </div>
       </div>
     </div>

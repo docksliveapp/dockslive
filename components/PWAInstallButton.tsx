@@ -337,13 +337,62 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
 
                 {/* Deployment Steps */}
                 <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2 text-[11px]">
-                  <p className="text-white font-semibold">Google Play Console Par Publish Karne Ka Tareeqa:</p>
-                  <ol className="list-decimal list-inside space-y-1.5 text-gray-400">
-                    <li><a href={pwaBuilderUrl} target="_blank" rel="noopener noreferrer" className="text-amber-400 underline font-semibold">PWABuilder</a> par jayein aur <strong>&quot;Package for Google Play Store&quot;</strong> select karein.</li>
-                    <li>Yeh aapko Google Play Store ke liye signed <code className="text-white font-mono">.aab (Android App Bundle)</code> file de dega.</li>
-                    <li><a href="https://play.google.com/console" target="_blank" rel="noopener noreferrer" className="text-brand-400 underline font-semibold">Google Play Console</a> kholein &gt; Create App &gt; <code className="text-white font-mono">.aab</code> upload karein.</li>
-                    <li>Aapki app live ho jayegi aur koi bhi user Google Play Store se search karke install kar sakega!</li>
+                  <p className="text-white font-semibold">Google Play Console Par Publish Karne Ka Mukammal Tareeqa:</p>
+                  <ol className="list-decimal list-inside space-y-2 text-gray-300">
+                    <li>
+                      <strong>Step 1 (.aab file hasil karein):</strong>{' '}
+                      <a href={pwaBuilderUrl} target="_blank" rel="noopener noreferrer" className="text-amber-400 underline font-bold">
+                        PWABuilder par click karein
+                      </a>{' '}
+                      &rarr; <strong>&quot;Package for Android&quot;</strong> &rarr; <strong>&quot;Generate AAB&quot;</strong> select karein. Yeh aapko Google Play Store ke liye signed <code className="text-emerald-300 font-mono">.aab</code> file de dega.
+                    </li>
+                    <li>
+                      <strong>Step 2 (Google Play Console kholein):</strong>{' '}
+                      <a href="https://play.google.com/console" target="_blank" rel="noopener noreferrer" className="text-brand-400 underline font-bold">
+                        play.google.com/console
+                      </a>{' '}
+                      kholein aur <strong>&quot;Create App&quot;</strong> par click karein.
+                    </li>
+                    <li>
+                      <strong>Step 3 (.aab upload karein):</strong> Production ya Closed Testing track mein <strong>Create new release</strong> dabayein aur apni <code className="text-emerald-300 font-mono">.aab</code> file drag &amp; drop karein.
+                    </li>
                   </ol>
+                </div>
+
+                {/* Google Play Store Listing Data to Copy */}
+                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5 text-[11px]">
+                  <p className="text-amber-300 font-bold uppercase tracking-wider text-[10px]">
+                    Google Play Console Store Listing Data (Copy &amp; Paste):
+                  </p>
+                  
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center py-1 border-b border-white/5">
+                      <span className="text-gray-400">App Name:</span>
+                      <span className="text-white font-semibold">DPL Port - Docks Private Limited</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1 border-b border-white/5">
+                      <span className="text-gray-400">Package Name:</span>
+                      <span className="text-emerald-300 font-mono">com.dockspvtltd.app</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1 border-b border-white/5">
+                      <span className="text-gray-400">Category:</span>
+                      <span className="text-white font-semibold">Business / Logistics</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1 border-b border-white/5">
+                      <span className="text-gray-400">Privacy Policy URL:</span>
+                      <a 
+                        href={`${appOrigin}/privacy-policy.html`} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="text-brand-400 underline truncate max-w-[200px]"
+                      >
+                        {appOrigin}/privacy-policy.html
+                      </a>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

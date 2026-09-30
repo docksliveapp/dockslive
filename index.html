@@ -6,9 +6,23 @@
     <title>Docks (Pvt.) Ltd</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="shortcut icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-v2.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v2.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <script>
+      // Service Worker Registration for PWABuilder, Chrome WebAPK & Google Play
+      if ('serviceWorker' in navigator && !window.location.hostname.includes('ais-dev-')) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .then(function(reg) {
+              console.log('[PWA] Service Worker registered with scope:', reg.scope);
+            })
+            .catch(function(err) {
+              // Graceful catch
+            });
+        });
+      }
+    </script>
     <meta name="theme-color" content="#0f172a" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />

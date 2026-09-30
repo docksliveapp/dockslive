@@ -3,8 +3,19 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
+      "package_name": "live.docks.twa",
+      "sha256_cert_fingerprints": [
+        "F5:84:F6:C1:11:13:56:CA:27:D8:1F:DA:D5:ED:48:02:6C:79:9F:14:2A:6B:EF:C0:4A:FC:F1:A4:D5:53:69:66"
+      ]
+    }
+  },
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
       "package_name": "com.dockspvtltd.app",
       "sha256_cert_fingerprints": [
+        "F5:84:F6:C1:11:13:56:CA:27:D8:1F:DA:D5:ED:48:02:6C:79:9F:14:2A:6B:EF:C0:4A:FC:F1:A4:D5:53:69:66",
         "14:6D:E9:7F:0F:52:CE:EB:2E:CD:9C:29:05:8B:D0:6B:44:6C:5E:AE:4B:92:07:DA:E9:56:88:B6:5D:DE:9B:F4"
       ]
     }
