@@ -545,8 +545,8 @@ const UserManagement: React.FC = () => {
         </button>
       </div>
 
-      {/* Primary 4 Tabs */}
-      <div className="flex gap-2 sm:gap-3 border-b border-white/10 pb-1.5 overflow-x-auto custom-scrollbar-x no-scrollbar" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}>
+      {/* Primary 4 Tabs - Compact Wrap with Zero Horizontal Scroll */}
+      <div className="flex flex-wrap gap-2 sm:gap-3 border-b border-white/10 pb-2">
         <button
           onClick={() => setActiveTab('office')}
           className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap text-xs sm:text-sm font-semibold shrink-0 ${
@@ -657,9 +657,9 @@ const UserManagement: React.FC = () => {
           </div>
         ) : viewMode === 'cards' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-            {filteredOfficeUsers.map(user => (
+            {filteredOfficeUsers.map((user, idx) => (
               <div 
-                key={user.id} 
+                key={`user_card_${user.id || idx}_${idx}`} 
                 className="glass-card rounded-2xl p-4 border border-white/10 hover:border-brand-500/30 transition-all shadow-lg space-y-3 relative overflow-hidden group"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -785,8 +785,8 @@ const UserManagement: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {filteredOfficeUsers.map(user => (
-                    <tr key={user.id} className="hover:bg-white/5 transition-colors">
+                  {filteredOfficeUsers.map((user, idx) => (
+                    <tr key={`user_row_${user.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-4 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-sm font-bold text-white shadow-lg overflow-hidden shrink-0">
                           {user.profilePicture ? (
@@ -898,9 +898,9 @@ const UserManagement: React.FC = () => {
           </div>
         ) : viewMode === 'cards' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-            {filteredClients.map(client => (
+            {filteredClients.map((client, idx) => (
               <div 
-                key={client.id || client.name} 
+                key={`clt_card_${client.id || client.name || idx}_${idx}`} 
                 className="glass-card rounded-2xl p-4 border border-white/10 hover:border-emerald-500/30 transition-all shadow-lg space-y-3 relative overflow-hidden group"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -989,8 +989,8 @@ const UserManagement: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {filteredClients.map(client => (
-                    <tr key={client.id || client.name} className="hover:bg-white/5 transition-colors">
+                  {filteredClients.map((client, idx) => (
+                    <tr key={`clt_row_${client.id || client.name || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-4">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold shrink-0">
@@ -1066,9 +1066,9 @@ const UserManagement: React.FC = () => {
           </div>
         ) : viewMode === 'cards' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-            {filteredTransporters.map(trans => (
+            {filteredTransporters.map((trans, idx) => (
               <div 
-                key={trans.id} 
+                key={`trans_card_${trans.id || idx}_${idx}`} 
                 className="glass-card rounded-2xl p-4 border border-white/10 hover:border-amber-500/30 transition-all shadow-lg space-y-3 relative overflow-hidden group"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -1163,8 +1163,8 @@ const UserManagement: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {filteredTransporters.map(trans => (
-                    <tr key={trans.id} className="hover:bg-white/5 transition-colors">
+                  {filteredTransporters.map((trans, idx) => (
+                    <tr key={`trans_row_${trans.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-4 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold shrink-0">
                           <Truck size={18} />
@@ -1282,9 +1282,9 @@ const UserManagement: React.FC = () => {
               </div>
             ) : viewMode === 'cards' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                {filteredDestinationStaff.map(staff => (
+                {filteredDestinationStaff.map((staff, idx) => (
                   <div 
-                    key={staff.id} 
+                    key={`dst_card_${staff.id || idx}_${idx}`} 
                     className="glass-card rounded-2xl p-4 border border-white/10 hover:border-amber-500/30 transition-all shadow-lg space-y-3 relative overflow-hidden group"
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -1381,8 +1381,8 @@ const UserManagement: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
-                      {filteredDestinationStaff.map(staff => (
-                        <tr key={staff.id} className="hover:bg-white/5 transition-colors">
+                      {filteredDestinationStaff.map((staff, idx) => (
+                        <tr key={`dst_row_${staff.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                           <td className="p-4 flex items-center gap-3">
                             <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold shrink-0">
                               <MapPin size={18} />
@@ -1460,9 +1460,9 @@ const UserManagement: React.FC = () => {
               </div>
             ) : viewMode === 'cards' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 animate-in fade-in duration-200">
-                {filteredDestinationUsers.map(user => (
+                {filteredDestinationUsers.map((user, idx) => (
                   <div 
-                    key={user.id} 
+                    key={`dusr_card_${user.id || idx}_${idx}`} 
                     className="glass-card rounded-2xl p-4 border border-white/10 hover:border-amber-500/30 transition-all shadow-lg space-y-3 relative overflow-hidden group"
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -1573,8 +1573,8 @@ const UserManagement: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
-                      {filteredDestinationUsers.map(user => (
-                        <tr key={user.id} className="hover:bg-white/5 transition-colors">
+                      {filteredDestinationUsers.map((user, idx) => (
+                        <tr key={`dusr_row_${user.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                           <td className="p-4 flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-sm font-bold text-amber-400 shadow-lg overflow-hidden shrink-0">
                               {user.profilePicture ? (

@@ -44,8 +44,6 @@ html, body, #root {
 
 .custom-scrollbar {
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;
-  touch-action: pan-y;
 }
 
 .custom-scrollbar-x {

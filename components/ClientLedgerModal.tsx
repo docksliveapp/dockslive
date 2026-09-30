@@ -305,8 +305,8 @@ export const ClientLedgerModal: React.FC<ClientLedgerModalProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {filteredRows.map((row) => (
-                    <tr key={row.id} className="hover:bg-white/5 transition-colors">
+                  {filteredRows.map((row, idx) => (
+                    <tr key={`cl_led_modal_row_${row.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-3 font-mono text-gray-300 whitespace-nowrap">{row.date}</td>
                       <td className="p-3 font-mono font-medium text-brand-300 whitespace-nowrap">
                         {row.refNumber}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine, CartesianGrid
 } from 'recharts';
@@ -169,6 +169,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       if (activityRoleFilter !== 'ALL') {
         const itemRole = String(item.role || item.userRole || '').toUpperCase();
         if (activityRoleFilter === 'TRANSPORTER' && !itemRole.includes('TRANSPORTER')) return false;
+        if (activityRoleFilter === 'VEHICLE_MANAGER' && !itemRole.includes('VEHICLE') && !itemRole.includes('FLEET') && !itemRole.includes('TRANSPORT')) return false;
         if (activityRoleFilter === 'LOADING_PORT_STAFF' && !itemRole.includes('LOADING')) return false;
         if (activityRoleFilter === 'DESTINATION_PORT_STAFF' && !itemRole.includes('DESTINATION') && !itemRole.includes('UNLOADING')) return false;
         if (activityRoleFilter === 'FINANCE' && !itemRole.includes('FINANCE')) return false;
@@ -796,7 +797,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                                  if (stationCategoryFilter === 'PRIVATE' && station.privateCargo === 0) return false;
                                  return true;
                                })
-                               .map((station) => {
+                               .map((station, sIdx) => {
                                  const isExpanded = expandedStationId === station.id;
                                  const clearancePercent = Math.round((station.customsClearance / station.totalMoved) * 100);
                                  const transitPercent = Math.round((station.afghanTransit / station.totalMoved) * 100);
@@ -805,7 +806,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
                                  return (
                                    <div 
-                                     key={station.id} 
+                                     key={`dash_station_${station.id || sIdx}_${sIdx}`} 
                                      className="bg-[#0f172a] border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4 sm:p-6 transition-all shadow-md"
                                    >
                                       {/* Station Title & Badge Header */}
@@ -1377,15 +1378,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             {[
               { id: 'ALL', label: 'All Roles' },
               { id: 'TRANSPORTER', label: '🚛 Transporters' },
+              { id: 'VEHICLE_MANAGER', label: '🚚 Fleet & Vehicles' },
               { id: 'LOADING_PORT_STAFF', label: '⚓ Port Loading' },
               { id: 'DESTINATION_PORT_STAFF', label: '🏁 Destination' },
               { id: 'FINANCE', label: '💰 Finance' },
               { id: 'OPERATIONS', label: '📦 Operations' },
               { id: 'CLIENT', label: '🏢 Clients' },
               { id: 'ADMIN', label: '⚡ Admin' }
-            ].map(tab => (
+            ].map((tab, tIdx) => (
               <button
-                key={tab.id}
+                key={`act_role_tab_${tab.id}_${tIdx}`}
                 type="button"
                 onClick={() => setActivityRoleFilter(tab.id)}
                 className={`px-3 py-1.5 rounded-xl font-semibold whitespace-nowrap transition text-[11px] ${
@@ -1423,7 +1425,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               </p>
             </div>
           ) : (
-            (showAllLogs ? filteredLiveLogs : filteredLiveLogs.slice(0, 10)).map((item) => {
+            (showAllLogs ? filteredLiveLogs : filteredLiveLogs.slice(0, 10)).map((item, idx) => {
               const roleUpper = String(item.role || item.userRole || '').toUpperCase();
               const isTransporter = roleUpper.includes('TRANSPORTER');
               const isPort = roleUpper.includes('LOADING') || roleUpper.includes('DESTINATION') || roleUpper.includes('PORT');
@@ -1433,7 +1435,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
               return (
                 <div 
-                  key={item.id} 
+                  key={`live_log_${item.id || idx}_${idx}`} 
                   className="p-3.5 rounded-2xl bg-slate-950/70 border border-white/5 hover:border-white/15 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
                 >
                   <div className="flex items-start gap-3 min-w-0 flex-1">

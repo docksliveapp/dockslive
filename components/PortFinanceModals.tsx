@@ -425,8 +425,8 @@ export const DownloadClientLedgerModal: React.FC<DownloadLedgerModalProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {computedRows.map(row => (
-                    <tr key={row.id} className="hover:bg-white/5">
+                  {computedRows.map((row, idx) => (
+                    <tr key={`port_fin_row_${row.id || idx}_${idx}`} className="hover:bg-white/5">
                       <td className="py-2 text-gray-400 font-mono text-[11px]">{row.date}</td>
                       <td className="py-2 font-mono font-semibold text-white">{row.reference || '-'}</td>
                       <td className="py-2 text-gray-300 max-w-xs truncate">{row.description}</td>

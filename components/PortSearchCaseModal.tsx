@@ -265,13 +265,13 @@ export const PortSearchCaseModal: React.FC<PortSearchCaseModalProps> = ({
             </div>
           ) : (
             <div className="space-y-2.5">
-              {filteredCases.map(c => {
+              {filteredCases.map((c, idx) => {
                 const mainCntr = c.containers?.[0];
                 const isCompleted = c.status === CaseStatus.COMPLETED;
 
                 return (
                   <div
-                    key={c.id}
+                    key={`port_search_case_${c.id || idx}_${idx}`}
                     onClick={() => {
                       onSelectCase(c);
                       onClose();

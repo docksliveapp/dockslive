@@ -1640,9 +1640,9 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   {allVehicles.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 items-center">
                       <span className="text-[10px] text-gray-500">Quick Select:</span>
-                      {allVehicles.slice(0, 5).map(v => (
+                      {allVehicles.slice(0, 5).map((v, vIdx) => (
                         <button
-                          key={v.id}
+                          key={`quick_veh_${v.id || vIdx}_${vIdx}`}
                           type="button"
                           onClick={() => {
                             setFormData(prev => ({ 
@@ -2578,12 +2578,12 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   No matching registered vehicles found.
                 </div>
               ) : (
-                filteredVehiclesList.map(veh => {
+                filteredVehiclesList.map((veh, vehIdx) => {
                   const stat = (veh.status || 'Active').toLowerCase();
                   const isInvalid = stat === 'expired' || stat === 'cancelled' || stat === 'suspended' || stat === 'inactive';
                   return (
                     <div
-                      key={veh.id}
+                      key={`wf_veh_${veh.id || vehIdx}_${vehIdx}`}
                       className="p-3 bg-black/30 border border-white/10 rounded-xl flex items-center justify-between gap-3 hover:border-white/20 transition-all"
                     >
                       <div>

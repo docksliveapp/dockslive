@@ -494,10 +494,10 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
                     <p className="text-gray-400 text-sm font-sans">No documents uploaded yet.</p>
                 </div>
             ) : (
-                companyDocuments.map((doc) => {
+                companyDocuments.map((doc, docIdx) => {
                     const expiry = checkExpiry(doc);
                     return (
-                        <div key={doc.id} className="glass-panel p-4 rounded-xl border border-white/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-white/5 md:hover:translate-x-1 transition-all">
+                        <div key={`comp_doc_${doc.id || docIdx}_${docIdx}`} className="glass-panel p-4 rounded-xl border border-white/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-white/5 md:hover:translate-x-1 transition-all">
                             <div className="flex items-center gap-4 flex-1">
                                 <div className={`p-3 rounded-xl ${expiry.isExpired ? 'bg-red-500/10 text-red-400' : 'bg-brand-500/10 text-brand-400'}`}>
                                     <FileText size={24} />
@@ -1120,8 +1120,8 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
         )}
 
         <div className="space-y-4">
-           {banks.map(bank => (
-              <div key={bank.id} className="glass-panel p-4 rounded-xl border border-white/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-white/5 transition-all">
+           {banks.map((bank, bIdx) => (
+              <div key={`bank_${bank.id || bIdx}_${bIdx}`} className="glass-panel p-4 rounded-xl border border-white/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-white/5 transition-all">
                  <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-lg bg-white flex items-center justify-center shadow-lg border border-white/10">
                        <span className="text-black font-bold text-xs">{bank.name.substring(0,3).toUpperCase()}</span>
@@ -1483,7 +1483,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
     <div className="max-w-5xl mx-auto space-y-6 animate-fade-in pb-36 sm:pb-16">
       <h2 className="text-3xl font-bold text-white mb-6 drop-shadow-md uppercase tracking-tight font-sans">Settings</h2>
 
-      <div className="flex gap-4 border-b border-white/10 pb-1 overflow-x-auto no-scrollbar">
+      <div className="flex flex-wrap gap-1.5 sm:gap-3 border-b border-white/10 pb-2">
         <button onClick={() => setActiveSection('general')} className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 font-sans ${activeSection === 'general' ? 'border-brand-500 text-white font-bold' : 'border-transparent text-gray-400 hover:text-white'}`}>General</button>
         <button onClick={() => setActiveSection('logo')} className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 font-sans flex items-center gap-2 ${activeSection === 'logo' ? 'border-brand-500 text-white font-bold' : 'border-transparent text-gray-400 hover:text-white'}`}>
           <ImageIcon size={15} />

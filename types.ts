@@ -198,9 +198,11 @@ export interface StaffLoadingBill {
   caseNo: string;
   clientName: string;
   containerNo: string;
+  containerNumber?: string;
   vehicleNo?: string;
   driverName?: string;
   portTerminal: string;
+  portStation?: string;
   date: string; // YYYY-MM-DD
   createdAt: string;
   charges: Array<{
@@ -212,6 +214,7 @@ export interface StaffLoadingBill {
     receiptName?: string;
   }>;
   totalAmount: number;
+  grandTotal?: number;
   paidAmount: number;
   balanceDue: number;
   status: 'PENDING' | 'PARTIAL' | 'PAID';

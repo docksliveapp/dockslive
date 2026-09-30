@@ -652,7 +652,7 @@ export const PortMakeBillModal: React.FC<PortMakeBillModalProps> = ({
 
             {/* Extra Charges list if added */}
             {extraCharges.map((item, idx) => (
-              <div key={item.id} className="p-3.5 bg-slate-950/80 rounded-2xl border border-white/10 space-y-2">
+              <div key={`extra_chg_${item.id || idx}_${idx}`} className="p-3.5 bg-slate-950/80 rounded-2xl border border-white/10 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <span className="text-white font-bold text-xs block">{5 + idx}. {item.head}</span>

@@ -16,6 +16,7 @@ import { detectMimeType, compressAndPrepareFile, convertImageToPdf } from '../se
 import { Container, ExtractedData, CaseStatus, Case, MockDocument, UserRole, CaseCharge, Client, ClientDefaultCharge, CaseStepDetail, WORKFLOW_8_STEPS, Vehicle } from '../types';
 import { WorkflowStepModal } from './WorkflowStepModal';
 import { CompletedCaseDossier } from './CompletedCaseDossier';
+import { VirtualizedList, VirtualizedTable } from './VirtualizedList';
 import { submitCaseActionApproval } from '../services/approvalService';
 import { 
   PAKISTAN_CUSTOMS_COMPLIANCE, 
@@ -2750,7 +2751,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     <tbody className="divide-y divide-white/5">
                        {reportData.map((row, idx) => (
                           <tr 
-                            key={row.id} 
+                            key={`rep_row_${row.id || idx}_${idx}`} 
                             onClick={() => setReportSelectedCase(row)}
                             className="hover:bg-brand-500/10 transition-colors cursor-pointer group"
                             title="Click row to open case details & download documents"
@@ -3038,15 +3039,23 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
         )}
 
-       {/* Case List - Touch-Optimized for Smooth Vertical Scrolling */}
+       {/* Case List - Touch-Optimized Virtualized List for High Performance & Smooth Scrolling */}
        <div className="glass-card rounded-2xl overflow-hidden">
          {/* Mobile View: High Density, Compact Typography, Zero Horizontal Scroll */}
-         <div className="block sm:hidden divide-y divide-white/10 touch-pan-y">
-           {filteredCases.length > 0 ? (
-             filteredCases.map(c => (
+         <div className="block sm:hidden touch-pan-y">
+           <VirtualizedList
+             items={filteredCases}
+             itemHeight={98}
+             maxHeight={650}
+             getItemKey={(c, idx) => `case_mob_${c.id || idx}_${idx}`}
+             emptyPlaceholder={
+               <div className="p-8 text-center text-gray-400 text-xs">
+                 No cases found matching the criteria.
+               </div>
+             }
+             renderItem={(c) => (
                <div 
-                 key={c.id} 
-                 className="p-3 hover:bg-white/5 active:bg-white/10 transition-colors cursor-pointer space-y-1.5"
+                 className="p-3 hover:bg-white/5 active:bg-white/10 transition-colors cursor-pointer space-y-1.5 border-b border-white/5"
                  onClick={() => { setSelectedCase(c); setView('details'); }}
                >
                  {/* Top Row: Case No, Status & Date */}
@@ -3082,71 +3091,73 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                    </span>
                  </div>
                </div>
-             ))
-           ) : (
-             <div className="p-8 text-center text-gray-400 text-xs">
-               No cases found matching the criteria.
-             </div>
-           )}
+             )}
+           />
          </div>
 
-         {/* Desktop View: Full Table */}
-         <div className="hidden sm:block overflow-x-auto custom-scrollbar touch-pan-y">
-           <table className="w-full text-left text-sm text-gray-200 min-w-[1000px]">
-             <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-300 border-b border-white/5">
-               <tr>
-                 <th className="p-4">Case No</th>
-                 <th className="p-4">Client</th>
-                 <th className="p-4">Category</th>
-                 <th className="p-4">Route</th>
-                 <th className="p-4">Date</th>
-                 <th className="p-4">Status</th>
-                 <th className="p-4 text-center">Action</th>
-               </tr>
-             </thead>
-             <tbody className="divide-y divide-white/5">
-               {filteredCases.length > 0 ? (
-                 filteredCases.map(c => (
-                   <tr key={c.id} className="hover:bg-white/5 transition-colors cursor-pointer group" onClick={() => { setSelectedCase(c); setView('details'); }}>
-                     <td className="p-4 font-mono font-bold text-white group-hover:text-brand-400 transition-colors">{c.caseNo}</td>
-                     <td className="p-4 font-medium text-white">{c.clientName}</td>
-                     <td className="p-4 text-gray-200">{c.category}</td>
-                     <td className="p-4 text-xs font-mono text-gray-300">
-                        {c.pol && c.pod ? `${c.pol} → ${c.pod}` : '-'}
-                     </td>
-                     <td className="p-4 text-gray-300">
-                          {c.createdAt}
-                     </td>
-                     <td className="p-4">
-                        <div className="flex flex-col gap-1 items-start">
-                          <span className={`px-2 py-1 rounded text-xs font-medium border border-white/10
-                            ${c.status === CaseStatus.COMPLETED ? 'bg-green-500/20 text-green-400' : 
-                              c.status === CaseStatus.IN_TRANSIT ? 'bg-blue-500/20 text-blue-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
-                             {c.status}
-                          </span>
-                          {c.approvalStatus === 'PENDING' && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/25 text-amber-300 border border-amber-500/40 animate-pulse">
-                              Pending Approval
-                            </span>
-                          )}
-                        </div>
-                     </td>
-                     <td className="p-4 text-center">
-                       <button className="p-2 hover:bg-white/10 rounded-full text-brand-400 transition-colors">
-                         <Eye size={18} />
-                       </button>
-                     </td>
-                   </tr>
-                 ))
-               ) : (
-                  <tr>
-                      <td colSpan={7} className="p-8 text-center text-gray-400">
-                          No cases found matching the criteria.
-                      </td>
-                  </tr>
-               )}
-             </tbody>
-           </table>
+         {/* Desktop View: Virtualized Table for Instant 60fps Scrolling */}
+         <div className="hidden sm:block">
+           <VirtualizedTable<Case>
+             items={filteredCases}
+             rowHeight={64}
+             maxHeight={650}
+             minTableWidth={1000}
+             getItemKey={(c, idx) => `case_row_${c.id || idx}_${idx}`}
+             onRowClick={(c) => { setSelectedCase(c); setView('details'); }}
+             columns={[
+               { header: 'Case No', width: '16%' },
+               { header: 'Client', width: '22%' },
+               { header: 'Category', width: '18%' },
+               { header: 'Route', width: '16%' },
+               { header: 'Date', width: '12%' },
+               { header: 'Status', width: '10%' },
+               { header: 'Action', width: '6%', className: 'text-center' }
+             ]}
+             renderRow={(c) => (
+               <>
+                 <div className="p-4 font-mono font-bold text-white group-hover:text-brand-400 transition-colors truncate" style={{ width: '16%', flexShrink: 0 }}>
+                   {c.caseNo}
+                 </div>
+                 <div className="p-4 font-medium text-white truncate" style={{ width: '22%', flexShrink: 0 }}>
+                   {c.clientName}
+                 </div>
+                 <div className="p-4 text-gray-200 truncate" style={{ width: '18%', flexShrink: 0 }}>
+                   {c.category}
+                 </div>
+                 <div className="p-4 text-xs font-mono text-gray-300 truncate" style={{ width: '16%', flexShrink: 0 }}>
+                   {c.pol && c.pod ? `${c.pol} → ${c.pod}` : '-'}
+                 </div>
+                 <div className="p-4 text-gray-300 text-xs truncate" style={{ width: '12%', flexShrink: 0 }}>
+                   {c.createdAt}
+                 </div>
+                 <div className="p-4" style={{ width: '10%', flexShrink: 0 }}>
+                   <div className="flex flex-col gap-1 items-start">
+                     <span className={`px-2 py-0.5 rounded text-xs font-medium border border-white/10 ${
+                       c.status === CaseStatus.COMPLETED ? 'bg-green-500/20 text-green-400' : 
+                       c.status === CaseStatus.IN_TRANSIT ? 'bg-blue-500/20 text-blue-400' : 'bg-yellow-500/20 text-yellow-400'
+                     }`}>
+                       {c.status}
+                     </span>
+                     {c.approvalStatus === 'PENDING' && (
+                       <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/25 text-amber-300 border border-amber-500/40 animate-pulse">
+                         Pending Approval
+                       </span>
+                     )}
+                   </div>
+                 </div>
+                 <div className="p-4 text-center" style={{ width: '6%', flexShrink: 0 }}>
+                   <button className="p-2 hover:bg-white/10 rounded-full text-brand-400 transition-colors">
+                     <Eye size={18} />
+                   </button>
+                 </div>
+               </>
+             )}
+             emptyPlaceholder={
+               <div className="p-8 text-center text-gray-400 text-sm">
+                 No cases found matching the criteria.
+               </div>
+             }
+           />
          </div>
        </div>
 
@@ -4117,7 +4128,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
                      return (
                        <div 
-                         key={stepConfig.id} 
+                         key={`cm_step_${stepConfig.id || index}_${index}`} 
                          onClick={() => handleOpenStepModal(stepConfig.id as any, index, targetCase)}
                          className="relative flex gap-4 sm:gap-6 mb-6 last:mb-0 cursor-pointer group"
                          title="Tap to update or view step details"
@@ -5376,8 +5387,8 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {uploadedDocs.map(doc => (
-              <div key={doc.id} className="p-3 bg-white/5 border border-white/10 rounded-xl flex items-center justify-between gap-2">
+            {uploadedDocs.map((doc, docIdx) => (
+              <div key={`up_doc_${doc.id || docIdx}_${docIdx}`} className="p-3 bg-white/5 border border-white/10 rounded-xl flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20">
                     <FileText size={16} />
@@ -6015,7 +6026,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       {/* Mobile View (Cards) - Optimized for vertical thumb scrolling */}
       <div className="block sm:hidden space-y-3 touch-pan-y">
         {formData.containers.map((c: any, index: number) => (
-          <div key={c.id} className="glass-panel border border-white/10 p-3.5 rounded-xl space-y-3">
+          <div key={`cntr_card_${c.id || index}_${index}`} className="glass-panel border border-white/10 p-3.5 rounded-xl space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-mono font-bold text-brand-400 bg-brand-500/10 border border-brand-500/20 px-2 py-0.5 rounded">
                 Container #{index + 1}
@@ -6095,7 +6106,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </thead>
           <tbody className="divide-y divide-white/5">
             {formData.containers.map((c: any, index: number) => (
-              <tr key={c.id} className="hover:bg-white/5 transition-colors">
+              <tr key={`cntr_row_${c.id || index}_${index}`} className="hover:bg-white/5 transition-colors">
                 <td className="p-3 text-center text-gray-400 font-mono text-xs">{index + 1}</td>
                 <td className="p-3">
                   <input 

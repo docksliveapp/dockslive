@@ -467,14 +467,14 @@ export const SmartCaseSearchModal: React.FC<SmartCaseSearchModalProps> = ({
             </div>
           ) : (
             <div className="divide-y divide-white/5">
-              {filteredCases.map((c) => {
+              {filteredCases.map((c, idx) => {
                 const containersCount = c.containers?.length || 0;
                 const containerNos = (c.containers || []).map(cnt => cnt.number).filter(Boolean).join(', ');
                 const itemDesc = c.itemDescription || (c as any).goodsDescription || (c as any).cargoDescription;
 
                 return (
                   <div
-                    key={c.id}
+                    key={`smart_search_case_${c.id || idx}_${idx}`}
                     onClick={() => {
                       onSelectCase(c);
                       onClose();

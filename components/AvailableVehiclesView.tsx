@@ -257,9 +257,9 @@ export const AvailableVehiclesView: React.FC<AvailableVehiclesViewProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredVehicles.map((v) => (
+          {filteredVehicles.map((v, idx) => (
             <div 
-              key={v.id}
+              key={`avail_veh_${v.id || idx}_${idx}`}
               className="bg-slate-900/90 border border-white/10 hover:border-amber-500/40 rounded-2xl p-4 space-y-3.5 transition-all shadow-lg hover:shadow-amber-500/5 group flex flex-col justify-between"
             >
               <div className="space-y-3">

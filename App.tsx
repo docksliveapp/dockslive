@@ -32,6 +32,8 @@ import { safeSessionStorage, safeLocalStorage, safeAppStorage } from './services
 import ErrorBoundary from './components/ErrorBoundary';
 import { appLifecycle } from './services/lifecycle';
 import { useBranding } from './services/brandingService';
+import { VirtualizedList } from './components/VirtualizedList';
+import { PWAInstallButton } from './components/PWAInstallButton';
 
 const App: React.FC = () => {
   // Splash Screen & Login Area State:
@@ -266,7 +268,7 @@ const App: React.FC = () => {
     setIsNotificationModalOpen(true);
   };
 
-  const handleNotificationAction = async (action: 'ACCEPT' | 'REJECT' | 'VIEW') => {
+  const handleNotificationAction = async (action: 'ACCEPT' | 'REJECT' | 'VIEW' | 'MARK_READ') => {
     if (!selectedNotification) return;
 
     if (action === 'VIEW') {
@@ -289,6 +291,9 @@ const App: React.FC = () => {
       } catch (err) {
         console.error("Failed to reject action request:", err);
       }
+      handleActionComplete(selectedNotification.id);
+      setIsNotificationModalOpen(false);
+    } else if (action === 'MARK_READ') {
       handleActionComplete(selectedNotification.id);
       setIsNotificationModalOpen(false);
     }
@@ -505,34 +510,39 @@ const App: React.FC = () => {
           <h3 className="font-semibold text-lg text-white flex items-center gap-2"><Bell size={20} className="text-brand-400" /> Action Center</h3>
           <button onClick={() => setIsActionCenterOpen(false)} className="text-gray-400 hover:text-white p-1 rounded-full hover:bg-white/10"><X size={20} /></button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-          {notifications.map(n => (
-            <div 
-                key={n.id} 
+        <div className="flex-1 overflow-hidden p-3 flex flex-col min-h-0">
+          <VirtualizedList
+            items={notifications}
+            itemHeight={120}
+            maxHeight={window.innerHeight ? window.innerHeight - 100 : 700}
+            getItemKey={(n, idx) => `act_notif_${n.id || idx}_${idx}`}
+            emptyPlaceholder={
+              <div className="text-center text-gray-500 py-10">
+                <Check size={48} className="mx-auto mb-2 opacity-50" />
+                <p>All caught up!</p>
+              </div>
+            }
+            renderItem={(n) => (
+              <div 
                 onClick={() => handleNotificationClick(n)}
-                className="p-4 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer group"
-            >
-              <h4 className="text-sm font-semibold text-gray-200 group-hover:text-brand-300 transition-colors">{n.title}</h4>
-              <p className="text-xs text-gray-400 mt-1">{n.description}</p>
-              {n.actionLabel && (
+                className="p-3.5 mb-2.5 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer group"
+              >
+                <h4 className="text-sm font-semibold text-gray-200 group-hover:text-brand-300 transition-colors truncate">{n.title}</h4>
+                <p className="text-xs text-gray-400 mt-1 line-clamp-2">{n.description}</p>
+                {n.actionLabel && (
                   <button 
                     onClick={(e) => {
-                        e.stopPropagation();
-                        handleNotificationClick(n);
+                      e.stopPropagation();
+                      handleNotificationClick(n);
                     }}
-                    className="w-full mt-3 bg-brand-600 hover:bg-brand-500 text-white text-xs font-medium py-2 rounded-lg transition-colors shadow-lg shadow-brand-600/20"
+                    className="w-full mt-2.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-medium py-1.5 rounded-lg transition-colors shadow-lg shadow-brand-600/20"
                   >
-                      {n.actionLabel}
+                    {n.actionLabel}
                   </button>
-              )}
-            </div>
-          ))}
-          {notifications.length === 0 && (
-             <div className="text-center text-gray-500 py-10">
-                 <Check size={48} className="mx-auto mb-2 opacity-50" />
-                 <p>All caught up!</p>
-             </div>
-          )}
+                )}
+              </div>
+            )}
+          />
         </div>
       </div>
 
@@ -571,9 +581,9 @@ const App: React.FC = () => {
 
         {/* Navigation items (Strictly Cases & Finance only for Client) */}
         <nav className="flex-1 py-6 space-y-1 px-3">
-          {currentNavItems.map((item) => (
+          {currentNavItems.map((item, idx) => (
             <button 
-              key={item.id} 
+              key={`nav_item_${item.id}_${idx}`} 
               onClick={() => { 
                 setActiveView(item.id); 
                 setNavigationFilter(null); 
@@ -611,6 +621,11 @@ const App: React.FC = () => {
               </span>
             </div>
           </div>
+        </div>
+
+        {/* PWA / Play Store Install in Sidebar */}
+        <div className={`px-3 py-1 ${!desktopSidebarExpanded && 'lg:hidden'}`}>
+          <PWAInstallButton variant="sidebar" />
         </div>
 
         {/* Logout at Sidebar Bottom */}
@@ -685,7 +700,10 @@ const App: React.FC = () => {
             ) : null}
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0">
+            {/* Install Mobile / Play Store App */}
+            <PWAInstallButton variant="header" />
+
             {/* Sone se Amount Option (Golden Amount Display & Treasury Breakdown) */}
             <GoldenAmountWidget 
               onOpenFinance={() => setActiveView('finance')}
@@ -723,7 +741,11 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-32 sm:pb-12 custom-scrollbar overscroll-contain">
+        <div 
+          id="main-scroll-container"
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-32 sm:pb-12 custom-scrollbar overscroll-y-auto"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
           {renderContent()}
         </div>
 

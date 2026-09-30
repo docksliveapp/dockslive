@@ -381,8 +381,8 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
           </button>
         </div>
 
-        {/* Tab Navigation for 5 Document Formats */}
-        <div className="border-b border-white/10 bg-slate-950/60 px-4 flex items-center gap-2 overflow-x-auto no-scrollbar py-2">
+        {/* Tab Navigation for 5 Document Formats - Compact Wrap with Zero Horizontal Scroll */}
+        <div className="border-b border-white/10 bg-slate-950/60 px-4 flex flex-wrap items-center gap-1.5 sm:gap-2 py-2.5">
           <button
             onClick={() => setActiveTab('REG_LETTER')}
             className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 whitespace-nowrap transition-all ${
@@ -822,12 +822,12 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
                         </td>
                       </tr>
                     ) : (
-                      displayVehicles.map((v) => {
+                      displayVehicles.map((v, idx) => {
                         const isSelected = selectedIds.includes(v.id);
                         const { maker, model, mra, owner } = extractVehicleFields(v);
                         return (
                           <tr
-                            key={v.id}
+                            key={`off_doc_veh_${v.id || idx}_${idx}`}
                             onClick={() => toggleSelectVehicle(v.id)}
                             className={`cursor-pointer transition-colors ${
                               isSelected ? 'bg-blue-600/15 hover:bg-blue-600/25' : 'hover:bg-white/5'
@@ -916,7 +916,7 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
                     {selectedVehicles.map((v, idx) => {
                       const { maker, model, mra, tare, owner } = extractVehicleFields(v);
                       return (
-                        <tr key={v.id} className="hover:bg-white/5">
+                        <tr key={`off_doc_sel_veh_${v.id || idx}_${idx}`} className="hover:bg-white/5">
                           <td className="p-2.5 text-center text-gray-400">{idx + 1}</td>
                           <td className="p-2.5 font-bold text-white">{v.registrationNumber}</td>
                           <td className="p-2.5">{v.chassisNo || '-'}</td>

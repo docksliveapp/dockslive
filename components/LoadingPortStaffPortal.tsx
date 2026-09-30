@@ -16,6 +16,7 @@ import { PortSearchCaseModal } from './PortSearchCaseModal';
 import { DownloadLoadingBillSearchModal, DownloadClientLedgerModal, AddStaffPaymentModal } from './PortFinanceModals';
 import { downloadLoadingBillPdf } from '../services/pdfExportService';
 import { LiveNotificationCenter } from './LiveNotificationCenter';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface LoadingPortStaffPortalProps {
   onSignOut: () => void;
@@ -483,6 +484,7 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
             </span>
           </div>
           <div className="flex items-center gap-3">
+            <PWAInstallButton variant="header" />
             <LiveNotificationCenter
               currentRole={userRole}
               currentRoles={userRoles}
@@ -632,11 +634,11 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                 <>
                   {/* Mobile Cards View */}
                   <div className="block md:hidden divide-y divide-white/5">
-                    {filteredAllCases.map((c) => {
+                    {filteredAllCases.map((c, cIdx) => {
                       const cntr = c.containers?.[0];
                       return (
                         <div
-                          key={c.id}
+                          key={`port_case_mob_${c.id || cIdx}_${cIdx}`}
                           onClick={() => setSelectedCaseForDetail(c)}
                           className="p-3.5 hover:bg-white/[0.04] transition-colors cursor-pointer space-y-2 active:bg-white/[0.08]"
                         >
@@ -681,11 +683,11 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
-                        {filteredAllCases.map((c) => {
+                        {filteredAllCases.map((c, cIdx) => {
                           const cntr = c.containers?.[0];
                           return (
                             <tr
-                              key={c.id}
+                              key={`port_case_row_${c.id || cIdx}_${cIdx}`}
                               onClick={() => setSelectedCaseForDetail(c)}
                               className="hover:bg-white/[0.03] transition-colors cursor-pointer group"
                             >
@@ -823,12 +825,12 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                     </div>
 
                     <div className="py-1 max-h-64 overflow-y-auto custom-scrollbar space-y-1">
-                      {availablePendingPorts.map(p => {
+                      {availablePendingPorts.map((p, pIdx) => {
                         const isSelected = activePortFilter.toUpperCase() === p.id.toUpperCase();
                         const isAll = p.id === 'ALL';
                         return (
                           <button
-                            key={p.id}
+                            key={`port_btn_${p.id || pIdx}_${pIdx}`}
                             type="button"
                             onClick={() => {
                               setActivePortFilter(p.id);
@@ -895,11 +897,11 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                   <span>Click case to open loading workflow & bill</span>
                 </div>
 
-                {currentFilteredCases.map(c => {
+                {currentFilteredCases.map((c, cIdx) => {
                   const mainCntr = c.containers?.[0];
                   return (
                     <div
-                      key={c.id}
+                      key={`port_wf_case_${c.id || cIdx}_${cIdx}`}
                       onClick={() => setSelectedCaseForWorkflow(c)}
                       className="p-4 sm:p-5 bg-slate-900/80 hover:bg-slate-900 border border-white/10 hover:border-amber-500/50 rounded-3xl cursor-pointer transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group shadow-md"
                     >

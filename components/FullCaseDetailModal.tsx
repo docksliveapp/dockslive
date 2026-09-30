@@ -548,7 +548,7 @@ export const FullCaseDetailModal: React.FC<FullCaseDetailModalProps> = ({
 
                 return (
                   <div
-                    key={stepConfig.id}
+                    key={`fcd_step_${stepConfig.id || index}_${index}`}
                     onClick={() => {
                       if (onOpenWorkflowStep) {
                         onOpenWorkflowStep(stepConfig.id as CaseStatus, index, targetCase);

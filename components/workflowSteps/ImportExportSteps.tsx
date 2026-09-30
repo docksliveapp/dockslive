@@ -331,8 +331,8 @@ export const ImportExportSteps: React.FC<CategoryStepRendererProps> = ({
                 className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:border-brand-500 outline-none"
               >
                 <option value="">-- Choose Trailer from Fleet (or enter below) --</option>
-                {availableVehicles.map(v => (
-                  <option key={v.id} value={v.registrationNumber}>
+                {availableVehicles.map((v, vIdx) => (
+                  <option key={`fleet_veh_${v.id || vIdx}_${vIdx}`} value={v.registrationNumber}>
                     {v.registrationNumber} ({v.type} - Driver: {v.driverName})
                   </option>
                 ))}

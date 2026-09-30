@@ -1297,12 +1297,12 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   No matching charges found. Type above and click &quot;Add New Charge&quot; to create it!
                 </div>
               ) : (
-                filteredPickerCharges.map((item) => {
+                filteredPickerCharges.map((item, idx) => {
                   const isChecked = selectedPickerCharges[item.name.toLowerCase()] ?? false;
 
                   return (
                     <label 
-                      key={item.id}
+                      key={`picker_chg_${item.id || idx}_${idx}`}
                       className={`p-2.5 rounded-xl border flex items-center justify-between gap-2.5 cursor-pointer transition ${
                         isChecked 
                           ? 'bg-brand-950/40 border-brand-500/40 text-white' 

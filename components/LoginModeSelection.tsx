@@ -314,9 +314,9 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
                   Universal Password for all accounts is: <strong className="text-amber-300 font-mono">dpl01234</strong>
                 </p>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {DEFAULT_DATABASE_USERS.map((u) => (
+                  {DEFAULT_DATABASE_USERS.map((u, idx) => (
                     <button
-                      key={u.id}
+                      key={`cred_guide_${u.id || u.userId || idx}_${idx}`}
                       type="button"
                       onClick={() => handleQuickFill(u)}
                       className="p-2 rounded-lg bg-white/5 hover:bg-amber-500/10 border border-white/10 hover:border-amber-500/30 text-left transition cursor-pointer group"

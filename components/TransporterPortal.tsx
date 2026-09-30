@@ -25,6 +25,7 @@ import { safeAppStorage } from '../services/storage';
 import { compressAndPrepareFile } from '../services/fileUtils';
 import { AvailableVehiclesView } from './AvailableVehiclesView';
 import { LiveNotificationCenter } from './LiveNotificationCenter';
+import { PWAInstallButton } from './PWAInstallButton';
 import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
 import { UserRole } from '../types';
 import { sendAppNotification } from '../services/notificationService';
@@ -270,12 +271,13 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     await sendAppNotification({
       title: `New Vehicle Registration: ${req.vehicleNo}`,
       description: `${selectedTransporterName} submitted vehicle ${req.vehicleNo} (${newRegForm.make}) with driver ${newRegForm.driverName || 'N/A'} for inspection & clearance.`,
-      targetRole: UserRole.VEHICLE_MANAGER,
+      targetRole: 'VEHICLE_MANAGER, OPERATIONS_MANAGER, ADMIN',
       targetView: 'vehicles',
       targetFilter: { vehicleNo: req.vehicleNo },
       type: 'ACTION',
       notificationSubType: 'CASE_APPROVAL',
       actionLabel: 'Inspect & Approve',
+      priority: 'HIGH',
       performedBy: selectedTransporterName,
       performedByRole: 'TRANSPORTER',
       category: 'TRANSPORTER'
@@ -322,12 +324,13 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     await sendAppNotification({
       title: `Vehicle Renewal Request: ${req.vehicleNo}`,
       description: `${selectedTransporterName} submitted a renewal request for vehicle ${req.vehicleNo}. Reason: ${renewalForm.reason || 'Bonded Route Renewal'}`,
-      targetRole: UserRole.VEHICLE_MANAGER,
+      targetRole: 'VEHICLE_MANAGER, OPERATIONS_MANAGER, ADMIN',
       targetView: 'vehicles',
       targetFilter: { vehicleNo: req.vehicleNo },
       type: 'ACTION',
       notificationSubType: 'CASE_APPROVAL',
       actionLabel: 'Review Renewal',
+      priority: 'HIGH',
       performedBy: selectedTransporterName,
       performedByRole: 'TRANSPORTER',
       category: 'TRANSPORTER'
@@ -360,12 +363,13 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     await sendAppNotification({
       title: `Vehicle Cancellation Request: ${req.vehicleNo}`,
       description: `${selectedTransporterName} requested cancellation for vehicle ${req.vehicleNo}. Reason: ${cancelReason}`,
-      targetRole: UserRole.VEHICLE_MANAGER,
+      targetRole: 'VEHICLE_MANAGER, OPERATIONS_MANAGER, ADMIN',
       targetView: 'vehicles',
       targetFilter: { vehicleNo: req.vehicleNo },
       type: 'ACTION',
       notificationSubType: 'CANCELLATION_APPROVAL',
       actionLabel: 'Review Cancellation',
+      priority: 'HIGH',
       performedBy: selectedTransporterName,
       performedByRole: 'TRANSPORTER',
       category: 'TRANSPORTER'
@@ -594,10 +598,14 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              {/* Install Mobile / Play Store App */}
+              <PWAInstallButton variant="header" />
+
               {/* Live Notification Center */}
               <LiveNotificationCenter 
                 currentRole={UserRole.TRANSPORTER}
                 userIdentifier={selectedTransporterName}
+                clientName={selectedTransporterName}
               />
 
               <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase hidden sm:inline-block">
@@ -694,8 +702,8 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
                   <span>Requests Pending Approval from Vehicle Manager:</span>
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                  {transporterRequests.filter(r => r.status === 'PENDING').map(req => (
-                    <div key={req.id} className="bg-slate-950 p-2.5 rounded-xl border border-white/10 text-xs">
+                  {transporterRequests.filter(r => r.status === 'PENDING').map((req, idx) => (
+                    <div key={`tp_req_${req.id || idx}_${idx}`} className="bg-slate-950 p-2.5 rounded-xl border border-white/10 text-xs">
                       <div className="flex justify-between items-center">
                         <span className="font-bold text-white font-mono">{req.vehicleNo}</span>
                         <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded">
@@ -727,11 +735,11 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {myVehicles.map((v) => {
+                  {myVehicles.map((v, idx) => {
                     const isReady = availableVehicles.some(av => av.vehicleNo === v.registrationNumber && av.readyStatus === 'READY');
                     return (
                       <div 
-                        key={v.id}
+                        key={`tp_veh_${v.id || idx}_${idx}`}
                         className="bg-slate-900 border border-white/10 hover:border-amber-500/40 rounded-2xl p-5 space-y-4 transition-all shadow-lg"
                       >
                         {/* Top: Reg & Status */}
@@ -860,8 +868,8 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
               </div>
             ) : (
               <div className="space-y-4">
-                {myAssignedCases.map((c) => (
-                  <div key={c.id} className="bg-slate-900 border border-white/10 rounded-2xl p-5 space-y-4">
+                {myAssignedCases.map((c, idx) => (
+                  <div key={`tp_case_${c.id || idx}_${idx}`} className="bg-slate-900 border border-white/10 rounded-2xl p-5 space-y-4">
                     <div className="flex flex-wrap justify-between items-start gap-2 border-b border-white/10 pb-3">
                       <div>
                         <div className="flex items-center gap-2">
@@ -1006,8 +1014,8 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
                         </td>
                       </tr>
                     ) : (
-                      myFinances.map((f) => (
-                        <tr key={f.id} className="hover:bg-white/5 transition">
+                      myFinances.map((f, idx) => (
+                        <tr key={`tp_fin_${f.id || idx}_${idx}`} className="hover:bg-white/5 transition">
                           <td className="p-3 font-mono text-gray-300">{f.date}</td>
                           <td className="p-3 font-medium text-white">{f.party || 'Client / DPL'}</td>
                           <td className="p-3 text-gray-300">{f.category || 'Vehicle Rent'}</td>

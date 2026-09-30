@@ -702,8 +702,8 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
               <span className="font-bold text-sky-400 text-xs uppercase tracking-wider block">
                 Additional / Extra Disbursed Charges:
               </span>
-              {extraCharges.map((ex) => (
-                <div key={ex.id} className="p-3 rounded-2xl bg-sky-500/5 border border-sky-500/20 flex items-center justify-between gap-3">
+              {extraCharges.map((ex, idx) => (
+                <div key={`extra_chg_${ex.id || idx}_${idx}`} className="p-3 rounded-2xl bg-sky-500/5 border border-sky-500/20 flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <span className="font-bold text-white block">{ex.head}</span>
                     <span className="text-[11px] text-emerald-400">

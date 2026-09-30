@@ -67,7 +67,7 @@ export function subscribeToCases(
       snapshot.forEach((docSnap) => {
         casesList.push({ ...docSnap.data(), id: docSnap.id } as Case);
       });
-      onData(casesList);
+      onData(dedupeArrayById(casesList));
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
@@ -125,10 +125,12 @@ export function subscribeToFinances(
     collection(db, path),
     (snapshot) => {
       const items: FinanceEntry[] = [];
+      let idx = 0;
       snapshot.forEach((docSnap) => {
-        items.push({ ...docSnap.data(), id: Number(docSnap.id) || Number(docSnap.data().id) } as FinanceEntry);
+        const numId = parseNumericDocId(docSnap.data().id, docSnap.id, idx++);
+        items.push({ ...docSnap.data(), id: numId } as FinanceEntry);
       });
-      onData(items);
+      onData(dedupeArrayById(items));
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
@@ -264,6 +266,132 @@ export async function syncMonthlyStaffSalariesToPayables(
   return newlyCreated;
 }
 
+/**
+ * Automatically posts recurring monthly fixed expenses (office rent, vehicle loans, internet,
+ * security retainer, utilities) and staff salaries on the 1st of every month
+ * (and immediately on rollover after 12:00 AM midnight of the last date of the month).
+ * Completely automatic without any button click required!
+ */
+export async function autoPostMonthlyRecurringAndSalaries(
+  recurringTemplates?: RecurringFinanceTemplate[],
+  staffUsers?: AppUser[],
+  existingPayables?: FinanceEntry[],
+  existingReceivables?: FinanceEntry[]
+): Promise<{ addedPayables: FinanceEntry[]; addedReceivables: FinanceEntry[] }> {
+  const now = new Date();
+  const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const firstOfMonthDate = `${currentMonthStr}-01`;
+
+  const currentPayables = existingPayables && existingPayables.length > 0 
+    ? existingPayables 
+    : safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', []);
+
+  const currentReceivables = existingReceivables && existingReceivables.length > 0 
+    ? existingReceivables 
+    : safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_receivables', []);
+
+  const addedPayables: FinanceEntry[] = [];
+  const addedReceivables: FinanceEntry[] = [];
+
+  // 1. Process Recurring Fixed Expense Templates
+  const templatesToProcess = (recurringTemplates && recurringTemplates.length > 0)
+    ? recurringTemplates
+    : DEFAULT_RECURRING_TEMPLATES;
+
+  for (const tpl of templatesToProcess) {
+    const isTplActive = tpl.isActive !== undefined ? tpl.isActive : (tpl.active !== undefined ? tpl.active : true);
+    if (!isTplActive) continue;
+
+    const recRef = `REC-${currentMonthStr}-${tpl.id}`;
+    const isPayable = (tpl.type || 'PAYABLE') === 'PAYABLE';
+    const targetList = isPayable ? currentPayables : currentReceivables;
+    const pendingAdded = isPayable ? addedPayables : addedReceivables;
+
+    const alreadyExists = targetList.some(item => item.reference === recRef) || 
+                          pendingAdded.some(item => item.reference === recRef);
+
+    if (!alreadyExists) {
+      const recEntry: FinanceEntry = {
+        id: Date.now() + Math.floor(Math.random() * 100000) + addedPayables.length + addedReceivables.length,
+        date: firstOfMonthDate,
+        description: `${tpl.title} (${tpl.category || 'Fixed Expense'})`,
+        party: tpl.party || 'Vendor / Utility',
+        amount: Number(tpl.amount) || 0,
+        type: isPayable ? 'PAYABLE' : 'RECEIVABLE',
+        status: 'PENDING',
+        category: tpl.category || 'Monthly Overhead',
+        reference: recRef,
+        recurringTemplateId: tpl.id,
+        paymentMethod: 'BANK',
+        bankName: 'HBL Corporate'
+      };
+
+      try {
+        await saveFinanceToFirestore(recEntry);
+      } catch (err) {
+        console.warn(`Could not save auto recurring entry ${recRef} to Firestore:`, err);
+      }
+
+      if (isPayable) {
+        addedPayables.push(recEntry);
+      } else {
+        addedReceivables.push(recEntry);
+      }
+    }
+  }
+
+  // 2. Process Staff Base Salaries
+  if (staffUsers && staffUsers.length > 0) {
+    for (const user of staffUsers) {
+      if (user.role === UserRole.CLIENT || user.role === UserRole.TRANSPORTER) continue;
+      const salary = Number(user.baseSalary || 0);
+      if (salary <= 0) continue;
+
+      const salaryRef = `SAL-${currentMonthStr}-${user.id}`;
+      const alreadyExists = currentPayables.some(
+        p => p.reference === salaryRef || (p.category === 'Staff Payroll & Salaries' && p.party?.trim().toLowerCase() === user.name?.trim().toLowerCase() && p.date === firstOfMonthDate)
+      ) || addedPayables.some(p => p.reference === salaryRef);
+
+      if (!alreadyExists) {
+        const netSalary = Math.max(0, salary - Number(user.loansAdvances || 0));
+        const roleLabel = user.designation || (user.role === UserRole.OFFICE_STAFF ? 'Office Staff' : String(user.role).replace(/_/g, ' '));
+        const salaryEntry: FinanceEntry = {
+          id: Date.now() + Math.floor(Math.random() * 100000) + addedPayables.length,
+          date: firstOfMonthDate,
+          description: `Monthly Salary - ${user.name} (${roleLabel}) [Gross: PKR ${salary.toLocaleString()}]`,
+          party: user.name,
+          amount: netSalary,
+          type: 'PAYABLE',
+          status: 'PENDING',
+          category: 'Staff Payroll & Salaries',
+          reference: salaryRef,
+          paymentMethod: 'BANK',
+          bankName: 'Meezan Bank'
+        };
+
+        try {
+          await saveFinanceToFirestore(salaryEntry);
+        } catch (err) {
+          console.warn('Could not save auto salary payable to Firestore:', err);
+        }
+        addedPayables.push(salaryEntry);
+      }
+    }
+  }
+
+  if (addedPayables.length > 0) {
+    const updatedPay = dedupeArrayById([...addedPayables, ...currentPayables]);
+    safeAppStorage.setJSON('dpl_live_payables', updatedPay);
+  }
+
+  if (addedReceivables.length > 0) {
+    const updatedRec = dedupeArrayById([...addedReceivables, ...currentReceivables]);
+    safeAppStorage.setJSON('dpl_live_receivables', updatedRec);
+  }
+
+  return { addedPayables, addedReceivables };
+}
+
 // VEHICLES
 export function subscribeToVehicles(
   onData: (items: Vehicle[]) => void,
@@ -274,10 +402,12 @@ export function subscribeToVehicles(
     collection(db, path),
     (snapshot) => {
       const items: Vehicle[] = [];
+      let idx = 0;
       snapshot.forEach((docSnap) => {
-        items.push({ ...docSnap.data(), id: Number(docSnap.id) || Number(docSnap.data().id) } as Vehicle);
+        const numId = parseNumericDocId(docSnap.data().id, docSnap.id, idx++);
+        items.push({ ...docSnap.data(), id: numId } as Vehicle);
       });
-      onData(items);
+      onData(dedupeArrayById(items));
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
@@ -335,7 +465,7 @@ export function subscribeToAvailableVehicles(
       snapshot.forEach((docSnap) => {
         items.push({ ...docSnap.data(), id: docSnap.id } as AvailableVehicle);
       });
-      onData(items);
+      onData(dedupeArrayById(items));
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
@@ -368,37 +498,131 @@ export async function deleteAvailableVehicleFromFirestore(id: string): Promise<v
   }
 }
 
+// HELPERS FOR DETERMINISTIC UNIQUE IDS & ARRAY DEDUPLICATION
+export function parseNumericDocId(rawId: any, docSnapId: string, indexOffset: number = 0): number {
+  if (typeof rawId === 'number' && !isNaN(rawId) && rawId > 0) {
+    return rawId;
+  }
+  const parsed = Number(rawId);
+  if (!isNaN(parsed) && parsed > 0) {
+    return parsed;
+  }
+  const snapNum = Number(docSnapId);
+  if (!isNaN(snapNum) && snapNum > 0) {
+    return snapNum;
+  }
+  // Deterministic 32-bit positive integer hash of the string document ID
+  let hash = 0;
+  const str = String(docSnapId || 'doc') + '_' + indexOffset;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash) + 100000 + indexOffset;
+}
+
+export function dedupeArrayById<T extends { id?: any }>(items: T[]): T[] {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item) continue;
+    const rawId = item.id;
+    if (rawId === undefined || rawId === null || rawId === '') {
+      const fallbackId = `item_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 7)}`;
+      (item as any).id = fallbackId;
+      seen.add(String(fallbackId));
+      unique.push(item);
+    } else {
+      const key = String(rawId);
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(item);
+      }
+      // If already seen, drop duplicate to prevent react duplicate key errors
+    }
+  }
+  return unique;
+}
+
 // TRANSPORTER REQUESTS (REGISTRATION, RENEWAL, CANCELLATION)
+const TRANSPORTER_REQUESTS_KEY = 'dpl_live_transporter_requests';
+const NOTIFICATIONS_STORAGE_KEY = 'dpl_live_notifications';
+
 export function subscribeToTransporterRequests(
   onData: (items: TransporterRequest[]) => void,
   onError?: (err: any) => void
 ) {
   const path = 'transporter_requests';
-  return onSnapshot(
+  
+  // 1. Immediately emit from local safeAppStorage cache if available
+  const cached = safeAppStorage.getJSON<TransporterRequest[]>(TRANSPORTER_REQUESTS_KEY, []);
+  if (cached && cached.length > 0) {
+    onData(dedupeArrayById(cached));
+  }
+
+  // 2. Listen for intra-tab updates
+  const handleLocalUpdate = (e: any) => {
+    const fresh = safeAppStorage.getJSON<TransporterRequest[]>(TRANSPORTER_REQUESTS_KEY, []);
+    if (fresh) onData(dedupeArrayById(fresh));
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('dpl_transporter_requests_updated', handleLocalUpdate);
+  }
+
+  // 3. Subscribe to live Firestore collection
+  const unsubscribeSnapshot = onSnapshot(
     collection(db, path),
     (snapshot) => {
       const items: TransporterRequest[] = [];
       snapshot.forEach((docSnap) => {
         items.push({ ...docSnap.data(), id: docSnap.id } as TransporterRequest);
       });
-      onData(items);
+      // Deduplicate and sort newest first
+      const uniqueItems = dedupeArrayById(items);
+      uniqueItems.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      safeAppStorage.setJSON(TRANSPORTER_REQUESTS_KEY, uniqueItems);
+      onData(uniqueItems);
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
       if (onError) onError(error);
     }
   );
+
+  return () => {
+    unsubscribeSnapshot();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('dpl_transporter_requests_updated', handleLocalUpdate);
+    }
+  };
 }
 
 export async function saveTransporterRequestToFirestore(request: TransporterRequest): Promise<void> {
   const path = 'transporter_requests';
   const docId = String(request.id || `req_${Date.now()}`);
+  const payload = sanitizeForFirestore({
+    ...request,
+    id: docId,
+    updatedAt: new Date().toISOString()
+  });
+
+  // Save to local storage cache immediately
   try {
-    const payload = sanitizeForFirestore({
-      ...request,
-      id: docId,
-      updatedAt: new Date().toISOString()
-    });
+    const current = safeAppStorage.getJSON<TransporterRequest[]>(TRANSPORTER_REQUESTS_KEY, []) || [];
+    const filtered = current.filter(r => String(r.id) !== docId);
+    const updated = [payload as TransporterRequest, ...filtered];
+    safeAppStorage.setJSON(TRANSPORTER_REQUESTS_KEY, updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dpl_transporter_requests_updated', { detail: payload }));
+    }
+  } catch (storageErr) {
+    console.warn("Storage sync error on saveTransporterRequest:", storageErr);
+  }
+
+  // Persist to Firestore
+  try {
     await setDoc(doc(db, path, docId), payload);
   } catch (error) {
     console.warn(`Firestore saveTransporterRequest warning:`, error);
@@ -408,8 +632,22 @@ export async function saveTransporterRequestToFirestore(request: TransporterRequ
 export async function updateTransporterRequestInFirestore(request: TransporterRequest): Promise<void> {
   const path = 'transporter_requests';
   const docId = String(request.id);
+  const payload = sanitizeForFirestore({ ...request, updatedAt: new Date().toISOString() });
+
+  // Update local storage cache immediately
   try {
-    const payload = sanitizeForFirestore({ ...request, updatedAt: new Date().toISOString() });
+    const current = safeAppStorage.getJSON<TransporterRequest[]>(TRANSPORTER_REQUESTS_KEY, []) || [];
+    const updated = current.map(r => String(r.id) === docId ? { ...r, ...payload } : r);
+    safeAppStorage.setJSON(TRANSPORTER_REQUESTS_KEY, updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dpl_transporter_requests_updated', { detail: payload }));
+    }
+  } catch (storageErr) {
+    console.warn("Storage sync error on updateTransporterRequest:", storageErr);
+  }
+
+  // Persist to Firestore
+  try {
     await setDoc(doc(db, path, docId), payload, { merge: true });
   } catch (error) {
     console.warn(`Firestore updateTransporterRequest warning:`, error);
@@ -422,31 +660,84 @@ export function subscribeToNotifications(
   onError?: (err: any) => void
 ) {
   const path = 'notifications';
-  return onSnapshot(
+
+  // 1. Immediately emit local cached notifications
+  const cached = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []);
+  if (cached && cached.length > 0) {
+    onData(dedupeArrayById(cached));
+  }
+
+  // 2. Intra-window broadcast listener
+  const handleLocalUpdate = () => {
+    const fresh = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []);
+    if (fresh) onData(dedupeArrayById(fresh));
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('dpl_notification_updated', handleLocalUpdate);
+  }
+
+  // 3. Firestore live subscription
+  const unsubscribeSnapshot = onSnapshot(
     collection(db, path),
     (snapshot) => {
       const items: AppNotification[] = [];
+      let idx = 0;
       snapshot.forEach((docSnap) => {
-        items.push({ ...docSnap.data(), id: Number(docSnap.id) || Number(docSnap.data().id) } as AppNotification);
+        const d = docSnap.data();
+        const numId = parseNumericDocId(d.id, docSnap.id, idx++);
+        items.push({ ...d, id: numId } as AppNotification);
       });
-      onData(items);
+      // Deduplicate items so same key is never emitted twice
+      const uniqueItems = dedupeArrayById(items);
+      // Sort newest first
+      uniqueItems.sort((a, b) => {
+        const timeA = a.id || 0;
+        const timeB = b.id || 0;
+        return timeB - timeA;
+      });
+
+      safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, uniqueItems);
+      onData(uniqueItems);
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
       if (onError) onError(error);
     }
   );
+
+  return () => {
+    unsubscribeSnapshot();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('dpl_notification_updated', handleLocalUpdate);
+    }
+  };
 }
 
 export async function saveNotificationToFirestore(notif: AppNotification): Promise<void> {
   const path = 'notifications';
-  const docId = String(notif.id || Date.now());
+  const numId = notif.id || (Date.now() + Math.floor(Math.random() * 1000));
+  const docId = String(numId);
+  const payload = sanitizeForFirestore({
+    ...notif,
+    id: numId,
+    updatedAt: new Date().toISOString()
+  });
+
+  // Save to local storage cache immediately so UI reacts instantly
   try {
-    const payload = sanitizeForFirestore({
-      ...notif,
-      id: Number(docId),
-      updatedAt: new Date().toISOString()
-    });
+    const current = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []) || [];
+    const filtered = current.filter(n => Number(n.id) !== Number(numId) && String(n.id) !== docId);
+    const updated = dedupeArrayById([payload as AppNotification, ...filtered]);
+    safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dpl_notification_updated', { detail: payload }));
+    }
+  } catch (storageErr) {
+    console.warn("Storage sync error on saveNotification:", storageErr);
+  }
+
+  // Persist to Firestore
+  try {
     await setDoc(doc(db, path, docId), payload);
   } catch (error) {
     console.warn(`Firestore saveNotification warning:`, error);
@@ -455,9 +746,24 @@ export async function saveNotificationToFirestore(notif: AppNotification): Promi
 
 export async function updateNotificationInFirestore(notif: AppNotification): Promise<void> {
   const path = 'notifications';
-  const docId = String(notif.id);
+  const numId = Number(notif.id);
+  const docId = String(numId);
+  const payload = sanitizeForFirestore({ ...notif, updatedAt: new Date().toISOString() });
+
+  // Update local storage cache immediately
   try {
-    const payload = sanitizeForFirestore({ ...notif, updatedAt: new Date().toISOString() });
+    const current = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []) || [];
+    const updated = dedupeArrayById(current.map(n => Number(n.id) === numId ? { ...n, ...payload } : n));
+    safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dpl_notification_updated', { detail: payload }));
+    }
+  } catch (storageErr) {
+    console.warn("Storage sync error on updateNotification:", storageErr);
+  }
+
+  // Persist to Firestore
+  try {
     await setDoc(doc(db, path, docId), payload, { merge: true });
   } catch (error) {
     console.warn(`Firestore updateNotification warning:`, error);

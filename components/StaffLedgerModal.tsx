@@ -353,8 +353,8 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {computedRows.map((row) => (
-                    <tr key={row.id} className="hover:bg-white/5 transition-colors">
+                  {computedRows.map((row, idx) => (
+                    <tr key={`staff_led_row_${row.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-3 font-mono text-gray-300 whitespace-nowrap">{row.date}</td>
                       <td className="p-3">
                         <span className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-gray-300 text-[10px] font-medium">

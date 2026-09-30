@@ -15,3 +15,13 @@ root.render(
     <App />
   </ErrorBoundary>
 );
+
+// Register Service Worker for PWA / Google Play Store TWA
+if ('serviceWorker' in navigator && process.env.NODE_ENV !== 'test') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('Service worker registration failed:', err);
+    });
+  });
+}
+

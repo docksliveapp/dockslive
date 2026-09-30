@@ -35,6 +35,7 @@ import {
 } from '../services/dbService';
 import { AvailableVehiclesView } from './AvailableVehiclesView';
 import { LiveNotificationCenter } from './LiveNotificationCenter';
+import { PWAInstallButton } from './PWAInstallButton';
 import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
 
 // Standard Route Pricing Matrix
@@ -1169,7 +1170,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Install Mobile / Play Store App */}
+            <PWAInstallButton variant="header" />
+
             {/* Live Notification Center */}
             <LiveNotificationCenter 
               currentRole={UserRole.CLIENT}
@@ -1295,9 +1299,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {filteredPendingCases.map((c) => (
+                  {filteredPendingCases.map((c, idx) => (
                     <div 
-                      key={c.id}
+                      key={`pending_case_${c.id || idx}_${idx}`}
                       onClick={() => {
                         setSelectedCase(c);
                         setShowCaseManagerViewModal(true);
@@ -1367,9 +1371,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {filteredCompleteCases.map((c) => (
+                  {filteredCompleteCases.map((c, idx) => (
                     <div 
-                      key={c.id}
+                      key={`comp_case_${c.id || idx}_${idx}`}
                       onClick={() => {
                         setSelectedCase(c);
                         setShowCaseManagerViewModal(true);
@@ -1466,11 +1470,11 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               </h3>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {filteredStatusPendingCases.map((c) => {
+                {filteredStatusPendingCases.map((c, idx) => {
                   const isClientAction = c.status === CaseStatus.SHIPPING_LINE_DO || c.status === CaseStatus.TP_FILING;
                   return (
                     <div
-                      key={c.id}
+                      key={`wf_pend_case_${c.id || idx}_${idx}`}
                       onClick={() => setSelectedWorkflowCase(c)}
                       className="bg-slate-900 border border-white/10 hover:border-amber-500/50 rounded-2xl p-5 space-y-3 cursor-pointer transition-all hover:shadow-xl group"
                     >
@@ -1724,8 +1728,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         </td>
                       </tr>
                     ) : (
-                      passbookEntries.map((row) => (
-                        <tr key={row.id} className="hover:bg-white/5 transition">
+                      passbookEntries.map((row, idx) => (
+                        <tr key={`pb_row_${row.id || idx}_${idx}`} className="hover:bg-white/5 transition">
                           <td className="p-3 font-mono text-gray-300">{row.date}</td>
                           <td className="p-3">
                             <span className="font-semibold text-white">{row.typeName}</span>
@@ -1849,7 +1853,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                       return (
                         <div 
-                          key={st.id} 
+                          key={`cl_step_${st.id || sIdx}_${sIdx}`} 
                           onClick={() => handleOpenClientStepModal(st.status, sIdx, selectedWorkflowCase)}
                           className={`p-3 sm:p-3.5 rounded-xl border transition-all cursor-pointer group hover:scale-[1.01] ${
                             isComplete 
@@ -2057,9 +2061,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     <p className="text-xs">No documents attached to this case yet.</p>
                   </div>
                 ) : (
-                  caseDownloadableDocs.map((docItem) => (
+                  caseDownloadableDocs.map((docItem, dIdx) => (
                     <div 
-                      key={docItem.id} 
+                      key={`case_doc_${docItem.id || dIdx}_${dIdx}`} 
                       className="p-3.5 flex items-center justify-between gap-3 hover:bg-white/[0.03] transition"
                     >
                       <div className="flex items-center gap-3 min-w-0">
@@ -2331,9 +2335,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     { id: 'Company Payment (DPL)', label: 'Company (DPL)', desc: 'DPL Invoice Settlement' },
                     { id: 'Loading Payment', label: 'Loading Staff', desc: 'Port Loading Desk' },
                     { id: 'Vehicle Rent', label: 'Vehicle Rent', desc: 'Transporter Freight' }
-                  ].map(cat => (
+                  ].map((cat, cIdx) => (
                     <button
-                      key={cat.id}
+                      key={`cat_btn_${cat.id}_${cIdx}`}
                       type="button"
                       onClick={() => setPaymentForm(prev => ({ ...prev, category: cat.id as any }))}
                       className={`p-2.5 rounded-xl border text-left transition ${
@@ -2367,8 +2371,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:border-emerald-500 outline-none"
                 >
                   <option value="">-- Select Case --</option>
-                  {paymentEligibleCases.map(c => (
-                    <option key={c.id} value={c.caseNo}>
+                  {paymentEligibleCases.map((c, idx) => (
+                    <option key={`pay_case_opt_${c.id || idx}_${idx}`} value={c.caseNo}>
                       {c.caseNo} ({c.pol} &rarr; {c.pod}) - B/L: {c.extractedData?.blNumber || 'N/A'}
                     </option>
                   ))}
@@ -2577,8 +2581,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             </div>
 
             <div className="space-y-2">
-              {clientCases.map(c => (
-                <div key={c.id} className="bg-slate-950 p-3 rounded-xl border border-white/10 flex justify-between items-center text-xs">
+              {clientCases.map((c, idx) => (
+                <div key={`cl_case_bill_${c.id || idx}_${idx}`} className="bg-slate-950 p-3 rounded-xl border border-white/10 flex justify-between items-center text-xs">
                   <div>
                     <span className="font-mono font-bold text-emerald-400 text-sm">
                       LB-26-{c.caseNo.split('-').pop()}

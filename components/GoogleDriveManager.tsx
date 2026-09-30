@@ -651,8 +651,8 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 font-sans">
-                {backups.map((b) => (
-                  <tr key={b.id} className="hover:bg-white/[0.02] transition-colors">
+                {backups.map((b, idx) => (
+                  <tr key={`gd_backup_${b.id || idx}_${idx}`} className="hover:bg-white/[0.02] transition-colors">
                     <td className="py-3.5 px-4 font-mono font-medium text-white flex items-center gap-2">
                       <FileJson size={16} className="text-amber-400 shrink-0" />
                       <span className="truncate max-w-xs">{b.name}</span>

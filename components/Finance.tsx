@@ -22,6 +22,7 @@ import {
   saveFinanceToFirestore, 
   updateFinanceInFirestore,
   deleteFinanceFromFirestore,
+  dedupeArrayById,
   subscribeToCases,
   subscribeToClients,
   subscribeToUsers,
@@ -30,7 +31,8 @@ import {
   deleteRecurringTemplateFromFirestore,
   saveClientToFirestore,
   DEFAULT_CLIENTS,
-  syncMonthlyStaffSalariesToPayables
+  syncMonthlyStaffSalariesToPayables,
+  autoPostMonthlyRecurringAndSalaries
 } from '../services/dbService';
 import { exportCSVFile, compressAndPrepareFile, convertImageToPdf } from '../services/fileUtils';
 import { safeAppStorage } from '../services/storage';
@@ -75,13 +77,13 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
   const [activeNotificationId, setActiveNotificationId] = useState<number | null>(null);
   const [financeData, setFinanceData] = useState<FinanceEntry[]>(() => {
-    return safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', INITIAL_FINANCE_DATA);
+    return dedupeArrayById(safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', INITIAL_FINANCE_DATA));
   });
   const [receivables, setReceivables] = useState<FinanceEntry[]>(() => {
-    return safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_receivables', INITIAL_RECEIVABLES);
+    return dedupeArrayById(safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_receivables', INITIAL_RECEIVABLES));
   });
   const [payables, setPayables] = useState<FinanceEntry[]>(() => {
-    return safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', INITIAL_PAYABLES);
+    return dedupeArrayById(safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', INITIAL_PAYABLES));
   });
   const [cases, setCases] = useState<Case[]>(() => {
     return safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
@@ -118,16 +120,16 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
   useEffect(() => {
     const handleSync = () => {
       const storedCases = safeAppStorage.getJSON<Case[] | null>('dpl_live_cases', null);
-      setCases(Array.isArray(storedCases) ? storedCases : []);
+      setCases(Array.isArray(storedCases) ? dedupeArrayById(storedCases) : []);
 
       const storedFinance = safeAppStorage.getJSON<FinanceEntry[] | null>('dpl_live_finance', null);
-      setFinanceData(Array.isArray(storedFinance) ? storedFinance : []);
+      setFinanceData(Array.isArray(storedFinance) ? dedupeArrayById(storedFinance) : []);
 
       const storedRecv = safeAppStorage.getJSON<FinanceEntry[] | null>('dpl_live_receivables', null);
-      setReceivables(Array.isArray(storedRecv) ? storedRecv : []);
+      setReceivables(Array.isArray(storedRecv) ? dedupeArrayById(storedRecv) : []);
 
       const storedPay = safeAppStorage.getJSON<FinanceEntry[] | null>('dpl_live_payables', null);
-      setPayables(Array.isArray(storedPay) ? storedPay : []);
+      setPayables(Array.isArray(storedPay) ? dedupeArrayById(storedPay) : []);
     };
 
     window.addEventListener('dpl_cases_updated', handleSync);
@@ -389,7 +391,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       bankName: transferDestination === 'DRAWER' ? undefined : transferDestination
     };
 
-    setFinanceData(prev => [inflowEntry, outflowEntry, ...prev]);
+    setFinanceData(prev => dedupeArrayById([inflowEntry, outflowEntry, ...prev]));
     await saveFinanceToFirestore(outflowEntry).catch(() => {});
     await saveFinanceToFirestore(inflowEntry).catch(() => {});
     logActivity(`Internal Transfer: PKR ${amt.toLocaleString()} from ${sourceLabel} to ${destLabel}`, 'FINANCE');
@@ -418,9 +420,9 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
   useEffect(() => {
     const unsubscribe = subscribeToFinances((items) => {
       if (items) {
-        const cashList = items.filter(i => i.type === 'INCOME' || i.type === 'EXPENSE');
-        const recvList = items.filter(i => i.type === 'RECEIVABLE');
-        const payList = items.filter(i => i.type === 'PAYABLE');
+        const cashList = dedupeArrayById(items.filter(i => i.type === 'INCOME' || i.type === 'EXPENSE'));
+        const recvList = dedupeArrayById(items.filter(i => i.type === 'RECEIVABLE'));
+        const payList = dedupeArrayById(items.filter(i => i.type === 'PAYABLE'));
 
         setFinanceData(cashList);
         setReceivables(recvList);
@@ -482,101 +484,64 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     return () => unsubscribe();
   }, []);
 
-  // One-time purge for any previously auto-generated mock recurring/salary entries that were posted during reset
+  // AUTOMATIC RECURRING EXPENSES & SALARIES POSTING
+  // Fully automatic without requiring any manual button click.
+  // Checks on mount and runs an active interval every 60s to detect midnight rollover into the 1st of the month.
   useEffect(() => {
-    const phantomEntries = payables.filter(p => p.reference?.startsWith('REC-') || p.reference?.startsWith('SAL-'));
-    if (phantomEntries.length > 0 && safeAppStorage.getItem('dpl_cleanup_phantom_v3') !== 'done') {
-      safeAppStorage.setItem('dpl_cleanup_phantom_v3', 'done');
-      phantomEntries.forEach(p => {
-        if (p.id) deleteFinanceFromFirestore(p.id).catch(() => {});
-      });
-      setPayables(prev => prev.filter(p => !p.reference?.startsWith('REC-') && !p.reference?.startsWith('SAL-')));
-      safeAppStorage.setJSON('dpl_live_payables', []);
-    }
-  }, [payables]);
+    let isCancelled = false;
 
-  // Automatic staff salary generation on the 1st of every month for all office staff members (regardless of role)
-  useEffect(() => {
-    if (!users || users.length === 0) return;
-    syncMonthlyStaffSalariesToPayables(users, payables).then((created) => {
-      if (created && created.length > 0) {
-        setPayables(prev => {
-          const combined = [...created, ...prev];
-          safeAppStorage.setJSON('dpl_live_payables', combined);
-          return combined;
-        });
+    const executeAutoPost = async () => {
+      try {
+        const result = await autoPostMonthlyRecurringAndSalaries(
+          recurringTemplates,
+          users,
+          payables,
+          receivables
+        );
+
+        if (!isCancelled && (result.addedPayables.length > 0 || result.addedReceivables.length > 0)) {
+          if (result.addedPayables.length > 0) {
+            setPayables(prev => dedupeArrayById([...result.addedPayables, ...prev]));
+          }
+          if (result.addedReceivables.length > 0) {
+            setReceivables(prev => dedupeArrayById([...result.addedReceivables, ...prev]));
+          }
+        }
+      } catch (err) {
+        console.warn('Auto-post monthly recurring and salary notice:', err);
       }
-    }).catch((e) => console.warn('Salary auto-sync notice:', e));
-  }, [users]);
+    };
 
-  // MANUAL POST ALL FIXED EXPENSES & SALARIES FOR CURRENT MONTH
+    executeAutoPost();
+
+    // Check every 60s so midnight rollover after the last date of the month triggers auto-posting immediately
+    const timer = setInterval(executeAutoPost, 60000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(timer);
+    };
+  }, [users, recurringTemplates]);
+
   const handlePostAllMonthlyFixedExpenses = async () => {
     setIsPostingRecurring(true);
-    setRecurringPostMessage(null);
     try {
-      const now = new Date();
-      const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const firstOfMonthDate = `${currentMonthStr}-01`;
-      let addedCount = 0;
-
-      // 1. Post recurring templates
-      for (const tpl of recurringTemplates) {
-        if (tpl.active) {
-          const recRef = `REC-${currentMonthStr}-${tpl.id}`;
-          const targetList = tpl.type === 'PAYABLE' ? payables : receivables;
-          const alreadyExists = targetList.some(item => item.reference === recRef);
-          if (!alreadyExists) {
-            const recEntry: FinanceEntry = {
-              id: Date.now() + Math.floor(Math.random() * 1000),
-              date: firstOfMonthDate,
-              description: `${tpl.title} (${tpl.category})`,
-              party: tpl.party,
-              amount: tpl.amount,
-              type: tpl.type,
-              status: 'PENDING',
-              category: tpl.category,
-              reference: recRef,
-              recurringTemplateId: tpl.id,
-              paymentMethod: 'BANK',
-              bankName: 'HBL Corporate'
-            };
-            await saveFinanceToFirestore(recEntry);
-            addedCount++;
-          }
-        }
+      const result = await autoPostMonthlyRecurringAndSalaries(
+        recurringTemplates,
+        users,
+        payables,
+        receivables
+      );
+      if (result.addedPayables.length > 0) {
+        setPayables(prev => dedupeArrayById([...result.addedPayables, ...prev]));
       }
-
-      // 2. Post staff salaries for all staff members (regardless of assigned role)
-      for (const u of users) {
-        if (u.role !== UserRole.CLIENT && u.role !== UserRole.TRANSPORTER && Number(u.baseSalary || 0) > 0) {
-          const salaryRef = `SAL-${currentMonthStr}-${u.id}`;
-          const alreadyExists = payables.some(p => p.reference === salaryRef || (p.category === 'Staff Payroll & Salaries' && p.party?.trim().toLowerCase() === u.name?.trim().toLowerCase() && p.date === firstOfMonthDate));
-          if (!alreadyExists) {
-            const netSalary = Math.max(0, Number(u.baseSalary || 0) - Number(u.loansAdvances || 0));
-            const roleLabel = u.designation || (u.role === UserRole.OFFICE_STAFF ? 'Office Staff' : String(u.role).replace(/_/g, ' '));
-            const salaryPayable: FinanceEntry = {
-              id: Date.now() + Math.floor(Math.random() * 1000) + addedCount,
-              date: firstOfMonthDate,
-              description: `Monthly Salary - ${u.name} (${roleLabel}) [Gross: PKR ${Number(u.baseSalary).toLocaleString()}]`,
-              party: u.name,
-              amount: netSalary,
-              type: 'PAYABLE',
-              status: 'PENDING',
-              category: 'Staff Payroll & Salaries',
-              reference: salaryRef,
-              paymentMethod: 'BANK',
-              bankName: 'Meezan Bank'
-            };
-            await saveFinanceToFirestore(salaryPayable);
-            addedCount++;
-          }
-        }
+      if (result.addedReceivables.length > 0) {
+        setReceivables(prev => dedupeArrayById([...result.addedReceivables, ...prev]));
       }
-
-      setRecurringPostMessage(`Successfully verified and posted ${addedCount} monthly entries for ${currentMonthStr}!`);
+      setRecurringPostMessage(`Posted ${result.addedPayables.length} payables and ${result.addedReceivables.length} receivables.`);
+      setTimeout(() => setRecurringPostMessage(null), 4000);
     } catch (err) {
-      console.error(err);
-      setRecurringPostMessage('Failed to post monthly fixed expenses.');
+      console.error('Error posting monthly fixed expenses:', err);
     } finally {
       setIsPostingRecurring(false);
     }
@@ -1631,7 +1596,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         bankName,
         transactionId
       };
-      setFinanceData(prev => [expenseEntry, ...prev]);
+      setFinanceData(prev => dedupeArrayById([expenseEntry, ...prev]));
       saveFinanceToFirestore(expenseEntry).catch(() => {});
     }
 
@@ -1653,7 +1618,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         bankName,
         transactionId
       };
-      setFinanceData(prev => [incomeEntry, ...prev]);
+      setFinanceData(prev => dedupeArrayById([incomeEntry, ...prev]));
       saveFinanceToFirestore(incomeEntry).catch(() => {});
     }
 
@@ -1713,7 +1678,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       transactionId: receivePaymentTrx || undefined
     };
 
-    setFinanceData(prev => [incomeEntry, ...prev]);
+    setFinanceData(prev => dedupeArrayById([incomeEntry, ...prev]));
     await saveFinanceToFirestore(incomeEntry);
 
     // If it's a direct receivable entry in Firestore, update it
@@ -1803,9 +1768,9 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       documentName: newTransaction.documentName
     };
 
-    if (transactionType === 'PAYABLE') setPayables([entry, ...payables]);
-    else if (transactionType === 'RECEIVABLE') setReceivables([entry, ...receivables]);
-    else setFinanceData([entry, ...financeData]);
+    if (transactionType === 'PAYABLE') setPayables(prev => dedupeArrayById([entry, ...prev]));
+    else if (transactionType === 'RECEIVABLE') setReceivables(prev => dedupeArrayById([entry, ...prev]));
+    else setFinanceData(prev => dedupeArrayById([entry, ...prev]));
 
     saveFinanceToFirestore(entry).catch((e) => console.warn("Firestore saveFinance error:", e));
     logActivity(`${entry.type}: ${entry.reference} - PKR ${entry.amount.toLocaleString()} for ${entry.party}`, 'FINANCE');
@@ -2759,11 +2724,11 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               </div>
 
               {/* Cards for each Bank: HBL, Meezan, Bank Al Habib, MCB Islamic, etc. */}
-              {treasuryBreakdown.banks.map(bank => {
+              {treasuryBreakdown.banks.map((bank, bIdx) => {
                 const isSelected = statFilterSubtab === `BANK_${bank.name}`;
                 return (
                   <div
-                    key={bank.id}
+                    key={`treas_bank_${bank.id || bIdx}_${bIdx}`}
                     onClick={() => setStatFilterSubtab(isSelected ? 'ALL' : `BANK_${bank.name}`)}
                     className={`p-4 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
                       isSelected
@@ -2830,7 +2795,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 { id: 'EXPENSE', label: 'Outflows Only (-)' }
               ].map(tab => (
                 <button
-                  key={tab.id}
+                  key={`cash_tab_${tab.id}`}
                   onClick={() => setStatFilterSubtab(tab.id)}
                   className={`px-3 py-1 text-xs rounded-lg font-medium transition-all ${
                     statFilterSubtab === tab.id
@@ -2868,8 +2833,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {filtered.map(entry => (
-                  <tr key={entry.id} className="hover:bg-white/5 transition-colors">
+                {filtered.map((entry, idx) => (
+                  <tr key={`cash_row_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                     <td className="p-3">
                       <span className="font-mono text-white block">{entry.date}</span>
                       <span className="text-[10px] text-gray-400 font-mono">{entry.reference || `REF-${entry.id}`}</span>
@@ -2983,7 +2948,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 { id: 'PAID', label: 'Settled & Cleared' }
               ].map(tab => (
                 <button
-                  key={tab.id}
+                  key={`inv_tab_${tab.id}`}
                   onClick={() => setStatFilterSubtab(tab.id)}
                   className={`px-3 py-1 text-xs rounded-lg font-medium transition-all ${
                     statFilterSubtab === tab.id
@@ -3023,10 +2988,10 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {filtered.map(entry => {
+                {filtered.map((entry, idx) => {
                   const remaining = entry.remainingAmount !== undefined ? entry.remainingAmount : (entry.status === 'PAID' ? 0 : entry.amount);
                   return (
-                    <tr key={entry.id} className="hover:bg-white/5 transition-colors">
+                    <tr key={`inv_row_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-3">
                         <span className="font-mono text-white block">{entry.date}</span>
                         <span className="text-[10px] text-purple-300 font-mono">{entry.reference || `INV-${entry.id}`}</span>
@@ -3150,7 +3115,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 { id: 'PAID', label: 'Paid Bills' }
               ].map(tab => (
                 <button
-                  key={tab.id}
+                  key={`pay_tab_${tab.id}`}
                   onClick={() => setStatFilterSubtab(tab.id)}
                   className={`px-3 py-1 text-xs rounded-lg font-medium transition-all ${
                     statFilterSubtab === tab.id
@@ -3188,8 +3153,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {filtered.map(entry => (
-                  <tr key={entry.id} className="hover:bg-white/5 transition-colors">
+                {filtered.map((entry, idx) => (
+                  <tr key={`pay_row_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                     <td className="p-3">
                       <span className="font-mono text-white block">{entry.date}</span>
                       <span className="text-[10px] text-gray-400 font-mono">{entry.reference || `PAY-${entry.id}`}</span>
@@ -3303,7 +3268,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 { id: 'CASH', label: 'Cash Receipts' }
               ].map(tab => (
                 <button
-                  key={tab.id}
+                  key={`rec_tab_${tab.id}`}
                   onClick={() => setStatFilterSubtab(tab.id)}
                   className={`px-3 py-1 text-xs rounded-lg font-medium transition-all ${
                     statFilterSubtab === tab.id
@@ -3341,8 +3306,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {filtered.map(entry => (
-                  <tr key={entry.id} className="hover:bg-white/5 transition-colors">
+                {filtered.map((entry, idx) => (
+                  <tr key={`rec_row_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                     <td className="p-3">
                       <span className="font-mono text-white block">{entry.date}</span>
                       <span className="text-[10px] text-purple-300 font-mono">{entry.reference || `REC-${entry.id}`}</span>
@@ -3494,7 +3459,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             </div>
 
             {/* Mobile View: Compact, Single-Row per Client Card */}
-            <div className="block sm:hidden divide-y divide-white/10 touch-pan-y">
+            <div className="block sm:hidden divide-y divide-white/10">
               {filteredClientReceivables.length === 0 ? (
                 <div className="p-8 text-center text-gray-400 text-xs">No client ledger accounts found.</div>
               ) : (
@@ -3586,8 +3551,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                             Billing Breakdown ({client.invoices.length} Invoices)
                           </span>
                           <div className="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar">
-                            {client.invoices.map((inv) => (
-                              <div key={inv.id} className="p-2 bg-white/5 rounded border border-white/5 flex items-center justify-between gap-2 text-xs">
+                            {client.invoices.map((inv, invIdx) => (
+                              <div key={`cl_inv_card_${inv.id || invIdx}_${invIdx}`} className="p-2 bg-white/5 rounded border border-white/5 flex items-center justify-between gap-2 text-xs">
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-1.5">
                                     <span className="font-mono text-brand-300 font-bold text-[11px]">{inv.reference}</span>
@@ -3626,7 +3591,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             </div>
 
             {/* Desktop Table: One Line Per Client with Ledger Current Balance */}
-            <div className="hidden sm:block overflow-x-auto touch-pan-y">
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left text-sm text-gray-300 print:table print:text-black">
                 <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/5 print:text-black print:border-black">
                   <tr>
@@ -3773,8 +3738,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-white/5">
-                                    {client.invoices.map((inv) => (
-                                      <tr key={inv.id} className="hover:bg-white/5 transition">
+                                    {client.invoices.map((inv, invIdx) => (
+                                      <tr key={`cl_inv_row_${inv.id || invIdx}_${invIdx}`} className="hover:bg-white/5 transition">
                                         <td className="p-2.5 font-mono text-gray-400">{inv.date}</td>
                                         <td className="p-2.5 font-mono font-bold text-brand-300">{inv.reference}</td>
                                         <td className="p-2.5 text-gray-400">
@@ -3844,54 +3809,13 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
         return (
           <>
-            {/* Monthly Fixed & Recurring Expenses Quick Bar */}
-            <div className="p-4 bg-slate-900/60 border-b border-white/5 flex flex-wrap items-center justify-between gap-3 no-print">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                  <RefreshCw size={18} className={isPostingRecurring ? 'animate-spin' : ''} />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-white flex items-center gap-2">
-                    Monthly Fixed Expenses & Salaries
-                    <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                      Auto-posts on 1st
-                    </span>
-                  </h4>
-                  <p className="text-[11px] text-gray-400">
-                    Office rent, vehicle loans, internet, security, and staff base salaries.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handlePostAllMonthlyFixedExpenses}
-                  disabled={isPostingRecurring}
-                  className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg border border-purple-500/40 flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
-                  title="Verify and post all monthly fixed expenses for the 1st of the month into Payables"
-                >
-                  <Zap size={13} />
-                  <span>{isPostingRecurring ? 'Posting Expenses...' : 'Post 1st-of-Month Expenses'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('recurring')}
-                  className="bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/10 flex items-center gap-1.5 transition-all"
-                >
-                  <Calendar size={13} />
-                  <span>Manage Templates</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Mobile View: Compact, Zero-Horizontal Scroll, Smooth Touch Pan-Y */}
-            <div className="block sm:hidden divide-y divide-white/10 touch-pan-y">
+            {/* Mobile View: Compact, Zero-Horizontal Scroll, Smooth Native Scroll */}
+            <div className="block sm:hidden divide-y divide-white/10">
               {filteredPayables.length === 0 ? (
                 <div className="p-8 text-center text-gray-400 text-xs">No payables found.</div>
               ) : (
-                filteredPayables.map((entry) => (
-                  <div key={entry.id} className="p-3 hover:bg-white/5 transition-colors space-y-1.5">
+                filteredPayables.map((entry, idx) => (
+                  <div key={`pay_mob_${entry.id || idx}_${idx}`} className="p-3 hover:bg-white/5 transition-colors space-y-1.5">
                     {/* Top Row: Date, Payee, Status */}
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
@@ -3950,7 +3874,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             </div>
 
             {/* Desktop Table: Full View */}
-            <div className="hidden sm:block overflow-x-auto touch-pan-y">
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left text-sm text-gray-300 print:table print:text-black">
                 <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/5 print:text-black print:border-black">
                   <tr>
@@ -3964,8 +3888,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5 print:divide-gray-300">
-                  {filteredPayables.map((entry) => (
-                    <tr key={entry.id} className="hover:bg-white/5 transition-colors">
+                  {filteredPayables.map((entry, idx) => (
+                    <tr key={`pay_row_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-4">{entry.date}</td>
                       <td className="p-4">{entry.description}</td>
                       <td className="p-4 font-medium text-white print:text-black">{entry.party}</td>
@@ -4191,7 +4115,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
             {/* Dynamic Ledger Table */}
             {/* Mobile View: Compact, Zero-Horizontal Scroll, Smooth Touch Pan-Y */}
-            <div className="block sm:hidden divide-y divide-white/10 touch-pan-y border-t border-white/10">
+            <div className="block sm:hidden divide-y divide-white/10 border-t border-white/10">
               {filteredClientLedgerEntries.length === 0 ? (
                 <div className="p-8 text-center text-gray-500 text-xs">
                   No transactions found for {selectedLedgerClient} in the selected period.
@@ -4199,8 +4123,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               ) : (
                 filteredClientLedgerEntries
                   .filter(entry => !searchTerm || entry.description.toLowerCase().includes(searchTerm.toLowerCase()) || (entry.reference || '').toLowerCase().includes(searchTerm.toLowerCase()))
-                  .map((entry) => (
-                    <div key={entry.id} className="p-3 hover:bg-white/5 transition-colors space-y-1.5">
+                  .map((entry, idx) => (
+                    <div key={`cl_led_mob_${entry.id || idx}_${idx}`} className="p-3 hover:bg-white/5 transition-colors space-y-1.5">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-[11px] font-mono text-gray-400 shrink-0">{entry.date}</span>
@@ -4272,7 +4196,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             </div>
 
             {/* Desktop Ledger Table */}
-            <div className="hidden sm:block overflow-x-auto touch-pan-y">
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left text-sm text-gray-300 border-t border-white/10 print:table print:text-black print:border-black">
                 <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/5 print:text-black print:border-black">
                   <tr>
@@ -4288,8 +4212,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 <tbody className="divide-y divide-white/5 print:divide-gray-300">
                   {filteredClientLedgerEntries
                     .filter(entry => !searchTerm || entry.description.toLowerCase().includes(searchTerm.toLowerCase()) || (entry.reference || '').toLowerCase().includes(searchTerm.toLowerCase()))
-                    .map((entry) => (
-                    <tr key={entry.id} className="hover:bg-white/5 transition-colors">
+                    .map((entry, idx) => (
+                    <tr key={`cl_led_row_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-4 whitespace-nowrap text-xs text-gray-400 print:text-black">{entry.date}</td>
                       <td className="p-4 whitespace-nowrap">
                         <span className="font-mono text-xs text-brand-300 bg-brand-500/10 px-2 py-0.5 rounded border border-brand-500/20 print:border-none print:text-black print:bg-transparent">
@@ -4460,8 +4384,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             </div>
 
             {/* Master General Ledger Table */}
-            {/* Mobile View: Compact, Zero-Horizontal Scroll, Smooth Touch Pan-Y */}
-            <div className="block sm:hidden divide-y divide-white/10 touch-pan-y border-t border-white/10">
+            {/* Mobile View: Compact, Zero-Horizontal Scroll */}
+            <div className="block sm:hidden divide-y divide-white/10 border-t border-white/10">
               {generalLedgerEntries.length === 0 ? (
                 <div className="p-8 text-center text-gray-500 text-xs">
                   No general ledger entries recorded.
@@ -4469,8 +4393,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               ) : (
                 generalLedgerEntries
                   .filter(entry => !searchTerm || entry.party.toLowerCase().includes(searchTerm.toLowerCase()) || entry.description.toLowerCase().includes(searchTerm.toLowerCase()) || (entry.reference || '').toLowerCase().includes(searchTerm.toLowerCase()))
-                  .map((entry) => (
-                    <div key={entry.id} className="p-3 hover:bg-white/5 transition-colors space-y-1.5">
+                  .map((entry, idx) => (
+                    <div key={`gl_mob_${entry.id || idx}_${idx}`} className="p-3 hover:bg-white/5 transition-colors space-y-1.5">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-[11px] font-mono text-gray-400 shrink-0">{entry.date}</span>
@@ -4504,7 +4428,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             </div>
 
             {/* Desktop Table: Full View */}
-            <div className="hidden sm:block overflow-x-auto touch-pan-y">
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left text-sm text-gray-300 border-t border-white/10 print:table print:text-black print:border-black">
                 <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/5 print:text-black print:border-black">
                   <tr>
@@ -4520,8 +4444,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 <tbody className="divide-y divide-white/5 print:divide-gray-300">
                   {generalLedgerEntries
                     .filter(entry => !searchTerm || entry.party.toLowerCase().includes(searchTerm.toLowerCase()) || entry.description.toLowerCase().includes(searchTerm.toLowerCase()) || (entry.reference || '').toLowerCase().includes(searchTerm.toLowerCase()))
-                    .map((entry) => (
-                    <tr key={entry.id} className="hover:bg-white/5 transition-colors">
+                    .map((entry, idx) => (
+                    <tr key={`gl_row_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-4 whitespace-nowrap text-xs text-gray-400 print:text-black">{entry.date}</td>
                       <td className="p-4 whitespace-nowrap">
                         <span className="font-semibold text-white text-xs print:text-black">
@@ -4679,14 +4603,14 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {recurringTemplates.map((template) => {
+                  {recurringTemplates.map((template, tIdx) => {
                     const isPostedThisMonth = payables.some(p => 
                       p.reference && p.reference.toLowerCase().includes(`${template.id}_${currentMonthKey}`.toLowerCase())
                     );
 
                     return (
                       <div 
-                        key={template.id} 
+                        key={`rec_tpl_${template.id || tIdx}_${tIdx}`} 
                         className={`p-4 rounded-2xl border transition-all space-y-3 ${
                           template.isActive 
                             ? 'bg-white/5 border-white/10 hover:border-purple-500/40' 
@@ -4778,13 +4702,13 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {activeStaffList.map((user) => {
+                    {activeStaffList.map((user, uIdx) => {
                       const salaryRef = `SAL-${user.id}-${currentMonthKey}`;
                       const isPosted = payables.some(p => p.reference === salaryRef);
                       const isPaid = payables.some(p => p.reference === salaryRef && p.status === 'PAID');
 
                       return (
-                        <tr key={user.id} className="hover:bg-white/5 transition-colors">
+                        <tr key={`staff_user_${user.id || uIdx}_${uIdx}`} className="hover:bg-white/5 transition-colors">
                           <td className="p-3 font-semibold text-white flex items-center gap-2">
                             <User size={14} className="text-purple-400" />
                             <span>{user.name}</span>
@@ -4905,8 +4829,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {filteredStaffRecords.map((entry) => (
-                    <tr key={entry.id} className="hover:bg-white/5 transition-colors">
+                  {filteredStaffRecords.map((entry, idx) => (
+                    <tr key={`staff_rec_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-3 font-mono text-gray-400">{entry.date}</td>
                       <td className="p-3 font-semibold text-white">{entry.party}</td>
                       <td className="p-3 text-gray-300">
@@ -5034,8 +4958,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {filteredTransporters.map((entry) => (
-                    <tr key={entry.id} className="hover:bg-white/5 transition-colors">
+                  {filteredTransporters.map((entry, idx) => (
+                    <tr key={`trans_rec_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-3 font-mono text-gray-400">{entry.date}</td>
                       <td className="p-3 font-semibold text-white">{entry.party}</td>
                       <td className="p-3 text-gray-300">
@@ -5248,14 +5172,14 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               </div>
 
               {/* Mobile View */}
-              <div className="block sm:hidden divide-y divide-white/10 touch-pan-y border-t border-white/10">
+              <div className="block sm:hidden divide-y divide-white/10 border-t border-white/10">
                 {filteredVendorLedgerEntries.length === 0 ? (
                   <div className="p-8 text-center text-gray-500 text-xs">
                     No transactions recorded for this vendor.
                   </div>
                 ) : (
-                  filteredVendorLedgerEntries.map((entry) => (
-                    <div key={entry.id} className="p-3 hover:bg-white/5 transition-colors space-y-1.5">
+                  filteredVendorLedgerEntries.map((entry, idx) => (
+                    <div key={`vnd_led_mob_${entry.id || idx}_${idx}`} className="p-3 hover:bg-white/5 transition-colors space-y-1.5">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-[11px] font-mono text-gray-400 shrink-0">{entry.date}</span>
@@ -5299,7 +5223,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               </div>
 
               {/* Desktop Table */}
-              <div className="hidden sm:block overflow-x-auto touch-pan-y">
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-left text-sm text-gray-300 border-t border-white/10">
                   <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/5">
                     <tr>
@@ -5313,8 +5237,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {filteredVendorLedgerEntries.map((entry) => (
-                      <tr key={entry.id} className="hover:bg-white/5 transition-colors">
+                    {filteredVendorLedgerEntries.map((entry, idx) => (
+                      <tr key={`vnd_led_row_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                         <td className="p-4 whitespace-nowrap text-xs text-gray-400">{entry.date}</td>
                         <td className="p-4 whitespace-nowrap">
                           <span className="font-mono text-xs text-brand-300 bg-brand-500/10 px-2 py-0.5 rounded border border-brand-500/20">
@@ -5482,7 +5406,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5 bg-slate-900/40">
-                    {filteredVendorsList.map((v) => {
+                    {filteredVendorsList.map((v, vIdx) => {
                       const vPaid = financeData
                         .filter(f => f.type === 'EXPENSE' && f.party && f.party.toLowerCase() === v.name.toLowerCase())
                         .reduce((sum, f) => sum + f.amount, 0);
@@ -5491,7 +5415,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                         .reduce((sum, p) => sum + p.amount, 0);
 
                       return (
-                        <tr key={v.id} className="hover:bg-white/5 transition">
+                        <tr key={`vnd_${v.id || vIdx}_${vIdx}`} className="hover:bg-white/5 transition">
                           <td className="p-3.5">
                             <span className="font-bold text-white text-sm">{v.name}</span>
                             {v.isRecurring && (
@@ -5597,13 +5521,13 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
         return (
           <>
-            {/* Mobile View: Compact, Zero-Horizontal Scroll, Smooth Touch Pan-Y */}
-            <div className="block sm:hidden divide-y divide-white/10 touch-pan-y">
+            {/* Mobile View: Compact, Zero-Horizontal Scroll */}
+            <div className="block sm:hidden divide-y divide-white/10">
               {filteredFinance.length === 0 ? (
                 <div className="p-8 text-center text-gray-400 text-xs">No records found.</div>
               ) : (
-                filteredFinance.map((entry) => (
-                  <div key={entry.id} className="p-3 hover:bg-white/5 transition-colors space-y-1.5">
+                filteredFinance.map((entry, idx) => (
+                  <div key={`fin_mob_${entry.id || idx}_${idx}`} className="p-3 hover:bg-white/5 transition-colors space-y-1.5">
                     {/* Top Row: Date, Party, Type & Status */}
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
@@ -5677,7 +5601,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             </div>
 
             {/* Desktop Table: Full View */}
-            <div className="hidden sm:block overflow-x-auto touch-pan-y">
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left text-sm text-gray-300 print:table print:text-black">
                 <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/5 print:text-black print:border-black">
                   <tr>
@@ -5691,8 +5615,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5 print:divide-gray-300">
-                  {filteredFinance.map((entry) => (
-                    <tr key={entry.id} className="hover:bg-white/5 transition-colors">
+                  {filteredFinance.map((entry, idx) => (
+                    <tr key={`fin_row_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-4">{entry.date}</td>
                       <td className="p-4">
                         <p className="font-medium text-white print:text-black">{entry.description}</p>
@@ -6009,8 +5933,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {pendingClientDeposits.map((dep) => (
-                  <tr key={dep.id} className="hover:bg-white/5 transition-colors">
+                {pendingClientDeposits.map((dep, depIdx) => (
+                  <tr key={`dep_${dep.id || depIdx}_${depIdx}`} className="hover:bg-white/5 transition-colors">
                     <td className="p-3 font-mono text-gray-300">{dep.date}</td>
                     <td className="p-3 font-bold text-white text-sm">{dep.party}</td>
                     <td className="p-3 text-gray-300">
@@ -6083,15 +6007,15 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       )}
 
       {/* Main Content Area */}
-      <div className="glass-card rounded-2xl overflow-hidden min-h-[500px] flex flex-col print:border-none print:shadow-none">
-        {/* Navigation Tabs */}
-        <div className="flex overflow-x-auto border-b border-white/5 bg-black/20 custom-scrollbar no-print">
-          {tabs.map(tab => (
+      <div className="glass-card rounded-2xl min-h-[500px] flex flex-col print:border-none print:shadow-none">
+        {/* Navigation Tabs - Compact Wrap with Zero Horizontal Scroll */}
+        <div className="flex flex-wrap border-b border-white/5 bg-black/20 no-print">
+          {tabs.map((tab, idx) => (
             <button
-              key={tab.id}
+              key={`fin_main_tab_${tab.id}_${idx}`}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-6 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors flex-shrink-0
-                ${activeTab === tab.id ? 'border-brand-500 text-white bg-white/5 font-semibold' : 'border-transparent text-gray-400 hover:text-gray-200 hover:bg-white/5'}
+              className={`px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-medium border-b-2 transition-colors flex-shrink-0
+                ${activeTab === tab.id ? 'border-brand-500 text-white bg-white/5 font-bold shadow-sm' : 'border-transparent text-gray-400 hover:text-gray-200 hover:bg-white/5'}
               `}
             >
               {tab.label}
@@ -6168,8 +6092,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
           </div>
         </div>
 
-        {/* Table / List Content - Touch-Optimized for Mobile Vertical Scrolling */}
-        <div className="w-full overflow-x-hidden sm:overflow-x-auto custom-scrollbar flex-1 touch-pan-y">
+        {/* Table / List Content - Natural Vertical Scrolling for Mobile & Desktop */}
+        <div className="w-full overflow-x-auto flex-1">
           {renderTableContent()}
         </div>
       </div>
@@ -6233,8 +6157,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                       }}
                     >
                       <option value="">Select Bank Account</option>
-                      {banks.map(b => (
-                        <option key={b.id} value={b.id}>{b.name}</option>
+                      {banks.map((b, idx) => (
+                        <option key={`bank_opt_${b.id || idx}_${idx}`} value={b.id}>{b.name}</option>
                       ))}
                     </select>
                   </div>
@@ -6331,8 +6255,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                       {transactionType === 'EXPENSE' || transactionType === 'PAYABLE' ? (
                         <>
                           <optgroup label="Vendors & Utilities">
-                            {vendors.map((v) => (
-                              <option key={v.id} value={v.companyTitle || v.name} className="bg-slate-900 text-white">
+                            {vendors.map((v, idx) => (
+                              <option key={`vnd_opt_exp_${v.id || idx}_${idx}`} value={v.companyTitle || v.name} className="bg-slate-900 text-white">
                                 {v.companyTitle || v.name} ({v.category})
                               </option>
                             ))}
@@ -6355,8 +6279,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                             ))}
                           </optgroup>
                           <optgroup label="Vendors & Utilities">
-                            {vendors.map((v) => (
-                              <option key={v.id} value={v.companyTitle || v.name} className="bg-slate-900 text-white">
+                            {vendors.map((v, idx) => (
+                              <option key={`vnd_opt_inc_${v.id || idx}_${idx}`} value={v.companyTitle || v.name} className="bg-slate-900 text-white">
                                 {v.companyTitle || v.name} ({v.category})
                               </option>
                             ))}
@@ -6674,8 +6598,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     }}
                   >
                     <option value="">Select Bank Account</option>
-                    {banks.map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
+                    {banks.map((b, idx) => (
+                      <option key={`bank_edit_opt_${b.id || idx}_${idx}`} value={b.id}>{b.name}</option>
                     ))}
                   </select>
                   <input 
@@ -7474,8 +7398,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {calculatedReceivables.map((inv) => (
-                    <tr key={inv.id} className="hover:bg-white/5 transition">
+                  {calculatedReceivables.map((inv, invIdx) => (
+                    <tr key={`calc_inv_${inv.id || invIdx}_${invIdx}`} className="hover:bg-white/5 transition">
                       <td className="p-3 font-mono font-bold text-brand-300">
                         {inv.reference || `INV-${inv.id}`}
                       </td>
