@@ -88,6 +88,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Staff Private Ledgers (Isolated Port Staff Accounts)
+    match /staff_private_ledgers/{ledgerId} {
+      allow read, write: if true;
+    }
+
     // Available Vehicles Fleet
     match /available_vehicles/{vehicleId} {
       allow read, write: if true;
@@ -108,9 +113,25 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Company Branding
+    // Company Branding & Custom Logos
     match /branding/{brandingId} {
       allow read, write: if true;
+    }
+
+    // Company Official Documents Archive
+    match /company_documents/{docId} {
+      allow read, write: if true;
+    }
+
+    // Company Document Categories
+    match /company_document_categories/{catId} {
+      allow read, write: if true;
+    }
+
+    // Admin Authorizations
+    match /admins/{adminId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

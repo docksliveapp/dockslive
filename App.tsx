@@ -3,10 +3,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   LayoutDashboard, FolderKanban, Users, Truck, Settings, FileText, Bell, LogOut, Menu,
   X, Check, AlertCircle, AlertTriangle, Info, Trash2, Loader2, Maximize2, Minimize2, Upload,
-  ShieldCheck, UserCircle, RefreshCw, HardDrive, MapPin
+  ShieldCheck, UserCircle, RefreshCw, HardDrive, MapPin, FolderArchive
 } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import CaseManagement from './components/CaseManagement';
+import CompanyDocuments from './components/CompanyDocuments';
 import AppSettings from './components/AppSettings';
 import Finance from './components/Finance';
 import VehicleManagement from './components/VehicleManagement';
@@ -18,6 +19,7 @@ import GoldenAmountWidget from './components/GoldenAmountWidget';
 import ClientPortal from './components/ClientPortal';
 import { LoadingPortStaffPortal } from './components/LoadingPortStaffPortal';
 import TransporterPortal from './components/TransporterPortal';
+import VendorPortal from './components/VendorPortal';
 import { AvailableVehiclesView } from './components/AvailableVehiclesView';
 import { ModeOption } from './components/TopModeSwitcher';
 import { AppNotification, UserRole } from './types';
@@ -25,6 +27,7 @@ import NotificationModal from './components/NotificationModal';
 import AuthModal from './components/AuthModal';
 import Logo from './components/Logo';
 import { LiveNotificationCenter } from './components/LiveNotificationCenter';
+import { PWAInstallButton } from './components/PWAInstallButton';
 import { auth, onAuthStateChanged, testFirestoreConnection } from './services/firebase';
 import { subscribeToNotifications } from './services/dbService';
 import { approveActionRequest, rejectActionRequest } from './services/approvalService';
@@ -33,7 +36,6 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { appLifecycle } from './services/lifecycle';
 import { useBranding } from './services/brandingService';
 import { VirtualizedList } from './components/VirtualizedList';
-import { PWAInstallButton } from './components/PWAInstallButton';
 
 const App: React.FC = () => {
   // Splash Screen & Login Area State:
@@ -133,6 +135,7 @@ const App: React.FC = () => {
   // Admin Navigation Items (Dashboard removed from sidebar; clicking Logo at top opens Dashboard)
   const adminNavItems = [
     { id: 'cases', label: 'Case Management', icon: FolderKanban },
+    { id: 'company_documents', label: 'Company Documents', icon: FolderArchive },
     { id: 'drive', label: 'Google Drive', icon: HardDrive },
     { id: 'finance', label: 'Finance', icon: FileText },
     { id: 'vehicles', label: 'Vehicles', icon: Truck },
@@ -177,6 +180,7 @@ const App: React.FC = () => {
 
     if (hasCasesAccess) {
       items.push({ id: 'cases', label: 'Case Management', icon: FolderKanban });
+      items.push({ id: 'company_documents', label: 'Company Documents', icon: FolderArchive });
     }
     if (hasFinanceAccess) {
       items.push({ id: 'finance', label: 'Finance & Accounts', icon: FileText });
@@ -328,6 +332,18 @@ const App: React.FC = () => {
       );
     }
 
+    // If in Vendor Role, directly render the Vendor Portal
+    if (currentRole === UserRole.VENDOR) {
+      return (
+        <VendorPortal
+          onSignOut={handleSignOut}
+          onSwitchMode={handleSwitchMode}
+          vendorName={safeAppStorage.getItem('dpl_current_user_name') || 'Al-Makkah Logistics & Equipment Services'}
+          vendorId={safeAppStorage.getItem('dpl_current_user_id') || 'vendor'}
+        />
+      );
+    }
+
     // Route Loading Port Staff and Destination / Unloading Staff directly to their dedicated workspace
     if (
       currentRole === UserRole.LOADING_PORT_STAFF || 
@@ -347,6 +363,7 @@ const App: React.FC = () => {
 
     switch(activeView) {
       case 'dashboard': return <Dashboard onNavigate={handleNavigate} />;
+      case 'company_documents': return <CompanyDocuments />;
       case 'cases': return <CaseManagement initialFilter={navigationFilter} clearFilter={() => setNavigationFilter(null)} onActionComplete={handleActionComplete} customLogo={customLogo} userRole={currentRole} userRoles={currentRoles} currentClientName={currentClientName} />;
       case 'drive': return <GoogleDriveManager />;
       case 'finance': return <Finance initialFilter={navigationFilter} onActionComplete={handleActionComplete} customLogo={customLogo} />;

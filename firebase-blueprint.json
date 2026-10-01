@@ -115,6 +115,122 @@
         "createdAt": { "type": "string", "description": "Registration date timestamp", "maxLength": 50 }
       },
       "required": ["name"]
+    },
+    "Vendor": {
+      "title": "Vendor",
+      "description": "Registered vendor profile for office supplies, port terminals, and services",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique vendor identifier" },
+        "name": { "type": "string", "description": "Vendor business name", "maxLength": 150 },
+        "serviceType": { "type": "string", "description": "Service category or trade type", "maxLength": 100 },
+        "contactPerson": { "type": "string", "description": "Key point of contact name", "maxLength": 100 },
+        "contactNumber": { "type": "string", "description": "Contact telephone or mobile", "maxLength": 50 },
+        "city": { "type": "string", "description": "Operating city or port terminal", "maxLength": 80 },
+        "status": { "type": "string", "description": "ACTIVE or INACTIVE status", "maxLength": 20 }
+      },
+      "required": ["name"]
+    },
+    "RecurringFinanceTemplate": {
+      "title": "RecurringFinanceTemplate",
+      "description": "Template for periodic recurring financial obligations and overheads",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Template identifier" },
+        "title": { "type": "string", "description": "Obligation title", "maxLength": 150 },
+        "amount": { "type": "number", "description": "Expected amount in PKR" },
+        "category": { "type": "string", "description": "Financial category head", "maxLength": 100 },
+        "frequency": { "type": "string", "description": "Frequency e.g. MONTHLY", "maxLength": 50 },
+        "active": { "type": "boolean", "description": "Whether template is actively generating" }
+      },
+      "required": ["title", "amount"]
+    },
+    "StaffLedgerEntry": {
+      "title": "StaffLedgerEntry",
+      "description": "Staff imprest, cash advance, or port operations ledger record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Ledger entry identifier" },
+        "staffId": { "type": "string", "description": "Unique staff member identifier", "maxLength": 100 },
+        "date": { "type": "string", "description": "Date of transaction", "maxLength": 50 },
+        "amount": { "type": "number", "description": "Transaction amount in PKR" },
+        "type": { "type": "string", "description": "CREDIT or DEBIT", "maxLength": 20 },
+        "description": { "type": "string", "description": "Purpose or receipt description", "maxLength": 300 }
+      },
+      "required": ["staffId", "date", "amount"]
+    },
+    "StaffPrivateLedgerEntry": {
+      "title": "StaffPrivateLedgerEntry",
+      "description": "Staff individual port ledger transaction isolating port clearance funds",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Private ledger entry ID" },
+        "staffUserId": { "type": "string", "description": "Staff login identifier", "maxLength": 100 },
+        "date": { "type": "string", "description": "Transaction date", "maxLength": 50 },
+        "amount": { "type": "number", "description": "Amount in PKR" },
+        "type": { "type": "string", "description": "INCOME or EXPENSE", "maxLength": 20 },
+        "description": { "type": "string", "description": "Description of port activity", "maxLength": 300 }
+      },
+      "required": ["staffUserId", "date", "amount"]
+    },
+    "CompanyDocument": {
+      "title": "CompanyDocument",
+      "description": "Archived official company document, license, or certificate",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique document identifier" },
+        "title": { "type": "string", "description": "Document title", "maxLength": 200 },
+        "category": { "type": "string", "description": "Document classification category", "maxLength": 100 },
+        "fileUrl": { "type": "string", "description": "URL or stored document link", "maxLength": 2000 },
+        "uploadedAt": { "type": "string", "description": "Upload timestamp", "maxLength": 50 }
+      },
+      "required": ["title", "category"]
+    },
+    "CompanyDocumentCategory": {
+      "title": "CompanyDocumentCategory",
+      "description": "Taxonomy category for classifying official company documents",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Category display name", "maxLength": 100 },
+        "createdAt": { "type": "string", "description": "Category creation date", "maxLength": 50 }
+      },
+      "required": ["name"]
+    },
+    "DestinationStaff": {
+      "title": "DestinationStaff",
+      "description": "Port and border clearance field personnel directory",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique staff identifier" },
+        "name": { "type": "string", "description": "Staff member's full name", "maxLength": 120 },
+        "station": { "type": "string", "description": "Assigned customs station or port", "maxLength": 100 },
+        "contact": { "type": "string", "description": "Mobile contact number", "maxLength": 50 },
+        "role": { "type": "string", "description": "Field responsibility designation", "maxLength": 80 }
+      },
+      "required": ["name", "station"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Audit trail log for tracking critical system and portal events",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Log record identifier" },
+        "action": { "type": "string", "description": "Action performed", "maxLength": 200 },
+        "performedBy": { "type": "string", "description": "User who took the action", "maxLength": 150 },
+        "timestamp": { "type": "string", "description": "Event timestamp", "maxLength": 50 },
+        "details": { "type": "string", "description": "Detailed log contextual data", "maxLength": 1000 }
+      },
+      "required": ["action", "timestamp"]
+    },
+    "Branding": {
+      "title": "Branding",
+      "description": "Company visual branding, theme colors, and logos",
+      "type": "object",
+      "properties": {
+        "customLogo": { "type": "string", "description": "Base64 or image URL", "maxLength": 50000 },
+        "companyName": { "type": "string", "description": "Displayed company title", "maxLength": 150 },
+        "updatedAt": { "type": "string", "description": "Timestamp of update", "maxLength": 50 }
+      }
     }
   },
   "firestore": {
@@ -129,6 +245,10 @@
     "/finances/{financeId}": {
       "schema": "FinanceEntry",
       "description": "Financial ledger transactions, invoices, and expenses"
+    },
+    "/finance/{financeId}": {
+      "schema": "FinanceEntry",
+      "description": "Legacy financial entries mirror path"
     },
     "/vehicles/{vehicleId}": {
       "schema": "Vehicle",
@@ -146,9 +266,25 @@
       "schema": "Setting",
       "description": "Global company settings and profile"
     },
+    "/vendors/{vendorId}": {
+      "schema": "Vendor",
+      "description": "Directory of approved terminal, maintenance, and facility vendors"
+    },
+    "/recurring_templates/{templateId}": {
+      "schema": "RecurringFinanceTemplate",
+      "description": "Recurring monthly expense and invoice templates"
+    },
+    "/staff_ledgers/{ledgerId}": {
+      "schema": "StaffLedgerEntry",
+      "description": "Staff advance and port operations ledgers"
+    },
     "/staff_loading_bills/{billId}": {
       "schema": "FinanceEntry",
       "description": "Loading port bills created by port staff for terminal charges"
+    },
+    "/staff_private_ledgers/{ledgerId}": {
+      "schema": "StaffPrivateLedgerEntry",
+      "description": "Port staff isolated clearance expense ledgers"
     },
     "/available_vehicles/{vehicleId}": {
       "schema": "Vehicle",
@@ -157,6 +293,26 @@
     "/transporter_requests/{requestId}": {
       "schema": "AppNotification",
       "description": "Vehicle registration, renewal, or trip update requests from transporters"
+    },
+    "/destination_staff/{staffId}": {
+      "schema": "DestinationStaff",
+      "description": "Border and port staff directory"
+    },
+    "/activity_logs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "System security and operational activity audit logs"
+    },
+    "/branding/{brandingId}": {
+      "schema": "Branding",
+      "description": "Company branding and customized logo assets"
+    },
+    "/company_documents/{docId}": {
+      "schema": "CompanyDocument",
+      "description": "Official company archives, licenses, and permits"
+    },
+    "/company_document_categories/{catId}": {
+      "schema": "CompanyDocumentCategory",
+      "description": "Categories for organizing official company documentation"
     }
   }
 }

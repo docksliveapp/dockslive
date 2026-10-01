@@ -9,7 +9,8 @@ export enum UserRole {
   VEHICLE_MANAGER = 'VEHICLE_MANAGER',
   OFFICE_STAFF = 'OFFICE_STAFF',
   CLIENT = 'CLIENT',
-  TRANSPORTER = 'TRANSPORTER'
+  TRANSPORTER = 'TRANSPORTER',
+  VENDOR = 'VENDOR'
 }
 
 export enum CaseStatus {
@@ -275,10 +276,28 @@ export interface MockDocument {
 export interface CompanyDocument {
   id: string;
   title: string;
-  url: string;
-  fileType: 'IMAGE' | 'PDF';
-  uploadDate: string;
-  unlimitedValidity: boolean;
+  category?: string;
+  subcategory?: string;
+  documentDate?: string;
+  from?: string;
+  to?: string;
+  subject?: string;
+  hearingRequired?: boolean;
+  hearingDate?: string;
+  hearingTime?: string;
+  hearingNotes?: string;
+  fileUrl?: string;
+  fileName?: string;
+  url?: string;
+  fileType?: string;
+  fileSize?: number;
+  uploadedAt?: string;
+  uploadDate?: string;
+  uploadedBy?: string;
+  referenceNo?: string;
+  tags?: string[];
+  notes?: string;
+  unlimitedValidity?: boolean;
   expiryDate?: string;
   isExpired?: boolean;
 }
@@ -1244,3 +1263,22 @@ export interface Bank {
   iban: string;
   logo?: string;
 }
+
+export const DEFAULT_COMPANY_DOCUMENT_CATEGORIES: string[] = [
+  'SECP',
+  'SRB',
+  'FBR income tax',
+  'PAKISTAN customs',
+  'State Bank of Pakistan',
+  'Stocks Exchange',
+  'Deposits/Guaranties',
+  'Chamber of Commerce',
+  'Showcase/ONOs reply',
+  'FIRs',
+  'Petitions',
+  "Agreement's",
+  'Quotations',
+  'Banks',
+  'Assets'
+];
+

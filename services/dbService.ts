@@ -18,7 +18,7 @@ import {
   getActiveDbUserSession,
   clearActiveDbUserSession
 } from './firebase';
-import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest } from '../types';
+import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES } from '../types';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
 
@@ -776,20 +776,15 @@ export async function updateNotificationInFirestore(notif: AppNotification): Pro
 
 export const DEFAULT_DATABASE_USERS: AppUser[] = [
   { id: 1, userId: 'admin', password: 'dpl01234', name: 'System Administrator', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'System Administrator', contact: '0300-1234567', email: 'admin@docks.com', status: 'ACTIVE', isAdmin: true, baseSalary: 150000 },
-  { id: 2, userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER], designation: 'Head of Finance & Accounts', contact: '0333-5554444', email: 'finance@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 110000 },
-  { id: 3, userId: 'casemanager', password: 'dpl01234', name: 'Case Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER], designation: 'Operations Manager', contact: '0321-9876543', email: 'casemanager@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 95000 },
-  { id: 4, userId: 'vehiclemanager', password: 'dpl01234', name: 'Vehicles Manager', role: UserRole.VEHICLE_MANAGER, roles: [UserRole.VEHICLE_MANAGER], designation: 'Fleet & Logistics Incharge', contact: '0301-2233445', email: 'transport@docks.com', status: 'ACTIVE', baseSalary: 85000 },
-  { id: 5, userId: 'documentmanager', password: 'dpl01234', name: 'Documentation Incharge', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER], designation: 'Documentation & Clearing Officer', contact: '0304-5566778', email: 'docs@docks.com', status: 'ACTIVE', baseSalary: 75000 },
-  { id: 6, userId: 'mohsin', password: 'dpl01234', name: 'Mohsin Khan', role: UserRole.LOADING_PORT_STAFF, roles: [UserRole.LOADING_PORT_STAFF], designation: 'Port Loading Officer', contact: '0302-3344556', email: 'mohsin.loading@docks.com', status: 'ACTIVE', baseSalary: 75000 },
-  { id: 11, userId: 'shahid', password: 'dpl01234', name: 'Shahid Khan', role: UserRole.LOADING_PORT_STAFF, roles: [UserRole.LOADING_PORT_STAFF], designation: 'Port Loading Officer', contact: '0302-7788991', email: 'shahid.loading@docks.com', status: 'ACTIVE', baseSalary: 75000 },
-  { id: 12, userId: 'danish', password: 'dpl01234', name: 'Danish Khan', role: UserRole.LOADING_PORT_STAFF, roles: [UserRole.LOADING_PORT_STAFF], designation: 'Port Loading Officer', contact: '0302-1122334', email: 'danish.loading@docks.com', status: 'ACTIVE', baseSalary: 75000 },
-  { id: 13, userId: 'loading01', password: 'dpl01234', name: 'Loading Staff Desk', role: UserRole.LOADING_PORT_STAFF, roles: [UserRole.LOADING_PORT_STAFF], designation: 'Loading Port Supervisor', contact: '0302-3344556', email: 'loading@docks.com', status: 'ACTIVE', baseSalary: 65000 },
-  { id: 14, userId: 'unloading01', password: 'dpl01234', name: 'Offloading Staff (Karachi)', role: UserRole.UNLOADING_PORT_STAFF, roles: [UserRole.UNLOADING_PORT_STAFF], designation: 'Offloading Port Supervisor', contact: '0302-5566778', email: 'unloading@docks.com', status: 'ACTIVE', baseSalary: 65000 },
-  { id: 7, userId: 'lahore', password: 'dpl01234', name: 'Rashid Khan (Lahore)', role: UserRole.DESTINATION_PORT_STAFF, roles: [UserRole.DESTINATION_PORT_STAFF], designation: 'Destination Officer (Lahore)', contact: '0303-4455667', email: 'lahore.destination@docks.com', status: 'ACTIVE', baseSalary: 70000 },
-  { id: 8, userId: 'peshawar', password: 'dpl01234', name: 'Destination Officer (Peshawar)', role: UserRole.DESTINATION_PORT_STAFF, roles: [UserRole.DESTINATION_PORT_STAFF], designation: 'Destination Officer (Peshawar)', contact: '0303-9988776', email: 'peshawar.destination@docks.com', status: 'ACTIVE', baseSalary: 70000 },
-  { id: 10, userId: '', password: '', name: 'Tariq Mehmood', role: UserRole.OFFICE_STAFF, roles: [UserRole.OFFICE_STAFF], designation: 'Head Office Coordinator', contact: '0312-7788990', email: 'tariq.office@docks.com', status: 'ACTIVE', baseSalary: 55000 },
-  { id: 9, userId: 'client01', password: 'dpl01234', name: 'Client User', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer', contact: '021-111-222-333', email: 'client01@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines' },
-  { id: 15, userId: 'transporter', password: 'dpl01234', name: 'Bilal Goods Transport Co.', role: UserRole.TRANSPORTER, roles: [UserRole.TRANSPORTER], designation: 'Fleet Owner & Transporter', contact: '0300-8889999', email: 'transporter@docks.com', status: 'ACTIVE' }
+  { id: 2, userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER], designation: 'Finance Manager', contact: '0333-5554444', email: 'finance@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 110000 },
+  { id: 3, userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER], designation: 'Operations Manager', contact: '0321-9876543', email: 'casemanager@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 95000 },
+  { id: 4, userId: 'vehiclemanager', password: 'dpl01234', name: 'Vehicles Manager', role: UserRole.VEHICLE_MANAGER, roles: [UserRole.VEHICLE_MANAGER], designation: 'Fleet & Vehicle Manager', contact: '0301-2233445', email: 'transport@docks.com', status: 'ACTIVE', baseSalary: 85000 },
+  { id: 5, userId: 'officestaff', password: 'dpl01234', name: 'Office Staff', role: UserRole.OFFICE_STAFF, roles: [UserRole.OFFICE_STAFF], designation: 'Office Staff Coordinator', contact: '0312-7788990', email: 'office@docks.com', status: 'ACTIVE', baseSalary: 65000 },
+  { id: 6, userId: 'transporter', password: 'dpl01234', name: 'Transporter Portal', role: UserRole.TRANSPORTER, roles: [UserRole.TRANSPORTER], designation: 'Goods Transporter / Fleet Partner', contact: '0300-8889999', email: 'transporter@docks.com', status: 'ACTIVE' },
+  { id: 7, userId: 'client', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines' },
+  { id: 8, userId: 'vendor', password: 'dpl01234', name: 'Vendor Portal', role: UserRole.VENDOR, roles: [UserRole.VENDOR], designation: 'Supplier / Service Vendor', contact: '0300-5556677', email: 'vendor@docks.com', status: 'ACTIVE', clientName: 'Al-Makkah Logistics & Equipment Services' },
+  // Compatibility aliases
+  { id: 9, userId: 'client01', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client01@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines' }
 ];
 
 let hasSeededInitialUsers = false;
@@ -830,10 +825,30 @@ export function subscribeToUsers(
       const list: AppUser[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        list.push({
-          ...data,
-          id: Number(docSnap.id) || Number(data.id) || Date.now()
-        } as AppUser);
+        const nameLower = (data.name || '').toLowerCase();
+        const idLower = (data.userId || '').toLowerCase();
+        const isLegacyPersonal = 
+          nameLower.includes('mohsin') || 
+          nameLower.includes('shahid') || 
+          nameLower.includes('danish') || 
+          nameLower.includes('tariq') ||
+          nameLower.includes('rashid') ||
+          idLower === 'mohsin' || 
+          idLower === 'shahid' || 
+          idLower === 'danish' || 
+          idLower === 'documentmanager' ||
+          idLower === 'lahore' ||
+          idLower === 'peshawar';
+
+        if (isLegacyPersonal) {
+          // Asynchronously clean up legacy document from Firestore
+          deleteDoc(doc(db, path, docSnap.id)).catch(() => {});
+        } else {
+          list.push({
+            ...data,
+            id: Number(docSnap.id) || Number(data.id) || Date.now()
+          } as AppUser);
+        }
       });
 
       // Sort by id
@@ -2040,4 +2055,145 @@ export async function saveStaffPrivateLedgerEntryToFirestore(entry: StaffPrivate
   }
   safeAppStorage.setJSON(localKey, current);
 }
+
+// ==========================================
+// COMPANY DOCUMENTS & CATEGORIES MANAGEMENT
+// ==========================================
+
+const COMPANY_DOCS_KEY = 'dpl_company_documents';
+const COMPANY_CATEGORIES_KEY = 'dpl_company_categories';
+
+export function subscribeToCompanyDocuments(
+  onData: (docs: CompanyDocument[]) => void,
+  onError?: (err: any) => void
+) {
+  const path = 'company_documents';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const docsList: CompanyDocument[] = [];
+      snapshot.forEach((docSnap) => {
+        docsList.push({ ...docSnap.data(), id: docSnap.id } as CompanyDocument);
+      });
+      // Sort by uploadedAt desc
+      docsList.sort((a, b) => new Date(b.uploadedAt || 0).getTime() - new Date(a.uploadedAt || 0).getTime());
+      safeAppStorage.setJSON(COMPANY_DOCS_KEY, docsList);
+      onData(docsList);
+    },
+    (error) => {
+      console.warn(`Firestore subscription notice on ${path}:`, error);
+      if (onError) onError(error);
+      const fallback = safeAppStorage.getJSON<CompanyDocument[]>(COMPANY_DOCS_KEY, []);
+      onData(fallback);
+    }
+  );
+}
+
+export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocument): Promise<void> {
+  const path = 'company_documents';
+  const docId = documentItem.id || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  try {
+    const payload = sanitizeForFirestore({
+      ...documentItem,
+      id: docId,
+      updatedAt: new Date().toISOString()
+    });
+    await setDoc(doc(db, path, docId), payload, { merge: true });
+  } catch (error) {
+    console.warn(`Firestore saveCompanyDocument warning for ${docId}:`, error);
+  }
+
+  // Update local cache
+  const current = safeAppStorage.getJSON<CompanyDocument[]>(COMPANY_DOCS_KEY, []);
+  const idx = current.findIndex(d => d.id === docId);
+  if (idx >= 0) {
+    current[idx] = { ...documentItem, id: docId };
+  } else {
+    current.unshift({ ...documentItem, id: docId });
+  }
+  safeAppStorage.setJSON(COMPANY_DOCS_KEY, current);
+}
+
+export async function deleteCompanyDocumentFromFirestore(docId: string): Promise<void> {
+  const path = 'company_documents';
+  try {
+    await deleteDoc(doc(db, path, docId));
+  } catch (error) {
+    console.warn(`Firestore deleteCompanyDocument warning for ${docId}:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<CompanyDocument[]>(COMPANY_DOCS_KEY, []);
+  safeAppStorage.setJSON(COMPANY_DOCS_KEY, current.filter(d => d.id !== docId));
+}
+
+export function subscribeToCompanyCategories(
+  onData: (categories: string[]) => void,
+  onError?: (err: any) => void
+) {
+  const path = 'company_document_categories';
+  return onSnapshot(
+    collection(db, path),
+    async (snapshot) => {
+      if (snapshot.empty) {
+        // Seed default categories
+        try {
+          for (const catName of DEFAULT_COMPANY_DOCUMENT_CATEGORIES) {
+            const catId = catName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+            await setDoc(doc(db, path, catId), { name: catName, createdAt: new Date().toISOString() });
+          }
+          safeAppStorage.setJSON(COMPANY_CATEGORIES_KEY, DEFAULT_COMPANY_DOCUMENT_CATEGORIES);
+          onData(DEFAULT_COMPANY_DOCUMENT_CATEGORIES);
+          return;
+        } catch (seedErr) {
+          console.warn('Failed to seed company categories:', seedErr);
+        }
+      }
+
+      const catList: string[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        if (d.name && !catList.includes(d.name)) {
+          catList.push(d.name);
+        }
+      });
+
+      // Ensure all default categories are represented
+      DEFAULT_COMPANY_DOCUMENT_CATEGORIES.forEach(def => {
+        if (!catList.includes(def)) catList.push(def);
+      });
+
+      safeAppStorage.setJSON(COMPANY_CATEGORIES_KEY, catList);
+      onData(catList);
+    },
+    (error) => {
+      console.warn(`Firestore subscription notice on ${path}:`, error);
+      if (onError) onError(error);
+      const fallback = safeAppStorage.getJSON<string[]>(COMPANY_CATEGORIES_KEY, DEFAULT_COMPANY_DOCUMENT_CATEGORIES);
+      onData(fallback);
+    }
+  );
+}
+
+export async function saveCompanyCategoryToFirestore(categoryName: string): Promise<void> {
+  const path = 'company_document_categories';
+  const cleanName = categoryName.trim();
+  if (!cleanName) return;
+
+  const catId = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+  try {
+    await setDoc(doc(db, path, catId), {
+      name: cleanName,
+      createdAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (error) {
+    console.warn(`Firestore saveCompanyCategory warning for ${cleanName}:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<string[]>(COMPANY_CATEGORIES_KEY, DEFAULT_COMPANY_DOCUMENT_CATEGORIES);
+  if (!current.includes(cleanName)) {
+    current.push(cleanName);
+    safeAppStorage.setJSON(COMPANY_CATEGORIES_KEY, current);
+  }
+}
+
 

@@ -643,3 +643,138 @@ export const createChatSession = () => {
     }
   });
 };
+
+export interface AnalyzedCompanyDocResult {
+  title?: string;
+  category?: string;
+  documentDate?: string;
+  from?: string;
+  to?: string;
+  subject?: string;
+  hearingRequired?: boolean;
+  hearingDate?: string;
+  hearingTime?: string;
+  referenceNo?: string;
+  unreadFieldsNote?: string;
+}
+
+export const analyzeCompanyDocumentWithAI = async (
+  file: { name: string; dataUrl: string; type?: string }
+): Promise<AnalyzedCompanyDocResult> => {
+  const fileName = file.name || 'document';
+  const cleanLower = fileName.toLowerCase();
+
+  // 1. Initial heuristic extraction based on file name & metadata
+  const heuristic: AnalyzedCompanyDocResult = {
+    title: fileName.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
+    category: 'PAKISTAN customs',
+    documentDate: new Date().toISOString().split('T')[0],
+    from: '',
+    to: 'Docks (Pvt.) Ltd, Karachi',
+    subject: '',
+    hearingRequired: false,
+    referenceNo: '',
+    unreadFieldsNote: ''
+  };
+
+  if (cleanLower.includes('secp')) heuristic.category = 'SECP';
+  else if (cleanLower.includes('srb') || cleanLower.includes('sindh revenue')) heuristic.category = 'SRB';
+  else if (cleanLower.includes('fbr') || cleanLower.includes('income tax') || cleanLower.includes('withholding')) heuristic.category = 'FBR income tax';
+  else if (cleanLower.includes('custom') || cleanLower.includes('gd') || cleanLower.includes('tp') || cleanLower.includes('collectorate')) heuristic.category = 'PAKISTAN customs';
+  else if (cleanLower.includes('sbp') || cleanLower.includes('state bank')) heuristic.category = 'State Bank of Pakistan';
+  else if (cleanLower.includes('stock') || cleanLower.includes('psx')) heuristic.category = 'Stocks Exchange';
+  else if (cleanLower.includes('guarantee') || cleanLower.includes('deposit') || cleanLower.includes('pay order')) heuristic.category = 'Deposits/Guaranties';
+  else if (cleanLower.includes('chamber') || cleanLower.includes('kcci')) heuristic.category = 'Chamber of Commerce';
+  else if (cleanLower.includes('show cause') || cleanLower.includes('ono') || cleanLower.includes('reply')) {
+    heuristic.category = 'Showcase/ONOs reply';
+    heuristic.hearingRequired = true;
+  }
+  else if (cleanLower.includes('fir') || cleanLower.includes('police')) heuristic.category = 'FIRs';
+  else if (cleanLower.includes('petition') || cleanLower.includes('high court') || cleanLower.includes('tribunal')) {
+    heuristic.category = 'Petitions';
+    heuristic.hearingRequired = true;
+  }
+  else if (cleanLower.includes('agreement') || cleanLower.includes('contract') || cleanLower.includes('mou')) heuristic.category = "Agreement's";
+  else if (cleanLower.includes('quotation') || cleanLower.includes('quote') || cleanLower.includes('estimate')) heuristic.category = 'Quotations';
+  else if (cleanLower.includes('bank') || cleanLower.includes('statement') || cleanLower.includes('hbl') || cleanLower.includes('mcb') || cleanLower.includes('meezan')) heuristic.category = 'Banks';
+  else if (cleanLower.includes('asset') || cleanLower.includes('property') || cleanLower.includes('vehicle') || cleanLower.includes('title deed')) heuristic.category = 'Assets';
+
+  // 2. Try Gemini OCR extraction if dataUrl is provided
+  try {
+    const ai = getAIClient();
+    if (ai && file.dataUrl && file.dataUrl.includes('base64,')) {
+      const parts: any[] = [];
+      const base64Data = file.dataUrl.split('base64,')[1];
+      const mimeType = file.type || (file.dataUrl.includes('application/pdf') ? 'application/pdf' : 'image/jpeg');
+
+      if (base64Data) {
+        parts.push({
+          inlineData: {
+            data: base64Data,
+            mimeType: mimeType.includes('pdf') ? 'application/pdf' : 'image/jpeg'
+          }
+        });
+      }
+
+      parts.push({
+        text: `You are an elite corporate legal document OCR analyst for Docks (Pvt.) Ltd, a Pakistani shipping and logistics company.
+Analyze this official company document or letter and extract the key fields into JSON.
+
+Categories must strictly be one of:
+[
+  "SECP", "SRB", "FBR income tax", "PAKISTAN customs", "State Bank of Pakistan",
+  "Stocks Exchange", "Deposits/Guaranties", "Chamber of Commerce", "Showcase/ONOs reply",
+  "FIRs", "Petitions", "Agreement's", "Quotations", "Banks", "Assets"
+]
+
+Extract these exact properties:
+- title: string (descriptive title of the letter/notice/deed)
+- category: string (the closest matching category from the list above)
+- documentDate: string (ISO format YYYY-MM-DD found on the letter, or empty if illegible)
+- from: string (the department/authority/party and city who issued or sent this document)
+- to: string (recipient name/designation/company and address written on the letter)
+- subject: string (subject/heading of the letter/notice/agreement)
+- referenceNo: string (letter number, notice reference number, ONO number, or filing number)
+- hearingRequired: boolean (true if this is a show-cause notice, summons, petition, or requires personal hearing / appearance before a court, collector, commissioner, or tribunal)
+- hearingDate: string (YYYY-MM-DD if a hearing date is explicitly scheduled, otherwise empty)
+- hearingTime: string (e.g. "11:00 AM" if hearing time is specified, otherwise empty)
+- unreadFieldsNote: string (mention any fields that were faded, torn, stamped over, or couldn't be definitively determined so the human operator can verify)`
+      });
+
+      const apiCall = ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: { parts },
+        config: {
+          responseMimeType: "application/json"
+        }
+      }).catch((err) => {
+        console.warn("Company doc AI extraction catch:", err);
+        return null;
+      });
+
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000));
+      const response: any = await Promise.race([apiCall, timeoutPromise]);
+
+      if (response && response.text) {
+        const parsed = JSON.parse(response.text);
+        return {
+          title: parsed.title || heuristic.title,
+          category: parsed.category || heuristic.category,
+          documentDate: parsed.documentDate || heuristic.documentDate,
+          from: parsed.from || heuristic.from,
+          to: parsed.to || heuristic.to,
+          subject: parsed.subject || heuristic.subject,
+          referenceNo: parsed.referenceNo || heuristic.referenceNo,
+          hearingRequired: Boolean(parsed.hearingRequired ?? heuristic.hearingRequired),
+          hearingDate: parsed.hearingDate || '',
+          hearingTime: parsed.hearingTime || '',
+          unreadFieldsNote: parsed.unreadFieldsNote || ''
+        };
+      }
+    }
+  } catch (ocrErr) {
+    console.warn("Company doc OCR attempt warning:", ocrErr);
+  }
+
+  return heuristic;
+};

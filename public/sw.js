@@ -1,7 +1,7 @@
 // Service Worker for DPL - Docks Private Limited
 // Play Store / TWA / PWABuilder 100% Compliant Service Worker
 
-const CACHE_NAME = 'docks-pwa-v2';
+const CACHE_NAME = 'docks-pwa-v3';
 const OFFLINE_URL = '/';
 
 const PRECACHE_ASSETS = [
@@ -13,7 +13,11 @@ const PRECACHE_ASSETS = [
   '/logo.svg',
   '/pwa-192x192.png',
   '/pwa-512x512.png',
-  '/apple-touch-icon.png'
+  '/pwa-192x192-v2.png',
+  '/pwa-512x512-v2.png',
+  '/pwa-maskable-512x512-v2.png',
+  '/apple-touch-icon.png',
+  '/apple-touch-icon-v2.png'
 ];
 
 // Install: Cache essential app shell

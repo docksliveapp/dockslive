@@ -1,0 +1,1343 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { 
+  FolderArchive, 
+  Search, 
+  Filter, 
+  Plus, 
+  Upload, 
+  Download, 
+  Trash2, 
+  Calendar, 
+  Clock, 
+  FileText, 
+  CheckCircle2, 
+  AlertCircle, 
+  Sparkles, 
+  Loader2, 
+  X, 
+  Eye, 
+  Building, 
+  Scale, 
+  Gavel, 
+  ChevronRight,
+  Send,
+  User,
+  MapPin,
+  Tag,
+  Paperclip,
+  Check,
+  FileCheck
+} from 'lucide-react';
+import { CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES } from '../types';
+import { 
+  subscribeToCompanyDocuments, 
+  saveCompanyDocumentToFirestore, 
+  deleteCompanyDocumentFromFirestore,
+  subscribeToCompanyCategories,
+  saveCompanyCategoryToFirestore
+} from '../services/dbService';
+import { analyzeCompanyDocumentWithAI } from '../services/geminiService';
+import { useBranding } from '../services/brandingService';
+import { jsPDF } from 'jspdf';
+
+// Category color badges
+const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  'SECP': { bg: 'bg-blue-500/20', text: 'text-blue-300', border: 'border-blue-500/40' },
+  'SRB': { bg: 'bg-emerald-500/20', text: 'text-emerald-300', border: 'border-emerald-500/40' },
+  'FBR income tax': { bg: 'bg-amber-500/20', text: 'text-amber-300', border: 'border-amber-500/40' },
+  'PAKISTAN customs': { bg: 'bg-red-500/20', text: 'text-red-300', border: 'border-red-500/40' },
+  'State Bank of Pakistan': { bg: 'bg-teal-500/20', text: 'text-teal-300', border: 'border-teal-500/40' },
+  'Stocks Exchange': { bg: 'bg-purple-500/20', text: 'text-purple-300', border: 'border-purple-500/40' },
+  'Deposits/Guaranties': { bg: 'bg-cyan-500/20', text: 'text-cyan-300', border: 'border-cyan-500/40' },
+  'Chamber of Commerce': { bg: 'bg-indigo-500/20', text: 'text-indigo-300', border: 'border-indigo-500/40' },
+  'Showcase/ONOs reply': { bg: 'bg-orange-500/20', text: 'text-orange-300', border: 'border-orange-500/40' },
+  'FIRs': { bg: 'bg-rose-500/20', text: 'text-rose-300', border: 'border-rose-500/40' },
+  'Petitions': { bg: 'bg-violet-500/20', text: 'text-violet-300', border: 'border-violet-500/40' },
+  "Agreement's": { bg: 'bg-sky-500/20', text: 'text-sky-300', border: 'border-sky-500/40' },
+  'Quotations': { bg: 'bg-lime-500/20', text: 'text-lime-300', border: 'border-lime-500/40' },
+  'Banks': { bg: 'bg-emerald-600/20', text: 'text-emerald-300', border: 'border-emerald-500/40' },
+  'Assets': { bg: 'bg-yellow-500/20', text: 'text-yellow-300', border: 'border-yellow-500/40' },
+};
+
+const getCategoryStyle = (cat: string) => {
+  return CATEGORY_COLORS[cat] || { bg: 'bg-white/10', text: 'text-gray-300', border: 'border-white/20' };
+};
+
+export const CompanyDocuments: React.FC = () => {
+  const { customLogo, companyName } = useBranding();
+
+  // State
+  const [documents, setDocuments] = useState<CompanyDocument[]>([]);
+  const [categories, setCategories] = useState<string[]>(DEFAULT_COMPANY_DOCUMENT_CATEGORIES);
+  const [selectedCategoryTab, setSelectedCategoryTab] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Modals
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showAdvanceSearchModal, setShowAdvanceSearchModal] = useState(false);
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
+  const [selectedDocForPreview, setSelectedDocForPreview] = useState<CompanyDocument | null>(null);
+
+  // New Category Form
+  const [newCategoryName, setNewCategoryName] = useState('');
+
+  // Advance Search Filters
+  const [advCategory, setAdvCategory] = useState('ALL');
+  const [advSubcategory, setAdvSubcategory] = useState('');
+  const [advDateFrom, setAdvDateFrom] = useState('');
+  const [advDateTo, setAdvDateTo] = useState('');
+  const [advTitle, setAdvTitle] = useState('');
+  const [advFrom, setAdvFrom] = useState('');
+  const [advTo, setAdvTo] = useState('');
+  const [advHearingFilter, setAdvHearingFilter] = useState<'ALL' | 'YES' | 'NO'>('ALL');
+  const [isAdvActive, setIsAdvActive] = useState(false);
+
+  // Add Document Form State
+  const [docCategory, setDocCategory] = useState(DEFAULT_COMPANY_DOCUMENT_CATEGORIES[0]);
+  const [docDate, setDocDate] = useState(new Date().toISOString().split('T')[0]);
+  const [docTitle, setDocTitle] = useState('');
+  const [docFrom, setDocFrom] = useState('');
+  const [docTo, setDocTo] = useState('Docks (Pvt.) Ltd, Karachi');
+  const [docSubject, setDocSubject] = useState('');
+  const [docRefNo, setDocRefNo] = useState('');
+  const [hearingRequired, setHearingRequired] = useState(false);
+  const [hearingDate, setHearingDate] = useState('');
+  const [hearingTime, setHearingTime] = useState('');
+  const [hearingNotes, setHearingNotes] = useState('');
+
+  // Uploaded Files for Add Modal (Supports Multiple!)
+  interface UploadItem {
+    name: string;
+    dataUrl: string;
+    type: string;
+    size: number;
+    status: 'idle' | 'analyzing' | 'done';
+  }
+  const [uploadedFiles, setUploadedFiles] = useState<UploadItem[]>([]);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [aiNotice, setAiNotice] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Subscribe to live Firestore data
+  useEffect(() => {
+    setIsLoading(true);
+    const unsubDocs = subscribeToCompanyDocuments((docs) => {
+      setDocuments(docs);
+      setIsLoading(false);
+    });
+
+    const unsubCats = subscribeToCompanyCategories((cats) => {
+      if (cats && cats.length > 0) {
+        setCategories(cats);
+      }
+    });
+
+    return () => {
+      unsubDocs();
+      unsubCats();
+    };
+  }, []);
+
+  // Filtered documents
+  const filteredDocuments = useMemo(() => {
+    return documents.filter((doc) => {
+      // Category Tab
+      if (selectedCategoryTab !== 'ALL' && doc.category !== selectedCategoryTab) {
+        return false;
+      }
+
+      // Quick Search Query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchesQuery = 
+          (doc.title && doc.title.toLowerCase().includes(q)) ||
+          (doc.subject && doc.subject.toLowerCase().includes(q)) ||
+          (doc.from && doc.from.toLowerCase().includes(q)) ||
+          (doc.to && doc.to.toLowerCase().includes(q)) ||
+          (doc.category && doc.category.toLowerCase().includes(q)) ||
+          (doc.referenceNo && doc.referenceNo.toLowerCase().includes(q)) ||
+          (doc.documentDate && doc.documentDate.includes(q));
+
+        if (!matchesQuery) return false;
+      }
+
+      // Advance Search Filters
+      if (isAdvActive) {
+        if (advCategory !== 'ALL' && doc.category !== advCategory) return false;
+        if (advSubcategory.trim() && !doc.subcategory?.toLowerCase().includes(advSubcategory.toLowerCase().trim())) return false;
+        if (advTitle.trim() && !doc.title.toLowerCase().includes(advTitle.toLowerCase().trim())) return false;
+        if (advFrom.trim() && !doc.from.toLowerCase().includes(advFrom.toLowerCase().trim())) return false;
+        if (advTo.trim() && !doc.to.toLowerCase().includes(advTo.toLowerCase().trim())) return false;
+        if (advDateFrom && doc.documentDate < advDateFrom) return false;
+        if (advDateTo && doc.documentDate > advDateTo) return false;
+        if (advHearingFilter === 'YES' && !doc.hearingRequired) return false;
+        if (advHearingFilter === 'NO' && doc.hearingRequired) return false;
+      }
+
+      return true;
+    });
+  }, [documents, selectedCategoryTab, searchQuery, isAdvActive, advCategory, advSubcategory, advTitle, advFrom, advTo, advDateFrom, advDateTo, advHearingFilter]);
+
+  // Unique Lists for Advance Search Autocomplete/Dropdowns
+  const uniqueFromList = useMemo(() => {
+    const set = new Set<string>();
+    documents.forEach(d => { if (d.from) set.add(d.from); });
+    return Array.from(set).sort();
+  }, [documents]);
+
+  const uniqueToList = useMemo(() => {
+    const set = new Set<string>();
+    documents.forEach(d => { if (d.to) set.add(d.to); });
+    return Array.from(set).sort();
+  }, [documents]);
+
+  // Handle Multi-File Upload & AI OCR Trigger
+  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newUploads: UploadItem[] = [];
+    const filesArray = Array.from(files);
+
+    for (const file of filesArray) {
+      await new Promise<void>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          newUploads.push({
+            name: file.name,
+            dataUrl: ev.target?.result as string,
+            type: file.type,
+            size: file.size,
+            status: 'idle'
+          });
+          resolve();
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    setUploadedFiles(prev => [...prev, ...newUploads]);
+
+    // Run AI OCR on the primary/first file to automatically extract fields
+    const primaryFile = newUploads[0];
+    if (primaryFile) {
+      setAiAnalyzing(true);
+      setAiNotice(null);
+      try {
+        const aiResult = await analyzeCompanyDocumentWithAI(primaryFile);
+
+        if (aiResult.title) setDocTitle(aiResult.title);
+        if (aiResult.category && categories.includes(aiResult.category)) {
+          setDocCategory(aiResult.category);
+        }
+        if (aiResult.documentDate) setDocDate(aiResult.documentDate);
+        if (aiResult.from) setDocFrom(aiResult.from);
+        if (aiResult.to) setDocTo(aiResult.to);
+        if (aiResult.subject) setDocSubject(aiResult.subject);
+        if (aiResult.referenceNo) setDocRefNo(aiResult.referenceNo);
+        if (aiResult.hearingRequired !== undefined) {
+          setHearingRequired(aiResult.hearingRequired);
+          if (aiResult.hearingDate) setHearingDate(aiResult.hearingDate);
+          if (aiResult.hearingTime) setHearingTime(aiResult.hearingTime);
+        }
+
+        if (aiResult.unreadFieldsNote) {
+          setAiNotice(`AI Notice: ${aiResult.unreadFieldsNote}`);
+        } else {
+          setAiNotice('✨ AI has successfully analyzed and filled document fields. Review below.');
+        }
+      } catch (err) {
+        console.warn('AI analysis notice:', err);
+        setAiNotice('Document attached. Fill in any fields manually if needed.');
+      } finally {
+        setAiAnalyzing(false);
+      }
+    }
+  };
+
+  // Save Document
+  const handleSaveDocument = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!docTitle.trim() || !docCategory) return;
+
+    const primaryFile = uploadedFiles[0];
+
+    const newDoc: CompanyDocument = {
+      id: `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      title: docTitle.trim(),
+      category: docCategory,
+      documentDate: docDate || new Date().toISOString().split('T')[0],
+      from: docFrom.trim(),
+      to: docTo.trim(),
+      subject: docSubject.trim(),
+      referenceNo: docRefNo.trim(),
+      hearingRequired: hearingRequired,
+      hearingDate: hearingRequired ? hearingDate : undefined,
+      hearingTime: hearingRequired ? hearingTime : undefined,
+      hearingNotes: hearingRequired ? hearingNotes.trim() : undefined,
+      fileUrl: primaryFile?.dataUrl || undefined,
+      fileName: primaryFile?.name || (uploadedFiles.length > 1 ? `${uploadedFiles.length} files attached` : undefined),
+      fileType: primaryFile?.type || undefined,
+      fileSize: primaryFile?.size || undefined,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: 'Office Staff / Admin'
+    };
+
+    await saveCompanyDocumentToFirestore(newDoc);
+
+    // Reset Form
+    setShowAddModal(false);
+    setDocTitle('');
+    setDocFrom('');
+    setDocTo('Docks (Pvt.) Ltd, Karachi');
+    setDocSubject('');
+    setDocRefNo('');
+    setHearingRequired(false);
+    setHearingDate('');
+    setHearingTime('');
+    setHearingNotes('');
+    setUploadedFiles([]);
+    setAiNotice(null);
+  };
+
+  // Add Custom Category
+  const handleSaveCategory = async () => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) return;
+
+    await saveCompanyCategoryToFirestore(trimmed);
+    if (!categories.includes(trimmed)) {
+      setCategories(prev => [...prev, trimmed]);
+    }
+    setDocCategory(trimmed);
+    setNewCategoryName('');
+    setShowAddCategoryModal(false);
+  };
+
+  // Delete Document
+  const handleDeleteDocument = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm('Are you sure you want to delete this company document record?')) {
+      await deleteCompanyDocumentFromFirestore(id);
+    }
+  };
+
+  // Download PDF Handler (Downloads original attachment or creates official generated PDF)
+  const handleDownloadPdf = (docItem: CompanyDocument) => {
+    if (docItem.fileUrl && docItem.fileUrl.startsWith('data:')) {
+      const link = document.createElement('a');
+      link.href = docItem.fileUrl;
+      link.download = docItem.fileName || `${docItem.title.replace(/\s+/g, '_')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
+    // Generate formatted official PDF with jsPDF
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const primaryColor = [22, 36, 71]; // Navy Blue
+    const goldColor = [217, 119, 6];   // Amber
+
+    // Header Band
+    pdf.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    pdf.rect(0, 0, 210, 32, 'F');
+
+    // Title
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(16);
+    pdf.text(companyName || 'DOCKS (PVT) LTD', 15, 14);
+
+    pdf.setFontSize(9);
+    pdf.setTextColor(245, 158, 11);
+    pdf.text('CORPORATE LEGAL & COMPLIANCE DOCUMENT RECORD', 15, 22);
+
+    // Document Meta Box
+    pdf.setTextColor(30, 41, 59);
+    pdf.setFontSize(14);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text(docItem.title, 15, 46);
+
+    pdf.setDrawColor(226, 232, 240);
+    pdf.line(15, 50, 195, 50);
+
+    let y = 60;
+    const addRow = (label: string, val: string, isAlert = false) => {
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(10);
+      pdf.setTextColor(100, 116, 139);
+      pdf.text(label, 15, y);
+
+      pdf.setFont('helvetica', isAlert ? 'bold' : 'normal');
+      pdf.setFontSize(10);
+      pdf.setTextColor(isAlert ? 180 : 15, isAlert ? 83 : 23, isAlert ? 9 : 42);
+      pdf.text(val || 'N/A', 65, y);
+      y += 9;
+    };
+
+    addRow('Category:', docItem.category);
+    addRow('Document Date:', docItem.documentDate);
+    if (docItem.referenceNo) addRow('Reference #:', docItem.referenceNo);
+    addRow('Sender (From):', docItem.from);
+    addRow('Recipient (To):', docItem.to);
+    addRow('Subject:', docItem.subject);
+
+    if (docItem.hearingRequired) {
+      y += 4;
+      pdf.setFillColor(254, 243, 199);
+      pdf.rect(15, y - 5, 180, 20, 'F');
+      pdf.setDrawColor(245, 158, 11);
+      pdf.rect(15, y - 5, 180, 20, 'S');
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(180, 83, 9);
+      pdf.text(`LEGAL HEARING SCHEDULED: ${docItem.hearingDate || 'TBD'} ${docItem.hearingTime ? 'at ' + docItem.hearingTime : ''}`, 20, y + 4);
+      if (docItem.hearingNotes) {
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(9);
+        pdf.text(`Notes: ${docItem.hearingNotes}`, 20, y + 10);
+      }
+      y += 24;
+    }
+
+    // Footer
+    pdf.setFontSize(8);
+    pdf.setTextColor(148, 163, 184);
+    pdf.text(`Generated on ${new Date().toLocaleString()} by DPL Digital Record System. Confidential.`, 15, 285);
+
+    pdf.save(`${docItem.title.replace(/\s+/g, '_')}_record.pdf`);
+  };
+
+  // Reset Advance Search
+  const handleResetAdvSearch = () => {
+    setAdvCategory('ALL');
+    setAdvSubcategory('');
+    setAdvDateFrom('');
+    setAdvDateTo('');
+    setAdvTitle('');
+    setAdvFrom('');
+    setAdvTo('');
+    setAdvHearingFilter('ALL');
+    setIsAdvActive(false);
+    setShowAdvanceSearchModal(false);
+  };
+
+  const handleApplyAdvSearch = () => {
+    setIsAdvActive(true);
+    setShowAdvanceSearchModal(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-gray-100 flex flex-col p-4 sm:p-6 space-y-6">
+      {/* Top Header Banner */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 backdrop-blur-md p-5 rounded-2xl border border-white/10 shadow-xl">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0 shadow-lg shadow-amber-500/10">
+            <FolderArchive size={26} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-black text-white tracking-wide">Company Documents</h1>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
+                {filteredDocuments.length} Records
+              </span>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Legal, regulatory, customs, taxation, agreements, and official corporate archives with AI scanning.
+            </p>
+          </div>
+        </div>
+
+        {/* Action Controls */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setShowAdvanceSearchModal(true)}
+            className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+              isAdvActive 
+                ? 'bg-amber-500 text-slate-950 font-bold border-amber-400 shadow-lg shadow-amber-500/20' 
+                : 'bg-white/5 hover:bg-white/10 text-gray-200 border-white/10 hover:border-amber-500/30'
+            }`}
+          >
+            <Filter size={14} className={isAdvActive ? 'text-slate-950' : 'text-amber-400'} />
+            <span>Advance Search</span>
+            {isAdvActive && <span className="w-2 h-2 rounded-full bg-slate-950 ml-1"></span>}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/25 transition-all transform active:scale-95 cursor-pointer"
+          >
+            <Plus size={16} className="stroke-[3]" />
+            <span>Add Document</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Main Search Input & Active Filter Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* Quick Search */}
+        <div className="relative flex-1 max-w-xl">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search document title, subject, sender, recipient, reference #..."
+            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900/90 border border-white/10 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 shadow-inner"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Active Filter Chips */}
+        {isAdvActive && (
+          <div className="flex items-center gap-2 text-xs bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-xl text-amber-300">
+            <Filter size={13} />
+            <span>Advance Filters Active</span>
+            <button
+              type="button"
+              onClick={handleResetAdvSearch}
+              className="ml-2 underline text-amber-400 hover:text-white font-bold cursor-pointer"
+            >
+              Reset
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Categories Filter Tabs */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-2 custom-scrollbar pr-2">
+        <button
+          type="button"
+          onClick={() => setSelectedCategoryTab('ALL')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+            selectedCategoryTab === 'ALL'
+              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5'
+          }`}
+        >
+          All Categories ({documents.length})
+        </button>
+
+        {categories.map((cat) => {
+          const count = documents.filter(d => d.category === cat).length;
+          const isSelected = selectedCategoryTab === cat;
+          return (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setSelectedCategoryTab(cat)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                isSelected
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/20'
+                  : 'bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5'
+              }`}
+            >
+              <span>{cat}</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                isSelected ? 'bg-slate-950/30 text-slate-950' : 'bg-white/10 text-gray-400'
+              }`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Documents List View */}
+      {isLoading ? (
+        <div className="py-20 text-center space-y-3">
+          <Loader2 size={32} className="animate-spin text-amber-400 mx-auto" />
+          <p className="text-xs text-gray-400">Loading company document archives...</p>
+        </div>
+      ) : filteredDocuments.length === 0 ? (
+        <div className="py-16 text-center space-y-3 bg-slate-900/40 rounded-2xl border border-white/5 p-8">
+          <FolderArchive size={40} className="text-gray-600 mx-auto" />
+          <h3 className="text-sm font-bold text-gray-300">No Documents Found</h3>
+          <p className="text-xs text-gray-500 max-w-md mx-auto">
+            {isAdvActive || searchQuery
+              ? 'No documents match the specified filters. Try clearing your search criteria.'
+              : 'No documents have been recorded in this category yet. Click "Add Document" to upload a new record.'}
+          </p>
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => setShowAddModal(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md transition cursor-pointer"
+            >
+              <Plus size={14} /> Add Document Now
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredDocuments.map((doc) => {
+            const catStyle = getCategoryStyle(doc.category);
+            return (
+              <div
+                key={doc.id}
+                onClick={() => setSelectedDocForPreview(doc)}
+                className="bg-slate-900/70 hover:bg-slate-900 border border-white/10 hover:border-amber-500/30 rounded-2xl p-4.5 transition-all shadow-lg hover:shadow-amber-500/5 flex flex-col justify-between cursor-pointer group space-y-3"
+              >
+                {/* Top Badge & Action */}
+                <div className="flex items-start justify-between gap-2">
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border ${catStyle.bg} ${catStyle.text} ${catStyle.border}`}>
+                    <Tag size={10} /> {doc.category}
+                  </span>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownloadPdf(doc);
+                      }}
+                      className="p-1.5 rounded-lg bg-white/5 hover:bg-amber-500/20 text-gray-300 hover:text-amber-300 border border-white/10 transition cursor-pointer"
+                      title="Download PDF"
+                    >
+                      <Download size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteDocument(doc.id, e)}
+                      className="p-1.5 rounded-lg bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer"
+                      title="Delete Record"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Document Title & Reference */}
+                <div>
+                  <h3 className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors line-clamp-2">
+                    {doc.title}
+                  </h3>
+                  {doc.referenceNo && (
+                    <div className="text-[10px] font-mono text-amber-400/90 mt-0.5">
+                      Ref #: {doc.referenceNo}
+                    </div>
+                  )}
+                </div>
+
+                {/* Subject & Summary */}
+                {doc.subject && (
+                  <p className="text-xs text-gray-400 line-clamp-2 bg-black/25 p-2 rounded-xl border border-white/5">
+                    {doc.subject}
+                  </p>
+                )}
+
+                {/* Hearing Alert Box if applicable */}
+                {doc.hearingRequired && (
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs text-amber-300">
+                    <div className="flex items-center gap-1.5">
+                      <Gavel size={14} className="text-amber-400 shrink-0" />
+                      <span className="font-bold">Hearing Scheduled:</span>
+                    </div>
+                    <span className="font-mono font-bold text-[11px] text-white">
+                      {doc.hearingDate || 'Scheduled'} {doc.hearingTime ? `@ ${doc.hearingTime}` : ''}
+                    </span>
+                  </div>
+                )}
+
+                {/* Bottom Meta Info (From, To, Date) */}
+                <div className="pt-2 border-t border-white/5 text-[11px] text-gray-400 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="truncate max-w-[150px]">
+                      <strong className="text-gray-300">From:</strong> {doc.from || 'Not specified'}
+                    </span>
+                    <span className="flex items-center gap-1 text-gray-400 shrink-0 font-mono text-[10px]">
+                      <Calendar size={11} /> {doc.documentDate}
+                    </span>
+                  </div>
+                  <div className="truncate">
+                    <strong className="text-gray-300">To:</strong> {doc.to || 'Docks (Pvt.) Ltd'}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 1. ADD DOCUMENT MODAL (WITH AI OCR & CUSTOM CATEGORY) */}
+      {/* ========================================================================= */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto custom-scrollbar">
+          <div className="bg-slate-900 border border-white/15 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto p-5 sm:p-6 space-y-5 shadow-2xl custom-scrollbar my-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+                  <Plus size={18} />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-bold text-white">Add Company Document</h2>
+                  <p className="text-[11px] text-gray-400">Upload letter/notice for AI reading or enter details manually</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Step 1: Upload Document Button (AI Auto-Reading) */}
+            <div className="p-4 rounded-xl bg-gradient-to-r from-amber-500/10 via-slate-800/80 to-blue-500/10 border border-amber-500/30 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+                  <Sparkles size={15} className="text-amber-400" />
+                  <span>AI Document Scanner & Auto-Fill</span>
+                </div>
+                {aiAnalyzing && (
+                  <span className="flex items-center gap-1.5 text-[11px] text-amber-300 font-semibold animate-pulse">
+                    <Loader2 size={12} className="animate-spin" /> AI Reading document...
+                  </span>
+                )}
+              </div>
+
+              <p className="text-[11px] text-gray-300 leading-relaxed">
+                Upload image or PDF document. AI will automatically scan and read the date, sender, recipient, subject, reference number, and legal hearing status!
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFilesSelected}
+                  multiple
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled={aiAnalyzing}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition cursor-pointer"
+                >
+                  <Upload size={14} />
+                  <span>{uploadedFiles.length > 0 ? 'Upload More Documents' : 'Upload Document (PDF / Image)'}</span>
+                </button>
+
+                {uploadedFiles.length > 0 && (
+                  <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                    <CheckCircle2 size={14} /> {uploadedFiles.length} file(s) attached
+                  </span>
+                )}
+              </div>
+
+              {/* Uploaded Files Chips */}
+              {uploadedFiles.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {uploadedFiles.map((f, idx) => (
+                    <span key={idx} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/40 text-[10px] text-gray-200 border border-white/10 font-mono">
+                      <Paperclip size={11} className="text-amber-400" />
+                      <span className="truncate max-w-[180px]">{f.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setUploadedFiles(uploadedFiles.filter((_, i) => i !== idx))}
+                        className="text-red-400 hover:text-red-300 ml-1"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* AI Notice Banner */}
+              {aiNotice && (
+                <div className="p-2.5 rounded-lg bg-black/40 border border-amber-500/20 text-[11px] text-amber-200 flex items-start gap-2">
+                  <Sparkles size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                  <span>{aiNotice}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Document Form */}
+            <form onSubmit={handleSaveDocument} className="space-y-4">
+              {/* Category Dropdown with "+ Add New Category" button */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-gray-300">Category *</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCategoryModal(true)}
+                    className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 underline cursor-pointer"
+                  >
+                    <Plus size={12} /> Add New Category
+                  </button>
+                </div>
+                <select
+                  value={docCategory}
+                  onChange={(e) => setDocCategory(e.target.value)}
+                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                >
+                  {categories.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Grid: Document Date & Reference No */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-300 block mb-1">Document Date *</label>
+                  <input
+                    type="date"
+                    required
+                    value={docDate}
+                    onChange={(e) => setDocDate(e.target.value)}
+                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-300 block mb-1">Reference / Notice #</label>
+                  <input
+                    type="text"
+                    value={docRefNo}
+                    onChange={(e) => setDocRefNo(e.target.value)}
+                    placeholder="e.g. FBR/2026/0991, SECP-REG-44"
+                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Document Title */}
+              <div>
+                <label className="text-xs font-semibold text-gray-300 block mb-1">Document Title *</label>
+                <input
+                  type="text"
+                  required
+                  value={docTitle}
+                  onChange={(e) => setDocTitle(e.target.value)}
+                  placeholder="e.g. Annual Tax Return Acknowledgment, Sindh Revenue Board Show-Cause Notice"
+                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              {/* Grid: From & To */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-300 block mb-1">From (Sender & Address) *</label>
+                  <input
+                    type="text"
+                    required
+                    value={docFrom}
+                    onChange={(e) => setDocFrom(e.target.value)}
+                    placeholder="e.g. Commissioner Inland Revenue, RTO-II Karachi"
+                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-300 block mb-1">To (Recipient & Address) *</label>
+                  <input
+                    type="text"
+                    required
+                    value={docTo}
+                    onChange={(e) => setDocTo(e.target.value)}
+                    placeholder="e.g. Docks (Pvt.) Ltd, Executive Office, Karachi"
+                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              {/* Subject */}
+              <div>
+                <label className="text-xs font-semibold text-gray-300 block mb-1">Subject / Summary</label>
+                <textarea
+                  rows={2}
+                  value={docSubject}
+                  onChange={(e) => setDocSubject(e.target.value)}
+                  placeholder="Subject of the letter or brief description..."
+                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400 resize-none"
+                />
+              </div>
+
+              {/* Hearing Required Option (Haan / Nahin) */}
+              <div className="p-3.5 rounded-xl bg-black/30 border border-white/10 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-bold text-white block">Kya is document ki hearing honi hai?</label>
+                    <p className="text-[11px] text-gray-400">Select whether personal appearance or hearing date is scheduled.</p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setHearingRequired(true)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        hearingRequired 
+                          ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' 
+                          : 'bg-white/5 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Haan (Yes)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHearingRequired(false)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        !hearingRequired 
+                          ? 'bg-slate-700 text-white' 
+                          : 'bg-white/5 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Nahin (No)
+                    </button>
+                  </div>
+                </div>
+
+                {/* If Hearing Required = True, show Date & Time inputs */}
+                {hearingRequired && (
+                  <div className="pt-2 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fade-in">
+                    <div>
+                      <label className="text-[11px] text-amber-300 font-semibold block mb-1">Hearing Date *</label>
+                      <input
+                        type="date"
+                        required={hearingRequired}
+                        value={hearingDate}
+                        onChange={(e) => setHearingDate(e.target.value)}
+                        className="w-full rounded-xl bg-black/50 border border-amber-500/30 p-2 text-xs text-white font-mono focus:border-amber-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-amber-300 font-semibold block mb-1">Hearing Time</label>
+                      <input
+                        type="time"
+                        value={hearingTime}
+                        onChange={(e) => setHearingTime(e.target.value)}
+                        className="w-full rounded-xl bg-black/50 border border-amber-500/30 p-2 text-xs text-white font-mono focus:border-amber-400"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] text-gray-300 block mb-1">Hearing Bench / Court / Officer Notes</label>
+                      <input
+                        type="text"
+                        value={hearingNotes}
+                        onChange={(e) => setHearingNotes(e.target.value)}
+                        placeholder="e.g. Before Honorable Collector Appeals, Custom House, Karachi"
+                        className="w-full rounded-xl bg-black/50 border border-white/10 p-2 text-xs text-white"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-gray-400 hover:text-white transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/25 transition cursor-pointer"
+                >
+                  Save Document
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 2. ADVANCE SEARCH MODAL */}
+      {/* ========================================================================= */}
+      {showAdvanceSearchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto custom-scrollbar">
+          <div className="bg-slate-900 border border-white/15 rounded-2xl w-full max-w-xl max-h-[92vh] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl custom-scrollbar my-auto">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <Filter size={18} className="text-amber-400" />
+                <h2 className="text-sm sm:text-base font-bold text-white">Advance Document Search</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdvanceSearchModal(false)}
+                className="text-gray-400 hover:text-white p-1"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs">
+              {/* Category Dropdown */}
+              <div>
+                <label className="text-gray-300 font-semibold block mb-1">Category</label>
+                <select
+                  value={advCategory}
+                  onChange={(e) => setAdvCategory(e.target.value)}
+                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white"
+                >
+                  <option value="ALL">All Categories</option>
+                  {categories.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Subcategory */}
+              <div>
+                <label className="text-gray-300 font-semibold block mb-1">Subcategory / Document Type</label>
+                <input
+                  type="text"
+                  value={advSubcategory}
+                  onChange={(e) => setAdvSubcategory(e.target.value)}
+                  placeholder="e.g. Notice, Order, Reply, Return, Challan"
+                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white"
+                />
+              </div>
+
+              {/* Date Selection (From & To) */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-gray-300 font-semibold block mb-1">Date From</label>
+                  <input
+                    type="date"
+                    value={advDateFrom}
+                    onChange={(e) => setAdvDateFrom(e.target.value)}
+                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-gray-300 font-semibold block mb-1">Date To</label>
+                  <input
+                    type="date"
+                    value={advDateTo}
+                    onChange={(e) => setAdvDateTo(e.target.value)}
+                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Document Title */}
+              <div>
+                <label className="text-gray-300 font-semibold block mb-1">Document Title</label>
+                <input
+                  type="text"
+                  value={advTitle}
+                  onChange={(e) => setAdvTitle(e.target.value)}
+                  placeholder="Filter by title..."
+                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white"
+                />
+              </div>
+
+              {/* To (Kisko Bheja Gaya) */}
+              <div>
+                <label className="text-gray-300 font-semibold block mb-1">To (Kisko bheja gaya list)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={advTo}
+                    onChange={(e) => setAdvTo(e.target.value)}
+                    placeholder="Recipient name..."
+                    className="flex-1 rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-white"
+                  />
+                  {uniqueToList.length > 0 && (
+                    <select
+                      onChange={(e) => setAdvTo(e.target.value)}
+                      className="w-32 rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-gray-300"
+                    >
+                      <option value="">Pick From List...</option>
+                      {uniqueToList.map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {/* From (Kisse Aaya) */}
+              <div>
+                <label className="text-gray-300 font-semibold block mb-1">From (Kisse document aaya list)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={advFrom}
+                    onChange={(e) => setAdvFrom(e.target.value)}
+                    placeholder="Sender name..."
+                    className="flex-1 rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-white"
+                  />
+                  {uniqueFromList.length > 0 && (
+                    <select
+                      onChange={(e) => setAdvFrom(e.target.value)}
+                      className="w-32 rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-gray-300"
+                    >
+                      <option value="">Pick From List...</option>
+                      {uniqueFromList.map(f => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {/* Hearing Filter */}
+              <div>
+                <label className="text-gray-300 font-semibold block mb-1">Hearing Scheduled?</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAdvHearingFilter('ALL')}
+                    className={`p-2 rounded-xl border text-center transition cursor-pointer ${
+                      advHearingFilter === 'ALL' ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold' : 'bg-black/30 border-white/10 text-gray-400'
+                    }`}
+                  >
+                    All Documents
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdvHearingFilter('YES')}
+                    className={`p-2 rounded-xl border text-center transition cursor-pointer ${
+                      advHearingFilter === 'YES' ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold' : 'bg-black/30 border-white/10 text-gray-400'
+                    }`}
+                  >
+                    ⚖️ Hearing Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdvHearingFilter('NO')}
+                    className={`p-2 rounded-xl border text-center transition cursor-pointer ${
+                      advHearingFilter === 'NO' ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold' : 'bg-black/30 border-white/10 text-gray-400'
+                    }`}
+                  >
+                    No Hearing
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="pt-3 border-t border-white/10 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={handleResetAdvSearch}
+                className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-gray-400 hover:text-white"
+              >
+                Reset Filters
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanceSearchModal(false)}
+                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-gray-400"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyAdvSearch}
+                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md cursor-pointer"
+                >
+                  Search Documents
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 3. ADD NEW CATEGORY SUB-MODAL */}
+      {/* ========================================================================= */}
+      {showAddCategoryModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-white/20 rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2">
+              <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                <Tag size={16} className="text-amber-400" /> Add New Category
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAddCategoryModal(false)}
+                className="text-gray-400 hover:text-white text-xs"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-300 block mb-1">Category Name *</label>
+              <input
+                type="text"
+                autoFocus
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="e.g. Legal Notices, Customs Port Clearances"
+                className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSaveCategory();
+                  }
+                }}
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setShowAddCategoryModal(false)}
+                className="px-3 py-1.5 rounded-xl bg-white/5 text-xs text-gray-400"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCategory}
+                className="px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer shadow-md"
+              >
+                Save Category
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 4. DOCUMENT PREVIEW MODAL */}
+      {/* ========================================================================= */}
+      {selectedDocForPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm animate-fade-in overflow-y-auto custom-scrollbar">
+          <div className="bg-slate-900 border border-white/15 rounded-2xl w-full max-w-xl max-h-[92vh] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl custom-scrollbar my-auto">
+            <div className="flex items-start justify-between border-b border-white/10 pb-3 gap-2">
+              <div>
+                <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border mb-1.5 ${getCategoryStyle(selectedDocForPreview.category).bg} ${getCategoryStyle(selectedDocForPreview.category).text} ${getCategoryStyle(selectedDocForPreview.category).border}`}>
+                  {selectedDocForPreview.category}
+                </span>
+                <h2 className="text-base sm:text-lg font-bold text-white leading-snug">
+                  {selectedDocForPreview.title}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedDocForPreview(null)}
+                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 shrink-0"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Hearing Card if scheduled */}
+            {selectedDocForPreview.hearingRequired && (
+              <div className="p-3.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-xs text-amber-300">
+                  <Gavel size={15} />
+                  <span>COURT / LEGAL HEARING SCHEDULED</span>
+                </div>
+                <div className="font-mono text-sm font-bold text-white">
+                  Date: {selectedDocForPreview.hearingDate || 'Scheduled'} {selectedDocForPreview.hearingTime ? `@ ${selectedDocForPreview.hearingTime}` : ''}
+                </div>
+                {selectedDocForPreview.hearingNotes && (
+                  <p className="text-[11px] text-gray-300 mt-1">{selectedDocForPreview.hearingNotes}</p>
+                )}
+              </div>
+            )}
+
+            {/* Document Details Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-400 block text-[10px]">DOCUMENT DATE</span>
+                <span className="text-white font-mono font-semibold">{selectedDocForPreview.documentDate}</span>
+              </div>
+              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-400 block text-[10px]">REFERENCE #</span>
+                <span className="text-amber-300 font-mono font-semibold">{selectedDocForPreview.referenceNo || 'None'}</span>
+              </div>
+              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-400 block text-[10px]">SENDER (FROM)</span>
+                <span className="text-white font-medium">{selectedDocForPreview.from || 'N/A'}</span>
+              </div>
+              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-400 block text-[10px]">RECIPIENT (TO)</span>
+                <span className="text-white font-medium">{selectedDocForPreview.to || 'Docks (Pvt.) Ltd'}</span>
+              </div>
+            </div>
+
+            {/* Subject */}
+            {selectedDocForPreview.subject && (
+              <div className="bg-black/30 p-3 rounded-xl border border-white/5 text-xs">
+                <span className="text-gray-400 block text-[10px] mb-1">SUBJECT / DESCRIPTION</span>
+                <p className="text-gray-200 leading-relaxed whitespace-pre-wrap">{selectedDocForPreview.subject}</p>
+              </div>
+            )}
+
+            {/* Attached File Preview if available */}
+            {selectedDocForPreview.fileUrl && (
+              <div className="p-3 rounded-xl bg-black/40 border border-white/10 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-300 font-semibold flex items-center gap-1.5">
+                    <Paperclip size={14} className="text-amber-400" />
+                    <span>Attached Document: {selectedDocForPreview.fileName || 'document.pdf'}</span>
+                  </span>
+                </div>
+                {selectedDocForPreview.fileUrl.startsWith('data:image/') && (
+                  <div className="max-h-60 overflow-hidden rounded-lg border border-white/10">
+                    <img 
+                      src={selectedDocForPreview.fileUrl} 
+                      alt="Preview" 
+                      className="w-full h-auto object-contain max-h-60" 
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="pt-3 border-t border-white/10 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={(e) => {
+                  handleDeleteDocument(selectedDocForPreview.id, e);
+                  setSelectedDocForPreview(null);
+                }}
+                className="px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs font-semibold border border-red-500/20 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 size={13} /> Delete Document
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedDocForPreview(null)}
+                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-gray-300 cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadPdf(selectedDocForPreview)}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+                >
+                  <Download size={14} /> Download PDF
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default CompanyDocuments;

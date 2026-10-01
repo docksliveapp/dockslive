@@ -159,36 +159,14 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
       });
       setArrangements(initialArr);
 
-      // Build initial category charges
-      populateCategoryCharges(cat);
+      // Start with empty charges list for fresh clients (only charges added via Add button will appear)
+      setChargesList([]);
 
       setLoginEnabled(true);
       setUserId(`CLT-${Math.floor(1000 + Math.random() * 9000)}`);
       setPassword(`DPL@${Math.floor(100 + Math.random() * 900)}`);
     }
   }, [isOpen, initialClient, defaultCategory]);
-
-  // Build category default charges
-  const populateCategoryCharges = (cat: string) => {
-    const normKey = normalizeCategoryKey(cat);
-    const catArrangements = CATEGORY_SERVICE_ARRANGEMENTS[normKey] || CATEGORY_SERVICE_ARRANGEMENTS['Bonded Carrier'];
-    
-    // Automatically open the charges specific to this category
-    const initialList: ClientDefaultCharge[] = Object.entries(catArrangements).map(([key, item]) => {
-      // For Bonded Carrier: TP charges default with amount
-      // For Private Cargo: Loading & Unloading default with amount
-      const isDefaultByRule = item.isDefaultDpl || (normKey === 'Transportation of Private Cargo' && (key.includes('loading') || key.includes('unloading')));
-      return {
-        id: `chg_${key}_${Date.now()}`,
-        category: cat,
-        description: item.label,
-        defaultAmount: isDefaultByRule ? item.amount : 0, // 0 means user can enter amount to make it active default
-        taxable: isDefaultByRule
-      };
-    });
-
-    setChargesList(initialList);
-  };
 
   // When category dropdown changes
   const handleCategoryChange = (newCat: string) => {
@@ -199,7 +177,6 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
       newArr[key] = item.isDefaultDpl ? 'DPL' : 'Client';
     });
     setArrangements(newArr);
-    populateCategoryCharges(newCat);
   };
 
   // Master charge pool for the charge picker
@@ -329,15 +306,13 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
     const clientId = initialClient?.id || `client_${Date.now()}`;
     const trimmedName = name.trim();
 
-    // User's crucial rule:
-    // "Koi bhi client case register karte waqt add kiya jaega to usmein by default charges mein pahli bar ek amount likhna zaruri hai Varna koi charges by default nahi honge jab tak unmen ek amount dal jaege phir woh charges default hojaeinge"
-    // Only save charges where amount > 0 as default charges!
+    // Only save charges that have a description (charges added by clicking the Add button)
     const validDefaultCharges: ClientDefaultCharge[] = chargesList
-      .filter(c => (Number(c.defaultAmount) || 0) > 0)
+      .filter(c => c.description.trim())
       .map(c => ({
         id: c.id,
         category: c.category || selectedCategory,
-        description: c.description,
+        description: c.description.trim(),
         defaultAmount: Number(c.defaultAmount) || 0,
         taxable: c.taxable ?? false
       }));
@@ -995,32 +970,19 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
               )}
             </div>
 
-            {/* Crucial Rule Notification */}
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-200 flex items-start gap-2.5">
-              <Sparkles size={16} className="shrink-0 mt-0.5 text-emerald-400" />
-              <div>
-                <strong>Rule for Default Charges:</strong> Default charges must have an initial amount greater than zero (&gt; 0). Only charges with a specified amount will be saved as the permanent default billing schedule for this client.
-              </div>
-            </div>
-
             {/* Charges List Table */}
             <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
               {chargesList.length === 0 ? (
                 <div className="p-4 text-center text-xs text-gray-400 bg-black/20 rounded-xl border border-white/5">
-                  No default charges added yet. Click &quot;Add Charge / Add Amount&quot; to pick or create charges.
+                  No default charges added yet. Click &quot;+ Add Charge / Add Amount&quot; to add default charges for this client.
                 </div>
               ) : (
                 chargesList.map((ch, idx) => {
                   const hasAmount = (Number(ch.defaultAmount) || 0) > 0;
-
                   return (
                     <div 
                       key={ch.id || idx} 
-                      className={`p-2.5 rounded-xl border flex flex-col sm:flex-row sm:items-center gap-2.5 transition-all ${
-                        hasAmount 
-                          ? 'bg-emerald-950/20 border-emerald-500/30' 
-                          : 'bg-black/30 border-white/10 opacity-70'
-                      }`}
+                      className="p-2.5 rounded-xl border bg-black/30 border-white/10 hover:border-emerald-500/30 flex flex-col sm:flex-row sm:items-center gap-2.5 transition-all"
                     >
                       <div className="flex-1 min-w-0">
                         <input 

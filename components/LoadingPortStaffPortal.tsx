@@ -42,8 +42,8 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
   onSignOut,
   userRole = UserRole.LOADING_PORT_STAFF,
   userRoles = [],
-  staffUserId = 'mohsin',
-  staffUserName = 'Mohsin Khan'
+  staffUserId = 'officestaff',
+  staffUserName = 'Port Operations Staff'
 }) => {
   const { customLogo, companyName } = useBranding();
   

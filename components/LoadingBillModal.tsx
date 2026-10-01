@@ -354,8 +354,8 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
       uploadedAt: new Date().toISOString()
     });
 
-    const staffId = safeAppStorage.getItem('dpl_current_user_id') || 'mohsin';
-    const staffName = safeAppStorage.getItem('dpl_current_user_name') || 'Mohsin Khan';
+    const staffId = safeAppStorage.getItem('dpl_current_user_id') || 'officestaff';
+    const staffName = safeAppStorage.getItem('dpl_current_user_name') || 'Port Operations Staff';
 
     // Save to Staff Loading Bills repository
     saveStaffBillToFirestore({

@@ -31,6 +31,18 @@ interface LoginModeSelectionProps {
   onSelectMode: (payload: SelectedModePayload) => void;
 }
 
+// Dedicated clean role list for testing mode (Strictly roles only, no personal names)
+const TESTING_ROLE_ACCOUNTS = [
+  { id: 'admin', userId: 'admin', password: 'dpl01234', name: 'System Administrator', role: UserRole.ADMIN, designation: 'System Administrator' },
+  { id: 'finance', userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, designation: 'Finance Manager' },
+  { id: 'casemanager', userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, designation: 'Operations Manager' },
+  { id: 'vehiclemanager', userId: 'vehiclemanager', password: 'dpl01234', name: 'Vehicles Manager', role: UserRole.VEHICLE_MANAGER, designation: 'Fleet & Vehicle Manager' },
+  { id: 'officestaff', userId: 'officestaff', password: 'dpl01234', name: 'Office Staff', role: UserRole.OFFICE_STAFF, designation: 'Office Staff Coordinator' },
+  { id: 'transporter', userId: 'transporter', password: 'dpl01234', name: 'Transporter Portal', role: UserRole.TRANSPORTER, designation: 'Goods Transporter' },
+  { id: 'client', userId: 'client', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, designation: 'Corporate Importer' },
+  { id: 'vendor', userId: 'vendor', password: 'dpl01234', name: 'Vendor Portal', role: UserRole.VENDOR, designation: 'Supplier / Service Vendor' }
+];
+
 export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelectMode }) => {
   const { customLogo, companyName, subtitle } = useBranding();
 
@@ -40,7 +52,7 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [showCredentialsGuide, setShowCredentialsGuide] = useState(false);
+  const [showCredentialsGuide, setShowCredentialsGuide] = useState(true);
 
   // Workflow & Draft Resumption Detection
   const [hasActiveDraft, setHasActiveDraft] = useState(false);
@@ -96,6 +108,8 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
 
       if (userRole === UserRole.CLIENT) {
         targetView = 'cases';
+      } else if (userRole === UserRole.VENDOR) {
+        targetView = 'vendor_portal';
       } else if (userRoles.includes(UserRole.FINANCE_MANAGER)) {
         targetView = 'finance';
       } else if (userRoles.includes(UserRole.VEHICLE_MANAGER) || userRole === UserRole.TRANSPORTER) {
@@ -124,10 +138,52 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
     }
   };
 
-  const handleQuickFill = (user: typeof DEFAULT_DATABASE_USERS[0]) => {
+  // 1-Click Instant Login for testing buttons
+  const handleQuickLogin = async (user: { id?: string | number; userId?: string; password?: string; name?: string; role?: UserRole; roles?: UserRole[]; designation?: string; clientName?: string }) => {
+    setIsLoading(true);
+    setErrorMessage(null);
     setIdentifier(user.userId || '');
     setPassword(user.password || 'dpl01234');
-    setErrorMessage(null);
+
+    try {
+      const authUser = await authenticateDatabaseUser(user.userId || '', user.password || 'dpl01234');
+      const userRole = (authUser.role as UserRole) || user.role || UserRole.ADMIN;
+      const userRoles = (authUser.roles && authUser.roles.length > 0) ? authUser.roles : [userRole];
+
+      safeAppStorage.setItem('dpl_user_roles', JSON.stringify(userRoles));
+      if (authUser.designation) {
+        safeAppStorage.setItem('dpl_user_designation', authUser.designation);
+      }
+      safeAppStorage.setItem('dpl_current_user_id', authUser.userId || user.userId || '');
+      safeAppStorage.setItem('dpl_current_user_name', authUser.name || user.name || authUser.userId || 'Staff');
+
+      let targetView = 'dashboard';
+      if (userRole === UserRole.CLIENT) {
+        targetView = 'cases';
+      } else if (userRole === UserRole.VENDOR) {
+        targetView = 'vendor_portal';
+      } else if (userRole === UserRole.TRANSPORTER || userRoles.includes(UserRole.VEHICLE_MANAGER)) {
+        targetView = 'vehicles';
+      } else if (userRoles.includes(UserRole.FINANCE_MANAGER)) {
+        targetView = 'finance';
+      } else if (userRoles.includes(UserRole.OPERATIONS_MANAGER) || userRoles.includes(UserRole.OFFICE_STAFF)) {
+        targetView = 'cases';
+      }
+
+      onSelectMode({
+        role: userRole,
+        roles: userRoles,
+        designation: authUser.designation || user.designation,
+        clientName: authUser.clientName || user.clientName || (userRole === UserRole.CLIENT ? authUser.name : 'Client Portal'),
+        targetView: targetView,
+        displayName: authUser.name || user.name || authUser.userId || 'Staff User'
+      });
+    } catch (err: any) {
+      console.error('Quick login error:', err);
+      setErrorMessage(err?.message || 'Quick login failed');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -303,26 +359,34 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
               className="w-full flex items-center justify-between text-xs text-amber-400/90 hover:text-amber-300 font-semibold cursor-pointer"
             >
               <span className="flex items-center gap-1.5">
-                <HelpCircle size={14} /> Official Staff Credentials Guide
+                <HelpCircle size={14} /> Quick Role Login (Testing Mode - Tap to Sign In)
               </span>
-              <span className="text-[10px] uppercase tracking-wider">{showCredentialsGuide ? '▲ Hide' : '▼ View IDs'}</span>
+              <span className="text-[10px] uppercase tracking-wider">{showCredentialsGuide ? '▲ Hide' : '▼ View Roles'}</span>
             </button>
 
             {showCredentialsGuide && (
-              <div className="mt-3 space-y-2 text-[11px] animate-fade-in max-h-56 overflow-y-auto pr-1 custom-scrollbar">
-                <p className="text-[10px] text-gray-400 mb-1.5">
-                  Universal Password for all accounts is: <strong className="text-amber-300 font-mono">dpl01234</strong>
-                </p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {DEFAULT_DATABASE_USERS.map((u, idx) => (
+              <div className="mt-3 space-y-2 text-[11px] animate-fade-in max-h-64 overflow-y-auto pr-1 custom-scrollbar">
+                <div className="flex items-center justify-between text-[10px] text-gray-400 mb-1.5">
+                  <span>Universal Password: <strong className="text-amber-300 font-mono">dpl01234</strong></span>
+                  <span className="text-emerald-400 font-semibold">⚡ Tap Any Role to Login</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {TESTING_ROLE_ACCOUNTS.map((u, idx) => (
                     <button
                       key={`cred_guide_${u.id || u.userId || idx}_${idx}`}
                       type="button"
-                      onClick={() => handleQuickFill(u)}
-                      className="p-2 rounded-lg bg-white/5 hover:bg-amber-500/10 border border-white/10 hover:border-amber-500/30 text-left transition cursor-pointer group"
+                      disabled={isLoading}
+                      onClick={() => handleQuickLogin(u)}
+                      className="p-2.5 rounded-xl bg-white/5 hover:bg-amber-500/15 border border-white/10 hover:border-amber-500/40 text-left transition cursor-pointer group flex flex-col justify-between"
+                      title={`Instant 1-Click Login as ${u.name}`}
                     >
-                      <div className="font-bold text-gray-200 group-hover:text-amber-300 truncate">{u.name}</div>
-                      <div className="text-amber-400 font-mono text-[10px]">ID: {u.userId}</div>
+                      <div className="font-bold text-gray-200 group-hover:text-amber-300 text-xs truncate">
+                        {u.name}
+                      </div>
+                      <div className="flex items-center justify-between mt-1 text-[10px]">
+                        <span className="text-amber-400 font-mono">ID: {u.userId}</span>
+                        <span className="text-emerald-400 font-semibold opacity-80 group-hover:opacity-100">Login ➔</span>
+                      </div>
                     </button>
                   ))}
                 </div>

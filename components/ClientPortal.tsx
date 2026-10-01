@@ -328,7 +328,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           totalAmount: (selectedCase.charges && selectedCase.charges.length > 0)
             ? selectedCase.charges.reduce((sum: number, ch: any) => sum + (Number(ch.amount) || 0), 0)
             : 28000,
-          officerName: (selectedCase as any).loadingStaffName || 'Mohsin Khan (Port Operations Officer)',
+          officerName: (selectedCase as any).loadingStaffName || 'Port Operations Officer',
           branding: { companyName, customLogo: activeLogo }
         };
         await downloadLoadingBillPdf(bData);
@@ -746,7 +746,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     let targetRecipient = 'DPL Billing Department';
     let targetRole = 'ADMIN';
     if (paymentForm.category === 'Loading Payment') {
-      targetRecipient = (caseItem as any)?.loadingStaffName || (caseItem?.loadingBills?.[0]?.staffName) || 'Mohsin Khan';
+      targetRecipient = (caseItem as any)?.loadingStaffName || (caseItem?.loadingBills?.[0]?.staffName) || 'Port Operations Staff';
       targetRole = 'LOADING_PORT_STAFF';
     } else if (paymentForm.category === 'Vehicle Rent') {
       targetRecipient = assignedContainer?.transporterName || (caseItem as any)?.transporterName || 'Bilal Goods Transport Co.';
@@ -2383,7 +2383,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     <p>
                       🏢 Recipient Routing: <strong className="text-white">
                         {paymentForm.category === 'Loading Payment' 
-                          ? (selectedCaseForPayment.loadingBills?.[0]?.staffName || 'Mohsin Khan (Port Officer)') 
+                          ? (selectedCaseForPayment.loadingBills?.[0]?.staffName || 'Port Operations Officer') 
                           : paymentForm.category === 'Vehicle Rent' 
                             ? (selectedCaseForPayment.containers?.[0]?.transporterName || 'Bilal Goods Transport Co.') 
                             : 'DPL Company Accounts'}
@@ -2588,7 +2588,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       LB-26-{c.caseNo.split('-').pop()}
                     </span>
                     <p className="text-gray-400 mt-0.5">
-                      Case: {c.caseNo} &bull; Port: {c.pol} &bull; Staff: {(c as any).loadingStaffName || 'Mohsin Khan'}
+                      Case: {c.caseNo} &bull; Port: {c.pol} &bull; Staff: {(c as any).loadingStaffName || 'Port Operations Staff'}
                     </p>
                   </div>
                   <button
@@ -2606,7 +2606,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                           amount: Number(ch.amount) || 0
                         })),
                         totalAmount: 25000,
-                        officerName: (c as any).loadingStaffName || 'Mohsin Khan (Port Staff)',
+                        officerName: (c as any).loadingStaffName || 'Port Operations Officer',
                         branding: { companyName, customLogo: activeLogo }
                       };
                       downloadLoadingBillPdf(bData);

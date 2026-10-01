@@ -2089,6 +2089,41 @@ const UserManagement: React.FC = () => {
                           Head office administrative coordinators and general support personnel.
                         </p>
                       </button>
+
+                      {/* Vendor Portal Role */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => {
+                            let r = prev.roles.filter(x => x !== UserRole.ADMIN);
+                            if (r.includes(UserRole.VENDOR)) {
+                              r = r.filter(x => x !== UserRole.VENDOR);
+                              if (r.length === 0) r = [UserRole.VENDOR];
+                            } else {
+                              r = [...r, UserRole.VENDOR];
+                            }
+                            return { ...prev, role: r[0] || UserRole.VENDOR, roles: r };
+                          });
+                        }}
+                        className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
+                          !formData.roles.includes(UserRole.ADMIN) && formData.roles.includes(UserRole.VENDOR)
+                            ? 'bg-amber-600/25 border-amber-500 shadow-md shadow-amber-500/20 ring-1 ring-amber-400'
+                            : 'bg-black/30 border-white/10 hover:border-amber-500/40 text-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_currentColor]"></span>
+                            Vendor / Supplier
+                          </span>
+                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200">
+                            Vendor Portal
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-400 mt-1 leading-tight">
+                          Equipment & service vendors with self-service statement download and slip upload portal.
+                        </p>
+                      </button>
                     </div>
                   </div>
                   <div className="sm:col-span-2">
