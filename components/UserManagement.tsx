@@ -727,7 +727,7 @@ const UserManagement: React.FC = () => {
                       <CreditCard size={13} className="text-emerald-400 shrink-0" /> Base Salary:
                     </span>
                     <span className="font-mono text-emerald-300 font-bold">
-                      PKR {(user.baseSalary || 45000).toLocaleString()}
+                      {Number(user.baseSalary || 0) > 0 ? `PKR ${Number(user.baseSalary).toLocaleString()}` : '-'}
                     </span>
                   </div>
                 </div>
@@ -826,7 +826,7 @@ const UserManagement: React.FC = () => {
                       </td>
                       <td className="p-4">
                         <span className="font-mono text-emerald-400 font-semibold text-xs">
-                          PKR {(user.baseSalary || 45000).toLocaleString()}
+                          {Number(user.baseSalary || 0) > 0 ? `PKR ${Number(user.baseSalary).toLocaleString()}` : '-'}
                         </span>
                       </td>
                       <td className="p-4">
@@ -1656,7 +1656,7 @@ const UserManagement: React.FC = () => {
                           </td>
                           <td className="p-4">
                             <span className="font-mono text-emerald-400 font-semibold text-xs">
-                              PKR {(user.baseSalary || 45000).toLocaleString()}
+                              {Number(user.baseSalary || 0) > 0 ? `PKR ${Number(user.baseSalary).toLocaleString()}` : '-'}
                             </span>
                           </td>
                           <td className="p-4">

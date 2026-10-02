@@ -222,6 +222,39 @@ export interface StaffLoadingBill {
   remarks?: string;
 }
 
+export interface PersonalLedgerAccount {
+  id: string;
+  ownerId: number | string;
+  ownerUserId: string;
+  ownerName: string;
+  partyName: string;
+  partyPhone?: string;
+  relationCategory?: string; // 'Daily Dealing', 'Cash Loan', 'Personal Partner', 'Friend / Relative', 'Other'
+  openingBalance?: number;   // Positive: they owe user, Negative: user owes them
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface PersonalLedgerEntry {
+  id: string;
+  accountId: string;
+  ownerId: number | string;
+  ownerUserId: string;
+  ownerName: string;
+  partyName: string;
+  date: string;
+  description: string;
+  type: 'GIVEN' | 'RECEIVED'; // GIVEN: Money given (Debit / دیا گیا / لینا ہے), RECEIVED: Money received (Credit / وصول کیا / دینا ہے)
+  amount: number;
+  paymentMethod?: 'CASH' | 'BANK_TRANSFER' | 'ONLINE' | 'CHEQUE' | 'OTHER';
+  reference?: string;
+  receiptUrl?: string;
+  receiptName?: string;
+  notes?: string;
+  createdAt: string;
+}
+
 export interface StaffPrivateLedgerEntry {
   id: string;
   staffUserId: string;

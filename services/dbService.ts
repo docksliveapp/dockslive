@@ -2,6 +2,7 @@ import {
   collection, 
   doc, 
   setDoc, 
+  updateDoc,
   deleteDoc, 
   onSnapshot,
   getDocs,
@@ -18,7 +19,7 @@ import {
   getActiveDbUserSession,
   clearActiveDbUserSession
 } from './firebase';
-import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES } from '../types';
+import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry } from '../types';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
 
@@ -127,6 +128,19 @@ export function subscribeToFinances(
       const items: FinanceEntry[] = [];
       let idx = 0;
       snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const partyLower = (data.party || '').toLowerCase();
+        const descLower = (data.description || '').toLowerCase();
+        const refStr = (data.reference || '');
+        const isStaleAdminSalary = 
+          (partyLower.includes('system administrator') || descLower.includes('system administrator')) &&
+          (data.category === 'Staff Payroll & Salaries' || refStr.startsWith('SAL-') || descLower.includes('monthly salary'));
+
+        if (isStaleAdminSalary) {
+          deleteDoc(doc(db, path, docSnap.id)).catch(() => {});
+          return;
+        }
+
         const numId = parseNumericDocId(docSnap.data().id, docSnap.id, idx++);
         items.push({ ...docSnap.data(), id: numId } as FinanceEntry);
       });
@@ -290,8 +304,14 @@ export async function syncMonthlyStaffSalariesToPayables(
   const newlyCreated: FinanceEntry[] = [];
 
   for (const user of staffUsers) {
-    // Skip external client or transporter entities
-    if (user.role === UserRole.CLIENT || user.role === UserRole.TRANSPORTER) continue;
+    // Skip external client or transporter entities, and admin accounts (System Administrator has no salary)
+    if (
+      user.role === UserRole.CLIENT || 
+      user.role === UserRole.TRANSPORTER || 
+      user.role === UserRole.ADMIN || 
+      user.userId === 'admin' || 
+      (user.name || '').toLowerCase().includes('administrator')
+    ) continue;
     const salary = Number(user.baseSalary || 0);
     if (salary <= 0) continue;
 
@@ -411,7 +431,13 @@ export async function autoPostMonthlyRecurringAndSalaries(
   // 2. Process Staff Base Salaries
   if (staffUsers && staffUsers.length > 0) {
     for (const user of staffUsers) {
-      if (user.role === UserRole.CLIENT || user.role === UserRole.TRANSPORTER) continue;
+      if (
+        user.role === UserRole.CLIENT || 
+        user.role === UserRole.TRANSPORTER || 
+        user.role === UserRole.ADMIN || 
+        user.userId === 'admin' || 
+        (user.name || '').toLowerCase().includes('administrator')
+      ) continue;
       const salary = Number(user.baseSalary || 0);
       if (salary <= 0) continue;
 
@@ -843,7 +869,7 @@ export async function updateNotificationInFirestore(notif: AppNotification): Pro
 // ==========================================
 
 export const DEFAULT_DATABASE_USERS: AppUser[] = [
-  { id: 1, userId: 'admin', password: 'dpl01234', name: 'System Administrator', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'System Administrator', contact: '0300-1234567', email: 'admin@docks.com', status: 'ACTIVE', isAdmin: true, baseSalary: 150000 },
+  { id: 1, userId: 'admin', password: 'dpl01234', name: 'System Administrator', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'System Administrator', contact: '0300-1234567', email: 'admin@docks.com', status: 'ACTIVE', isAdmin: true, baseSalary: 0 },
   { id: 2, userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER], designation: 'Finance Manager', contact: '0333-5554444', email: 'finance@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 110000 },
   { id: 3, userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER], designation: 'Operations Manager', contact: '0321-9876543', email: 'casemanager@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 95000 },
   { id: 4, userId: 'vehiclemanager', password: 'dpl01234', name: 'Vehicles Manager', role: UserRole.VEHICLE_MANAGER, roles: [UserRole.VEHICLE_MANAGER], designation: 'Fleet & Vehicle Manager', contact: '0301-2233445', email: 'transport@docks.com', status: 'ACTIVE', baseSalary: 85000 },
@@ -912,8 +938,14 @@ export function subscribeToUsers(
           // Asynchronously clean up legacy document from Firestore
           deleteDoc(doc(db, path, docSnap.id)).catch(() => {});
         } else {
+          const isAdminAccount = data.role === UserRole.ADMIN || idLower === 'admin' || nameLower.includes('administrator');
+          if (isAdminAccount && Number(data.baseSalary) > 0) {
+            data.baseSalary = 0;
+            updateDoc(doc(db, path, docSnap.id), { baseSalary: 0 }).catch(() => {});
+          }
           list.push({
             ...data,
+            baseSalary: isAdminAccount ? 0 : data.baseSalary,
             id: Number(docSnap.id) || Number(data.id) || Date.now()
           } as AppUser);
         }
@@ -2280,6 +2312,135 @@ export async function saveCompanyCategoryToFirestore(categoryName: string): Prom
     current.push(cleanName);
     safeAppStorage.setJSON(COMPANY_CATEGORIES_KEY, current);
   }
+}
+
+// ==========================================
+// PERSONAL LEDGERS (PRIVATE PER USER ID)
+// ==========================================
+
+const PERSONAL_LEDGER_ACCOUNTS_KEY = 'dpl_personal_ledger_accounts';
+const PERSONAL_LEDGER_ENTRIES_KEY = 'dpl_personal_ledger_entries';
+
+export function subscribeToPersonalLedgerAccounts(
+  onData: (accounts: PersonalLedgerAccount[]) => void,
+  onError?: (err: any) => void
+) {
+  const path = 'personal_ledger_accounts';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const items: PersonalLedgerAccount[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ ...docSnap.data(), id: docSnap.id } as PersonalLedgerAccount);
+      });
+      safeAppStorage.setJSON(PERSONAL_LEDGER_ACCOUNTS_KEY, items);
+      onData(items);
+    },
+    (error) => {
+      console.warn(`Firestore subscription notice on ${path}:`, error);
+      if (onError) onError(error);
+      const fallback = safeAppStorage.getJSON<PersonalLedgerAccount[]>(PERSONAL_LEDGER_ACCOUNTS_KEY, []);
+      onData(fallback);
+    }
+  );
+}
+
+export function subscribeToPersonalLedgerEntries(
+  onData: (entries: PersonalLedgerEntry[]) => void,
+  onError?: (err: any) => void
+) {
+  const path = 'personal_ledger_entries';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const items: PersonalLedgerEntry[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ ...docSnap.data(), id: docSnap.id } as PersonalLedgerEntry);
+      });
+      safeAppStorage.setJSON(PERSONAL_LEDGER_ENTRIES_KEY, items);
+      onData(items);
+    },
+    (error) => {
+      console.warn(`Firestore subscription notice on ${path}:`, error);
+      if (onError) onError(error);
+      const fallback = safeAppStorage.getJSON<PersonalLedgerEntry[]>(PERSONAL_LEDGER_ENTRIES_KEY, []);
+      onData(fallback);
+    }
+  );
+}
+
+export async function savePersonalLedgerAccount(account: PersonalLedgerAccount): Promise<void> {
+  const path = 'personal_ledger_accounts';
+  const docId = account.id || `placct_${Date.now()}`;
+  try {
+    const payload = sanitizeForFirestore({
+      ...account,
+      id: docId,
+      updatedAt: new Date().toISOString()
+    });
+    await setDoc(doc(db, path, docId), payload, { merge: true });
+  } catch (error) {
+    console.warn(`Firestore savePersonalLedgerAccount warning for ${docId}:`, error);
+  }
+
+  // Update local storage
+  const current = safeAppStorage.getJSON<PersonalLedgerAccount[]>(PERSONAL_LEDGER_ACCOUNTS_KEY, []);
+  const idx = current.findIndex(a => a.id === docId);
+  if (idx >= 0) {
+    current[idx] = { ...account, id: docId };
+  } else {
+    current.unshift({ ...account, id: docId });
+  }
+  safeAppStorage.setJSON(PERSONAL_LEDGER_ACCOUNTS_KEY, current);
+}
+
+export async function deletePersonalLedgerAccount(accountId: string): Promise<void> {
+  const path = 'personal_ledger_accounts';
+  try {
+    await deleteDoc(doc(db, path, accountId));
+  } catch (error) {
+    console.warn(`Firestore deletePersonalLedgerAccount warning:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<PersonalLedgerAccount[]>(PERSONAL_LEDGER_ACCOUNTS_KEY, []);
+  safeAppStorage.setJSON(PERSONAL_LEDGER_ACCOUNTS_KEY, current.filter(a => a.id !== accountId));
+}
+
+export async function savePersonalLedgerEntry(entry: PersonalLedgerEntry): Promise<void> {
+  const path = 'personal_ledger_entries';
+  const docId = entry.id || `plentry_${Date.now()}`;
+  try {
+    const payload = sanitizeForFirestore({
+      ...entry,
+      id: docId,
+      createdAt: entry.createdAt || new Date().toISOString()
+    });
+    await setDoc(doc(db, path, docId), payload, { merge: true });
+  } catch (error) {
+    console.warn(`Firestore savePersonalLedgerEntry warning for ${docId}:`, error);
+  }
+
+  // Update local storage
+  const current = safeAppStorage.getJSON<PersonalLedgerEntry[]>(PERSONAL_LEDGER_ENTRIES_KEY, []);
+  const idx = current.findIndex(e => e.id === docId);
+  if (idx >= 0) {
+    current[idx] = { ...entry, id: docId };
+  } else {
+    current.unshift({ ...entry, id: docId });
+  }
+  safeAppStorage.setJSON(PERSONAL_LEDGER_ENTRIES_KEY, current);
+}
+
+export async function deletePersonalLedgerEntry(entryId: string): Promise<void> {
+  const path = 'personal_ledger_entries';
+  try {
+    await deleteDoc(doc(db, path, entryId));
+  } catch (error) {
+    console.warn(`Firestore deletePersonalLedgerEntry warning:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<PersonalLedgerEntry[]>(PERSONAL_LEDGER_ENTRIES_KEY, []);
+  safeAppStorage.setJSON(PERSONAL_LEDGER_ENTRIES_KEY, current.filter(e => e.id !== entryId));
 }
 
 

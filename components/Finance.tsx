@@ -75,6 +75,15 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     safeAppStorage.setItem('dpl_finance_tab', activeTab);
   }, [activeTab]);
 
+  // Helper to identify stale System Administrator salary entries
+  const isSystemAdminSalary = (p: Partial<FinanceEntry>) => {
+    const party = (p.party || '').toLowerCase();
+    const desc = (p.description || '').toLowerCase();
+    const ref = (p.reference || '');
+    return (party.includes('system administrator') || desc.includes('system administrator')) && 
+           (p.category === 'Staff Payroll & Salaries' || ref.startsWith('SAL-') || desc.includes('monthly salary'));
+  };
+
   const [activeNotificationId, setActiveNotificationId] = useState<number | null>(null);
   const [financeData, setFinanceData] = useState<FinanceEntry[]>(() => {
     return dedupeArrayById(safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', INITIAL_FINANCE_DATA));
@@ -83,7 +92,12 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     return dedupeArrayById(safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_receivables', INITIAL_RECEIVABLES));
   });
   const [payables, setPayables] = useState<FinanceEntry[]>(() => {
-    return dedupeArrayById(safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', INITIAL_PAYABLES));
+    const raw = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', INITIAL_PAYABLES) || [];
+    const cleaned = raw.filter(p => !isSystemAdminSalary(p));
+    if (cleaned.length !== raw.length) {
+      safeAppStorage.setJSON('dpl_live_payables', cleaned);
+    }
+    return dedupeArrayById(cleaned);
   });
   const [cases, setCases] = useState<Case[]>(() => {
     return safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
@@ -129,7 +143,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       setReceivables(Array.isArray(storedRecv) ? dedupeArrayById(storedRecv) : []);
 
       const storedPay = safeAppStorage.getJSON<FinanceEntry[] | null>('dpl_live_payables', null);
-      setPayables(Array.isArray(storedPay) ? dedupeArrayById(storedPay) : []);
+      const cleanedPay = Array.isArray(storedPay) ? storedPay.filter(p => !isSystemAdminSalary(p)) : [];
+      setPayables(dedupeArrayById(cleanedPay));
     };
 
     window.addEventListener('dpl_cases_updated', handleSync);
@@ -422,7 +437,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       if (items) {
         const cashList = dedupeArrayById(items.filter(i => i.type === 'INCOME' || i.type === 'EXPENSE'));
         const recvList = dedupeArrayById(items.filter(i => i.type === 'RECEIVABLE'));
-        const payList = dedupeArrayById(items.filter(i => i.type === 'PAYABLE'));
+        const payList = dedupeArrayById(items.filter(i => i.type === 'PAYABLE' && !isSystemAdminSalary(i)));
 
         setFinanceData(cashList);
         setReceivables(recvList);
@@ -579,8 +594,28 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       notes: newRecurringTemplate.notes?.trim() || ''
     };
 
-    setRecurringTemplates(prev => [template, ...prev]);
+    const updatedTemplates = [template, ...recurringTemplates];
+    setRecurringTemplates(updatedTemplates);
     await saveRecurringTemplateToFirestore(template);
+
+    // Immediately post to payables for current month so it appears in list & counters right away
+    try {
+      const result = await autoPostMonthlyRecurringAndSalaries(
+        updatedTemplates,
+        users,
+        payables,
+        receivables
+      );
+      if (result.addedPayables.length > 0) {
+        setPayables(prev => dedupeArrayById([...result.addedPayables, ...prev]));
+      }
+      if (result.addedReceivables.length > 0) {
+        setReceivables(prev => dedupeArrayById([...result.addedReceivables, ...prev]));
+      }
+    } catch (err) {
+      console.warn('Auto post new fixed expense notice:', err);
+    }
+
     setShowRecurringModal(false);
     setNewRecurringTemplate({
       title: '',
@@ -1318,11 +1353,11 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     };
   }, [financeData, calculatedReceivables]);
 
-  // Master General Ledger Entries (All Parties & Accounts)
+  // Master General Ledger Entries (Strictly Client Generated Invoices, Case Billables & Client Payments)
   const generalLedgerEntries = useMemo(() => {
     const glEntries: (LedgerEntry & { party: string; category: string })[] = [];
 
-    // All Client Case charges (Debits)
+    // 1. All Client Case charges / Generated Invoices (Debits)
     cases.forEach((c) => {
       if (c.status === 'CANCELLED') return;
 
@@ -1347,45 +1382,9 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       }
     });
 
-    // All Cashbook Entries
-    financeData.forEach((f) => {
-      if (f.type === 'INCOME') {
-        const refParts = [
-          f.reference || `REC-${f.id}`,
-          f.caseNo ? `Case: ${f.caseNo}` : '',
-          f.containerNumber ? `Cntr: ${f.containerNumber}` : ''
-        ].filter(Boolean);
-
-        glEntries.push({
-          id: `gl_inc_${f.id}`,
-          date: f.date,
-          reference: refParts.join(' | '),
-          description: `Income: ${f.description}`,
-          debit: 0,
-          credit: f.amount,
-          balance: 0,
-          type: 'CREDIT',
-          party: f.party,
-          category: f.category
-        });
-      } else if (f.type === 'EXPENSE') {
-        glEntries.push({
-          id: `gl_exp_${f.id}`,
-          date: f.date,
-          reference: f.reference || `EXP-${f.id}`,
-          description: `Expense: ${f.description}`,
-          debit: f.amount,
-          credit: 0,
-          balance: 0,
-          type: 'DEBIT',
-          party: f.party,
-          category: f.category
-        });
-      }
-    });
-
-    // All Receivables (Debits)
+    // 2. All Client Receivables Invoiced (Debits)
     receivables.forEach((r) => {
+      if (r.category === 'Staff Payroll & Salaries' || r.reference?.startsWith('SAL-') || r.reference?.startsWith('REC-')) return;
       const refParts = [
         r.reference || `INV-${r.id}`,
         r.caseNo ? `Case: ${r.caseNo}` : '',
@@ -1406,24 +1405,46 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       });
     });
 
-    // All Payables (Credits / Commitments)
-    payables.forEach((p) => {
-      glEntries.push({
-        id: `gl_pay_${p.id}`,
-        date: p.date,
-        reference: p.reference || `PAY-${p.id}`,
-        description: `Payable Outflow: ${p.description}`,
-        debit: p.amount,
-        credit: 0,
-        balance: 0,
-        type: 'DEBIT',
-        party: p.party,
-        category: p.category
-      });
+    // 3. All Client Payments Received (Credits)
+    financeData.forEach((f) => {
+      if (f.type === 'INCOME') {
+        const refParts = [
+          f.reference || `REC-${f.id}`,
+          f.caseNo ? `Case: ${f.caseNo}` : '',
+          f.containerNumber ? `Cntr: ${f.containerNumber}` : ''
+        ].filter(Boolean);
+
+        glEntries.push({
+          id: `gl_inc_${f.id}`,
+          date: f.date,
+          reference: refParts.join(' | '),
+          description: `Client Payment Received: ${f.description}`,
+          debit: 0,
+          credit: f.amount,
+          balance: 0,
+          type: 'CREDIT',
+          party: f.party,
+          category: f.category
+        });
+      }
+    });
+
+    // Strictly ensure no staff salaries, payroll, or administrative payables appear in General Ledger
+    const clientOnlyGlEntries = glEntries.filter(e => {
+      const partyLower = (e.party || '').toLowerCase();
+      const descLower = (e.description || '').toLowerCase();
+      const catLower = (e.category || '').toLowerCase();
+      const isSalaryOrStaff = 
+        catLower.includes('salary') || 
+        catLower.includes('payroll') || 
+        partyLower.includes('system administrator') || 
+        descLower.includes('salary') ||
+        (e.reference || '').startsWith('SAL-');
+      return !isSalaryOrStaff;
     });
 
     // Filter by Account if selected
-    let filtered = glEntries;
+    let filtered = clientOnlyGlEntries;
     if (glAccountFilter !== 'ALL') {
       filtered = filtered.filter(e => e.party?.trim().toLowerCase() === glAccountFilter.trim().toLowerCase());
     }
@@ -1439,7 +1460,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     });
 
     return filtered;
-  }, [cases, financeData, receivables, payables, glAccountFilter]);
+  }, [cases, financeData, receivables, glAccountFilter]);
 
   // Master GL Summary
   const glSummary = useMemo(() => {
@@ -4609,59 +4630,106 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         );
 
       case 'recurring': {
-        const totalFixedOverhead = recurringTemplates
-          .filter(t => t.isActive && t.type === 'PAYABLE')
-          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+        const currentMonthKey = new Date().toISOString().slice(0, 7); // e.g. "YYYY-MM"
 
-        const activeStaffList = users.filter(u => u.role !== UserRole.CLIENT && (u.status || 'ACTIVE') === 'ACTIVE');
+        const activeTemplates = recurringTemplates.filter(t => t.isActive && (t.type || 'PAYABLE') === 'PAYABLE');
+        const totalTemplatesAmount = activeTemplates.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+        const activeStaffList = users.filter(u => 
+          u.role !== UserRole.CLIENT && 
+          u.role !== UserRole.TRANSPORTER && 
+          u.role !== UserRole.ADMIN && 
+          u.userId !== 'admin' && 
+          !(u.name || '').toLowerCase().includes('administrator') && 
+          (u.status || 'ACTIVE') === 'ACTIVE' && 
+          Number(u.baseSalary || 0) > 0
+        );
         const totalMonthlySalaries = activeStaffList.reduce((sum, u) => sum + (Number(u.baseSalary) || 0), 0);
-        const totalMonthlyOutflow = totalFixedOverhead + totalMonthlySalaries;
 
-        const currentMonthKey = new Date().toISOString().slice(0, 7);
+        // 1. Total Kitna Dena Tha (Monthly Fixed Amount Total)
+        const totalMonthlyFixedTotal = totalTemplatesAmount + totalMonthlySalaries;
+
+        // 2. Kya De Diya Hai (Paid this month)
+        let paidAmount = 0;
+        let paidCount = 0;
+        let pendingCount = 0;
+
+        // Check active fixed templates
+        activeTemplates.forEach(t => {
+          const match = payables.find(p => 
+            (p.recurringTemplateId === t.id || (p.reference && p.reference.toLowerCase().includes(t.id.toLowerCase()))) &&
+            (p.date?.startsWith(currentMonthKey) || p.reference?.includes(currentMonthKey))
+          );
+          if (match && match.status === 'PAID') {
+            paidAmount += (Number(match.amount) || Number(t.amount) || 0);
+            paidCount++;
+          } else {
+            pendingCount++;
+          }
+        });
+
+        // Check active staff salaries
+        activeStaffList.forEach(u => {
+          const salaryRef = `SAL-${u.id}-${currentMonthKey}`;
+          const salaryRefAlt = `SAL-${currentMonthKey}-${u.id}`;
+          const match = payables.find(p => 
+            (p.reference === salaryRef || p.reference === salaryRefAlt || (p.category === 'Staff Payroll & Salaries' && p.party?.trim().toLowerCase() === u.name?.trim().toLowerCase() && p.date?.startsWith(currentMonthKey)))
+          );
+          if (match && match.status === 'PAID') {
+            paidAmount += (Number(match.amount) || Number(u.baseSalary) || 0);
+            paidCount++;
+          } else {
+            pendingCount++;
+          }
+        });
+
+        // Also check any direct expenses recorded in financeData for current month matching templates or salaries
+        const directFixedPaidInFinance = financeData.filter(f => {
+          if (f.type !== 'EXPENSE') return false;
+          if (!f.date?.startsWith(currentMonthKey)) return false;
+          const desc = (f.description || '').toLowerCase();
+          const alreadyTrackedInPayables = payables.some(p => p.status === 'PAID' && (p.reference === f.reference || p.id === f.id));
+          if (alreadyTrackedInPayables) return false;
+          return activeTemplates.some(t => desc.includes(t.title.toLowerCase()) || f.party?.toLowerCase() === t.party?.toLowerCase());
+        }).reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
+
+        const totalMonthlyFixedPaid = paidAmount + directFixedPaidInFinance;
+
+        // 3. Kya Dena Baki Hai (Payables: Remaining unpaid due for this month)
+        const totalMonthlyFixedPayables = Math.max(0, totalMonthlyFixedTotal - totalMonthlyFixedPaid);
 
         return (
           <div className="p-4 space-y-6">
-            {/* Header & Controls */}
+            {/* Header & Controls: Clean header with only Add Fixed Expense button */}
             <div className="bg-slate-900/60 p-5 rounded-2xl border border-white/5 flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
                     <Building size={18} className="text-purple-400" />
-                    Monthly Fixed Expenses & Recurring Payments
+                    Monthly Fixed Expenses
                   </h3>
                   <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[11px] border border-purple-500/30">
                     Automated on 1st of Month
                   </span>
                 </div>
                 <p className="text-xs text-gray-400 mt-1 max-w-xl">
-                  Office rent, loan installments, security, utilities, and staff base salaries are verified and scheduled to log into <strong>Payables</strong> on the 1st of every month automatically.
+                  Office rent, loan installments, security, utilities, and staff base salaries are scheduled and automatically posted into Payables on the 1st of every month.
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={handlePostAllMonthlyFixedExpenses}
-                  disabled={isPostingRecurring}
-                  className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-purple-500/40 flex items-center gap-2 shadow-lg shadow-purple-950/40 transition-all active:scale-95"
-                  title="Verify and post all monthly recurring templates and salaries for the 1st of the month"
-                >
-                  <Zap size={14} className={isPostingRecurring ? 'animate-spin' : ''} />
-                  <span>{isPostingRecurring ? 'Posting to Payables...' : 'Post 1st-of-Month Payables Now'}</span>
-                </button>
-
+              <div className="flex items-center gap-2.5">
                 <button
                   type="button"
                   onClick={() => setShowRecurringModal(true)}
-                  className="bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-brand-500/40 flex items-center gap-2 transition-all active:scale-95"
+                  className="bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-brand-500/40 flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-brand-950/40"
                 >
-                  <Plus size={14} />
+                  <Plus size={15} />
                   <span>Add Fixed Expense</span>
                 </button>
               </div>
             </div>
 
-            {/* Notification message */}
+            {/* Notification message if any */}
             {recurringPostMessage && (
               <div className="p-3 bg-purple-500/20 border border-purple-500/40 rounded-xl flex items-center justify-between text-xs text-purple-200">
                 <span className="flex items-center gap-2">
@@ -4677,57 +4745,94 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               </div>
             )}
 
-            {/* Monthly Outflow Metrics */}
+            {/* 3 Calculated Stat Counters Requested by User */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                <span className="text-[11px] uppercase tracking-wider text-gray-400 block font-medium">Monthly Fixed Overhead</span>
-                <div className="text-xl font-mono font-bold text-white mt-1">
-                  PKR {totalFixedOverhead.toLocaleString()}
+              {/* Counter 1: Monthly Fixed Amount Total (Total Kitna Dena Tha) */}
+              <div className="p-5 bg-gradient-to-br from-slate-900/90 to-purple-950/30 rounded-2xl border border-purple-500/30 shadow-lg relative overflow-hidden">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] uppercase tracking-wider text-purple-300 font-semibold block">
+                    Monthly Fixed Amount Total
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-200 border border-purple-500/30 font-medium">
+                    Total Kitna Dena Tha
+                  </span>
                 </div>
-                <span className="text-[11px] text-gray-500 mt-1 block">
-                  {recurringTemplates.filter(t => t.isActive).length} active fixed templates
-                </span>
+                <div className="text-2xl font-mono font-bold text-white mt-2 drop-shadow-sm">
+                  PKR {totalMonthlyFixedTotal.toLocaleString()}
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-gray-400 mt-2 pt-2 border-t border-white/5">
+                  <span>Templates: PKR {totalTemplatesAmount.toLocaleString()}</span>
+                  <span>Salaries: PKR {totalMonthlySalaries.toLocaleString()}</span>
+                </div>
               </div>
 
-              <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                <span className="text-[11px] uppercase tracking-wider text-gray-400 block font-medium">Monthly Staff Payroll</span>
-                <div className="text-xl font-mono font-bold text-purple-300 mt-1">
-                  PKR {totalMonthlySalaries.toLocaleString()}
+              {/* Counter 2: Paid (Kya De Diya Hai) */}
+              <div className="p-5 bg-gradient-to-br from-slate-900/90 to-emerald-950/30 rounded-2xl border border-emerald-500/30 shadow-lg relative overflow-hidden">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] uppercase tracking-wider text-emerald-400 font-semibold block">
+                    Paid
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">
+                    Kya De Diya Hai
+                  </span>
                 </div>
-                <span className="text-[11px] text-gray-500 mt-1 block">
-                  {activeStaffList.length} active team members
-                </span>
+                <div className="text-2xl font-mono font-bold text-emerald-400 mt-2 drop-shadow-sm">
+                  PKR {totalMonthlyFixedPaid.toLocaleString()}
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-gray-400 mt-2 pt-2 border-t border-white/5">
+                  <span>{paidCount} items cleared this month</span>
+                  <span className="text-emerald-400 font-medium">
+                    {totalMonthlyFixedTotal > 0 ? Math.round((totalMonthlyFixedPaid / totalMonthlyFixedTotal) * 100) : 0}% Paid
+                  </span>
+                </div>
               </div>
 
-              <div className="p-4 bg-purple-950/30 rounded-2xl border border-purple-500/20">
-                <span className="text-[11px] uppercase tracking-wider text-purple-300 block font-medium">Total Monthly Commitment</span>
-                <div className="text-xl font-mono font-bold text-emerald-400 mt-1">
-                  PKR {totalMonthlyOutflow.toLocaleString()}
+              {/* Counter 3: Payables (Kya Dena Baki Hai) */}
+              <div className="p-5 bg-gradient-to-br from-slate-900/90 to-rose-950/30 rounded-2xl border border-rose-500/30 shadow-lg relative overflow-hidden">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] uppercase tracking-wider text-rose-300 font-semibold block">
+                    Payables
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-medium">
+                    Kya Dena Baki Hai
+                  </span>
                 </div>
-                <span className="text-[11px] text-gray-400 mt-1 block">
-                  Due on 1st of every month
-                </span>
+                <div className="text-2xl font-mono font-bold text-rose-400 mt-2 drop-shadow-sm">
+                  PKR {totalMonthlyFixedPayables.toLocaleString()}
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-gray-400 mt-2 pt-2 border-t border-white/5">
+                  <span>{pendingCount} items remaining due</span>
+                  <span className="text-rose-400 font-medium">
+                    {totalMonthlyFixedPayables === 0 ? 'All Cleared' : 'Pending Payment'}
+                  </span>
+                </div>
               </div>
             </div>
 
-            {/* Section 1: Configured Recurring Templates */}
+            {/* Section 1: Configured Fixed Expenses List */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs uppercase font-bold text-gray-400 tracking-wider">
-                  Configured Recurring Templates ({recurringTemplates.length})
+                  Configured Fixed Expenses List ({recurringTemplates.length})
                 </h4>
+                <span className="text-xs text-gray-400">
+                  {recurringTemplates.filter(t => t.isActive).length} Active Templates
+                </span>
               </div>
 
               {recurringTemplates.length === 0 ? (
                 <div className="p-8 text-center text-gray-400 text-xs bg-white/5 rounded-2xl border border-white/5">
-                  No recurring expense templates configured yet. Click "Add Fixed Expense" to add office rent, loan repayments, or utility bills.
+                  No fixed expenses added yet. Click <strong>"Add Fixed Expense"</strong> above to add office rent, loan repayments, security, or utility bills. They will automatically be listed here.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {recurringTemplates.map((template, tIdx) => {
-                    const isPostedThisMonth = payables.some(p => 
-                      p.reference && p.reference.toLowerCase().includes(`${template.id}_${currentMonthKey}`.toLowerCase())
+                    const matchingPayable = payables.find(p => 
+                      (p.recurringTemplateId === template.id || (p.reference && p.reference.toLowerCase().includes(template.id.toLowerCase()))) &&
+                      (p.date?.startsWith(currentMonthKey) || p.reference?.includes(currentMonthKey))
                     );
+                    const isPaidThisMonth = matchingPayable?.status === 'PAID';
+                    const isPostedThisMonth = !!matchingPayable;
 
                     return (
                       <div 
@@ -4760,22 +4865,39 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                           </span>
                         </div>
 
-                        <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs">
-                          <span className={`text-[11px] flex items-center gap-1 ${isPostedThisMonth ? 'text-emerald-400' : 'text-gray-400'}`}>
-                            {isPostedThisMonth ? (
-                              <>
+                        <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs gap-2 flex-wrap">
+                          <span className="text-[11px] flex items-center gap-1">
+                            {isPaidThisMonth ? (
+                              <span className="text-emerald-400 font-medium flex items-center gap-1">
                                 <CheckCircle2 size={12} />
-                                <span>Logged in {currentMonthKey}</span>
-                              </>
-                            ) : (
-                              <>
+                                <span>Paid for {currentMonthKey}</span>
+                              </span>
+                            ) : isPostedThisMonth ? (
+                              <span className="text-amber-400 font-medium flex items-center gap-1">
                                 <Clock size={12} />
-                                <span>Pending for {currentMonthKey}</span>
-                              </>
+                                <span>In Payables (Unpaid)</span>
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 flex items-center gap-1">
+                                <Clock size={12} />
+                                <span>Scheduled on 1st</span>
+                              </span>
                             )}
                           </span>
 
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 ml-auto">
+                            {isPostedThisMonth && !isPaidThisMonth && matchingPayable && (
+                              <button
+                                type="button"
+                                onClick={() => handleStatusChange(matchingPayable.id, payables, setPayables)}
+                                className="px-2 py-1 rounded bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 text-[10px] font-semibold transition-colors flex items-center gap-1 active:scale-95"
+                                title="Mark as paid now"
+                              >
+                                <CheckCircle2 size={11} />
+                                <span>Pay Now</span>
+                              </button>
+                            )}
+
                             <button
                               type="button"
                               onClick={() => handleToggleRecurringActive(template)}
@@ -4820,13 +4942,16 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                       <th className="p-3">Schedule</th>
                       <th className="p-3 text-right">Base Salary</th>
                       <th className="p-3 text-center">{currentMonthKey} Status</th>
+                      <th className="p-3 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
                     {activeStaffList.map((user, uIdx) => {
                       const salaryRef = `SAL-${user.id}-${currentMonthKey}`;
-                      const isPosted = payables.some(p => p.reference === salaryRef);
-                      const isPaid = payables.some(p => p.reference === salaryRef && p.status === 'PAID');
+                      const salaryRefAlt = `SAL-${currentMonthKey}-${user.id}`;
+                      const matchingSalaryPayable = payables.find(p => p.reference === salaryRef || p.reference === salaryRefAlt || (p.category === 'Staff Payroll & Salaries' && p.party?.trim().toLowerCase() === user.name?.trim().toLowerCase() && p.date?.startsWith(currentMonthKey)));
+                      const isPosted = !!matchingSalaryPayable;
+                      const isPaid = matchingSalaryPayable?.status === 'PAID';
 
                       return (
                         <tr key={`staff_user_${user.id || uIdx}_${uIdx}`} className="hover:bg-white/5 transition-colors">
@@ -4854,6 +4979,22 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                               </span>
                             )}
                           </td>
+                          <td className="p-3 text-center">
+                            {isPosted && !isPaid && matchingSalaryPayable ? (
+                              <button
+                                type="button"
+                                onClick={() => handleStatusChange(matchingSalaryPayable.id, payables, setPayables)}
+                                className="px-2.5 py-1 rounded bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 text-[10px] font-semibold transition-colors inline-flex items-center gap-1 active:scale-95"
+                              >
+                                <CheckCircle2 size={11} />
+                                <span>Pay Salary</span>
+                              </button>
+                            ) : isPaid ? (
+                              <span className="text-[10px] text-emerald-400 font-semibold">Cleared ✓</span>
+                            ) : (
+                              <span className="text-[10px] text-gray-500">-</span>
+                            )}
+                          </td>
                         </tr>
                       );
                     })}
@@ -4878,9 +5019,16 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         );
 
         const allStaffMembers = Array.from(new Set([
-          ...users.filter(u => u.role !== UserRole.CLIENT).map(u => u.name),
-          ...staffPayables.map(p => p.party),
-          ...staffExpenses.map(e => e.party)
+          ...users.filter(u => 
+            u.role !== UserRole.CLIENT && 
+            u.role !== UserRole.TRANSPORTER && 
+            u.role !== UserRole.ADMIN && 
+            u.userId !== 'admin' && 
+            !(u.name || '').toLowerCase().includes('administrator') && 
+            Number(u.baseSalary || 0) > 0
+          ).map(u => u.name),
+          ...staffPayables.filter(p => !p.party?.toLowerCase().includes('administrator')).map(p => p.party),
+          ...staffExpenses.filter(e => !e.party?.toLowerCase().includes('administrator')).map(e => e.party)
         ])).filter(Boolean);
 
         const filteredStaffRecords = staffPayables.filter(p => 

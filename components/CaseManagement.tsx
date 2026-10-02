@@ -1285,7 +1285,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     setFormData({
       client: clientNameInit,
       category: categoryInit,
-      pol: 'Karachi Port Trust',
+      pol: '',
       pod: '',
       containers: [],
       extractedData: {},
@@ -1333,7 +1333,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     const initialFormData = {
       client: initialClient,
       category: initialCategory || 'Bonded Carrier',
-      pol: 'Karachi Port Trust',
+      pol: '',
       pod: '',
       containers: [],
       extractedData: {},
