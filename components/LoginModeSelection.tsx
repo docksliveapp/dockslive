@@ -10,13 +10,16 @@ import {
   HelpCircle,
   Clock,
   User,
-  CheckCircle2
+  CheckCircle2,
+  Building,
+  UserPlus
 } from 'lucide-react';
 import { UserRole } from '../types';
 import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
 import { safeAppStorage } from '../services/storage';
-import { authenticateDatabaseUser, DEFAULT_DATABASE_USERS } from '../services/dbService';
+import { authenticateDatabaseUser, DEFAULT_DATABASE_USERS, saveClientToFirestore } from '../services/dbService';
+import { sendAppNotification } from '../services/notificationService';
 
 export interface SelectedModePayload {
   role: UserRole;
@@ -47,12 +50,100 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
   const { customLogo, companyName, subtitle } = useBranding();
 
   // Credentials Form State - Blank by default, user enters their credentials
+  const [authMode, setAuthMode] = useState<'signin' | 'register'>('signin');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showCredentialsGuide, setShowCredentialsGuide] = useState(true);
+
+  // Client Registration Form State
+  const [clientReg, setClientReg] = useState({
+    companyName: '',
+    contactPerson: '',
+    mobileNumber: '',
+    email: '',
+    ntn: '',
+    officeAddress: '',
+    password: ''
+  });
+
+  const handleClientRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!clientReg.companyName.trim() || !clientReg.mobileNumber.trim() || !clientReg.password.trim()) {
+      setErrorMessage('Please fill in Company Name, Mobile Number, and Password.');
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    try {
+      const clientId = `CLT-${Date.now().toString().slice(-4)}`;
+      const clientName = clientReg.companyName.trim();
+      const contactPerson = clientReg.contactPerson.trim() || clientName;
+      const phone = clientReg.mobileNumber.trim();
+
+      await saveClientToFirestore({
+        id: clientId,
+        name: clientName,
+        ownerName: contactPerson,
+        contact: contactPerson,
+        mobileNumber: phone,
+        whatsappNumber: phone,
+        email: clientReg.email.trim(),
+        ntn: clientReg.ntn.trim(),
+        officeAddress: clientReg.officeAddress.trim(),
+        userId: phone || clientId,
+        password: clientReg.password.trim(),
+        loginEnabled: false,
+        status: 'PENDING_APPROVAL' as any
+      });
+
+      // Emit high-priority approval notification to Finance Manager
+      await sendAppNotification({
+        title: `Client Registration Approval: ${clientName}`,
+        description: `New client "${clientName}" (${contactPerson}, Phone: ${phone}) registered via portal. Finance Manager verification and approval required before login access is activated.`,
+        details: `Company: ${clientName}\nContact: ${contactPerson}\nPhone: ${phone}\nEmail: ${clientReg.email || 'N/A'}\nNTN: ${clientReg.ntn || 'N/A'}\nAddress: ${clientReg.officeAddress || 'N/A'}`,
+        targetRole: UserRole.FINANCE_MANAGER,
+        targetView: 'users',
+        type: 'ACTION',
+        notificationSubType: 'CLIENT_REGISTRATION_APPROVAL',
+        status: 'PENDING',
+        actionLabel: 'Approve Client',
+        category: 'APPROVAL',
+        approvalData: {
+          entityType: 'client',
+          entityId: clientId,
+          entityName: clientName,
+          actionType: 'APPROVE_CLIENT',
+          requestedBy: contactPerson
+        }
+      });
+
+      setSuccessMessage(`Registration request submitted successfully! Your account is pending verification and approval by the Finance Manager / Administration. Access will be activated upon approval.`);
+      setClientReg({
+        companyName: '',
+        contactPerson: '',
+        mobileNumber: '',
+        email: '',
+        ntn: '',
+        officeAddress: '',
+        password: ''
+      });
+      setTimeout(() => {
+        setAuthMode('signin');
+      }, 3500);
+    } catch (err: any) {
+      console.error('Registration failed:', err);
+      setErrorMessage(err?.message || 'Could not submit registration. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Workflow & Draft Resumption Detection
   const [hasActiveDraft, setHasActiveDraft] = useState(false);
@@ -207,10 +298,10 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
             <img 
               src={customLogo} 
               alt="Corporate Logo" 
-              className="w-40 sm:w-48 max-h-16 object-contain drop-shadow-[0_4px_20px_rgba(245,158,11,0.25)]" 
+              className="w-28 sm:w-36 max-h-24 object-contain drop-shadow-[0_4px_20px_rgba(245,158,11,0.25)]" 
             />
           ) : (
-            <Logo className="w-44 sm:w-52 h-auto drop-shadow-xl" />
+            <Logo className="w-24 sm:w-32 h-auto drop-shadow-xl" />
           )}
         </div>
 
@@ -241,17 +332,55 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
         <div className="bg-slate-900/95 border border-amber-500/30 rounded-3xl p-5 sm:p-7 shadow-2xl backdrop-blur-xl">
           
           {/* Form Header */}
-          <div className="text-center mb-5">
+          <div className="text-center mb-4">
             <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center mx-auto mb-2 shadow-inner">
-              <Lock className="text-amber-300" size={22} />
+              {authMode === 'signin' ? <Lock className="text-amber-300" size={22} /> : <UserPlus className="text-amber-300" size={22} />}
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-white tracking-wide">
-              Sign In
+              {authMode === 'signin' ? 'Sign In' : 'Register as Client'}
             </h2>
             <p className="text-xs text-gray-400 mt-1">
-              Please enter your User ID and Password
+              {authMode === 'signin' 
+                ? 'Please enter your User ID and Password' 
+                : 'Enter your business details for Finance Manager approval'}
             </p>
           </div>
+
+          {/* Mode Switcher */}
+          <div className="flex rounded-xl bg-slate-950 p-1 mb-4 border border-white/10">
+            <button
+              type="button"
+              onClick={() => { setAuthMode('signin'); setErrorMessage(null); setSuccessMessage(null); }}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                authMode === 'signin' 
+                  ? 'bg-amber-400 text-slate-950 shadow-md font-black' 
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <LogIn size={13} />
+              <span>Sign In</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMode('register'); setErrorMessage(null); setSuccessMessage(null); }}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                authMode === 'register' 
+                  ? 'bg-amber-400 text-slate-950 shadow-md font-black' 
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <UserPlus size={13} />
+              <span>New Client Registration</span>
+            </button>
+          </div>
+
+          {/* Success Notice */}
+          {successMessage && (
+            <div className="mb-4 p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-start gap-2">
+              <CheckCircle2 size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+              <span>{successMessage}</span>
+            </div>
+          )}
 
           {/* Error Notice */}
           {errorMessage && (
@@ -261,15 +390,137 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
           )}
 
           {/* In-Progress Draft Resumption Notice */}
-          {hasActiveDraft && (
+          {hasActiveDraft && authMode === 'signin' && (
             <div className="mb-4 p-3 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
               <Clock size={15} className="flex-shrink-0 text-amber-400" />
               <span>An active case registration draft ({draftCaseNo || `Step ${draftStep}`}) will resume upon login.</span>
             </div>
           )}
 
-          {/* Sign In Form */}
-          <form onSubmit={handleCredentialsLogin} className="space-y-4">
+          {authMode === 'register' ? (
+            <form onSubmit={handleClientRegister} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                  <Building size={12} className="text-amber-400" />
+                  <span>Company / Importer Name *</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={clientReg.companyName}
+                  onChange={(e) => setClientReg({ ...clientReg, companyName: e.target.value })}
+                  placeholder="e.g. Al-Madina Trading Co."
+                  className="w-full px-3.5 py-2.5 bg-slate-950/90 border border-white/10 rounded-xl text-white text-xs focus:outline-none focus:border-amber-400 transition"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider mb-1">
+                    Contact Person
+                  </label>
+                  <input
+                    type="text"
+                    value={clientReg.contactPerson}
+                    onChange={(e) => setClientReg({ ...clientReg, contactPerson: e.target.value })}
+                    placeholder="e.g. Tariq Mehmood"
+                    className="w-full px-3.5 py-2.5 bg-slate-950/90 border border-white/10 rounded-xl text-white text-xs focus:outline-none focus:border-amber-400 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider mb-1">
+                    Mobile / Phone *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={clientReg.mobileNumber}
+                    onChange={(e) => setClientReg({ ...clientReg, mobileNumber: e.target.value })}
+                    placeholder="03001234567"
+                    className="w-full px-3.5 py-2.5 bg-slate-950/90 border border-white/10 rounded-xl text-white text-xs focus:outline-none focus:border-amber-400 transition"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider mb-1">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={clientReg.email}
+                    onChange={(e) => setClientReg({ ...clientReg, email: e.target.value })}
+                    placeholder="importer@company.com"
+                    className="w-full px-3.5 py-2.5 bg-slate-950/90 border border-white/10 rounded-xl text-white text-xs focus:outline-none focus:border-amber-400 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider mb-1">
+                    NTN / STRN
+                  </label>
+                  <input
+                    type="text"
+                    value={clientReg.ntn}
+                    onChange={(e) => setClientReg({ ...clientReg, ntn: e.target.value })}
+                    placeholder="1234567-8"
+                    className="w-full px-3.5 py-2.5 bg-slate-950/90 border border-white/10 rounded-xl text-white text-xs focus:outline-none focus:border-amber-400 transition"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider mb-1">
+                  Office City / Address
+                </label>
+                <input
+                  type="text"
+                  value={clientReg.officeAddress}
+                  onChange={(e) => setClientReg({ ...clientReg, officeAddress: e.target.value })}
+                  placeholder="e.g. Office #104, I.I. Chundrigar Road, Karachi"
+                  className="w-full px-3.5 py-2.5 bg-slate-950/90 border border-white/10 rounded-xl text-white text-xs focus:outline-none focus:border-amber-400 transition"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider mb-1">
+                  Create Account Password *
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={clientReg.password}
+                  onChange={(e) => setClientReg({ ...clientReg, password: e.target.value })}
+                  placeholder="Choose a strong password"
+                  className="w-full px-3.5 py-2.5 bg-slate-950/90 border border-white/10 rounded-xl text-white text-xs focus:outline-none focus:border-amber-400 transition"
+                />
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full py-3 px-4 rounded-xl bg-amber-400 hover:bg-yellow-300 active:bg-amber-500 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/30 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Submitting Registration Request...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus size={16} />
+                      <span>Submit for Approval</span>
+                    </>
+                  )}
+                </button>
+                <p className="text-[10px] text-gray-400 text-center mt-2">
+                  Finance Manager approval is required to verify and activate new client accounts.
+                </p>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleCredentialsLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
                 <User size={13} className="text-amber-400" />
@@ -350,6 +601,7 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
               )}
             </button>
           </form>
+          )}
 
           {/* Quick Staff Credentials Reference Guide */}
           <div className="mt-5 pt-4 border-t border-white/10">

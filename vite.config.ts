@@ -179,9 +179,15 @@ Return ONLY valid JSON.`;
         }
       ],
       define: {
+        'process.env.NODE_ENV': JSON.stringify(mode),
         'process.env.API_KEY': JSON.stringify(geminiKey),
         'process.env.GEMINI_API_KEY': JSON.stringify(geminiKey),
-        '__GEMINI_API_KEY__': JSON.stringify(geminiKey)
+        '__GEMINI_API_KEY__': JSON.stringify(geminiKey),
+        'process.env': JSON.stringify({
+          NODE_ENV: mode,
+          API_KEY: geminiKey,
+          GEMINI_API_KEY: geminiKey,
+        }),
       },
       resolve: {
         alias: {

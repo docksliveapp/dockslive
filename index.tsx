@@ -16,12 +16,10 @@ root.render(
   </ErrorBoundary>
 );
 
-// Register Service Worker for PWA / Google Play Store TWA
-if ('serviceWorker' in navigator && process.env.NODE_ENV !== 'test') {
+// Register Service Worker for PWA / Google Play Store TWA only on production custom domains
+if ('serviceWorker' in navigator && typeof window !== 'undefined' && !window.location.hostname.includes('ais-')) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('Service worker registration failed:', err);
-    });
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
   });
 }
 

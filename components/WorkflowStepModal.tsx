@@ -42,8 +42,10 @@ import {
   getWorkflowStepIndex, 
   normalizeCategoryName, 
   supportsSubCategories,
-  isDestinationUnloadedAndGateOut 
+  isDestinationUnloadedAndGateOut,
+  getStepTargetRole
 } from '../services/workflowConfig';
+import { sendAppNotification } from '../services/notificationService';
 import { PdfViewerModal } from './PdfViewerModal';
 import { WorkflowMultiUploader } from './WorkflowMultiUploader';
 import { downloadCasePdf, downloadCustomsDeliveryOrderPdf } from '../services/pdfExportService';
@@ -803,6 +805,52 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     };
 
     onSaveCase(updatedCase);
+
+    // Dispatch real-time workflow notification to the responsible role
+    if (isCompleting) {
+      const totalSteps = categoryWorkflow.totalSteps;
+      if (stepIndex < totalSteps - 1) {
+        const nextStep = categoryWorkflow.steps[stepIndex + 1];
+        const targetRole = getStepTargetRole(targetCase.category, nextStep.id, stepIndex + 1);
+        const nextRoleLabel = String(targetRole).replace(/_/g, ' ');
+
+        sendAppNotification({
+          title: `Action Required: #${updatedCase.caseNo} - Step ${stepIndex + 2}: ${nextStep.title}`,
+          description: `Case #${updatedCase.caseNo} (${updatedCase.clientName || 'Consignment'}) has progressed to Step ${stepIndex + 2}: ${nextStep.title}. Assigned to ${nextRoleLabel} to update and advance workflow.`,
+          details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName || 'N/A'}\nService: ${updatedCase.category}\nNext Step: Step ${stepIndex + 2} - ${nextStep.title}\nAssigned Role: ${nextRoleLabel}`,
+          targetRole: targetRole,
+          targetView: 'cases',
+          targetFilter: {
+            caseNo: updatedCase.caseNo,
+            stepId: nextStep.id,
+            stepIndex: stepIndex + 1,
+            action: 'UPDATE_STEP'
+          },
+          type: 'ACTION',
+          notificationSubType: 'WORKFLOW_TASK',
+          actionLabel: 'Open Step Workflow',
+          category: 'CASE',
+          performedBy: String(userRole),
+          performedByRole: String(userRole)
+        }).catch(e => console.warn('Could not dispatch workflow step notification:', e));
+      } else {
+        // All steps completed - Notify Finance Manager for Final Invoicing & Settlement
+        sendAppNotification({
+          title: `Case Workflow Completed: #${updatedCase.caseNo}`,
+          description: `All ${totalSteps} workflow steps for Case #${updatedCase.caseNo} (${updatedCase.clientName}) are completed. Ready for final finance billing and account clearance.`,
+          details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName || 'N/A'}\nService: ${updatedCase.category}\nStatus: ALL STEPS COMPLETED`,
+          targetRole: UserRole.FINANCE_MANAGER,
+          targetView: 'finance',
+          type: 'INFO',
+          notificationSubType: 'FINANCE_RECORDED',
+          actionLabel: 'View Invoice & Billing',
+          category: 'FINANCE',
+          performedBy: String(userRole),
+          performedByRole: String(userRole)
+        }).catch(e => console.warn('Could not dispatch workflow completed notification:', e));
+      }
+    }
+
     onClose();
   };
 

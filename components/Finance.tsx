@@ -601,8 +601,19 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     }
   }, [initialFilter]);
 
+  // Pending Client Portal Deposits & incoming payments awaiting bank verification
+  const pendingClientDeposits = useMemo(() => {
+    return financeData.filter(f => f.type === 'INCOME' && f.status === 'PENDING');
+  }, [financeData]);
+
   const tabs = [
     { id: 'cashbook', label: 'Cashbook' },
+    { 
+      id: 'payment_approvals', 
+      label: pendingClientDeposits.length > 0 
+        ? `Payment Approvals (${pendingClientDeposits.length})` 
+        : 'Payment Approvals' 
+    },
     { id: 'receivables', label: 'Receivables' },
     { id: 'payables', label: 'Payables' },
     { id: 'client_ledger', label: 'Client Ledger' },
@@ -1214,11 +1225,6 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       totalRemainingAmount
     };
   }, [banks, financeData]);
-
-  // Pending Client Portal Deposits awaiting bank verification
-  const pendingClientDeposits = useMemo(() => {
-    return financeData.filter(f => f.type === 'INCOME' && f.status === 'PENDING');
-  }, [financeData]);
 
   const [previewSlipModalUrl, setPreviewSlipModalUrl] = useState<string | null>(null);
 
@@ -3408,6 +3414,103 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
   const renderTableContent = () => {
     switch (activeTab) {
+      case 'payment_approvals': {
+        return (
+          <div className="space-y-4">
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center justify-center shrink-0">
+                  <ShieldCheck size={20} />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                    <span>Incoming Payment Approvals & Bank Verification Desk</span>
+                    <span className="bg-amber-500/20 text-amber-300 text-xs px-2.5 py-0.5 rounded-full border border-amber-500/30 font-semibold font-mono">
+                      {pendingClientDeposits.length} Awaiting Verification
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-300 mt-0.5">
+                    Finance Manager verification required for all incoming payments and deposit slips. Check whether funds have reached your bank statement before approving.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {pendingClientDeposits.length === 0 ? (
+              <div className="p-12 text-center rounded-2xl bg-slate-900/50 border border-white/5 space-y-2">
+                <CheckCircle2 size={36} className="text-emerald-400 mx-auto" />
+                <h4 className="text-sm font-bold text-white">All Payments Verified!</h4>
+                <p className="text-xs text-gray-400">There are no pending client or external payment deposits awaiting verification at this time.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-white/10 bg-slate-950/80">
+                <table className="w-full text-left text-xs text-gray-200">
+                  <thead className="bg-slate-900 uppercase font-semibold text-gray-400 border-b border-white/10">
+                    <tr>
+                      <th className="p-3">Date</th>
+                      <th className="p-3">Client / Party</th>
+                      <th className="p-3">Method & Bank</th>
+                      <th className="p-3">Reference / TxID</th>
+                      <th className="p-3">Amount (PKR)</th>
+                      <th className="p-3 text-center">Proof Slip</th>
+                      <th className="p-3 text-right">Verification Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {pendingClientDeposits.map((dep, depIdx) => (
+                      <tr key={`dep_tab_${dep.id || depIdx}_${depIdx}`} className="hover:bg-white/5 transition-colors">
+                        <td className="p-3 font-mono text-gray-300">{dep.date}</td>
+                        <td className="p-3 font-bold text-white text-sm">{dep.party}</td>
+                        <td className="p-3 text-gray-300">
+                          <span className="bg-white/5 px-2 py-0.5 rounded border border-white/10 text-[11px]">
+                            {dep.paymentMethod || 'BANK'} &bull; {dep.bankName || 'Meezan Bank'}
+                          </span>
+                        </td>
+                        <td className="p-3 font-mono text-amber-300">{dep.reference || 'N/A'}</td>
+                        <td className="p-3 font-mono font-bold text-emerald-400 text-sm">
+                          PKR {Number(dep.amount || 0).toLocaleString()}
+                        </td>
+                        <td className="p-3 text-center">
+                          {dep.slipUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewSlipModalUrl(dep.slipUrl!)}
+                              className="px-2.5 py-1 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 border border-brand-500/30 text-xs font-medium inline-flex items-center gap-1 cursor-pointer transition"
+                            >
+                              <Eye size={13} /> View Slip
+                            </button>
+                          ) : (
+                            <span className="text-gray-500 italic text-[11px]">No image</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleRejectClientDeposit(dep)}
+                              className="px-3 py-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 text-xs font-semibold cursor-pointer transition"
+                            >
+                              Decline
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleApproveClientDeposit(dep)}
+                              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-emerald-600/30 cursor-pointer active:scale-95 transition"
+                            >
+                              <CheckCircle2 size={14} /> Approve & Credit
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      }
+
       case 'receivables': {
         const filteredClientReceivables = clientReceivablesSummaries.filter(client => {
           if (!searchTerm) return true;
@@ -3822,11 +3925,19 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                         <span className="text-[11px] font-mono text-gray-400 shrink-0">{entry.date}</span>
                         <span className="text-xs font-bold text-white truncate">{entry.party}</span>
                       </div>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
-                        entry.status === 'PAID' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
-                      }`}>
-                        {entry.status}
-                      </span>
+                      {entry.status === 'PAID' ? (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-green-500/20 text-green-400">
+                          PAID
+                        </span>
+                      ) : (entry.category === 'Staff Payroll & Salaries' || entry.recurringTemplateId !== undefined || entry.reference?.startsWith('SAL-') || entry.reference?.startsWith('REC-') || entry.status === 'APPROVED' || entry.description?.toLowerCase().includes('monthly salary') || entry.description?.toLowerCase().includes('fixed expense')) ? (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-0.5">
+                          ✓ Auto-Approved
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 bg-yellow-500/20 text-yellow-400">
+                          {entry.status || 'PENDING'}
+                        </span>
+                      )}
                     </div>
 
                     {/* Middle: Description & Reference */}
@@ -3896,9 +4007,19 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                       <td className="p-4 text-right text-red-400 font-mono print:text-black">PKR {entry.amount.toLocaleString()}</td>
                       <td className="p-4 text-gray-400 print:text-black">{entry.reference || 'Due on File'}</td>
                       <td className="p-4">
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${entry.status === 'PAID' ? 'bg-green-500/20 text-green-400 print:border print:border-black print:text-black' : 'bg-yellow-500/20 text-yellow-400 print:border print:border-black print:text-black'}`}>
-                          {entry.status}
-                        </span>
+                        {entry.status === 'PAID' ? (
+                          <span className="px-2 py-1 rounded text-xs font-medium bg-green-500/20 text-green-400 print:border print:border-black print:text-black">
+                            PAID
+                          </span>
+                        ) : (entry.category === 'Staff Payroll & Salaries' || entry.recurringTemplateId !== undefined || entry.reference?.startsWith('SAL-') || entry.reference?.startsWith('REC-') || entry.status === 'APPROVED' || entry.description?.toLowerCase().includes('monthly salary') || entry.description?.toLowerCase().includes('fixed expense')) ? (
+                          <span className="px-2 py-1 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 inline-flex items-center gap-1">
+                            ✓ Auto-Approved
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400 print:border print:border-black print:text-black">
+                            {entry.status || 'PENDING'}
+                          </span>
+                        )}
                       </td>
                       <td className="p-4 text-center no-print">
                         <div className="flex items-center justify-center gap-1.5">

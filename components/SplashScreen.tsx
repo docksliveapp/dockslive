@@ -18,7 +18,7 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
     setFadingOut(true);
     setTimeout(() => {
       onComplete();
-    }, 500);
+    }, 300);
   };
 
   useEffect(() => {
@@ -27,10 +27,10 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
       setMounted(true);
     });
 
-    // Elegant presentation duration: display animated logo cleanly for ~2.4 seconds then transition smoothly
+    // Snappy splash presentation duration (~1.4s) then transition smoothly
     const exitTimer = setTimeout(() => {
       handleFinish();
-    }, 2400);
+    }, 1400);
 
     return () => {
       cancelAnimationFrame(enterTimer);
@@ -41,10 +41,11 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
   return (
     <div 
       onClick={handleFinish}
+      onTouchStart={handleFinish}
       role="button"
       tabIndex={0}
       aria-label="Welcome screen - Click or tap to continue to login"
-      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center p-6 select-none bg-[#030712] transition-all duration-600 ease-out overflow-hidden cursor-pointer ${
+      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center p-6 select-none bg-[#030712] transition-all duration-300 ease-out overflow-hidden cursor-pointer ${
         fadingOut ? 'opacity-0 scale-105 pointer-events-none' : 'opacity-100 scale-100'
       }`}
     >
@@ -228,10 +229,10 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             <img 
               src={customLogo} 
               alt={companyName || "DOCKS Logo"} 
-              className="w-64 sm:w-88 max-h-44 object-contain drop-shadow-[0_12px_32px_rgba(245,158,11,0.5)] filter brightness-110 select-none"
+              className="w-40 sm:w-56 max-h-44 object-contain drop-shadow-[0_12px_32px_rgba(245,158,11,0.5)] filter brightness-110 select-none mx-auto"
             />
           ) : (
-            <div className="w-64 sm:w-96 drop-shadow-[0_14px_36px_rgba(245,158,11,0.45)] select-none">
+            <div className="w-40 sm:w-56 mx-auto drop-shadow-[0_14px_36px_rgba(245,158,11,0.45)] select-none">
               <Logo className="w-full h-auto" />
             </div>
           )}

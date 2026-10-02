@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   X, Check, XCircle, FileText, DollarSign, Info, Trash2, 
@@ -20,18 +20,41 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
   onClose, 
   onAction 
 }) => {
+  const [enlargedSlip, setEnlargedSlip] = useState(false);
   if (!isOpen || !notification) return null;
 
-  const isApprovalAction = 
-    notification.notificationSubType === 'CASE_APPROVAL' ||
-    notification.notificationSubType === 'DELETION_APPROVAL' ||
-    notification.notificationSubType === 'CANCELLATION_APPROVAL' ||
-    notification.notificationSubType === 'EDIT_APPROVAL';
+  const isMonthlyExpense = 
+    notification.notificationSubType === 'FINANCE_RECORDED' ||
+    notification.description?.toLowerCase().includes('monthly salary') ||
+    notification.description?.toLowerCase().includes('fixed expense') ||
+    notification.title?.toLowerCase().includes('monthly salary') ||
+    notification.title?.toLowerCase().includes('monthly fixed');
 
-  const isBuying = notification.notificationSubType === 'BUYING';
+  const isPaymentApproval = 
+    notification.notificationSubType === 'PAYMENT_APPROVAL' ||
+    notification.approvalData?.actionType === 'VERIFY_PAYMENT';
+
+  const isApprovalAction = 
+    !isMonthlyExpense && (
+      isPaymentApproval ||
+      notification.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
+      notification.notificationSubType === 'CASE_APPROVAL' ||
+      notification.notificationSubType === 'DELETION_APPROVAL' ||
+      notification.notificationSubType === 'CANCELLATION_APPROVAL' ||
+      notification.notificationSubType === 'EDIT_APPROVAL' ||
+      notification.approvalData?.actionType === 'APPROVE_CLIENT'
+    );
 
   const getIcon = () => {
     switch (notification.notificationSubType as string) {
+      case 'PAYMENT_APPROVAL':
+        return <DollarSign size={28} className="text-emerald-400" />;
+      case 'CLIENT_REGISTRATION_APPROVAL':
+        return <ShieldCheck size={28} className="text-purple-400" />;
+      case 'WORKFLOW_TASK':
+        return <FileText size={28} className="text-amber-400" />;
+      case 'FINANCE_RECORDED':
+        return <CheckCircle2 size={28} className="text-teal-400" />;
       case 'DELETION_APPROVAL':
         return <Trash2 size={28} className="text-red-400" />;
       case 'CANCELLATION_APPROVAL':
@@ -53,7 +76,18 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
   };
 
   const getHeaderBadge = () => {
+    if (isMonthlyExpense) {
+      return { label: 'Monthly Fixed Expense (Auto-Recorded)', bg: 'bg-teal-500/20 text-teal-300 border-teal-500/30' };
+    }
     switch (notification.notificationSubType as string) {
+      case 'PAYMENT_APPROVAL':
+        return { label: 'Payment Receipt Verification Required', bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+      case 'CLIENT_REGISTRATION_APPROVAL':
+        return { label: 'Client Registration Approval', bg: 'bg-purple-500/20 text-purple-300 border-purple-500/30' };
+      case 'WORKFLOW_TASK':
+        return { label: 'Workflow Action Required', bg: 'bg-amber-500/20 text-amber-300 border-amber-500/30' };
+      case 'FINANCE_RECORDED':
+        return { label: 'Monthly Fixed Expense (Auto-Recorded)', bg: 'bg-teal-500/20 text-teal-300 border-teal-500/30' };
       case 'DELETION_APPROVAL':
         return { label: 'Deletion Request', bg: 'bg-red-500/20 text-red-300 border-red-500/30' };
       case 'CANCELLATION_APPROVAL':
@@ -63,7 +97,7 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
       case 'CASE_APPROVAL':
         return { label: 'Case Approval', bg: 'bg-blue-500/20 text-blue-300 border-blue-500/30' };
       case 'BUYING':
-        return { label: 'Finance Payable / Buying', bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+        return { label: 'Finance Record', bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
       default:
         return { label: notification.notificationSubType?.replace(/_/g, ' ') || 'SYSTEM ALERT', bg: 'bg-sky-500/20 text-sky-300 border-sky-500/30' };
     }
@@ -206,6 +240,58 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
             </div>
           )}
 
+          {/* Bank Deposit Slip Image Preview if available */}
+          {approval?.slipUrl && (
+            <div className="bg-slate-950/80 rounded-2xl p-4 border border-emerald-500/30 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <DollarSign size={14} />
+                  Attached Bank Deposit Slip / Cheque Receipt
+                </span>
+                <span className="text-[10px] text-gray-400 font-mono">
+                  PKR {Number(approval.amount || 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="rounded-xl overflow-hidden border border-white/10 bg-black/40 flex items-center justify-center p-1">
+                <img 
+                  src={approval.slipUrl} 
+                  alt="Bank Deposit Slip Receipt" 
+                  className="max-h-64 w-auto rounded-lg object-contain shadow-xl cursor-pointer hover:scale-[1.02] transition"
+                  onClick={() => setEnlargedSlip(true)}
+                  title="Click to view full image"
+                />
+              </div>
+              <p className="text-[10px] text-gray-400 text-center italic">
+                Click image to enlarge. Verify funds in bank statement before approving.
+              </p>
+
+              {enlargedSlip && (
+                <div 
+                  className="fixed inset-0 z-[100099] bg-black/90 flex items-center justify-center p-4 backdrop-blur-md cursor-zoom-out"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEnlargedSlip(false);
+                  }}
+                >
+                  <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center">
+                    <button
+                      type="button"
+                      className="absolute -top-10 right-0 text-white/80 hover:text-white bg-white/10 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                      onClick={() => setEnlargedSlip(false)}
+                    >
+                      <X size={14} /> Close Preview
+                    </button>
+                    <img 
+                      src={approval.slipUrl} 
+                      alt="Bank Deposit Slip Enlarged" 
+                      className="max-w-full max-h-[85vh] rounded-2xl object-contain shadow-2xl border border-white/20"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Quick Case / Vehicle Reference Card if available */}
           {notification.targetFilter?.caseNo && (
             <div className="p-3 rounded-2xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-between gap-2">
@@ -225,10 +311,10 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
           )}
         </div>
 
-        {/* Actionable Footer (Facebook / Instagram Style Direct Actions) */}
+        {/* Actionable Footer (Direct Action Buttons) */}
         <div className="p-4 border-t border-white/10 bg-slate-950/80 flex flex-col gap-2.5">
-          {/* If Approval or Buying: Show Instant Accept / Reject */}
-          {(isApprovalAction || isBuying) ? (
+          {/* If Approval Required: Show Instant Accept / Reject */}
+          {isApprovalAction ? (
             <div className="flex items-center gap-2.5 w-full">
               <button 
                 type="button"
@@ -236,7 +322,7 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
                 className="flex-1 flex items-center justify-center gap-2 bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 py-3 rounded-2xl transition-all font-bold text-xs sm:text-sm active:scale-95"
               >
                 <XCircle size={16} />
-                <span>Reject</span>
+                <span>{isPaymentApproval ? 'Decline Payment' : 'Reject'}</span>
               </button>
               <button 
                 type="button"
@@ -244,7 +330,13 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
                 className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-2xl transition-all font-bold text-xs sm:text-sm shadow-lg shadow-emerald-600/25 active:scale-95"
               >
                 <Check size={16} />
-                <span>Approve & Execute</span>
+                <span>
+                  {isPaymentApproval 
+                    ? 'Confirm Receipt & Credit Ledger' 
+                    : notification.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' 
+                    ? 'Approve Client Registration' 
+                    : 'Approve & Execute'}
+                </span>
               </button>
             </div>
           ) : null}
@@ -257,7 +349,7 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
                 onClick={() => onAction('VIEW')}
                 className="flex-1 py-2.5 px-3 rounded-2xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition shadow-md shadow-brand-600/20 active:scale-95"
               >
-                <span>Open in {notification.targetView.toUpperCase()}</span>
+                <span>{notification.actionLabel || `Open in ${notification.targetView.toUpperCase()}`}</span>
                 <ArrowRight size={13} />
               </button>
             )}

@@ -17,6 +17,7 @@ import {
   subscribeToUsers, 
   subscribeToClients, 
   saveClientToFirestore, 
+  updateClientInFirestore,
   deleteClientFromFirestore,
   subscribeToDestinationStaff, 
   deleteDestinationStaffFromFirestore, 
@@ -913,9 +914,17 @@ const UserManagement: React.FC = () => {
                       <p className="text-xs text-gray-400 truncate">{client.ownerName || client.contact || 'Owner N/A'}</p>
                     </div>
                   </div>
-                  <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">
-                    {client.defaultCaseCategory || 'Bonded Carrier'}
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {(client as any).status === 'PENDING_APPROVAL' ? (
+                      <span className="text-[10px] bg-amber-500/20 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded-full font-bold animate-pulse flex items-center gap-1">
+                        <Clock size={10} /> Pending Approval
+                      </span>
+                    ) : (
+                      <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">
+                        {client.defaultCaseCategory || 'Bonded Carrier'}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1 text-xs">
@@ -946,6 +955,23 @@ const UserManagement: React.FC = () => {
                 </div>
 
                 <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
+                  {(client as any).status === 'PENDING_APPROVAL' && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await updateClientInFirestore({
+                          id: client.id,
+                          loginEnabled: true,
+                          status: 'ACTIVE' as any
+                        });
+                        setClientsList(prev => prev.map(c => c.id === client.id ? { ...c, loginEnabled: true, status: 'ACTIVE' as any } : c));
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 shadow-md shadow-emerald-600/30 transition active:scale-95"
+                      title="Approve Client Account and Activate Portal Login"
+                    >
+                      <Check size={14} /> Approve
+                    </button>
+                  )}
                   <button
                     onClick={() => setLedgerClient(client)}
                     className="flex-1 text-emerald-300 hover:text-emerald-200 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 transition-all text-xs flex items-center justify-center gap-1.5 font-semibold"
@@ -997,7 +1023,14 @@ const UserManagement: React.FC = () => {
                             <Building size={18} />
                           </div>
                           <div>
-                            <span className="font-bold text-white block">{client.name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white block">{client.name}</span>
+                              {(client as any).status === 'PENDING_APPROVAL' && (
+                                <span className="text-[10px] bg-amber-500/20 border border-amber-500/30 text-amber-300 px-2 py-0.2 rounded-full font-bold animate-pulse">
+                                  Pending Approval
+                                </span>
+                              )}
+                            </div>
                             <span className="text-[11px] text-gray-400">{client.officeAddress || 'Address N/A'}</span>
                           </div>
                         </div>
@@ -1019,6 +1052,23 @@ const UserManagement: React.FC = () => {
                       </td>
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {(client as any).status === 'PENDING_APPROVAL' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await updateClientInFirestore({
+                                  id: client.id,
+                                  loginEnabled: true,
+                                  status: 'ACTIVE' as any
+                                });
+                                setClientsList(prev => prev.map(c => c.id === client.id ? { ...c, loginEnabled: true, status: 'ACTIVE' as any } : c));
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 shadow-md shadow-emerald-600/30 transition active:scale-95"
+                              title="Approve Client Account"
+                            >
+                              <Check size={13} /> Approve
+                            </button>
+                          )}
                           <button
                             onClick={() => setLedgerClient(client)}
                             className="text-emerald-400 hover:text-emerald-300 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors text-xs flex items-center gap-1 font-semibold"

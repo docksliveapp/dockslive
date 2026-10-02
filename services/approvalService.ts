@@ -1,12 +1,16 @@
-import { AppNotification, Case, Vehicle, UserRole } from '../types';
+import { AppNotification, Case, Vehicle, UserRole, FinanceEntry } from '../types';
 import { 
   saveNotificationToFirestore, 
   updateNotificationInFirestore,
   updateCaseInFirestore,
   deleteCaseFromFirestore,
   updateVehicleInFirestore,
-  deleteVehicleFromFirestore
+  deleteVehicleFromFirestore,
+  updateFinanceInFirestore,
+  updateClientInFirestore
 } from './dbService';
+import { safeAppStorage } from './storage';
+import { logActivity } from './activityLogService';
 
 export interface ActionApprovalPayload {
   actionType: 'DELETE' | 'CANCEL' | 'EDIT';
@@ -205,6 +209,50 @@ export async function approveActionRequest(notification: AppNotification): Promi
       } as any;
       await updateVehicleInFirestore(vehiclePayload);
     }
+  } else if (entityType === 'finance' || actionType === 'VERIFY_PAYMENT') {
+    const numId = Number(entityId);
+    try {
+      await updateFinanceInFirestore({
+        id: numId,
+        status: 'PAID',
+        remarks: `Payment receipt verified & approved by Finance Manager on ${new Date().toLocaleDateString()}`
+      } as any);
+
+      // Synchronize safeAppStorage
+      const livePay = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', []);
+      const liveRec = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_receivables', []);
+      const updatedPay = livePay.map(f => f.id === numId ? { ...f, status: 'PAID' } : f);
+      const updatedRec = liveRec.map(f => f.id === numId ? { ...f, status: 'PAID' } : f);
+      safeAppStorage.setJSON('dpl_live_payables', updatedPay);
+      safeAppStorage.setJSON('dpl_live_receivables', updatedRec);
+
+      logActivity(
+        `Payment Receipt Verified & Approved: PKR ${Number(notification.approvalData.amount || 0).toLocaleString()}`,
+        `Payment receipt from "${notification.approvalData.requestedBy || 'Client'}" was checked and confirmed received by Finance Manager.`,
+        'FINANCE_MANAGER',
+        'Finance Desk',
+        { entityId: numId, amount: notification.approvalData.amount }
+      );
+    } catch (err) {
+      console.warn("Could not verify finance entry:", err);
+    }
+  } else if (entityType === 'client' || actionType === 'APPROVE_CLIENT') {
+    try {
+      await updateClientInFirestore({
+        id: String(entityId),
+        loginEnabled: true,
+        status: 'ACTIVE'
+      } as any);
+
+      logActivity(
+        `Client Registration Approved: ${notification.approvalData.entityName || entityId}`,
+        `New client registration request approved. Portal login and tariff access activated.`,
+        'ADMIN',
+        'System Admin'
+      );
+    } catch (err) {
+      console.warn("Could not approve client registration:", err);
+    }
   }
 
   await updateNotificationInFirestore({ ...notification, status: 'RESOLVED' });
@@ -219,7 +267,7 @@ export async function rejectActionRequest(notification: AppNotification, rejectR
     return;
   }
 
-  const { entityType, entityId } = notification.approvalData;
+  const { entityType, entityId, actionType } = notification.approvalData;
 
   if (entityType === 'case') {
     await updateCaseInFirestore({
@@ -231,6 +279,34 @@ export async function rejectActionRequest(notification: AppNotification, rejectR
       id: Number(entityId),
       pendingApproval: undefined
     } as any);
+  } else if (entityType === 'finance' || actionType === 'VERIFY_PAYMENT') {
+    const numId = Number(entityId);
+    try {
+      await updateFinanceInFirestore({
+        id: numId,
+        status: 'CANCELLED',
+        remarks: `Payment deposit declined by Finance Manager: ${rejectReason || 'Funds not verified with bank'}`
+      } as any);
+
+      logActivity(
+        `Payment Deposit Declined: PKR ${Number(notification.approvalData.amount || 0).toLocaleString()}`,
+        `Deposit slip from "${notification.approvalData.requestedBy || 'Client'}" was declined by Finance Manager. Reason: ${rejectReason || 'Funds not verified'}.`,
+        'FINANCE_MANAGER',
+        'Finance Desk'
+      );
+    } catch (err) {
+      console.warn("Could not decline finance payment:", err);
+    }
+  } else if (entityType === 'client' || actionType === 'APPROVE_CLIENT') {
+    try {
+      await updateClientInFirestore({
+        id: String(entityId),
+        loginEnabled: false,
+        status: 'REJECTED'
+      } as any);
+    } catch (err) {
+      console.warn("Could not reject client registration:", err);
+    }
   }
 
   await updateNotificationInFirestore({

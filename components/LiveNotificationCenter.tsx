@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Bell, X, Check, CheckCircle2, Clock, FileText, DollarSign, 
-  Truck, ShieldAlert, ArrowRight, Filter, AlertTriangle, Info,
+  Truck, ShieldAlert, ShieldCheck, ArrowRight, Filter, AlertTriangle, Info,
   Sparkles, ExternalLink
 } from 'lucide-react';
 import { AppNotification, UserRole } from '../types';
@@ -15,7 +15,7 @@ interface LiveNotificationCenterProps {
   currentRoles?: (UserRole | string)[];
   userIdentifier?: string;
   clientName?: string;
-  onNavigateToCase?: (caseNoOrId: string) => void;
+  onNavigateToCase?: (caseNoOrId: string, filterData?: any) => void;
   onNavigateToTab?: (tabName: string) => void;
   buttonClassName?: string;
   showBadgeOnly?: boolean;
@@ -35,14 +35,26 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
   const [selectedNotification, setSelectedNotification] = useState<AppNotification | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'WORKFLOW' | 'FINANCE' | 'APPROVAL'>('ALL');
+  const [liveToast, setLiveToast] = useState<AppNotification | null>(null);
+  const initialLoadRef = useRef(true);
 
   // Real-time Firestore subscription
   useEffect(() => {
     const unsub = subscribeToNotifications((items) => {
-      setNotifications(items || []);
+      const incoming = items || [];
+      // Trigger toast for brand new pending notification on real-time event
+      if (!initialLoadRef.current && incoming.length > notifications.length) {
+        const newest = incoming.find(n => n.status === 'PENDING');
+        if (newest) {
+          setLiveToast(newest);
+          setTimeout(() => setLiveToast(null), 7000);
+        }
+      }
+      initialLoadRef.current = false;
+      setNotifications(incoming);
     });
     return () => unsub();
-  }, []);
+  }, [notifications.length]);
 
   // Normalization helper for roles
   const normalizeRole = (r?: any): string => {
@@ -174,6 +186,7 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     if (activeFilter === 'ALL') return relevantNotifications;
     if (activeFilter === 'WORKFLOW') {
       return relevantNotifications.filter(n => 
+        n.notificationSubType === 'WORKFLOW_TASK' ||
         n.notificationSubType === 'CASE_APPROVAL' || 
         (n.targetView && n.targetView.includes('case')) ||
         (n.title && (n.title.includes('Case') || n.title.includes('Workflow') || n.title.includes('Shipment')))
@@ -181,18 +194,35 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     }
     if (activeFilter === 'FINANCE') {
       return relevantNotifications.filter(n => 
+        n.notificationSubType === 'FINANCE_RECORDED' ||
+        n.notificationSubType === 'PAYMENT_APPROVAL' ||
         n.notificationSubType === 'BUYING' || 
         (n.targetView && n.targetView.includes('finance')) ||
-        (n.title && (n.title.includes('Invoice') || n.title.includes('Payment') || n.title.includes('Bill') || n.title.includes('Tariff')))
+        (n.title && (n.title.includes('Invoice') || n.title.includes('Payment') || n.title.includes('Bill') || n.title.includes('Tariff') || n.title.includes('Finance') || n.title.includes('Salary') || n.title.includes('Expense')))
       );
     }
     if (activeFilter === 'APPROVAL') {
-      return relevantNotifications.filter(n => 
-        n.notificationSubType === 'CASE_APPROVAL' ||
-        n.notificationSubType === 'DELETION_APPROVAL' ||
-        n.notificationSubType === 'CANCELLATION_APPROVAL' ||
-        n.notificationSubType === 'EDIT_APPROVAL'
-      );
+      return relevantNotifications.filter(n => {
+        const isMonthlyExpense = 
+          n.notificationSubType === 'FINANCE_RECORDED' ||
+          n.description?.toLowerCase().includes('monthly salary') ||
+          n.description?.toLowerCase().includes('fixed expense') ||
+          n.title?.toLowerCase().includes('monthly salary') ||
+          n.title?.toLowerCase().includes('monthly fixed');
+
+        if (isMonthlyExpense) return false;
+
+        return (
+          n.notificationSubType === 'PAYMENT_APPROVAL' ||
+          n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
+          n.notificationSubType === 'CASE_APPROVAL' ||
+          n.notificationSubType === 'DELETION_APPROVAL' ||
+          n.notificationSubType === 'CANCELLATION_APPROVAL' ||
+          n.notificationSubType === 'EDIT_APPROVAL' ||
+          n.approvalData?.actionType === 'VERIFY_PAYMENT' ||
+          n.approvalData?.actionType === 'APPROVE_CLIENT'
+        );
+      });
     }
     return relevantNotifications;
   }, [relevantNotifications, activeFilter]);
@@ -228,7 +258,21 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       handleMarkAsRead(n);
     }
 
-    // Always open the notification detail & action modal
+    // Direct 1-tap navigation for case workflows:
+    if (n.targetFilter?.caseNo && onNavigateToCase) {
+      onNavigateToCase(n.targetFilter.caseNo, n.targetFilter);
+      setIsOpen(false);
+      return;
+    }
+
+    // Direct navigation for tabs (e.g. finance, users, vehicles):
+    if (n.targetView && onNavigateToTab) {
+      onNavigateToTab(n.targetView);
+      setIsOpen(false);
+      return;
+    }
+
+    // Otherwise open notification details modal
     setSelectedNotification(n);
     setIsModalOpen(true);
   };
@@ -281,7 +325,7 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
         onNavigateToTab(selectedNotification.targetView);
       }
       if (selectedNotification.targetFilter?.caseNo && onNavigateToCase) {
-        onNavigateToCase(selectedNotification.targetFilter.caseNo);
+        onNavigateToCase(selectedNotification.targetFilter.caseNo, selectedNotification.targetFilter);
       }
       setIsModalOpen(false);
       setIsOpen(false);
@@ -322,6 +366,14 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
 
   const getBadgeIcon = (subType?: string) => {
     switch (subType) {
+      case 'PAYMENT_APPROVAL':
+        return <DollarSign size={15} className="text-emerald-400" />;
+      case 'CLIENT_REGISTRATION_APPROVAL':
+        return <ShieldCheck size={15} className="text-purple-400" />;
+      case 'WORKFLOW_TASK':
+        return <FileText size={15} className="text-amber-400" />;
+      case 'FINANCE_RECORDED':
+        return <CheckCircle2 size={15} className="text-teal-400" />;
       case 'DELETION_APPROVAL':
         return <AlertTriangle size={15} className="text-red-400" />;
       case 'CANCELLATION_APPROVAL':
@@ -490,29 +542,57 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
               ) : (
                 filteredNotifications.map((n, idx) => {
                   const isPending = n.status === 'PENDING';
+
+                  const isMonthlyExpense = 
+                    n.notificationSubType === 'FINANCE_RECORDED' ||
+                    n.description?.toLowerCase().includes('monthly salary') ||
+                    n.description?.toLowerCase().includes('fixed expense') ||
+                    n.title?.toLowerCase().includes('monthly salary') ||
+                    n.title?.toLowerCase().includes('monthly fixed');
+
+                  const isPaymentApproval = 
+                    n.notificationSubType === 'PAYMENT_APPROVAL' ||
+                    n.approvalData?.actionType === 'VERIFY_PAYMENT';
+
                   const isApproval = 
-                    n.notificationSubType === 'CASE_APPROVAL' ||
-                    n.notificationSubType === 'DELETION_APPROVAL' ||
-                    n.notificationSubType === 'CANCELLATION_APPROVAL' ||
-                    n.notificationSubType === 'EDIT_APPROVAL' ||
-                    n.notificationSubType === 'BUYING';
+                    !isMonthlyExpense && (
+                      isPaymentApproval ||
+                      n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
+                      n.notificationSubType === 'CASE_APPROVAL' ||
+                      n.notificationSubType === 'DELETION_APPROVAL' ||
+                      n.notificationSubType === 'CANCELLATION_APPROVAL' ||
+                      n.notificationSubType === 'EDIT_APPROVAL' ||
+                      n.approvalData?.actionType === 'APPROVE_CLIENT'
+                    );
+
+                  const subTypeLabel = isMonthlyExpense
+                    ? 'AUTO-POSTED EXPENSE'
+                    : isPaymentApproval
+                    ? 'PAYMENT VERIFICATION'
+                    : n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL'
+                    ? 'CLIENT REGISTRATION'
+                    : n.notificationSubType === 'WORKFLOW_TASK'
+                    ? 'WORKFLOW TASK'
+                    : n.notificationSubType?.replace(/_/g, ' ') || 'SYSTEM ALERT';
 
                   return (
                     <div 
                       key={`live_notif_${n.id || idx}_${idx}`}
                       onClick={() => handleCardClick(n)}
                       className={`p-3.5 rounded-2xl border transition-all cursor-pointer group space-y-2.5 relative select-none ${
-                        isPending
+                        isPending && isApproval
                           ? 'bg-slate-900 border-amber-500/50 hover:border-amber-400 shadow-lg shadow-amber-500/5 border-l-4 border-l-amber-400'
                           : 'bg-slate-900/60 border-white/10 hover:border-white/20 opacity-85 hover:opacity-100'
                       }`}
-                      style={{ backgroundColor: isPending ? '#0f172a' : '#0c1322' }}
+                      style={{ backgroundColor: isPending && isApproval ? '#0f172a' : '#0c1322' }}
                     >
                       {/* Top Row: Icon, Title, Unread Pulse Dot, Timestamp */}
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2.5 min-w-0 flex-1">
                           <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border ${
-                            isPending 
+                            isMonthlyExpense
+                              ? 'bg-teal-500/15 text-teal-400 border-teal-500/30'
+                              : isPending 
                               ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' 
                               : 'bg-white/5 text-gray-400 border-white/10'
                           }`}>
@@ -523,12 +603,14 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                               <h4 className="text-xs font-bold text-white group-hover:text-amber-300 transition truncate">
                                 {n.title}
                               </h4>
-                              {isPending && (
-                                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" title="Unread" />
+                              {isPending && isApproval && (
+                                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" title="Action Pending" />
                               )}
                             </div>
-                            <span className="text-[10px] text-amber-400/90 font-mono uppercase font-semibold">
-                              {n.notificationSubType?.replace(/_/g, ' ') || 'SYSTEM ALERT'}
+                            <span className={`text-[10px] font-mono uppercase font-semibold ${
+                              isMonthlyExpense ? 'text-teal-400' : 'text-amber-400/90'
+                            }`}>
+                              {subTypeLabel}
                             </span>
                           </div>
                         </div>
@@ -555,9 +637,9 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                         {n.description}
                       </p>
 
-                      {/* Action Bar (One-Tap Actionable like Facebook / Instagram) */}
+                      {/* Action Bar (One-Tap Actionable) */}
                       <div className="flex flex-wrap items-center justify-between gap-1.5 pt-2 border-t border-white/10 text-xs">
-                        {/* If Approval/Buying: Direct 1-tap Approve & Reject buttons */}
+                        {/* If Approval: Direct 1-tap Approve & Reject buttons */}
                         {isApproval ? (
                           <div className="flex items-center gap-1.5 w-full sm:w-auto">
                             <button
@@ -566,7 +648,7 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                               className="flex-1 sm:flex-none px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center justify-center gap-1 transition shadow shadow-emerald-600/20 active:scale-95"
                             >
                               <Check size={12} />
-                              <span>Approve</span>
+                              <span>{isPaymentApproval ? 'Verify & Credit' : 'Approve'}</span>
                             </button>
                             <button
                               type="button"
@@ -577,6 +659,40 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                               <span>Reject</span>
                             </button>
                           </div>
+                        ) : isMonthlyExpense ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/15 text-teal-300 border border-teal-500/30 flex items-center gap-1 font-mono">
+                              <CheckCircle2 size={11} />
+                              Auto-Recorded
+                            </span>
+                            {onNavigateToTab && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onNavigateToTab('finance');
+                                  setIsOpen(false);
+                                }}
+                                className="text-amber-400 hover:text-amber-300 font-semibold text-[11px] flex items-center gap-1 ml-1"
+                              >
+                                <span>View Ledger</span>
+                                <ExternalLink size={11} />
+                              </button>
+                            )}
+                          </div>
+                        ) : (n.targetFilter?.caseNo && onNavigateToCase) ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onNavigateToCase(n.targetFilter.caseNo, n.targetFilter);
+                              setIsOpen(false);
+                            }}
+                            className="text-emerald-400 hover:text-emerald-300 font-semibold text-[11px] flex items-center gap-1"
+                          >
+                            <span>Open Workflow ({n.targetFilter.caseNo})</span>
+                            <ExternalLink size={11} />
+                          </button>
                         ) : n.targetView ? (
                           <div className="flex items-center gap-1">
                             <span className="text-emerald-400 font-semibold text-[11px] flex items-center gap-1">
@@ -628,6 +744,58 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
           onClose={() => setIsModalOpen(false)}
           onAction={handleNotificationAction}
         />
+      )}
+
+      {/* Real-time Floating In-App Toast Alert */}
+      {liveToast && typeof document !== 'undefined' && createPortal(
+        <div 
+          className="fixed top-5 right-5 z-[99999] max-w-sm w-full bg-slate-900/95 border border-amber-500/50 text-white rounded-2xl shadow-2xl p-4 flex items-start gap-3 animate-slide-left backdrop-blur-xl"
+          style={{ backgroundColor: '#0f172a' }}
+        >
+          <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center justify-center shrink-0 mt-0.5">
+            <Bell size={18} className="animate-bounce" />
+          </div>
+          <div className="flex-1 min-w-0 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                {liveToast.notificationSubType?.replace(/_/g, ' ') || 'New Task Alert'}
+              </span>
+              <button 
+                type="button" 
+                onClick={() => setLiveToast(null)}
+                className="text-gray-400 hover:text-white p-0.5 rounded cursor-pointer"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <h4 className="text-xs font-bold text-white truncate">{liveToast.title}</h4>
+            <p className="text-[11px] text-gray-300 line-clamp-2 leading-relaxed">{liveToast.description}</p>
+            <div className="pt-1 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  handleCardClick(liveToast);
+                  setLiveToast(null);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-yellow-300 text-slate-950 font-black text-[11px] flex items-center gap-1 shadow cursor-pointer active:scale-95 transition"
+              >
+                <span>Take Action</span>
+                <ArrowRight size={11} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleMarkAsRead(liveToast);
+                  setLiveToast(null);
+                }}
+                className="px-2 py-1 rounded-lg text-gray-400 hover:text-white text-[11px] cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </>
   );

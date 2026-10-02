@@ -27,7 +27,6 @@ import NotificationModal from './components/NotificationModal';
 import AuthModal from './components/AuthModal';
 import Logo from './components/Logo';
 import { LiveNotificationCenter } from './components/LiveNotificationCenter';
-import { PWAInstallButton } from './components/PWAInstallButton';
 import { auth, onAuthStateChanged, testFirestoreConnection } from './services/firebase';
 import { subscribeToNotifications } from './services/dbService';
 import { approveActionRequest, rejectActionRequest } from './services/approvalService';
@@ -46,6 +45,19 @@ const App: React.FC = () => {
   const [showModeSelection, setShowModeSelection] = useState<boolean>(false);
   const [isReplaySplashOnly, setIsReplaySplashOnly] = useState<boolean>(false);
   const { customLogo, companyName } = useBranding();
+
+  // Failsafe: Ensure splash screen never hangs the app under any browser condition
+  useEffect(() => {
+    if (showSplash) {
+      const failsafe = setTimeout(() => {
+        setShowSplash(false);
+        if (!isReplaySplashOnly) {
+          setShowModeSelection(true);
+        }
+      }, 2500);
+      return () => clearTimeout(failsafe);
+    }
+  }, [showSplash, isReplaySplashOnly]);
 
   // Role State (Preserved across app switching and backgrounding)
   const [currentRole, setCurrentRole] = useState<UserRole>(() => {
@@ -577,13 +589,21 @@ const App: React.FC = () => {
           title="DOCKS Dashboard"
         >
           {/* Full Logo - Shown when sidebar is expanded OR on mobile */}
-          <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} flex items-center justify-center`}>
-            <Logo className="h-10 w-auto max-w-[180px] group-hover:brightness-110 transition-all" />
+          <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} flex items-center justify-center gap-2.5`}>
+            <Logo className="h-10 w-10 shrink-0 object-contain group-hover:brightness-110 transition-all" />
+            <div className="flex flex-col text-left min-w-0">
+              <span className="font-extrabold text-xs tracking-wider text-amber-300 font-sans uppercase truncate">
+                {companyName || 'DOCKS (PVT) LTD'}
+              </span>
+              <span className="text-[9px] font-bold text-amber-400/90 tracking-wider uppercase truncate">
+                Bonded Carrier
+              </span>
+            </div>
           </div>
           
           {/* Icon Logo - Shown ONLY when sidebar is collapsed on desktop */}
           <div className={`${desktopSidebarExpanded ? 'hidden' : 'hidden lg:flex'} items-center justify-center`}>
-            <Logo variant="icon" className="h-8 w-auto max-w-[48px] group-hover:brightness-110 transition-all" />
+            <Logo variant="icon" className="h-8 w-8 object-contain group-hover:brightness-110 transition-all" />
           </div>
 
           {/* Client Role Badge in Sidebar */}
@@ -638,11 +658,6 @@ const App: React.FC = () => {
               </span>
             </div>
           </div>
-        </div>
-
-        {/* PWA / Play Store Install in Sidebar */}
-        <div className={`px-3 py-1 ${!desktopSidebarExpanded && 'lg:hidden'}`}>
-          <PWAInstallButton variant="sidebar" />
         </div>
 
         {/* Logout at Sidebar Bottom */}
@@ -718,9 +733,6 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0">
-            {/* Install Mobile / Play Store App */}
-            <PWAInstallButton variant="header" />
-
             {/* Sone se Amount Option (Golden Amount Display & Treasury Breakdown) */}
             <GoldenAmountWidget 
               onOpenFinance={() => setActiveView('finance')}
@@ -732,9 +744,9 @@ const App: React.FC = () => {
               currentRoles={currentRoles}
               userIdentifier={currentClientName || firebaseUser?.displayName || firebaseUser?.email || 'Admin'}
               clientName={currentClientName}
-              onNavigateToCase={(caseNoOrId) => {
+              onNavigateToCase={(caseNoOrId, filterData) => {
                 setActiveView('cases');
-                setNavigationFilter(caseNoOrId);
+                setNavigationFilter(filterData || caseNoOrId);
               }}
               onNavigateToTab={(tabName) => {
                 if (tabName === 'finance') setActiveView('finance');

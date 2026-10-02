@@ -11,14 +11,15 @@ const Logo: React.FC<LogoProps> = ({ className = "", variant = 'full', customSrc
   const { customLogo: globalLogo, companyName } = useBranding();
   const [imgError, setImgError] = useState(false);
 
-  const defaultSrc = variant === 'icon' ? '/favicon.svg' : '/logo.svg';
+  const defaultSrc = '/logo.svg';
+  const fallbackSrc = '/logo.svg';
   const activeLogo = customSrc !== undefined ? (customSrc || defaultSrc) : (globalLogo || defaultSrc);
 
   if (activeLogo && !imgError) {
     return (
       <img 
         src={activeLogo} 
-        alt={companyName || "Company Logo"} 
+        alt={companyName || "DPL Logo"} 
         className={`${className} object-contain select-none transition-all duration-300`}
         onError={() => setImgError(true)}
       />
@@ -27,7 +28,7 @@ const Logo: React.FC<LogoProps> = ({ className = "", variant = 'full', customSrc
 
   return (
     <img 
-      src={defaultSrc} 
+      src={fallbackSrc} 
       alt="DPL Logo" 
       className={`${className} object-contain select-none`} 
     />

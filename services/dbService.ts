@@ -143,8 +143,23 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
   const path = 'finances';
   const docId = String(entry.id || Date.now());
   try {
-    const payload = sanitizeForFirestore({
+    // Monthly recurring fixed overheads and staff payroll are auto-approved upon entry
+    const isMonthlyOrRecurring = 
+      entry.category === 'Staff Payroll & Salaries' ||
+      entry.recurringTemplateId !== undefined ||
+      entry.reference?.startsWith('SAL-') ||
+      entry.reference?.startsWith('REC-') ||
+      entry.description?.toLowerCase().includes('monthly salary') ||
+      entry.description?.toLowerCase().includes('fixed expense') ||
+      entry.description?.toLowerCase().includes('monthly overhead');
+
+    const entryToSave: FinanceEntry = {
       ...entry,
+      status: (isMonthlyOrRecurring && entry.status === 'PENDING') ? 'APPROVED' : entry.status
+    };
+
+    const payload = sanitizeForFirestore({
+      ...entryToSave,
       id: Number(docId),
       createdBy: auth.currentUser?.uid || 'guest',
       updatedAt: new Date().toISOString()
@@ -152,22 +167,75 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
     await setDoc(doc(db, path, docId), payload);
 
     // Notify Finance Manager and Admin of finance entries
-    if (entry.amount && Number(entry.amount) > 0) {
+    if (entryToSave.amount && Number(entryToSave.amount) > 0) {
       const notifId = Date.now() + Math.floor(Math.random() * 1000);
-      const notif: AppNotification = {
-        id: notifId,
-        title: `Finance ${entry.type === 'RECEIVABLE' ? 'Receivable' : entry.type === 'PAYABLE' ? 'Payable' : 'Entry'}: PKR ${Number(entry.amount).toLocaleString()}`,
-        description: `${entry.description || entry.category || 'Transaction'} for ${entry.party || 'Account'}. Status: ${entry.status || 'RECORDED'}`,
-        details: `${entry.category || 'Finance'} • Reference: ${entry.reference || 'N/A'} • Payment Method: ${entry.paymentMethod || 'BANK'}`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        type: 'INFO',
-        notificationSubType: 'BUYING',
-        status: 'PENDING',
-        actionLabel: 'View Finance',
-        targetRole: UserRole.FINANCE_MANAGER,
-        targetView: 'finance',
-        category: 'FINANCE'
-      };
+
+      const isClientDepositUpload = 
+        Boolean(entryToSave.slipUrl) || 
+        (entryToSave.type === 'INCOME' && entryToSave.status === 'PENDING' && entryToSave.party && entryToSave.party !== 'DPL');
+
+      let notif: AppNotification;
+
+      if (isMonthlyOrRecurring) {
+        // Monthly fixed amounts and salaries: AUTOMATIC, NO approval required!
+        notif = {
+          id: notifId,
+          title: `Monthly Fixed Expense: PKR ${Number(entryToSave.amount).toLocaleString()} (Auto-Approved)`,
+          description: `${entryToSave.description || 'Monthly Fixed Expense'} for ${entryToSave.party || 'Account'} has been automatically approved and recorded to Finance Payables. No manual approval required.`,
+          details: `${entryToSave.category || 'Finance'} • Reference: ${entryToSave.reference || 'N/A'} • Status: AUTO-APPROVED • Payment Method: ${entryToSave.paymentMethod || 'BANK'}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: 'INFO',
+          notificationSubType: 'FINANCE_RECORDED',
+          status: 'RESOLVED',
+          actionLabel: 'View in Finance',
+          targetRole: UserRole.FINANCE_MANAGER,
+          targetView: 'finance',
+          category: 'FINANCE'
+        };
+      } else if (isClientDepositUpload) {
+        // Client / User deposited money or uploaded slip: REQUIRES Finance Manager verification of funds!
+        notif = {
+          id: notifId,
+          title: `Payment Verification Required: PKR ${Number(entry.amount).toLocaleString()}`,
+          description: `Deposit slip / payment uploaded by ${entry.party || 'Client'} for ${entry.category || 'Payment'}. Finance Manager verification required to verify funds received before crediting ledger.`,
+          details: `Party: ${entry.party} • Bank: ${entry.bankName || 'Direct'} • Ref: ${entry.reference || 'N/A'} • Amount: PKR ${Number(entry.amount).toLocaleString()}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: 'ACTION',
+          notificationSubType: 'PAYMENT_APPROVAL',
+          status: 'PENDING',
+          actionLabel: 'Verify Payment',
+          targetRole: UserRole.FINANCE_MANAGER,
+          targetView: 'finance',
+          category: 'FINANCE',
+          approvalData: {
+            entityType: 'finance',
+            entityId: entry.id,
+            entityName: entry.party || 'Client Payment',
+            actionType: 'VERIFY_PAYMENT',
+            requestedBy: entry.party || 'Client',
+            amount: Number(entry.amount),
+            slipUrl: entry.slipUrl,
+            bankName: entry.bankName,
+            caseNo: (entry as any).caseNo
+          }
+        };
+      } else {
+        notif = {
+          id: notifId,
+          title: `Finance ${entry.type === 'RECEIVABLE' ? 'Receivable' : entry.type === 'PAYABLE' ? 'Payable' : 'Entry'}: PKR ${Number(entry.amount).toLocaleString()}`,
+          description: `${entry.description || entry.category || 'Transaction'} for ${entry.party || 'Account'}. Status: ${entry.status || 'RECORDED'}`,
+          details: `${entry.category || 'Finance'} • Reference: ${entry.reference || 'N/A'} • Payment Method: ${entry.paymentMethod || 'BANK'}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: 'INFO',
+          notificationSubType: 'GENERAL',
+          status: 'RESOLVED',
+          actionLabel: 'View Finance',
+          targetRole: UserRole.FINANCE_MANAGER,
+          targetView: 'finance',
+          category: 'FINANCE'
+        };
+      }
+
       saveNotificationToFirestore(notif).catch(() => {});
       logActivity(
         notif.title, 
@@ -242,7 +310,7 @@ export async function syncMonthlyStaffSalariesToPayables(
         party: user.name,
         amount: netSalary,
         type: 'PAYABLE',
-        status: 'PENDING',
+        status: 'APPROVED',
         category: 'Staff Payroll & Salaries',
         reference: salaryRef,
         paymentMethod: 'BANK',
@@ -318,7 +386,7 @@ export async function autoPostMonthlyRecurringAndSalaries(
         party: tpl.party || 'Vendor / Utility',
         amount: Number(tpl.amount) || 0,
         type: isPayable ? 'PAYABLE' : 'RECEIVABLE',
-        status: 'PENDING',
+        status: 'APPROVED',
         category: tpl.category || 'Monthly Overhead',
         reference: recRef,
         recurringTemplateId: tpl.id,
@@ -362,7 +430,7 @@ export async function autoPostMonthlyRecurringAndSalaries(
           party: user.name,
           amount: netSalary,
           type: 'PAYABLE',
-          status: 'PENDING',
+          status: 'APPROVED',
           category: 'Staff Payroll & Salaries',
           reference: salaryRef,
           paymentMethod: 'BANK',
@@ -949,6 +1017,9 @@ export async function authenticateDatabaseUser(
   }
 
     // 3. Verify status
+    if (matchedUser.status === 'PENDING_APPROVAL') {
+      throw new Error('Your client registration request is currently pending verification and approval by the Finance Manager / Administration. Access will be activated upon approval.');
+    }
     if (matchedUser.status === 'SUSPENDED' || (matchedUser as any).isSuspended) {
       throw new Error('This account has been suspended by the administrator. Login access is currently blocked. Please contact system administration for assistance.');
     }
@@ -1133,6 +1204,7 @@ export async function saveClientToFirestore(client: Partial<Client>): Promise<st
       userId: client.userId || '',
       password: client.password || '',
       loginEnabled: client.loginEnabled ?? false,
+      status: (client as any).status || 'ACTIVE',
       createdAt: client.createdAt || new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload, { merge: true });
@@ -1140,6 +1212,20 @@ export async function saveClientToFirestore(client: Partial<Client>): Promise<st
   } catch (error) {
     console.warn(`Firestore saveClient warning:`, error);
     return docId;
+  }
+}
+
+export async function updateClientInFirestore(client: Partial<Client>): Promise<void> {
+  const path = 'clients';
+  if (!client.id) return;
+  try {
+    const payload = sanitizeForFirestore({
+      ...client,
+      updatedAt: new Date().toISOString()
+    });
+    await setDoc(doc(db, path, String(client.id)), payload, { merge: true });
+  } catch (error) {
+    console.warn(`Firestore updateClient warning:`, error);
   }
 }
 

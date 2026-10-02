@@ -11,7 +11,9 @@ export interface SendNotificationOptions {
   targetView?: 'cases' | 'finance' | 'vehicles' | 'users' | 'dashboard' | string;
   targetFilter?: any;
   type?: 'ACTION' | 'INFO' | 'ALERT';
-  notificationSubType?: 'CASE_APPROVAL' | 'BUYING' | 'GENERAL' | 'DELETION_APPROVAL' | 'CANCELLATION_APPROVAL' | 'EDIT_APPROVAL';
+  notificationSubType?: AppNotification['notificationSubType'];
+  status?: 'PENDING' | 'RESOLVED' | 'REJECTED';
+  approvalData?: AppNotification['approvalData'];
   actionLabel?: string;
   priority?: 'HIGH' | 'MEDIUM' | 'LOW';
   performedBy?: string;
@@ -36,7 +38,8 @@ export async function sendAppNotification(opts: SendNotificationOptions): Promis
     timestamp: timeStr,
     type: opts.type || 'INFO',
     notificationSubType: opts.notificationSubType || 'GENERAL',
-    status: 'PENDING',
+    status: opts.status || 'PENDING',
+    approvalData: opts.approvalData,
     actionLabel: opts.actionLabel,
     priority: opts.priority || 'MEDIUM',
     targetRole: opts.targetRole || 'ALL',

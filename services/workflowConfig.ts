@@ -1,4 +1,4 @@
-import { CaseStatus } from '../types';
+import { CaseStatus, UserRole } from '../types';
 
 export interface WorkflowStepConfig {
   stepIndex: number;
@@ -629,4 +629,43 @@ export function isDestinationUnloadedAndGateOut(targetCase?: any): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Determines which role is primarily responsible for taking action on a given workflow step.
+ */
+export function getStepTargetRole(category: string | undefined, stepId: string, stepIndex: number): UserRole {
+  const s = (stepId || '').toLowerCase();
+
+  // 1. Vehicle / Fleet allocation & Transport dispatch
+  if (s.includes('vehicle') || s.includes('transport') || s.includes('fleet') || s.includes('carrier') || s.includes('trailer') || s.includes('driver')) {
+    return UserRole.VEHICLE_MANAGER;
+  }
+
+  // 2. Loading Port Processing / Stuffing / Wharfage / Port Gate Out
+  if (s.includes('loading') || s.includes('stuff') || s.includes('wharfage') || s.includes('vessel_loading') || s.includes('gate_out')) {
+    return UserRole.LOADING_PORT_STAFF;
+  }
+
+  // 3. Destination Port Arrival / Discharge / Unloading / Gate-in / Empty Return
+  if (s.includes('destination') || s.includes('unload') || s.includes('discharge') || s.includes('destuff') || s.includes('empty_return') || s.includes('arrival')) {
+    return UserRole.DESTINATION_PORT_STAFF;
+  }
+
+  // 4. In Transit / GPS Monitoring / Emergency route exception
+  if (s.includes('transit') || s.includes('highway')) {
+    return UserRole.OPERATIONS_MANAGER;
+  }
+
+  // 5. Billing / Invoicing / Settlement
+  if (s.includes('settlement') || s.includes('billing') || s.includes('invoice') || s.includes('payment') || s.includes('excise')) {
+    return UserRole.FINANCE_MANAGER;
+  }
+
+  // 6. Early documentation: TP Filing, GD Filing, CRO Booking, Shipping Line DO
+  if (stepIndex === 0 || stepIndex === 1 || s.includes('booking') || s.includes('tp_filing') || s.includes('gd') || s.includes('document')) {
+    return UserRole.OFFICE_STAFF;
+  }
+
+  return UserRole.OPERATIONS_MANAGER;
 }

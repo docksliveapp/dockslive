@@ -888,6 +888,7 @@ export interface Client {
   userId?: string; // Optional portal login user ID
   password?: string; // Optional portal login password
   loginEnabled?: boolean;
+  status?: 'ACTIVE' | 'INACTIVE' | 'PENDING_APPROVAL' | 'REJECTED';
   createdAt?: string;
 }
 
@@ -954,7 +955,7 @@ export interface FinanceEntry {
   description: string;
   amount: number;
   type: 'INCOME' | 'EXPENSE' | 'RECEIVABLE' | 'PAYABLE';
-  status: 'PAID' | 'PENDING' | 'PARTIAL';
+  status: 'PAID' | 'PENDING' | 'PARTIAL' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
   party: string; // Client or Vendor
   clientName?: string;
   category: string;
@@ -1176,7 +1177,7 @@ export interface AppUser {
   designation?: string; // Free-text designation/title
   contact: string;
   email: string;
-  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'PENDING_APPROVAL';
   isSuspended?: boolean;
   suspendedAt?: string;
   suspendedReason?: string;
@@ -1231,7 +1232,17 @@ export interface AppNotification {
   details?: string; // Full details for the pop-up
   timestamp: string;
   type: 'ACTION' | 'INFO' | 'ALERT';
-  notificationSubType?: 'CASE_APPROVAL' | 'BUYING' | 'GENERAL' | 'DELETION_APPROVAL' | 'CANCELLATION_APPROVAL' | 'EDIT_APPROVAL';
+  notificationSubType?: 
+    | 'CASE_APPROVAL' 
+    | 'BUYING' 
+    | 'GENERAL' 
+    | 'DELETION_APPROVAL' 
+    | 'CANCELLATION_APPROVAL' 
+    | 'EDIT_APPROVAL'
+    | 'PAYMENT_APPROVAL'
+    | 'CLIENT_REGISTRATION_APPROVAL'
+    | 'WORKFLOW_TASK'
+    | 'FINANCE_RECORDED';
   status: 'PENDING' | 'RESOLVED' | 'REJECTED';
   actionLabel?: string;
   priority?: 'HIGH' | 'MEDIUM' | 'LOW';
@@ -1242,15 +1253,19 @@ export interface AppNotification {
   category?: 'CASE' | 'FINANCE' | 'APPROVAL' | 'TRANSPORTER' | 'GENERAL';
   read?: boolean;
   approvalData?: {
-    entityType: 'case' | 'vehicle';
+    entityType: 'case' | 'vehicle' | 'finance' | 'client';
     entityId: number | string;
     entityName?: string;
-    actionType: 'DELETE' | 'CANCEL' | 'EDIT';
+    actionType: 'DELETE' | 'CANCEL' | 'EDIT' | 'VERIFY_PAYMENT' | 'APPROVE_CLIENT' | 'WORKFLOW_ACTION';
     requestedBy: string;
     requestedByRole?: string;
     reason?: string;
     proposedChanges?: any;
     originalData?: any;
+    amount?: number;
+    slipUrl?: string;
+    bankName?: string;
+    caseNo?: string;
   };
 }
 

@@ -1150,19 +1150,54 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     };
   }, [showCamera]);
 
-  // Effect to apply initial filter from props (Dashboard drill-down)
+  // Effect to apply initial filter from props (Notification click / Dashboard drill-down)
   useEffect(() => {
-    if (initialFilter) {
-        if (initialFilter.status) {
-            setStatusFilter(initialFilter.status);
-        }
-        if (initialFilter.notificationId) {
-            setActiveNotificationId(initialFilter.notificationId);
-        }
-    } else {
-        setStatusFilter(null);
+    if (!initialFilter) {
+      setStatusFilter(null);
+      return;
     }
-  }, [initialFilter]);
+
+    if (initialFilter.status) {
+      setStatusFilter(initialFilter.status);
+    }
+    if (initialFilter.notificationId) {
+      setActiveNotificationId(initialFilter.notificationId);
+    }
+
+    // Extract target caseNo or caseId from initialFilter
+    const targetCaseNo = typeof initialFilter === 'string' 
+      ? initialFilter 
+      : (initialFilter.caseNo || initialFilter.caseNumber || initialFilter.caseId || initialFilter.id);
+
+    if (targetCaseNo && cases.length > 0) {
+      const targetClean = String(targetCaseNo).trim().toLowerCase();
+      const matchedCase = cases.find(c => 
+        (c.caseNo && c.caseNo.trim().toLowerCase() === targetClean) ||
+        (c.caseNumber && c.caseNumber.trim().toLowerCase() === targetClean) ||
+        String(c.id).trim().toLowerCase() === targetClean
+      );
+
+      if (matchedCase) {
+        setSelectedCase(matchedCase);
+        setView('details');
+
+        // If stepId or stepIndex specified, automatically open the step workflow modal so user can update immediately
+        if (initialFilter.stepId !== undefined || initialFilter.stepIndex !== undefined) {
+          const stepIdx = initialFilter.stepIndex !== undefined ? Number(initialFilter.stepIndex) : 0;
+          const stepStatus = initialFilter.stepId || CaseStatus.SHIPPING_LINE_DO;
+          handleOpenStepModal(stepStatus as any, stepIdx, matchedCase);
+        }
+
+        // Smooth scroll to top of details
+        setTimeout(() => {
+          const container = document.getElementById('main-scroll-container');
+          if (container) container.scrollTo({ top: 0, behavior: 'smooth' });
+        }, 100);
+
+        if (clearFilter) clearFilter();
+      }
+    }
+  }, [initialFilter, cases, clearFilter]);
 
   const getNestedValue = (obj: any, path: string) => {
     return path.split('.').reduce((acc, part) => acc && acc[part], obj);

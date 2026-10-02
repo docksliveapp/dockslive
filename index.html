@@ -10,17 +10,20 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v2.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <script>
-      // Service Worker Registration for PWABuilder, Chrome WebAPK & Google Play
-      if ('serviceWorker' in navigator && !window.location.hostname.includes('ais-dev-')) {
-        window.addEventListener('load', function() {
-          navigator.serviceWorker.register('/sw.js', { scope: '/' })
-            .then(function(reg) {
-              console.log('[PWA] Service Worker registered with scope:', reg.scope);
-            })
-            .catch(function(err) {
-              // Graceful catch
-            });
+      // Clear stale service workers and caches on preview/dev domains to prevent hangs
+      if ('serviceWorker' in navigator && (window.location.hostname.includes('ais-') || window.location.hostname.includes('localhost') || window.location.hostname.includes('127.0.0.1'))) {
+        navigator.serviceWorker.getRegistrations().then(function(regs) {
+          for (var reg of regs) {
+            reg.unregister();
+          }
         });
+        if (typeof caches !== 'undefined') {
+          caches.keys().then(function(keys) {
+            for (var key of keys) {
+              caches.delete(key);
+            }
+          });
+        }
       }
     </script>
     <meta name="theme-color" content="#0f172a" />
@@ -45,53 +48,7 @@
         }
       });
     </script>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script>
-      tailwind.config = {
-        darkMode: 'class',
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-            },
-            colors: {
-              brand: {
-                950: '#020617', // Sidebar bg
-                900: '#0a0f1c', // Main bg
-                800: '#111827', // Card bg
-                700: '#1f2937', // Border/Hover
-                600: '#2563eb', // Primary
-                500: '#3b82f6', // Lighter Blue
-                accent: '#06b6d4', // Cyan
-                success: '#10b981',
-                warning: '#f59e0b',
-                danger: '#ef4444',
-              }
-            },
-            animation: {
-              'fade-in': 'fadeIn 0.5s ease-out forwards',
-              'float': 'float 6s ease-in-out infinite',
-              'pulse-glow': 'pulseGlow 3s infinite',
-            },
-            keyframes: {
-              fadeIn: {
-                '0%': { opacity: '0', transform: 'translateY(10px)' },
-                '100%': { opacity: '1', transform: 'translateY(0)' },
-              },
-              float: {
-                '0%, 100%': { transform: 'translateY(0)' },
-                '50%': { transform: 'translateY(-10px)' },
-              },
-              pulseGlow: {
-                '0%, 100%': { opacity: '1', filter: 'brightness(1)' },
-                '50%': { opacity: '0.8', filter: 'brightness(1.2)' },
-              }
-            }
-          }
-        }
-      }
-    </script>
     <style>
       /* Custom Scrollbar for Glass Theme */
       ::-webkit-scrollbar {

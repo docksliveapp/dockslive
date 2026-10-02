@@ -39,28 +39,210 @@ import {
 import { analyzeCompanyDocumentWithAI } from '../services/geminiService';
 import { useBranding } from '../services/brandingService';
 import { jsPDF } from 'jspdf';
+import {
+  Building2,
+  Landmark,
+  Shield,
+  ShieldCheck,
+  Coins,
+  TrendingUp,
+  Award,
+  AlertTriangle,
+  Siren,
+  FileSignature,
+  CreditCard,
+  HardDrive,
+  FolderOpen,
+  FolderPlus,
+  Layers,
+  FileDown,
+  ArrowRight,
+  LayoutGrid
+} from 'lucide-react';
 
-// Category color badges
-const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  'SECP': { bg: 'bg-blue-500/20', text: 'text-blue-300', border: 'border-blue-500/40' },
-  'SRB': { bg: 'bg-emerald-500/20', text: 'text-emerald-300', border: 'border-emerald-500/40' },
-  'FBR income tax': { bg: 'bg-amber-500/20', text: 'text-amber-300', border: 'border-amber-500/40' },
-  'PAKISTAN customs': { bg: 'bg-red-500/20', text: 'text-red-300', border: 'border-red-500/40' },
-  'State Bank of Pakistan': { bg: 'bg-teal-500/20', text: 'text-teal-300', border: 'border-teal-500/40' },
-  'Stocks Exchange': { bg: 'bg-purple-500/20', text: 'text-purple-300', border: 'border-purple-500/40' },
-  'Deposits/Guaranties': { bg: 'bg-cyan-500/20', text: 'text-cyan-300', border: 'border-cyan-500/40' },
-  'Chamber of Commerce': { bg: 'bg-indigo-500/20', text: 'text-indigo-300', border: 'border-indigo-500/40' },
-  'Showcase/ONOs reply': { bg: 'bg-orange-500/20', text: 'text-orange-300', border: 'border-orange-500/40' },
-  'FIRs': { bg: 'bg-rose-500/20', text: 'text-rose-300', border: 'border-rose-500/40' },
-  'Petitions': { bg: 'bg-violet-500/20', text: 'text-violet-300', border: 'border-violet-500/40' },
-  "Agreement's": { bg: 'bg-sky-500/20', text: 'text-sky-300', border: 'border-sky-500/40' },
-  'Quotations': { bg: 'bg-lime-500/20', text: 'text-lime-300', border: 'border-lime-500/40' },
-  'Banks': { bg: 'bg-emerald-600/20', text: 'text-emerald-300', border: 'border-emerald-500/40' },
-  'Assets': { bg: 'bg-yellow-500/20', text: 'text-yellow-300', border: 'border-yellow-500/40' },
+// Category color badges & rich metadata
+export interface CategoryMeta {
+  icon: React.ElementType;
+  description: string;
+  gradient: string;
+  badgeBg: string;
+  textColor: string;
+  borderColor: string;
+  iconBg: string;
+  glowColor: string;
+}
+
+export const CATEGORY_META: Record<string, CategoryMeta> = {
+  'SECP': {
+    icon: Building2,
+    description: 'Corporate filings, Form 29, incorporation & statutory compliance',
+    gradient: 'from-blue-950/60 to-slate-900/90 hover:from-blue-900/40 hover:to-slate-850',
+    badgeBg: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+    textColor: 'text-blue-400',
+    borderColor: 'border-blue-500/30 hover:border-blue-400/70',
+    iconBg: 'bg-blue-500/20 text-blue-400',
+    glowColor: 'group-hover:shadow-blue-500/20'
+  },
+  'SRB': {
+    icon: Landmark,
+    description: 'Sindh Revenue Board, provincial sales tax & withholding filings',
+    gradient: 'from-emerald-950/60 to-slate-900/90 hover:from-emerald-900/40 hover:to-slate-850',
+    badgeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    textColor: 'text-emerald-400',
+    borderColor: 'border-emerald-500/30 hover:border-emerald-400/70',
+    iconBg: 'bg-emerald-500/20 text-emerald-400',
+    glowColor: 'group-hover:shadow-emerald-500/20'
+  },
+  'FBR income tax': {
+    icon: Coins,
+    description: 'Federal Board of Revenue, income tax returns, CPRs & audit notices',
+    gradient: 'from-amber-950/60 to-slate-900/90 hover:from-amber-900/40 hover:to-slate-850',
+    badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+    textColor: 'text-amber-400',
+    borderColor: 'border-amber-500/30 hover:border-amber-400/70',
+    iconBg: 'bg-amber-500/20 text-amber-400',
+    glowColor: 'group-hover:shadow-amber-500/20'
+  },
+  'PAKISTAN customs': {
+    icon: Shield,
+    description: 'Customs Collectorates, WeBOC, GDs, port clearance & orders',
+    gradient: 'from-red-950/60 to-slate-900/90 hover:from-red-900/40 hover:to-slate-850',
+    badgeBg: 'bg-red-500/20 text-red-300 border-red-500/30',
+    textColor: 'text-red-400',
+    borderColor: 'border-red-500/30 hover:border-red-400/70',
+    iconBg: 'bg-red-500/20 text-red-400',
+    glowColor: 'group-hover:shadow-red-500/20'
+  },
+  'State Bank of Pakistan': {
+    icon: Landmark,
+    description: 'Central bank foreign exchange, E-forms, remittance & approvals',
+    gradient: 'from-teal-950/60 to-slate-900/90 hover:from-teal-900/40 hover:to-slate-850',
+    badgeBg: 'bg-teal-500/20 text-teal-300 border-teal-500/30',
+    textColor: 'text-teal-400',
+    borderColor: 'border-teal-500/30 hover:border-teal-400/70',
+    iconBg: 'bg-teal-500/20 text-teal-400',
+    glowColor: 'group-hover:shadow-teal-500/20'
+  },
+  'Stocks Exchange': {
+    icon: TrendingUp,
+    description: 'Pakistan Stock Exchange (PSX), corporate shares & equity records',
+    gradient: 'from-purple-950/60 to-slate-900/90 hover:from-purple-900/40 hover:to-slate-850',
+    badgeBg: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+    textColor: 'text-purple-400',
+    borderColor: 'border-purple-500/30 hover:border-purple-400/70',
+    iconBg: 'bg-purple-500/20 text-purple-400',
+    glowColor: 'group-hover:shadow-purple-500/20'
+  },
+  'Deposits/Guaranties': {
+    icon: ShieldCheck,
+    description: 'Port authority security deposits, bank guarantees & cash bonds',
+    gradient: 'from-cyan-950/60 to-slate-900/90 hover:from-cyan-900/40 hover:to-slate-850',
+    badgeBg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+    textColor: 'text-cyan-400',
+    borderColor: 'border-cyan-500/30 hover:border-cyan-400/70',
+    iconBg: 'bg-cyan-500/20 text-cyan-400',
+    glowColor: 'group-hover:shadow-cyan-500/20'
+  },
+  'Chamber of Commerce': {
+    icon: Award,
+    description: 'KCCI / FPCCI membership, certificates of origin & attestations',
+    gradient: 'from-indigo-950/60 to-slate-900/90 hover:from-indigo-900/40 hover:to-slate-850',
+    badgeBg: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+    textColor: 'text-indigo-400',
+    borderColor: 'border-indigo-500/30 hover:border-indigo-400/70',
+    iconBg: 'bg-indigo-500/20 text-indigo-400',
+    glowColor: 'group-hover:shadow-indigo-500/20'
+  },
+  'Showcase/ONOs reply': {
+    icon: AlertTriangle,
+    description: 'Show Cause Notices, Order in Originals, hearings & formal replies',
+    gradient: 'from-orange-950/60 to-slate-900/90 hover:from-orange-900/40 hover:to-slate-850',
+    badgeBg: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+    textColor: 'text-orange-400',
+    borderColor: 'border-orange-500/30 hover:border-orange-400/70',
+    iconBg: 'bg-orange-500/20 text-orange-400',
+    glowColor: 'group-hover:shadow-orange-500/20'
+  },
+  'FIRs': {
+    icon: Siren,
+    description: 'First Information Reports, police notices & regulatory citations',
+    gradient: 'from-rose-950/60 to-slate-900/90 hover:from-rose-900/40 hover:to-slate-850',
+    badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+    textColor: 'text-rose-400',
+    borderColor: 'border-rose-500/30 hover:border-rose-400/70',
+    iconBg: 'bg-rose-500/20 text-rose-400',
+    glowColor: 'group-hover:shadow-rose-500/20'
+  },
+  'Petitions': {
+    icon: Scale,
+    description: 'High Court, Supreme Court & Customs Appellate Tribunal petitions',
+    gradient: 'from-violet-950/60 to-slate-900/90 hover:from-violet-900/40 hover:to-slate-850',
+    badgeBg: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
+    textColor: 'text-violet-400',
+    borderColor: 'border-violet-500/30 hover:border-violet-400/70',
+    iconBg: 'bg-violet-500/20 text-violet-400',
+    glowColor: 'group-hover:shadow-violet-500/20'
+  },
+  "Agreement's": {
+    icon: FileSignature,
+    description: 'Vendor, client, warehouse, lease agreements & corporate contracts',
+    gradient: 'from-sky-950/60 to-slate-900/90 hover:from-sky-900/40 hover:to-slate-850',
+    badgeBg: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
+    textColor: 'text-sky-400',
+    borderColor: 'border-sky-500/30 hover:border-sky-400/70',
+    iconBg: 'bg-sky-500/20 text-sky-400',
+    glowColor: 'group-hover:shadow-sky-500/20'
+  },
+  'Quotations': {
+    icon: Tag,
+    description: 'Commercial quotes, freight proposals & tariff rate cards',
+    gradient: 'from-lime-950/60 to-slate-900/90 hover:from-lime-900/40 hover:to-slate-850',
+    badgeBg: 'bg-lime-500/20 text-lime-300 border-lime-500/30',
+    textColor: 'text-lime-400',
+    borderColor: 'border-lime-500/30 hover:border-lime-400/70',
+    iconBg: 'bg-lime-500/20 text-lime-400',
+    glowColor: 'group-hover:shadow-lime-500/20'
+  },
+  'Banks': {
+    icon: CreditCard,
+    description: 'Bank statements, sanction letters, LC facilities & signatory cards',
+    gradient: 'from-emerald-950/60 to-slate-900/90 hover:from-emerald-900/40 hover:to-slate-850',
+    badgeBg: 'bg-emerald-600/20 text-emerald-300 border-emerald-600/30',
+    textColor: 'text-emerald-400',
+    borderColor: 'border-emerald-600/30 hover:border-emerald-500/70',
+    iconBg: 'bg-emerald-600/20 text-emerald-400',
+    glowColor: 'group-hover:shadow-emerald-500/20'
+  },
+  'Assets': {
+    icon: HardDrive,
+    description: 'Vehicle ownership books, warehouse titles, office machinery deeds',
+    gradient: 'from-yellow-950/60 to-slate-900/90 hover:from-yellow-900/40 hover:to-slate-850',
+    badgeBg: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+    textColor: 'text-yellow-400',
+    borderColor: 'border-yellow-500/30 hover:border-yellow-400/70',
+    iconBg: 'bg-yellow-500/20 text-yellow-400',
+    glowColor: 'group-hover:shadow-yellow-500/20'
+  }
+};
+
+export const getCategoryMeta = (cat: string): CategoryMeta => {
+  if (CATEGORY_META[cat]) return CATEGORY_META[cat];
+  return {
+    icon: FolderArchive,
+    description: 'Corporate archive & official regulatory records folder',
+    gradient: 'from-slate-900 to-slate-950 hover:from-slate-850 hover:to-slate-900',
+    badgeBg: 'bg-white/10 text-gray-200 border-white/20',
+    textColor: 'text-amber-400',
+    borderColor: 'border-white/10 hover:border-amber-500/50',
+    iconBg: 'bg-white/10 text-amber-400',
+    glowColor: 'group-hover:shadow-amber-500/20'
+  };
 };
 
 const getCategoryStyle = (cat: string) => {
-  return CATEGORY_COLORS[cat] || { bg: 'bg-white/10', text: 'text-gray-300', border: 'border-white/20' };
+  const meta = getCategoryMeta(cat);
+  const parts = meta.badgeBg.split(' ');
+  return { bg: parts[0] || 'bg-white/10', text: meta.textColor, border: parts[2] || 'border-white/20' };
 };
 
 export const CompanyDocuments: React.FC = () => {
@@ -73,11 +255,14 @@ export const CompanyDocuments: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
-  // Modals
+  // Modals & Category Window View
   const [showAddModal, setShowAddModal] = useState(false);
   const [showAdvanceSearchModal, setShowAdvanceSearchModal] = useState(false);
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
   const [selectedDocForPreview, setSelectedDocForPreview] = useState<CompanyDocument | null>(null);
+  const [activeCategoryModal, setActiveCategoryModal] = useState<string | null>(null);
+  const [categoryModalSearch, setCategoryModalSearch] = useState<string>('');
+  const [viewMode, setViewMode] = useState<'categories' | 'documents'>('categories');
 
   // New Category Form
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -178,6 +363,24 @@ export const CompanyDocuments: React.FC = () => {
       return true;
     });
   }, [documents, selectedCategoryTab, searchQuery, isAdvActive, advCategory, advSubcategory, advTitle, advFrom, advTo, advDateFrom, advDateTo, advHearingFilter]);
+
+  // Documents for the currently opened category modal window
+  const activeCategoryDocuments = useMemo(() => {
+    if (!activeCategoryModal) return [];
+    return documents.filter((doc) => {
+      if (doc.category !== activeCategoryModal) return false;
+      if (!categoryModalSearch.trim()) return true;
+      const q = categoryModalSearch.toLowerCase().trim();
+      return (
+        (doc.title && doc.title.toLowerCase().includes(q)) ||
+        (doc.subject && doc.subject.toLowerCase().includes(q)) ||
+        (doc.from && doc.from.toLowerCase().includes(q)) ||
+        (doc.to && doc.to.toLowerCase().includes(q)) ||
+        (doc.referenceNo && doc.referenceNo.toLowerCase().includes(q)) ||
+        (doc.documentDate && doc.documentDate.includes(q))
+      );
+    });
+  }, [documents, activeCategoryModal, categoryModalSearch]);
 
   // Unique Lists for Advance Search Autocomplete/Dropdowns
   const uniqueFromList = useMemo(() => {
@@ -430,7 +633,7 @@ export const CompanyDocuments: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-gray-100 flex flex-col p-4 sm:p-6 space-y-6">
+    <div className="space-y-6 animate-fade-in pb-12 text-gray-100">
       {/* Top Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 backdrop-blur-md p-5 rounded-2xl border border-white/10 shadow-xl">
         <div className="flex items-center gap-3.5">
@@ -454,6 +657,24 @@ export const CompanyDocuments: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2.5">
           <button
             type="button"
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/25 transition-all transform active:scale-95 cursor-pointer"
+          >
+            <Plus size={16} className="stroke-[3]" />
+            <span>Add Document</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowAddCategoryModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 hover:border-amber-500/30 text-xs font-semibold transition cursor-pointer"
+          >
+            <FolderPlus size={14} className="text-amber-400" />
+            <span>New Category</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowAdvanceSearchModal(true)}
             className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
               isAdvActive 
@@ -465,19 +686,10 @@ export const CompanyDocuments: React.FC = () => {
             <span>Advance Search</span>
             {isAdvActive && <span className="w-2 h-2 rounded-full bg-slate-950 ml-1"></span>}
           </button>
-
-          <button
-            type="button"
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/25 transition-all transform active:scale-95 cursor-pointer"
-          >
-            <Plus size={16} className="stroke-[3]" />
-            <span>Add Document</span>
-          </button>
         </div>
       </div>
 
-      {/* Main Search Input & Active Filter Bar */}
+      {/* Main Search Input & Active Filter Bar & View Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {/* Quick Search */}
         <div className="relative flex-1 max-w-xl">
@@ -500,174 +712,492 @@ export const CompanyDocuments: React.FC = () => {
           )}
         </div>
 
-        {/* Active Filter Chips */}
-        {isAdvActive && (
-          <div className="flex items-center gap-2 text-xs bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-xl text-amber-300">
-            <Filter size={13} />
-            <span>Advance Filters Active</span>
+        {/* View Switcher: Square Category Folders vs All Documents List */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center p-1 rounded-xl bg-slate-900 border border-white/10 shadow-inner">
             <button
               type="button"
-              onClick={handleResetAdvSearch}
-              className="ml-2 underline text-amber-400 hover:text-white font-bold cursor-pointer"
-            >
-              Reset
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Categories Filter Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-2 custom-scrollbar pr-2">
-        <button
-          type="button"
-          onClick={() => setSelectedCategoryTab('ALL')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-            selectedCategoryTab === 'ALL'
-              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-              : 'bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5'
-          }`}
-        >
-          All Categories ({documents.length})
-        </button>
-
-        {categories.map((cat) => {
-          const count = documents.filter(d => d.category === cat).length;
-          const isSelected = selectedCategoryTab === cat;
-          return (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => setSelectedCategoryTab(cat)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
-                isSelected
-                  ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/20'
-                  : 'bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5'
+              onClick={() => setViewMode('categories')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                viewMode === 'categories'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                  : 'text-gray-400 hover:text-white'
               }`}
             >
-              <span>{cat}</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                isSelected ? 'bg-slate-950/30 text-slate-950' : 'bg-white/10 text-gray-400'
-              }`}>
-                {count}
-              </span>
+              <LayoutGrid size={13} />
+              <span>Category Folders ({categories.length})</span>
             </button>
-          );
-        })}
-      </div>
 
-      {/* Documents List View */}
-      {isLoading ? (
-        <div className="py-20 text-center space-y-3">
-          <Loader2 size={32} className="animate-spin text-amber-400 mx-auto" />
-          <p className="text-xs text-gray-400">Loading company document archives...</p>
-        </div>
-      ) : filteredDocuments.length === 0 ? (
-        <div className="py-16 text-center space-y-3 bg-slate-900/40 rounded-2xl border border-white/5 p-8">
-          <FolderArchive size={40} className="text-gray-600 mx-auto" />
-          <h3 className="text-sm font-bold text-gray-300">No Documents Found</h3>
-          <p className="text-xs text-gray-500 max-w-md mx-auto">
-            {isAdvActive || searchQuery
-              ? 'No documents match the specified filters. Try clearing your search criteria.'
-              : 'No documents have been recorded in this category yet. Click "Add Document" to upload a new record.'}
-          </p>
-          <div className="pt-2">
             <button
               type="button"
-              onClick={() => setShowAddModal(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md transition cursor-pointer"
+              onClick={() => setViewMode('documents')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                viewMode === 'documents'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                  : 'text-gray-400 hover:text-white'
+              }`}
             >
-              <Plus size={14} /> Add Document Now
+              <FileText size={13} />
+              <span>All Documents ({filteredDocuments.length})</span>
             </button>
+          </div>
+
+          {/* Active Filter Chips */}
+          {isAdvActive && (
+            <div className="flex items-center gap-2 text-xs bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-xl text-amber-300">
+              <Filter size={13} />
+              <span>Filtered</span>
+              <button
+                type="button"
+                onClick={handleResetAdvSearch}
+                className="ml-1 underline text-amber-400 hover:text-white font-bold cursor-pointer"
+              >
+                Reset
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* When in Category View and user typed a search query, show prompt banner */}
+      {viewMode === 'categories' && searchQuery && (
+        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs text-amber-300">
+          <div className="flex items-center gap-2">
+            <Search size={14} className="text-amber-400" />
+            <span>Search query "{searchQuery}" matches <strong>{filteredDocuments.length}</strong> document(s) across archives.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setViewMode('documents')}
+            className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition cursor-pointer flex items-center gap-1"
+          >
+            <span>View Matching Documents</span>
+            <ArrowRight size={12} />
+          </button>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MAIN VIEW: SQUARE CATEGORY ICONS GRID (Default View)                     */}
+      {/* ========================================================================= */}
+      {viewMode === 'categories' ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-xs uppercase tracking-wider font-bold text-gray-400">Company Document Folders</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white/10 text-gray-300">
+                {categories.length} Categories
+              </span>
+            </div>
+            <span className="text-xs text-amber-400/80">Click any folder to view documents & download PDF</span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-4.5">
+            {categories.map((cat) => {
+              const meta = getCategoryMeta(cat);
+              const CategoryIcon = meta.icon;
+              const catDocs = documents.filter(d => d.category === cat);
+              const count = catDocs.length;
+
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => {
+                    setActiveCategoryModal(cat);
+                    setCategoryModalSearch('');
+                  }}
+                  className={`aspect-square p-4 sm:p-5 rounded-2xl border transition-all duration-300 flex flex-col justify-between items-center text-center cursor-pointer group shadow-lg hover:shadow-2xl hover:scale-[1.03] active:scale-[0.98] bg-gradient-to-br ${meta.gradient} ${meta.borderColor} ${meta.glowColor}`}
+                >
+                  {/* Top Square Icon Badge */}
+                  <div className={`w-13 h-13 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center shadow-lg transition-transform group-hover:scale-110 ${meta.iconBg}`}>
+                    <CategoryIcon size={26} className={meta.textColor} />
+                  </div>
+
+                  {/* Category Title & Badge */}
+                  <div className="space-y-1.5 w-full px-1">
+                    <h3 className="text-xs sm:text-sm font-black text-white group-hover:text-amber-300 transition-colors line-clamp-2 leading-tight">
+                      {cat}
+                    </h3>
+                    <div className="flex justify-center">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono border ${
+                        count > 0 
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/30 font-bold' 
+                          : 'bg-white/5 text-gray-400 border-white/10'
+                      }`}>
+                        {count} {count === 1 ? 'Document' : 'Documents'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Bottom Action Prompt */}
+                  <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-400 group-hover:text-amber-400 transition-colors">
+                    <span>Open Folder</span>
+                    <ChevronRight size={13} className="transition-transform group-hover:translate-x-0.5" />
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredDocuments.map((doc) => {
-            const catStyle = getCategoryStyle(doc.category);
-            return (
-              <div
-                key={doc.id}
-                onClick={() => setSelectedDocForPreview(doc)}
-                className="bg-slate-900/70 hover:bg-slate-900 border border-white/10 hover:border-amber-500/30 rounded-2xl p-4.5 transition-all shadow-lg hover:shadow-amber-500/5 flex flex-col justify-between cursor-pointer group space-y-3"
-              >
-                {/* Top Badge & Action */}
-                <div className="flex items-start justify-between gap-2">
-                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border ${catStyle.bg} ${catStyle.text} ${catStyle.border}`}>
-                    <Tag size={10} /> {doc.category}
-                  </span>
+        /* ========================================================================= */
+        /* ALL DOCUMENTS FLAT VIEW                                                   */
+        /* ========================================================================= */
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setViewMode('categories')}
+              className="inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 font-bold cursor-pointer"
+            >
+              <span>← Back to Category Folders</span>
+            </button>
+            <span className="text-xs text-gray-400 font-mono">Showing {filteredDocuments.length} Records</span>
+          </div>
 
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDownloadPdf(doc);
-                      }}
-                      className="p-1.5 rounded-lg bg-white/5 hover:bg-amber-500/20 text-gray-300 hover:text-amber-300 border border-white/10 transition cursor-pointer"
-                      title="Download PDF"
-                    >
-                      <Download size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteDocument(doc.id, e)}
-                      className="p-1.5 rounded-lg bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer"
-                      title="Delete Record"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+          {isLoading ? (
+            <div className="py-20 text-center space-y-3">
+              <Loader2 size={32} className="animate-spin text-amber-400 mx-auto" />
+              <p className="text-xs text-gray-400">Loading company document archives...</p>
+            </div>
+          ) : filteredDocuments.length === 0 ? (
+            <div className="py-16 text-center space-y-3 bg-slate-900/40 rounded-2xl border border-white/5 p-8">
+              <FolderArchive size={40} className="text-gray-600 mx-auto" />
+              <h3 className="text-sm font-bold text-gray-300">No Documents Found</h3>
+              <p className="text-xs text-gray-500 max-w-md mx-auto">
+                {isAdvActive || searchQuery
+                  ? 'No documents match the specified filters. Try clearing your search criteria.'
+                  : 'No documents have been recorded in this category yet. Click "Add Document" to upload a new record.'}
+              </p>
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(true)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md transition cursor-pointer"
+                >
+                  <Plus size={14} /> Add Document Now
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredDocuments.map((doc) => {
+                const catStyle = getCategoryStyle(doc.category);
+                return (
+                  <div
+                    key={doc.id}
+                    onClick={() => handleDownloadPdf(doc)}
+                    className="bg-slate-900/70 hover:bg-slate-900 border border-white/10 hover:border-amber-500/30 rounded-2xl p-4.5 transition-all shadow-lg hover:shadow-amber-500/5 flex flex-col justify-between cursor-pointer group space-y-3"
+                    title="Click to download PDF document"
+                  >
+                    {/* Top Badge & Action */}
+                    <div className="flex items-start justify-between gap-2">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border ${catStyle.bg} ${catStyle.text} ${catStyle.border}`}>
+                        <Tag size={10} /> {doc.category}
+                      </span>
+
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadPdf(doc)}
+                          className="p-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 transition cursor-pointer"
+                          title="Download PDF"
+                        >
+                          <Download size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDocForPreview(doc)}
+                          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition cursor-pointer"
+                          title="View Details"
+                        >
+                          <Eye size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteDocument(doc.id, e)}
+                          className="p-1.5 rounded-lg bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer"
+                          title="Delete Record"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Document Title & Reference */}
+                    <div>
+                      <h3 className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors line-clamp-2">
+                        {doc.title}
+                      </h3>
+                      {doc.referenceNo && (
+                        <div className="text-[10px] font-mono text-amber-400/90 mt-0.5">
+                          Ref #: {doc.referenceNo}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Subject & Summary */}
+                    {doc.subject && (
+                      <p className="text-xs text-gray-400 line-clamp-2 bg-black/25 p-2 rounded-xl border border-white/5">
+                        {doc.subject}
+                      </p>
+                    )}
+
+                    {/* Hearing Alert Box if applicable */}
+                    {doc.hearingRequired && (
+                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs text-amber-300">
+                        <div className="flex items-center gap-1.5">
+                          <Gavel size={14} className="text-amber-400 shrink-0" />
+                          <span className="font-bold">Hearing Scheduled:</span>
+                        </div>
+                        <span className="font-mono font-bold text-[11px] text-white">
+                          {doc.hearingDate || 'Scheduled'} {doc.hearingTime ? `@ ${doc.hearingTime}` : ''}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Bottom Meta Info (From, To, Date) */}
+                    <div className="pt-2 border-t border-white/5 text-[11px] text-gray-400 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="truncate max-w-[150px]">
+                          <strong className="text-gray-300">From:</strong> {doc.from || 'Not specified'}
+                        </span>
+                        <span className="flex items-center gap-1 text-gray-400 shrink-0 font-mono text-[10px]">
+                          <Calendar size={11} /> {doc.documentDate}
+                        </span>
+                      </div>
+                      <div className="truncate">
+                        <strong className="text-gray-300">To:</strong> {doc.to || 'Docks (Pvt.) Ltd'}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
-                {/* Document Title & Reference */}
+      {/* ========================================================================= */}
+      {/* DEDICATED CATEGORY DOCUMENTS MODAL WINDOW (OPENS ON CATEGORY CLICK)       */}
+      {/* ========================================================================= */}
+      {activeCategoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto custom-scrollbar">
+          <div className="bg-slate-900 border border-white/15 rounded-3xl w-full max-w-4xl max-h-[92vh] overflow-y-auto p-5 sm:p-7 space-y-5 shadow-2xl custom-scrollbar my-auto flex flex-col">
+            {/* Modal Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+              <div className="flex items-center gap-3.5">
+                {(() => {
+                  const meta = getCategoryMeta(activeCategoryModal);
+                  const IconComp = meta.icon;
+                  return (
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg ${meta.iconBg}`}>
+                      <IconComp size={24} className={meta.textColor} />
+                    </div>
+                  );
+                })()}
                 <div>
-                  <h3 className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors line-clamp-2">
-                    {doc.title}
-                  </h3>
-                  {doc.referenceNo && (
-                    <div className="text-[10px] font-mono text-amber-400/90 mt-0.5">
-                      Ref #: {doc.referenceNo}
-                    </div>
-                  )}
-                </div>
-
-                {/* Subject & Summary */}
-                {doc.subject && (
-                  <p className="text-xs text-gray-400 line-clamp-2 bg-black/25 p-2 rounded-xl border border-white/5">
-                    {doc.subject}
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg sm:text-xl font-black text-white tracking-wide">
+                      {activeCategoryModal}
+                    </h2>
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      {activeCategoryDocuments.length} Documents
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {getCategoryMeta(activeCategoryModal).description}
                   </p>
-                )}
-
-                {/* Hearing Alert Box if applicable */}
-                {doc.hearingRequired && (
-                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs text-amber-300">
-                    <div className="flex items-center gap-1.5">
-                      <Gavel size={14} className="text-amber-400 shrink-0" />
-                      <span className="font-bold">Hearing Scheduled:</span>
-                    </div>
-                    <span className="font-mono font-bold text-[11px] text-white">
-                      {doc.hearingDate || 'Scheduled'} {doc.hearingTime ? `@ ${doc.hearingTime}` : ''}
-                    </span>
-                  </div>
-                )}
-
-                {/* Bottom Meta Info (From, To, Date) */}
-                <div className="pt-2 border-t border-white/5 text-[11px] text-gray-400 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="truncate max-w-[150px]">
-                      <strong className="text-gray-300">From:</strong> {doc.from || 'Not specified'}
-                    </span>
-                    <span className="flex items-center gap-1 text-gray-400 shrink-0 font-mono text-[10px]">
-                      <Calendar size={11} /> {doc.documentDate}
-                    </span>
-                  </div>
-                  <div className="truncate">
-                    <strong className="text-gray-300">To:</strong> {doc.to || 'Docks (Pvt.) Ltd'}
-                  </div>
                 </div>
               </div>
-            );
-          })}
+
+              <div className="flex items-center gap-2 self-end sm:self-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocCategory(activeCategoryModal);
+                    setShowAddModal(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition cursor-pointer"
+                >
+                  <Plus size={14} className="stroke-[3]" />
+                  <span>Add Document</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveCategoryModal(null)}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
+                  title="Close Window"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* In-Modal Search Bar */}
+            <div className="relative">
+              <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={categoryModalSearch}
+                onChange={(e) => setCategoryModalSearch(e.target.value)}
+                placeholder={`Search within ${activeCategoryModal} (title, subject, reference #, date)...`}
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50"
+              />
+              {categoryModalSearch && (
+                <button
+                  type="button"
+                  onClick={() => setCategoryModalSearch('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Documents List inside Category Modal */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1 min-h-[220px]">
+              {activeCategoryDocuments.length === 0 ? (
+                <div className="py-12 text-center space-y-3 bg-black/25 rounded-2xl border border-white/5 p-6">
+                  {(() => {
+                    const meta = getCategoryMeta(activeCategoryModal);
+                    const EmptyIcon = meta.icon;
+                    return (
+                      <div className={`w-12 h-12 rounded-2xl mx-auto flex items-center justify-center opacity-80 ${meta.iconBg}`}>
+                        <EmptyIcon size={24} className={meta.textColor} />
+                      </div>
+                    );
+                  })()}
+                  <h4 className="text-sm font-bold text-gray-300">
+                    {categoryModalSearch ? 'No Matching Documents' : `No Documents Recorded in ${activeCategoryModal}`}
+                  </h4>
+                  <p className="text-xs text-gray-500 max-w-sm mx-auto">
+                    {categoryModalSearch 
+                      ? 'No documents match your keyword. Try clearing the search query.'
+                      : `No files or notices have been uploaded under ${activeCategoryModal} yet. Click below to add the first document.`}
+                  </p>
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDocCategory(activeCategoryModal);
+                        setShowAddModal(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md transition cursor-pointer"
+                    >
+                      <Plus size={14} /> Upload First Document to {activeCategoryModal}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="text-[11px] text-gray-400 font-semibold flex items-center justify-between px-1">
+                    <span>Click any document to download PDF directly</span>
+                    <span>{activeCategoryDocuments.length} Record(s)</span>
+                  </div>
+
+                  {activeCategoryDocuments.map((doc) => (
+                    <div
+                      key={doc.id}
+                      onClick={() => handleDownloadPdf(doc)}
+                      className="bg-slate-800/60 hover:bg-slate-800/90 border border-white/10 hover:border-amber-500/40 rounded-2xl p-4 transition-all shadow-md hover:shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer group"
+                      title="Click to Download PDF"
+                    >
+                      {/* Document Details */}
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors">
+                            {doc.title}
+                          </h4>
+                          {doc.referenceNo && (
+                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              Ref: {doc.referenceNo}
+                            </span>
+                          )}
+                          {doc.fileName && (
+                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-mono text-gray-300 bg-white/5 border border-white/10 flex items-center gap-1">
+                              <Paperclip size={10} className="text-amber-400" />
+                              <span className="truncate max-w-[140px]">{doc.fileName}</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {doc.subject && (
+                          <p className="text-xs text-gray-300 line-clamp-1">
+                            {doc.subject}
+                          </p>
+                        )}
+
+                        <div className="flex flex-wrap items-center gap-3 text-[11px] text-gray-400 font-mono">
+                          <span className="flex items-center gap-1">
+                            <Calendar size={11} className="text-amber-400" /> {doc.documentDate}
+                          </span>
+                          {doc.from && (
+                            <span><strong>From:</strong> {doc.from}</span>
+                          )}
+                          {doc.to && (
+                            <span><strong>To:</strong> {doc.to}</span>
+                          )}
+                        </div>
+
+                        {doc.hearingRequired && (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-[11px] font-bold text-amber-300 mt-1">
+                            <Gavel size={12} className="text-amber-400" />
+                            <span>Hearing Scheduled: {doc.hearingDate || 'TBD'} {doc.hearingTime ? `@ ${doc.hearingTime}` : ''}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-center" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadPdf(doc)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition cursor-pointer"
+                          title="Download PDF"
+                        >
+                          <Download size={13} />
+                          <span>Download PDF</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDocForPreview(doc)}
+                          className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition cursor-pointer"
+                          title="View Details"
+                        >
+                          <Eye size={14} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteDocument(doc.id, e)}
+                          className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer"
+                          title="Delete Record"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Bottom Bar */}
+            <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs text-gray-400">
+              <span>Folder: <strong className="text-white">{activeCategoryModal}</strong></span>
+              <button
+                type="button"
+                onClick={() => setActiveCategoryModal(null)}
+                className="px-4 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 font-semibold cursor-pointer"
+              >
+                Close Window
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
