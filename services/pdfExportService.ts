@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import { Case, Container, Vehicle, FinanceEntry } from '../types';
-import { getStoredBranding } from './brandingService';
+import { getStoredBranding, getDefaultBranding } from './brandingService';
+import { getActiveCompany, getActiveCompanyPrefix } from './companyService';
 
 export interface PdfExportOptions {
   onlyInvoice?: boolean;
@@ -147,15 +148,17 @@ export async function drawPdfCorporateHeader(
     accentColor?: [number, number, number];
   }
 ): Promise<number> {
+  const activeComp = getActiveCompany();
+  const defaultB = getDefaultBranding(activeComp);
   const stored = getStoredBranding();
   const b = { ...stored, ...options.branding };
-  const companyName = cleanPdfText(b.companyName) || 'DOCKS (PVT) LTD.';
-  const subtitle = cleanPdfText(b.subtitle) || 'CUSTOMS BONDED CARRIER';
-  const address = cleanPdfText(b.address) || 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.';
-  const phone = cleanPdfText(b.phone) || '+92-21-32330103, +92-21-32330104';
-  const cell = cleanPdfText(b.cell) || '+92-321-9222883, +92-321-8496006';
-  const email = cleanPdfText(b.email) || 'director@dockspk.com';
-  const web = cleanPdfText(b.web) || 'www.dockspk.com';
+  const companyName = cleanPdfText(b.companyName) || defaultB.companyName;
+  const subtitle = cleanPdfText(b.subtitle) || defaultB.subtitle;
+  const address = cleanPdfText(b.address) || defaultB.address;
+  const phone = cleanPdfText(b.phone) || defaultB.phone;
+  const cell = cleanPdfText(b.cell) || defaultB.cell;
+  const email = cleanPdfText(b.email) || defaultB.email;
+  const web = cleanPdfText(b.web) || defaultB.web;
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 14;
@@ -274,14 +277,16 @@ export function drawPdfCorporateFooter(
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
+  const activeComp = getActiveCompany();
+  const defaultB = getDefaultBranding(activeComp);
   const b = { ...getStoredBranding(), ...branding };
-  const address = cleanPdfText(b.address) || 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.';
-  const phone = cleanPdfText(b.phone) || '+92-21-32330103, +92-21-32330104';
-  let email = cleanPdfText(b.email) || 'info@dockspk.com';
+  const address = cleanPdfText(b.address) || defaultB.address;
+  const phone = cleanPdfText(b.phone) || defaultB.phone;
+  let email = cleanPdfText(b.email) || defaultB.email;
   if (email.toLowerCase().includes('director@')) {
     email = email.replace(/director@/gi, 'info@');
   }
-  const web = cleanPdfText(b.web) || 'www.dockspk.com';
+  const web = cleanPdfText(b.web) || defaultB.web;
 
   const cleanRight = cleanPdfText(rightText);
   const dividerY = pageHeight - 16;
@@ -346,16 +351,21 @@ export function drawOfficialCompanyStampOnly(
     doc.roundedRect(x + 1, y + 1, boxW - 2, boxH - 2, 1.5, 1.5, 'S');
 
     // Header
+    const stampComp = getActiveCompany();
+    const stampDef = getDefaultBranding(stampComp);
+    const stampTitle = cleanPdfText(b.companyName) || stampDef.companyName;
+    const stampSub = cleanPdfText(b.subtitle) || stampComp.category || 'LOGISTICS & CARRIER OPERATIONS';
+
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6.5);
     doc.setTextColor(30, 58, 138);
-    doc.text('DOCKS (PVT) LTD.', x + (boxW / 2), y + 4.8, { align: 'center' });
+    doc.text(stampTitle.toUpperCase(), x + (boxW / 2), y + 4.8, { align: 'center' });
 
     // Subtitle
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(4.8);
     doc.setTextColor(37, 99, 235);
-    doc.text('BONDED CARRIER • FLEET OPERATIONS', x + (boxW / 2), y + 8.2, { align: 'center' });
+    doc.text(stampSub.toUpperCase(), x + (boxW / 2), y + 8.2, { align: 'center' });
 
     // Center Badge
     doc.setFillColor(30, 58, 138);
@@ -462,7 +472,7 @@ export async function downloadCasePdf(
     let currentY = margin;
 
     const b = { ...getStoredBranding(), ...branding };
-    const companyName = b.companyName || 'DOCKS (PVT) LTD.';
+    const companyName = b.companyName || getDefaultBranding(getActiveCompany()).companyName;
 
     // Helper: Header block with corporate branding & logo
     const renderHeader = async (docTitle: string) => {
@@ -2031,7 +2041,7 @@ export async function downloadVehicleDetailsPdf(data: VehicleExportData): Promis
     if (data.status === 'CANCELLED') {
       doc.setTextColor(220, 38, 38);
       doc.text(`Fleet Cancellation & NOC Issued: ${data.cancellationDate || data.nocDate || 'Cancelled'}`, pageWidth - margin - 4, currentY + 11, { align: 'right' });
-      doc.text(`NOC Reference Code: ${data.nocReference || 'NOC-DPL-VERIFIED'}`, pageWidth - margin - 4, currentY + 16, { align: 'right' });
+      doc.text(`NOC Reference Code: ${data.nocReference || `NOC-${getActiveCompanyPrefix()}-VERIFIED`}`, pageWidth - margin - 4, currentY + 16, { align: 'right' });
       doc.text(`De-registration Status: CLOSED & CERTIFIED`, pageWidth - margin - 4, currentY + 21, { align: 'right' });
     } else {
       doc.setTextColor(22, 163, 74);
@@ -2144,7 +2154,10 @@ export async function downloadVehicleNocPdf(
     const margin = 14;
     const v = data.vehicle;
     const today = data.date || new Date().toLocaleDateString('en-GB');
-    const nocSerial = data.nocNo || v.nocReference || `NOC-DPL-${Date.now().toString().slice(-6)}`;
+    const compPrefix = getActiveCompanyPrefix();
+    const activeComp = getActiveCompany();
+    const compName = cleanPdfText(data.branding?.companyName || activeComp.legalTitle || activeComp.name);
+    const nocSerial = data.nocNo || v.nocReference || `NOC-${compPrefix}-${Date.now().toString().slice(-6)}`;
     const reasonText = data.reason || v.cancellationReason || 'Fleet Contract Concluded & Operational Retirement';
 
     let currentY = await drawPdfCorporateHeader(doc, {
@@ -2179,17 +2192,17 @@ export async function downloadVehicleNocPdf(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(30, 41, 59);
-    const bodyP1 = `This is to officially certify that the commercial vehicle bearing Registration Number ${v.registrationNumber}, DPL Serial ${v.dplSerial}, belonging to Transporter "${v.transporterName}", has formally been decommissioned and removed from the active customs bonded / domestic carrier fleet of DOCKS (PVT) LTD.`;
+    const bodyP1 = `This is to officially certify that the commercial vehicle bearing Registration Number ${v.registrationNumber}, ${compPrefix} Serial ${v.dplSerial}, belonging to Transporter "${v.transporterName}", has formally been decommissioned and removed from the active customs bonded / domestic carrier fleet of ${compName.toUpperCase()}.`;
     doc.text(bodyP1, margin, currentY, { maxWidth: pageWidth - (margin * 2), lineHeightFactor: 1.4 });
 
     currentY += 14;
 
-    const bodyP2 = `All customs port gate passes, GPS tracker hardware, container chassis locks, and bonded transit manifests issued under the authority of DOCKS (PVT) LTD. have been safely surrendered, audited, and reconciled. All financial liabilities, wharfage dues, and terminal toll fees up to ${today} have been cleared.`;
+    const bodyP2 = `All customs port gate passes, GPS tracker hardware, container chassis locks, and bonded transit manifests issued under the authority of ${compName} have been safely surrendered, audited, and reconciled. All financial liabilities, wharfage dues, and terminal toll fees up to ${today} have been cleared.`;
     doc.text(bodyP2, margin, currentY, { maxWidth: pageWidth - (margin * 2), lineHeightFactor: 1.4 });
 
     currentY += 14;
 
-    const bodyP3 = `Consequently, DOCKS (PVT) LTD. holds NO OBJECTION whatsoever to the cancellation, transfer of ownership, or re-registration of this vehicle under any other carrier or entity.`;
+    const bodyP3 = `Consequently, ${compName} holds NO OBJECTION whatsoever to the cancellation, transfer of ownership, or re-registration of this vehicle under any other carrier or entity.`;
     doc.text(bodyP3, margin, currentY, { maxWidth: pageWidth - (margin * 2), lineHeightFactor: 1.4 });
 
     currentY += 12;
@@ -2203,7 +2216,7 @@ export async function downloadVehicleNocPdf(
 
     const rows: [string, string][] = [
       ['Vehicle Registration No:', v.registrationNumber],
-      ['DPL Fleet Serial No:', v.dplSerial],
+      [`${compPrefix} Fleet Serial No:`, v.dplSerial],
       ['Vehicle Category / Type:', `${v.category} • ${v.type} (${v.size || 'Standard'})`],
       ['Engine Number:', v.engineNo || 'N/A'],
       ['Chassis Number:', v.chassisNo || 'N/A'],
@@ -2273,7 +2286,7 @@ export async function downloadCustomsDeliveryOrderPdf(
     let currentY = margin;
 
     const b = { ...getStoredBranding(), ...data.branding };
-    const companyName = b.companyName || 'DOCKS (PVT) LTD.';
+    const companyName = b.companyName || getDefaultBranding(getActiveCompany()).companyName;
     const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     const doSerial = `DO-NOC-${targetCase.caseNo.replace(/[^a-zA-Z0-9]/g, '')}-${Date.now().toString().slice(-4)}`;
 
@@ -2747,7 +2760,8 @@ export async function downloadTaxReportPdf(data: TaxReportExportData): Promise<{
       drawPdfCorporateFooter(doc, 'Confidential Logistics Tax & Finance Performance Statement', b);
     }
 
-    const filename = `DPL_Tax_Finance_Report_${data.startDate}_to_${data.endDate}.pdf`;
+    const prefix = getActiveCompanyPrefix();
+    const filename = `${prefix}_Tax_Finance_Report_${data.startDate}_to_${data.endDate}.pdf`;
     return triggerDirectDownload(doc, filename);
   } catch (error) {
     console.error('Failed to generate Tax & Finance PDF:', error);
@@ -2830,9 +2844,11 @@ export async function downloadCustomsVehicleListPdf(
     currentY += 8;
 
     // Addressee Block
+    const permitComp = getActiveCompany();
+    const permitName = permitComp.legalTitle || permitComp.name;
     doc.setFont('times', 'bold');
     doc.setFontSize(10);
-    doc.text('M/s. Docks (Pvt.) Ltd', margin, currentY);
+    doc.text(`M/s. ${permitName}`, margin, currentY);
     currentY += 4.5;
 
     doc.setFont('times', 'normal');
@@ -2871,7 +2887,7 @@ export async function downloadCustomsVehicleListPdf(
     // Paragraph 2 Body Text
     doc.setFont('times', 'normal');
     doc.setFontSize(9);
-    const para2Text = `2.  The request for renewal of vehicles and fresh registration of ${vehicleCount} vehicles in terms of Rule 329 (5) & (6) of Chapter XIV, Rule 478 (d) of Chapter XXI and Rule 639 (d) of Customs Rules, 2001 notified vide SRO 450(I)/2001 dated 18.06.2001 acceded to and total ${vehicleCount} vehicles, particulars of which indicated in the table below are hereby provisionally registered in the system with M/s. Docks (Pvt.) Ltd. Karachi for providing transport facility to the transhipments to and from upcountry Customs Dry Ports as well as transit goods for a period of six months. The Customs House, however, reserves the right to revoke / suspend this provisional registration fully or partially at any time during the period of its validity without any prior notice.`;
+    const para2Text = `2.  The request for renewal of vehicles and fresh registration of ${vehicleCount} vehicles in terms of Rule 329 (5) & (6) of Chapter XIV, Rule 478 (d) of Chapter XXI and Rule 639 (d) of Customs Rules, 2001 notified vide SRO 450(I)/2001 dated 18.06.2001 acceded to and total ${vehicleCount} vehicles, particulars of which indicated in the table below are hereby provisionally registered in the system with M/s. ${permitName} Karachi for providing transport facility to the transhipments to and from upcountry Customs Dry Ports as well as transit goods for a period of six months. The Customs House, however, reserves the right to revoke / suspend this provisional registration fully or partially at any time during the period of its validity without any prior notice.`;
     const splitPara2 = doc.splitTextToSize(para2Text, contentWidth);
     doc.text(splitPara2, margin, currentY);
     currentY += (splitPara2.length * 4.1) + 4;

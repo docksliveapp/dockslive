@@ -33,6 +33,7 @@ import {
 } from '../services/vehicleDocxService';
 import { downloadCustomsVehicleListPdf } from '../services/pdfExportService';
 import { compressAndPrepareFile } from '../services/fileUtils';
+import { useActiveCompany, getActiveCompanyPrefix } from '../services/companyService';
 
 // --- Clean Live Data ---
 
@@ -53,6 +54,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   userRole: propUserRole,
   userRoles: propUserRoles 
 }) => {
+  const { activeCompany } = useActiveCompany();
   const [activeTab, setActiveTab] = useState<'transporters' | 'vehicles' | 'ready_vehicles'>(() => {
     const saved = safeAppStorage.getItem('dpl_vehicle_tab');
     return (saved === 'transporters' || saved === 'ready_vehicles') ? saved : 'vehicles';
@@ -68,7 +70,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     if (req.type === 'NEW_REGISTRATION' && req.vehicleData) {
       const newVeh: Vehicle = {
         id: Date.now(),
-        dplSerial: `DPL-V-${String(vehicles.length + 1).padStart(4, '0')}`,
+        dplSerial: `${getActiveCompanyPrefix()}-V-${String(vehicles.length + 1).padStart(4, '0')}`,
         registrationNumber: req.vehicleNo || 'TL-NEW',
         transporterId: Number(req.transporterId) || 1,
         transporterName: req.transporterName,
@@ -328,7 +330,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     if (!vehicleToCancel) return;
     setIsCancellingVehicle(true);
     const today = new Date().toLocaleDateString('en-GB');
-    const nocRef = `NOC-DPL-${Date.now().toString().slice(-6)}`;
+    const nocRef = `NOC-${getActiveCompanyPrefix()}-${Date.now().toString().slice(-6)}`;
 
     // Update vehicle status in state
     const cancelledVehicle: Vehicle = {
@@ -381,16 +383,17 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   };
 
   const handleDirectDownloadNoc = async (v: Vehicle) => {
+    const prefix = getActiveCompanyPrefix();
     try {
       const res = await downloadVehicleNocPdf({
         vehicle: v,
-        nocNo: v.nocReference || `NOC-DPL-${v.id}`,
+        nocNo: v.nocReference || `NOC-${prefix}-${v.id}`,
         reason: v.cancellationReason || 'Fleet Release',
         date: v.cancellationDate || new Date().toLocaleDateString('en-GB')
       });
       setNocSuccessNotice({
         vehicleNo: v.registrationNumber,
-        nocRef: v.nocReference || `NOC-DPL-${v.id}`,
+        nocRef: v.nocReference || `NOC-${prefix}-${v.id}`,
         downloadUrl: res.blobUrl,
         filename: res.filename
       });
@@ -401,9 +404,10 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
 
   // Download official NOC in Word (.docx) format for pre-printed letterhead / stamp paper (NO company logo on top)
   const handleDownloadNocDocx = async (v: Vehicle) => {
+    const prefix = getActiveCompanyPrefix();
     try {
       const doc = await generateVehicleNocDocx(v, {
-        nocReference: v.nocReference || `NOC-DPL-${v.id}`,
+        nocReference: v.nocReference || `NOC-${prefix}-${v.id}`,
         nocDate: v.cancellationDate || new Date().toISOString().split('T')[0],
         reason: v.cancellationReason || 'Fleet Release & Operational De-Registration',
         leaveLetterheadSpace: true
@@ -429,10 +433,12 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
 
   const generateDPLSerial = (customList?: Vehicle[]) => {
     const list = customList || vehicles;
+    const prefix = getActiveCompanyPrefix();
     let maxSeq = 0;
+    const regex = new RegExp(`^(?:DPL|MI|VSL|TRK|${prefix})-(\\d+)`, 'i');
     list.forEach(v => {
       if (v.dplSerial) {
-        const match = v.dplSerial.match(/DPL-(\d+)/i);
+        const match = v.dplSerial.match(regex);
         if (match) {
           const seq = parseInt(match[1], 10);
           if (seq > maxSeq) maxSeq = seq;
@@ -440,7 +446,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       }
     });
     const nextSeq = maxSeq + 1;
-    return `DPL-${String(nextSeq).padStart(4, '0')}`;
+    return `${prefix}-${String(nextSeq).padStart(4, '0')}`;
   };
 
   const calculateExpiryDate = (startDate: string) => {
@@ -1541,7 +1547,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                 <span className="font-mono font-bold text-white text-sm bg-white/10 px-2 py-0.5 rounded">{vehicleToCancel.registrationNumber}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-400">DPL Fleet Serial:</span>
+                <span className="text-gray-400">{activeCompany?.shortName || getActiveCompanyPrefix()} Fleet Serial:</span>
                 <span className="font-mono text-brand-400">{vehicleToCancel.dplSerial}</span>
               </div>
               <div className="flex justify-between items-center">

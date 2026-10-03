@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   LayoutDashboard, FolderKanban, Users, Truck, Settings, FileText, Bell, LogOut, Menu,
   X, Check, AlertCircle, AlertTriangle, Info, Trash2, Loader2, Maximize2, Minimize2, Upload,
-  ShieldCheck, UserCircle, RefreshCw, HardDrive, MapPin, FolderArchive
+  ShieldCheck, UserCircle, RefreshCw, HardDrive, MapPin, FolderArchive, Building2, ChevronDown
 } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import CaseManagement from './components/CaseManagement';
@@ -15,6 +15,8 @@ import UserManagement from './components/UserManagement';
 import GoogleDriveManager from './components/GoogleDriveManager';
 import SplashScreen from './components/SplashScreen';
 import LoginModeSelection, { SelectedModePayload } from './components/LoginModeSelection';
+import CompanyWorkspaceSelector from './components/CompanyWorkspaceSelector';
+import { useActiveCompany, setActiveCompany } from './services/companyService';
 import GoldenAmountWidget from './components/GoldenAmountWidget';
 import ClientPortal from './components/ClientPortal';
 import { LoadingPortStaffPortal } from './components/LoadingPortStaffPortal';
@@ -43,8 +45,11 @@ const App: React.FC = () => {
   // 2. Once splash finishes, the Login / Portal Selection screen ALWAYS appears
   const [showSplash, setShowSplash] = useState<boolean>(true);
   const [showModeSelection, setShowModeSelection] = useState<boolean>(false);
+  const [showCompanySelection, setShowCompanySelection] = useState<boolean>(false);
+  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState<boolean>(false);
   const [isReplaySplashOnly, setIsReplaySplashOnly] = useState<boolean>(false);
   const { customLogo, companyName } = useBranding();
+  const { activeCompany } = useActiveCompany();
 
   // Failsafe: Ensure splash screen never hangs the app under any browser condition
   useEffect(() => {
@@ -225,6 +230,8 @@ const App: React.FC = () => {
     safeAppStorage.setItem('dpl_last_location_role', currentRole);
     safeAppStorage.removeItem('dpl_session_active');
     setShowSplash(false);
+    setShowCompanySelection(false);
+    setIsCompanyModalOpen(false);
     setShowModeSelection(true);
   };
 
@@ -438,6 +445,22 @@ const App: React.FC = () => {
             safeAppStorage.setItem('dpl_last_location_role', payload.role);
             safeAppStorage.setItem('dpl_session_active', 'true');
             setShowModeSelection(false);
+            setShowCompanySelection(true);
+          }}
+        />
+      </ErrorBoundary>
+    );
+  }
+
+  if (showCompanySelection) {
+    return (
+      <ErrorBoundary>
+        <CompanyWorkspaceSelector 
+          userName={safeAppStorage.getItem('dpl_current_user_name') || 'Staff User'}
+          userRoleTitle={currentDesignation || (currentRole as string)}
+          onSelectCompany={(selectedId) => {
+            setActiveCompany(selectedId);
+            setShowCompanySelection(false);
           }}
         />
       </ErrorBoundary>
@@ -482,6 +505,20 @@ const App: React.FC = () => {
             currentRole={currentRole}
             onRoleChange={(role) => setCurrentRole(role)}
           />
+
+          {/* Company Workspace Selector Modal */}
+          {isCompanyModalOpen && (
+            <CompanyWorkspaceSelector 
+              isModal={true}
+              onClose={() => setIsCompanyModalOpen(false)}
+              userName={safeAppStorage.getItem('dpl_current_user_name') || 'Staff User'}
+              userRoleTitle={currentDesignation || (currentRole as string)}
+              onSelectCompany={(selectedId) => {
+                setActiveCompany(selectedId);
+                setIsCompanyModalOpen(false);
+              }}
+            />
+          )}
 
           {/* Session & Draft Restoration Toast Banner */}
           {sessionToast && (
@@ -593,10 +630,10 @@ const App: React.FC = () => {
             <Logo className="h-10 w-10 shrink-0 object-contain group-hover:brightness-110 transition-all" />
             <div className="flex flex-col text-left min-w-0">
               <span className="font-extrabold text-xs tracking-wider text-amber-300 font-sans uppercase truncate">
-                {companyName || 'DOCKS (PVT) LTD'}
+                {activeCompany.name}
               </span>
               <span className="text-[9px] font-bold text-amber-400/90 tracking-wider uppercase truncate">
-                Bonded Carrier
+                {activeCompany.shortName} • {activeCompany.category.split('&')[0]}
               </span>
             </div>
           </div>
@@ -614,6 +651,26 @@ const App: React.FC = () => {
               </span>
             </div>
           )}
+        </div>
+
+        {/* Switch Company Workspace Button in Sidebar */}
+        <div className="w-full px-2 pt-2 pb-1">
+          <button
+            type="button"
+            onClick={() => setIsCompanyModalOpen(true)}
+            className="w-full flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all text-xs font-semibold cursor-pointer group shadow-sm"
+            title="Switch Subsidiary / Company Workspace"
+          >
+            <div className="flex items-center gap-2 truncate">
+              <Building2 size={15} className="text-amber-400 shrink-0" />
+              <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} truncate text-[11px] font-bold text-gray-200 group-hover:text-amber-300`}>
+                Switch Company
+              </span>
+            </div>
+            <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[9px] px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-bold uppercase`}>
+              4 Entities
+            </span>
+          </button>
         </div>
 
         {/* Navigation items (Strictly Cases & Finance only for Client) */}
@@ -733,6 +790,30 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0">
+            {/* Active Subsidiary Switcher Button in Top Bar */}
+            <button
+              type="button"
+              id="header-company-switcher-btn"
+              onClick={() => setIsCompanyModalOpen(true)}
+              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 border border-amber-500/30 hover:border-amber-400 transition-all text-left group shadow-sm cursor-pointer"
+              title="Switch Subsidiary / Company Workspace (4 Companies)"
+            >
+              <img 
+                src={activeCompany.logo} 
+                alt={activeCompany.name} 
+                className="w-5 h-5 sm:w-6 sm:h-6 object-contain shrink-0 filter drop-shadow" 
+              />
+              <div className="flex flex-col min-w-0 hidden md:flex">
+                <span className="text-[11px] font-bold text-white group-hover:text-amber-300 transition-colors truncate max-w-[130px] xl:max-w-[170px]">
+                  {activeCompany.name}
+                </span>
+                <span className="text-[9px] text-amber-400/90 font-medium truncate max-w-[130px]">
+                  {activeCompany.shortName} • Switch
+                </span>
+              </div>
+              <ChevronDown size={14} className="text-gray-400 group-hover:text-amber-300 transition-transform group-hover:translate-y-0.5 ml-0.5 shrink-0" />
+            </button>
+
             {/* Sone se Amount Option (Golden Amount Display & Treasury Breakdown) */}
             <GoldenAmountWidget 
               onOpenFinance={() => setActiveView('finance')}
@@ -804,6 +885,20 @@ const App: React.FC = () => {
           currentRole={currentRole}
           onRoleChange={(role) => setCurrentRole(role)}
         />
+
+        {/* Company Workspace Selector Modal */}
+        {isCompanyModalOpen && (
+          <CompanyWorkspaceSelector 
+            isModal={true}
+            onClose={() => setIsCompanyModalOpen(false)}
+            userName={safeAppStorage.getItem('dpl_current_user_name') || 'Staff User'}
+            userRoleTitle={currentDesignation || (currentRole as string)}
+            onSelectCompany={(selectedId) => {
+              setActiveCompany(selectedId);
+              setIsCompanyModalOpen(false);
+            }}
+          />
+        )}
       </main>
     </div>
     </ErrorBoundary>

@@ -11,57 +11,113 @@
 // In-memory memory cache for bulletproof resilience when multitasking
 const memoryCache: Record<string, string> = {};
 
+// Storage keys that are partitioned per company
+const COMPANY_PARTITIONED_KEYS = new Set([
+  'dpl_live_cases',
+  'dpl_live_finance',
+  'dpl_live_receivables',
+  'dpl_live_payables',
+  'dpl_live_vehicles',
+  'dpl_cached_vehicles',
+  'dpl_clients',
+  'dpl_company_documents',
+  'dpl_vendors',
+  'dpl_recurring_templates',
+  'dpl_personal_ledger_accounts',
+  'dpl_personal_ledger_entries',
+  'dpl_staff_ledgers',
+  'dpl_destination_staff',
+  'dpl_company_branding_v1',
+  'dpl_reg_formdata',
+  'dpl_live_notifications',
+  'dpl_cashbook_transactions',
+  'dpl_payment_vouchers',
+  'dpl_general_ledger_entries',
+  'dpl_staff_salaries',
+  'dpl_staff_members',
+  'dpl_activity_logs',
+  'dpl_category_tariffs',
+  'dpl_vehicle_management_draft',
+  'dpl_case_registration_draft'
+]);
+
+function resolveScopedStorageKey(key: string): string {
+  if (!COMPANY_PARTITIONED_KEYS.has(key)) {
+    return key;
+  }
+  try {
+    let companyId = 'docks';
+    if (typeof window !== 'undefined' && window.localStorage) {
+      companyId = window.localStorage.getItem('dpl_active_company_id') || 'docks';
+    } else if (memoryCache['dpl_active_company_id']) {
+      companyId = memoryCache['dpl_active_company_id'];
+    }
+    if (companyId === 'docks') {
+      return key;
+    }
+    return `${key}_${companyId}`;
+  } catch (_) {
+    return key;
+  }
+}
+
 export const safeSessionStorage = {
   getItem: (key: string): string | null => {
+    const scopedKey = resolveScopedStorageKey(key);
     try {
       if (typeof window !== 'undefined' && window.sessionStorage) {
-        return window.sessionStorage.getItem(key);
+        return window.sessionStorage.getItem(scopedKey);
       }
     } catch (_) {}
-    return memoryCache[key] ?? null;
+    return memoryCache[scopedKey] ?? null;
   },
   setItem: (key: string, value: string): void => {
+    const scopedKey = resolveScopedStorageKey(key);
     try {
       if (typeof window !== 'undefined' && window.sessionStorage) {
-        window.sessionStorage.setItem(key, value);
+        window.sessionStorage.setItem(scopedKey, value);
       }
     } catch (_) {}
-    memoryCache[key] = value;
+    memoryCache[scopedKey] = value;
   },
   removeItem: (key: string): void => {
+    const scopedKey = resolveScopedStorageKey(key);
     try {
       if (typeof window !== 'undefined' && window.sessionStorage) {
-        window.sessionStorage.removeItem(key);
+        window.sessionStorage.removeItem(scopedKey);
       }
     } catch (_) {}
-    delete memoryCache[key];
+    delete memoryCache[scopedKey];
   }
 };
 
 export const safeLocalStorage = {
   getItem: (key: string): string | null => {
+    const scopedKey = resolveScopedStorageKey(key);
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
-        return window.localStorage.getItem(key);
+        return window.localStorage.getItem(scopedKey);
       }
     } catch (_) {}
-    return memoryCache[key] ?? null;
+    return memoryCache[scopedKey] ?? null;
   },
   setItem: (key: string, value: string): void => {
+    const scopedKey = resolveScopedStorageKey(key);
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(key, value);
+        window.localStorage.setItem(scopedKey, value);
       }
     } catch (_) {}
-    memoryCache[key] = value;
+    memoryCache[scopedKey] = value;
   },
   removeItem: (key: string): void => {
+    const scopedKey = resolveScopedStorageKey(key);
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.removeItem(key);
+        window.localStorage.removeItem(scopedKey);
       }
     } catch (_) {}
-    delete memoryCache[key];
+    delete memoryCache[scopedKey];
   }
 };
 
@@ -74,30 +130,33 @@ export const safeLocalStorage = {
  */
 export const safeAppStorage = {
   getItem: (key: string): string | null => {
-    if (memoryCache[key] !== undefined) {
-      return memoryCache[key];
+    const scopedKey = resolveScopedStorageKey(key);
+    if (memoryCache[scopedKey] !== undefined) {
+      return memoryCache[scopedKey];
     }
-    const fromLocal = safeLocalStorage.getItem(key);
+    const fromLocal = safeLocalStorage.getItem(scopedKey);
     if (fromLocal !== null) {
-      memoryCache[key] = fromLocal;
+      memoryCache[scopedKey] = fromLocal;
       return fromLocal;
     }
-    const fromSession = safeSessionStorage.getItem(key);
+    const fromSession = safeSessionStorage.getItem(scopedKey);
     if (fromSession !== null) {
-      memoryCache[key] = fromSession;
+      memoryCache[scopedKey] = fromSession;
       return fromSession;
     }
     return null;
   },
   setItem: (key: string, value: string): void => {
-    memoryCache[key] = value;
-    safeLocalStorage.setItem(key, value);
-    safeSessionStorage.setItem(key, value);
+    const scopedKey = resolveScopedStorageKey(key);
+    memoryCache[scopedKey] = value;
+    safeLocalStorage.setItem(scopedKey, value);
+    safeSessionStorage.setItem(scopedKey, value);
   },
   removeItem: (key: string): void => {
-    delete memoryCache[key];
-    safeLocalStorage.removeItem(key);
-    safeSessionStorage.removeItem(key);
+    const scopedKey = resolveScopedStorageKey(key);
+    delete memoryCache[scopedKey];
+    safeLocalStorage.removeItem(scopedKey);
+    safeSessionStorage.removeItem(scopedKey);
   },
   clear: (): void => {
     Object.keys(memoryCache).forEach((k) => delete memoryCache[k]);

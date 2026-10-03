@@ -14,6 +14,7 @@ import {
   convertInchesToTwip
 } from 'docx';
 import { Vehicle } from '../types';
+import { getActiveCompany, getActiveCompanyPrefix } from './companyService';
 
 // Company details
 export const DOCKS_COMPANY = {
@@ -30,6 +31,21 @@ export const DOCKS_COMPANY = {
     w2_shams: { name: 'Mr. SHAMS TABREZ BUKHARI', cnic: '42301-0618439-9' }
   }
 };
+
+export function getActiveCompanyDocxDetails() {
+  const active = getActiveCompany();
+  return {
+    name: active.name,
+    legalTitle: active.legalTitle || active.name,
+    fullLegalName: `M/s. ${active.legalTitle || active.name}`,
+    address: active.address || 'Office No. 13 First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi',
+    ntn: active.id === 'docks' ? '5064083-8' : (active.id === 'muhib' ? '5064083-9' : '5064083-7'),
+    customsNtn: '3997968',
+    phone: active.phone || '+92 21 3241 4500',
+    email: active.email || 'operations@makgroup.com.pk',
+    witnesses: DOCKS_COMPANY.witnesses
+  };
+}
 
 // Date utilities
 export function getCleanDate(dateInput?: string | Date): Date {
@@ -361,7 +377,7 @@ export async function generateRegistrationRenewalLetterDocx(
             spacing: { before: 200 },
             children: [
               new TextRun({
-                text: 'Docks (Pvt) Ltd.',
+                text: getActiveCompanyDocxDetails().name,
                 bold: true,
                 size: 23
               })
@@ -519,11 +535,11 @@ export async function generateCustomsPermitLetterDocx(
             ]
           }),
 
-          // Addressee: M/s. Docks (Pvt) Ltd
+          // Addressee: active company
           new Paragraph({
             spacing: { line: 260, after: 220 },
             children: [
-              new TextRun({ text: 'M/s. Docks (Pvt.) Ltd\n', bold: true, size: 21 }),
+              new TextRun({ text: `${getActiveCompanyDocxDetails().fullLegalName}\n`, bold: true, size: 21 }),
               new TextRun({ text: 'Office No.13 First Floor State Life Building No.7\n', size: 20 }),
               new TextRun({ text: 'G-Allana Road Tower,\n', size: 20 }),
               new TextRun({ text: 'Karachi.', bold: true, size: 20 })
@@ -569,7 +585,7 @@ export async function generateCustomsPermitLetterDocx(
                 text: `, particulars of which indicated in the table below are hereby provisionally registered in the system in the with `,
                 size: 20
               }),
-              new TextRun({ text: `M/s. Docks (Pvt.) Ltd. Karachi`, bold: true, underline: {}, size: 20 }),
+              new TextRun({ text: `${getActiveCompanyDocxDetails().fullLegalName} Karachi`, bold: true, underline: {}, size: 20 }),
               new TextRun({
                 text: ` for providing transport facility to the transhipments to and from upcountry Customs Dry Ports as well as transit goods for a period of six months. The Customs House, However, reserves the right to revoke / suspend this provisional registration fully or partially at anytime during the period of its validity without any prior notice.`,
                 size: 20
@@ -803,9 +819,9 @@ export async function generateLeaseAgreementDocx(
           new Paragraph({
             spacing: { line: 280, after: 180 },
             children: [
-              new TextRun({ text: 'M/s.Docks (Pvt.) Ltd.', bold: true, underline: {}, size: 20 }),
+              new TextRun({ text: `${getActiveCompanyDocxDetails().fullLegalName}`, bold: true, underline: {}, size: 20 }),
               new TextRun({
-                text: ', (bonded Carrier) having OFFICE NO.13 FIRST FLOOR, STATE LIFE BUILDING NO. 7, G-ALLANA ROAD, TOWER, KARACHI, to as “Lessee” (which expression whereas the context so permits, shall mean and include their heirs, executors, administrators, successors, attorneys, representatives, nominees and assignees). WHEREAS, the lessor is the lawful owner of the following vehicles:',
+                text: `, having ${getActiveCompanyDocxDetails().address.toUpperCase()}, to as “Lessee” (which expression whereas the context so permits, shall mean and include their heirs, executors, administrators, successors, attorneys, representatives, nominees and assignees). WHEREAS, the lessor is the lawful owner of the following vehicles:`,
                 size: 20
               })
             ]
@@ -850,7 +866,7 @@ export async function generateLeaseAgreementDocx(
             spacing: { line: 270, after: 100 },
             children: [
               new TextRun({
-                text: 'b) The designated vehicle shall remain dedicated to M/s. Docks (Pvt.) Ltd.',
+                text: `b) The designated vehicle shall remain dedicated to ${getActiveCompanyDocxDetails().fullLegalName}.`,
                 size: 19
               })
             ]
@@ -928,8 +944,8 @@ export async function generateLeaseAgreementDocx(
             children: [
               new TextRun({ text: 'LESSOR\t\t\t\t\t\t\tLEASEE\n\n', bold: true, size: 21 }),
               new TextRun({ text: '__________________________\t\t\t__________________________\n', size: 20 }),
-              new TextRun({ text: `${lessorName}\t\t\t\t\tDocks (Pvt.) Ltd.\n`, bold: true, size: 20 }),
-              new TextRun({ text: `CNIC: ${lessorCnic}\t\t\t\tNTN No. ${DOCKS_COMPANY.ntn}`, size: 20 })
+              new TextRun({ text: `${lessorName}\t\t\t\t\t${getActiveCompanyDocxDetails().name}\n`, bold: true, size: 20 }),
+              new TextRun({ text: `CNIC: ${lessorCnic}\t\t\t\tNTN No. ${getActiveCompanyDocxDetails().ntn}`, size: 20 })
             ]
           }),
 
@@ -1105,7 +1121,7 @@ export async function generateLeaseTerminationAgreementDocx(
             alignment: AlignmentType.CENTER,
             spacing: { after: 240 },
             children: [
-              new TextRun({ text: 'M/s. DOCKS (PVT) LTD', bold: true, size: 21 }),
+              new TextRun({ text: `${getActiveCompanyDocxDetails().fullLegalName}`, bold: true, size: 21 }),
               new TextRun({ text: ' hereafter referred to as “Lessee”.', size: 20 })
             ]
           }),
@@ -1155,9 +1171,9 @@ export async function generateLeaseTerminationAgreementDocx(
             spacing: { line: 260, after: 240 },
             children: [
               new TextRun({ text: 'LESSEE\nSIGNATURE\n\n\n', bold: true, size: 20 }),
-              new TextRun({ text: 'M/S. DOCKS (PVT.) LTD\n', bold: true, size: 21 }),
-              new TextRun({ text: `CNIC No. / NTN No. ${DOCKS_COMPANY.customsNtn}\n`, size: 20 }),
-              new TextRun({ text: `Address: ${DOCKS_COMPANY.address}`, size: 20 })
+              new TextRun({ text: `${getActiveCompanyDocxDetails().fullLegalName.toUpperCase()}\n`, bold: true, size: 21 }),
+              new TextRun({ text: `CNIC No. / NTN No. ${getActiveCompanyDocxDetails().customsNtn}\n`, size: 20 }),
+              new TextRun({ text: `Address: ${getActiveCompanyDocxDetails().address}`, size: 20 })
             ]
           }),
 
@@ -1377,7 +1393,7 @@ export async function generateCancellationLetterLetterheadDocx(
             children: [
               new TextRun({ text: 'Yours Faithfully,\n\n', size: 21 }),
               new TextRun({ text: '_________________________\n', size: 21 }),
-              new TextRun({ text: 'For: DOCKS (PVT) LTD.', bold: true, size: 23 })
+              new TextRun({ text: `For: ${getActiveCompanyDocxDetails().name.toUpperCase()}`, bold: true, size: 23 })
             ]
           })
         ]
@@ -1407,7 +1423,9 @@ export async function generateVehicleNocDocx(
 ): Promise<Document> {
   const dateObj = getCleanDate(options.nocDate || vehicle.nocDate);
   const formattedDate = formatSlashDate(dateObj);
-  const nocRef = options.nocReference || vehicle.nocReference || `NOC-DPL-${vehicle.dplSerial || vehicle.registrationNumber.replace(/[^a-zA-Z0-9]/g, '')}`;
+  const prefix = getActiveCompanyPrefix();
+  const activeDetails = getActiveCompanyDocxDetails();
+  const nocRef = options.nocReference || vehicle.nocReference || `NOC-${prefix}-${vehicle.dplSerial || vehicle.registrationNumber.replace(/[^a-zA-Z0-9]/g, '')}`;
   const reason = options.reason || vehicle.cancellationReason || 'Fleet Release & Operational De-Registration';
 
   const topMargin = options.useStampPaperSpace
@@ -1541,12 +1559,12 @@ export async function generateVehicleNocDocx(
                 size: 21
               }),
               new TextRun({
-                text: `M/s. DOCKS (PVT) LTD `,
+                text: `${activeDetails.fullLegalName.toUpperCase()} `,
                 bold: true,
                 size: 21
               }),
               new TextRun({
-                text: `(Customs Bonded Carrier License No. 3997968 / NTN 5064083-8) has `,
+                text: `(Carrier License No. ${activeDetails.customsNtn} / NTN ${activeDetails.ntn}) has `,
                 size: 21
               }),
               new TextRun({
@@ -1556,7 +1574,7 @@ export async function generateVehicleNocDocx(
                 size: 21
               }),
               new TextRun({
-                text: `to the de-registration, release, and cancellation of the vehicle described below from our active customs bonded and domestic transport fleet:`,
+                text: `to the de-registration, release, and cancellation of the vehicle described below from our active carrier and domestic transport fleet:`,
                 size: 21
               })
             ]
@@ -1573,7 +1591,7 @@ export async function generateVehicleNocDocx(
             spacing: { before: 240, line: 280, after: 200 },
             children: [
               new TextRun({
-                text: `1.  All customs port gate passes, GPS tracking devices, container chassis locks, and customs bonded documents issued under the authority of M/s. DOCKS (PVT) LTD have been surrendered, audited, and returned.\n`,
+                text: `1.  All customs port gate passes, GPS tracking devices, container chassis locks, and transport documents issued under the authority of ${activeDetails.fullLegalName} have been surrendered, audited, and returned.\n`,
                 size: 20
               }),
               new TextRun({
@@ -1611,7 +1629,7 @@ export async function generateVehicleNocDocx(
             children: [
               new TextRun({ text: '___________________________\t\t\t\t___________________________\n', size: 21 }),
               new TextRun({ text: 'Authorized Signatory\t\t\t\t\tManager Operations & Fleet\n', bold: true, size: 21 }),
-              new TextRun({ text: 'M/s. DOCKS (PVT) LTD.\t\t\t\t\tM/s. DOCKS (PVT) LTD.\n', bold: true, size: 21 })
+              new TextRun({ text: `${activeDetails.fullLegalName}\t\t\t\t\t${activeDetails.fullLegalName}\n`, bold: true, size: 21 })
             ]
           })
         ]

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 300" width="100%" height="100%">
+  <defs>
+    <filter id="miShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- Central Circular Emblem -->
+  <g transform="translate(300, 110)" filter="url(#miShadow)">
+    <!-- Red Upper/Left Crescent Swoosh -->
+    <path d="M -90, -5 C -88, -55 -45, -92 10, -92 C 55, -92 90, -68 96, -34 C 92, -34 78, -50 56, -62 C 34, -74 8, -78 -14, -72 C -46, -64 -72, -38 -76, -5 C -78, 10 -76, 26 -70, 42 L -84, 52 C -92, 34 -94, 14 -90, -5 Z" 
+          fill="#DC2626"/>
+
+    <!-- Blue Lower/Right Crescent Swoosh -->
+    <path d="M 90, 5 C 88, 55 45, 92 -10, 92 C -55, 92 -90, 68 -96, 34 C -92, 34 -78, 50 -56, 62 C -34, 74 -8, 78 14, 72 C 46, 64 72, 38 76, 5 C 78, -10 76, -26 70, -42 L 84, -52 C 92, -34 94, -14 90, 5 Z" 
+          fill="#1D4ED8"/>
+
+    <!-- Sweeping Blue 'M' Letter -->
+    <path d="M -54, 46 C -62, 28 -62, -2 -50, -24 C -46, -30 -38, -34 -32, -30 C -26, -26 -28, -16 -32, -6 C -36, 6 -36, 20 -32, 30 L -14, -30 L 0, 16 L 14, -30 L 26, 46 L 10, 46 L 2, -4 L -10, 36 L -20, 36 L -36, -8 C -42, 6 -42, 26 -38, 46 Z" 
+          fill="#1D4ED8"/>
+
+    <!-- Solid Red 'I' Bar -->
+    <rect x="34" y="-30" width="16" height="76" rx="2" fill="#DC2626"/>
+  </g>
+
+  <!-- Typography: Company Name & Subtitle -->
+  <text x="300" y="244" 
+        font-family="'Montserrat', 'Arial Black', sans-serif" 
+        font-size="20" 
+        font-weight="900" 
+        letter-spacing="3" 
+        fill="#FFFFFF" 
+        text-anchor="middle">
+    MUHIB INTERNATIONAL (SMC-PVT.) LTD.
+  </text>
+  <text x="300" y="268" 
+        font-family="'Montserrat', sans-serif" 
+        font-size="11" 
+        font-weight="700" 
+        letter-spacing="3" 
+        fill="#93C5FD" 
+        text-anchor="middle">
+    INTERNATIONAL FREIGHT FORWARDERS • IMPORT &amp; EXPORT
+  </text>
+</svg>

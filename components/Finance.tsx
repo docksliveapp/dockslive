@@ -50,6 +50,7 @@ import {
 } from '../services/pdfExportService';
 import { getStandardChargesForCategory } from '../services/customsComplianceService';
 import { getCategoryArrangements, getArrangementCharges } from '../services/categoryTariffService';
+import { useActiveCompany, getActiveCompanyPrefix } from '../services/companyService';
 
 const INITIAL_FINANCE_DATA: FinanceEntry[] = [];
 
@@ -65,8 +66,9 @@ interface FinanceProps {
 
 const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, customLogo }) => {
   const branding = useBranding();
+  const { activeCompany } = useActiveCompany();
   const { companyName, subtitle } = branding;
-  const activeLogo = customLogo || branding.customLogo;
+  const activeLogo = customLogo || branding.customLogo || activeCompany?.logo;
   const [activeTab, setActiveTab] = useState(() => {
     return safeAppStorage.getItem('dpl_finance_tab') || 'cashbook';
   });
@@ -109,12 +111,14 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
   const [statFilterSubtab, setStatFilterSubtab] = useState<string>('ALL');
 
   const generateFinanceReference = (customList?: FinanceEntry[]) => {
+    const activePrefix = activeCompany?.prefix || getActiveCompanyPrefix();
     // Collect all entries from financeData, receivables, and payables to find the maximum serial globally
     const listToScan = customList || [...financeData, ...receivables, ...payables];
     let maxSeq = 0;
+    const regex = new RegExp(`^(?:${activePrefix}|DPL|MI|VSL|TRK|TSCTN)(?:-TRX)?-(\\d+)`, 'i');
     listToScan.forEach(f => {
       if (f.reference) {
-        const match = f.reference.match(/TSCTN-(\d+)/i) || f.reference.match(/DPL-(\d+)/i);
+        const match = f.reference.match(regex);
         if (match) {
           const seq = parseInt(match[1], 10);
           if (seq > maxSeq) maxSeq = seq;
@@ -127,7 +131,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       }
     });
     const nextSeq = maxSeq + 1;
-    return `TSCTN-${String(nextSeq).padStart(4, '0')}`;
+    return `${activePrefix}-${String(nextSeq).padStart(4, '0')}`;
   };
 
   // Cross-component and cross-storage live sync
@@ -2301,7 +2305,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       e.credit > 0 ? e.credit : 0,
       e.balance
     ]);
-    const filename = `General_Ledger_DPL_${glAccountFilter.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}`;
+    const shortCode = activeCompany?.shortName || activeCompany?.prefix || 'DPL';
+    const filename = `General_Ledger_${shortCode}_${glAccountFilter.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}`;
     exportCSVFile(filename, headers, rows);
   };
 
@@ -6584,7 +6589,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                   type="text" 
                   placeholder={
                     transactionType === 'EXPENSE' ? 'e.g. Utility bill payment / Office supplies' :
-                    transactionType === 'INCOME' ? 'e.g. Part payment against Case DPL-26-000004' : 
+                    transactionType === 'INCOME' ? `e.g. Part payment against Case ${activeCompany?.shortName || 'DPL'}-26-000004` : 
                     transactionType === 'PAYABLE' ? 'e.g. Port Wharfage & Handling Charges' : 'e.g. Logistics Service Fee'
                   }
                   className="w-full glass-input rounded-xl p-3 outline-none text-sm text-white border border-white/15 focus:border-brand-400"

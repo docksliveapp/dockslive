@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 300" width="100%" height="100%">
+  <defs>
+    <linearGradient id="vlsCyanGrad" x1="0%" y1="0%" x2="100%" y2="80%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="45%" stop-color="#0284C7"/>
+      <stop offset="100%" stop-color="#0369A1"/>
+    </linearGradient>
+
+    <linearGradient id="sunGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE047"/>
+      <stop offset="100%" stop-color="#EAB308"/>
+    </linearGradient>
+
+    <filter id="vlsShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <g transform="translate(140, 20)" filter="url(#vlsShadow)">
+    <!-- Golden Sun Arc / Crescent Above -->
+    <path d="M 60,78 A 76,76 0 0,1 184,78" fill="none" stroke="url(#sunGrad)" stroke-width="8" stroke-linecap="round"/>
+
+    <!-- Dark Container Stacks & Bridge on Ship Deck -->
+    <g fill="#0F172A" stroke="#1E293B" stroke-width="1.5">
+      <!-- Container blocks -->
+      <rect x="62" y="58" width="34" height="24" rx="1"/>
+      <line x1="79" y1="58" x2="79" y2="82" stroke="#334155" stroke-width="1"/>
+      <rect x="98" y="44" width="46" height="38" rx="1"/>
+      <line x1="121" y1="44" x2="121" y2="82" stroke="#334155" stroke-width="1"/>
+      <rect x="146" y="44" width="44" height="38" rx="1"/>
+      <line x1="168" y1="44" x2="168" y2="82" stroke="#334155" stroke-width="1"/>
+      <!-- Container lines -->
+      <line x1="62" y1="70" x2="190" y2="70" stroke="#334155" stroke-width="1"/>
+      <line x1="98" y1="56" x2="190" y2="56" stroke="#334155" stroke-width="1"/>
+    </g>
+
+    <!-- Stylized Cyan 'VLS' Ship Hull & Prow -->
+    <!-- Left prow with perforated deck dots -->
+    <path d="M 32,84 L 54,84 L 76,146 L 98,84 L 126,84 L 88,154 L 64,154 Z" fill="url(#vlsCyanGrad)"/>
+    <circle cx="36" cy="90" r="2.5" fill="#FFFFFF"/>
+    <circle cx="44" cy="90" r="2.5" fill="#FFFFFF"/>
+    <circle cx="52" cy="90" r="2.5" fill="#FFFFFF"/>
+
+    <!-- 'L' and sweeping prow cut -->
+    <path d="M 126,84 L 148,84 L 148,134 L 194,134 L 190,154 L 126,154 Z" fill="url(#vlsCyanGrad)"/>
+
+    <!-- Sweeping aerodynamic dynamic ship bow -->
+    <path d="M 194,84 C 230,84 250,102 240,132 C 234,148 214,154 186,154 L 176,134 C 196,134 214,130 218,122 C 222,112 210,104 188,104 L 168,104 L 168,84 Z" fill="url(#vlsCyanGrad)"/>
+
+    <!-- Ocean Wave Crests at waterline -->
+    <path d="M 38,158 Q 62,168 86,158 Q 110,148 134,158 Q 158,168 182,158 Q 206,148 230,158 Q 248,166 260,158" 
+          fill="none" stroke="#38BDF8" stroke-width="4" stroke-linecap="round"/>
+    <path d="M 46,168 Q 72,176 98,168 Q 124,160 150,168 Q 176,176 202,168 Q 228,160 252,168" 
+          fill="none" stroke="#0284C7" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- Maritime Anchor dangling on right -->
+    <g transform="translate(216, 126)" stroke="#0F172A" stroke-width="2.5" fill="none">
+      <circle cx="0" cy="-4" r="3.5"/>
+      <line x1="0" y1="0" x2="0" y2="28"/>
+      <line x1="-7" y1="6" x2="7" y2="6"/>
+      <path d="M -12,20 C -12,32 12,32 12,20" stroke-linecap="round"/>
+      <path d="M -15,18 L -12,20 L -9,18"/>
+      <path d="M 9,18 L 12,20 L 15,18"/>
+    </g>
+  </g>
+
+  <!-- Typography Below -->
+  <text x="300" y="244" 
+        font-family="'Montserrat', 'Arial Black', sans-serif" 
+        font-size="22" 
+        font-weight="900" 
+        letter-spacing="3" 
+        fill="#FFFFFF" 
+        text-anchor="middle">
+    VINTAGE SHIPPING LINE
+  </text>
+  <text x="300" y="270" 
+        font-family="'Montserrat', sans-serif" 
+        font-size="11" 
+        font-weight="700" 
+        letter-spacing="3" 
+        fill="#38BDF8" 
+        text-anchor="middle">
+    OCEAN FREIGHT • SHIPPING LINES &amp; CONTAINER FLEET
+  </text>
+</svg>

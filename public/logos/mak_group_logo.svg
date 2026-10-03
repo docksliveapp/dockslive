@@ -1,0 +1,218 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="100%" height="100%">
+  <defs>
+    <!-- Gold Gradients -->
+    <linearGradient id="goldOuter" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FBF0B9"/>
+      <stop offset="25%" stop-color="#D4AF37"/>
+      <stop offset="50%" stop-color="#AA7C11"/>
+      <stop offset="75%" stop-color="#E5C158"/>
+      <stop offset="100%" stop-color="#936806"/>
+    </linearGradient>
+
+    <linearGradient id="goldMetallic" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFF3C4"/>
+      <stop offset="30%" stop-color="#E6C665"/>
+      <stop offset="50%" stop-color="#BF9024"/>
+      <stop offset="70%" stop-color="#E2C15E"/>
+      <stop offset="100%" stop-color="#8C6207"/>
+    </linearGradient>
+
+    <radialGradient id="navyCenter" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0E213D"/>
+      <stop offset="65%" stop-color="#071324"/>
+      <stop offset="100%" stop-color="#030812"/>
+    </radialGradient>
+
+    <radialGradient id="goldDiscGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="75%" stop-color="#D4AF37" stop-opacity="0"/>
+      <stop offset="95%" stop-color="#FDE047" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#D4AF37" stop-opacity="0.8"/>
+    </radialGradient>
+
+    <!-- Bevel & Shadow Filters -->
+    <filter id="medallionShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.85"/>
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#EAB308" flood-opacity="0.25"/>
+    </filter>
+
+    <filter id="goldEmboss" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="3" stdDeviation="2" flood-color="#000000" flood-opacity="0.6"/>
+      <feDropShadow dx="0" dy="-2" stdDeviation="1" flood-color="#FFFBEB" flood-opacity="0.7"/>
+    </filter>
+
+    <filter id="glowSubtle" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Outer Shadow & Base Outer Ring -->
+  <g filter="url(#medallionShadow)">
+    <!-- Outer Rim -->
+    <circle cx="400" cy="400" r="380" fill="url(#goldOuter)" stroke="#4A3405" stroke-width="4"/>
+    <circle cx="400" cy="400" r="366" fill="#0A1628" stroke="url(#goldMetallic)" stroke-width="6"/>
+
+    <!-- Interwoven Decorative Lattice Ring -->
+    <g opacity="0.85" stroke="url(#goldOuter)" stroke-width="3" fill="none">
+      <circle cx="400" cy="400" r="350"/>
+      <circle cx="400" cy="400" r="334"/>
+      <!-- Cross Lattice Struts -->
+      <path d="M 120,400 A 280,280 0 0,0 680,400" stroke-dasharray="6,8"/>
+      <path d="M 400,120 A 280,280 0 0,0 400,680" stroke-dasharray="6,8"/>
+      <!-- Radiating Knots -->
+      <circle cx="400" cy="400" r="320" stroke="url(#goldMetallic)" stroke-width="5"/>
+    </g>
+
+    <!-- Deep Navy Center Disc -->
+    <circle cx="400" cy="400" r="310" fill="url(#navyCenter)" stroke="#1E293B" stroke-width="3"/>
+    <circle cx="400" cy="400" r="310" fill="url(#goldDiscGlow)"/>
+
+    <!-- Large Mechanical Gear Track Outer Bevel -->
+    <circle cx="400" cy="400" r="236" fill="none" stroke="url(#goldMetallic)" stroke-width="14"/>
+    <circle cx="400" cy="400" r="222" fill="#091426" stroke="#453106" stroke-width="2"/>
+
+    <!-- Cog Gear Teeth Array -->
+    <g fill="url(#goldMetallic)" stroke="#533C06" stroke-width="1.5">
+      <!-- 24 Precision Gear Teeth -->
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(15 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(30 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(45 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(60 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(75 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(90 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(105 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(120 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(135 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(150 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(165 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(180 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(195 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(210 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(225 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(240 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(255 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(270 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(285 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(300 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(315 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(330 400 400)"/>
+      <path d="M 390,166 L 410,166 L 414,180 L 386,180 Z" transform="rotate(345 400 400)"/>
+    </g>
+
+    <!-- Inner Core Golden Disc -->
+    <circle cx="400" cy="400" r="172" fill="#0C1B33" stroke="url(#goldMetallic)" stroke-width="8"/>
+    <circle cx="400" cy="400" r="162" fill="#081426" stroke="#453106" stroke-width="2"/>
+
+    <!-- Central "MAK" Metallic 3D Typography -->
+    <g filter="url(#goldEmboss)">
+      <text x="400" y="388" 
+            font-family="'Cinzel', 'Trajan Pro', 'Cinzel Decorative', 'Times New Roman', Georgia, serif" 
+            font-size="88" 
+            font-weight="900" 
+            letter-spacing="6" 
+            fill="url(#goldMetallic)" 
+            stroke="#533C06" 
+            stroke-width="2" 
+            text-anchor="middle">
+        MAK
+      </text>
+
+      <!-- Subtitle: GROUP OF COMPANIES -->
+      <text x="400" y="426" 
+            font-family="'Montserrat', 'Cinzel', 'Arial Black', sans-serif" 
+            font-size="16" 
+            font-weight="800" 
+            letter-spacing="5" 
+            fill="#FDE68A" 
+            text-anchor="middle">
+        GROUP OF COMPANIES
+      </text>
+
+      <!-- Thin Golden Separator Line -->
+      <line x1="280" y1="440" x2="520" y2="440" stroke="url(#goldMetallic)" stroke-width="2"/>
+
+      <!-- 4 Entity Tags Below MAK -->
+      <text x="400" y="460" 
+            font-family="'Montserrat', sans-serif" 
+            font-size="12" 
+            font-weight="700" 
+            letter-spacing="3" 
+            fill="#CBD5E1" 
+            text-anchor="middle">
+        DOCKS • TRUCKIT
+      </text>
+      <text x="400" y="478" 
+            font-family="'Montserrat', sans-serif" 
+            font-size="12" 
+            font-weight="700" 
+            letter-spacing="3" 
+            fill="#CBD5E1" 
+            text-anchor="middle">
+        MUHIB • VINTAGE
+      </text>
+    </g>
+
+    <!-- ============================================== -->
+    <!-- 4 ORBITING BADGES (12H, 9H, 3H, 6H)           -->
+    <!-- ============================================== -->
+
+    <!-- TOP (12 O'CLOCK): DOCKS (PVT.) LTD. (DPL) -->
+    <g transform="translate(400, 160)">
+      <circle cx="0" cy="0" r="72" fill="#0A1628" stroke="url(#goldMetallic)" stroke-width="8" filter="url(#medallionShadow)"/>
+      <!-- Inner cog edge -->
+      <circle cx="0" cy="0" r="62" fill="none" stroke="url(#goldOuter)" stroke-width="3" stroke-dasharray="8,5"/>
+      <!-- DPL Gold Lettering -->
+      <path d="M -38,-14 L -20,-14 C -12,-14 -6,-10 -6,-3 C -6,5 -12,9 -20,9 L -38,9 Z M -31,-8 L -31,3 L -21,3 C -17,3 -14,1 -14,-3 C -14,-6 -17,-8 -21,-8 Z" fill="url(#goldMetallic)"/>
+      <path d="M -2,-14 L 14,-14 C 22,-14 28,-10 28,-3 C 28,4 22,8 14,8 L 6,8 L 6,18 L -2,18 Z M 6,-8 L 6,2 L 13,2 C 17,2 20,0 20,-3 C 20,-6 17,-8 13,-8 Z" fill="url(#goldMetallic)"/>
+      <path d="M 32,-14 L 40,-14 L 40,11 L 54,11 L 54,18 L 32,18 Z" fill="url(#goldMetallic)"/>
+      <!-- DPL Speed lines -->
+      <rect x="-44" y="-12" width="5" height="3" fill="url(#goldMetallic)"/>
+      <rect x="-46" y="-6" width="7" height="3" fill="url(#goldMetallic)"/>
+      <text x="0" y="27" font-family="'Montserrat', sans-serif" font-size="9" font-weight="900" fill="#FDE68A" text-anchor="middle" letter-spacing="1">DOCKS</text>
+    </g>
+
+    <!-- LEFT (9 O'CLOCK): MUHIB INTERNATIONAL (MI) -->
+    <g transform="translate(160, 400)">
+      <circle cx="0" cy="0" r="72" fill="#0A1628" stroke="url(#goldMetallic)" stroke-width="8" filter="url(#medallionShadow)"/>
+      <!-- Dual red/blue swoosh ring -->
+      <path d="M -50,-10 A 52,52 0 1,1 48,15" fill="none" stroke="#DC2626" stroke-width="6" stroke-linecap="round"/>
+      <path d="M 48,15 A 52,52 0 1,1 -50,-10" fill="none" stroke="#2563EB" stroke-width="6" stroke-linecap="round"/>
+      <!-- Sweeping Blue 'M' and Red 'I' -->
+      <path d="M -32,14 L -32,-12 L -20,2 L -8,-12 L -8,14 L -15,14 L -15,-2 L -20,4 L -25,-2 L -25,14 Z" fill="#3B82F6"/>
+      <path d="M 2,-12 L 12,-12 L 12,14 L 2,14 Z" fill="#EF4444"/>
+      <text x="0" y="27" font-family="'Montserrat', sans-serif" font-size="9" font-weight="900" fill="#93C5FD" text-anchor="middle" letter-spacing="1">MUHIB</text>
+    </g>
+
+    <!-- RIGHT (3 O'CLOCK): VINTAGE SHIPPING LINE (VLS) -->
+    <g transform="translate(640, 400)">
+      <circle cx="0" cy="0" r="72" fill="#0A1628" stroke="url(#goldMetallic)" stroke-width="8" filter="url(#medallionShadow)"/>
+      <!-- Sun Arc -->
+      <path d="M -26,-22 A 32,32 0 0,1 26,-22" fill="none" stroke="#FBBF24" stroke-width="4" stroke-linecap="round"/>
+      <!-- Container Ship Silhouette -->
+      <rect x="-24" y="-19" width="48" height="9" fill="#0F172A" stroke="#38BDF8" stroke-width="1"/>
+      <rect x="-18" y="-24" width="16" height="5" fill="#1E293B"/>
+      <!-- Cyan VLS Hull & Waves -->
+      <path d="M -34,-6 L -16,10 L 0,-6 L 14,10 L 32,-4 C 28,14 -4,16 -34,-6 Z" fill="url(#goldMetallic)"/>
+      <path d="M -30,12 Q -15,16 0,12 Q 15,8 30,12" fill="none" stroke="#38BDF8" stroke-width="3"/>
+      <!-- Anchor -->
+      <path d="M 18,2 L 18,14 M 14,10 C 14,16 22,16 22,10" fill="none" stroke="#F1F5F9" stroke-width="2"/>
+      <text x="0" y="27" font-family="'Montserrat', sans-serif" font-size="9" font-weight="900" fill="#7DD3FC" text-anchor="middle" letter-spacing="1">VINTAGE</text>
+    </g>
+
+    <!-- BOTTOM (6 O'CLOCK): TRUCKIT (PVT.) LTD. -->
+    <g transform="translate(400, 640)">
+      <circle cx="0" cy="0" r="72" fill="#0A1628" stroke="url(#goldMetallic)" stroke-width="8" filter="url(#medallionShadow)"/>
+      <!-- Aerodynamic Wings (Left) -->
+      <path d="M -38,-18 L -8,-18 Q -4,-18 -4,-15 L -4,-12 L -38,-12 Q -42,-12 -42,-15 Z" fill="#94A3B8"/>
+      <path d="M -36,-8 L -8,-8 Q -4,-8 -4,-5 L -4,-2 L -36,-2 Q -40,-2 -40,-5 Z" fill="#94A3B8"/>
+      <path d="M -24,2 L -8,2 Q -4,2 -4,5 L -4,8 L -24,8 Q -28,8 -28,5 Z" fill="#94A3B8"/>
+      <!-- Red Cab Curve & Dots (Right) -->
+      <path d="M 2,-18 L 16,-18 Q 32,-18 32,-4 L 32,-1 L 2,-1 Z" fill="#EF4444"/>
+      <path d="M 2,2 L 32,2 L 32,8 L 2,8 Z" fill="#EF4444"/>
+      <circle cx="8" cy="15" r="4.5" fill="#DC2626"/>
+      <circle cx="24" cy="15" r="4.5" fill="#DC2626"/>
+      <text x="0" y="27" font-family="'Montserrat', sans-serif" font-size="9" font-weight="900" fill="#FCA5A5" text-anchor="middle" letter-spacing="1">TRUCKIT</text>
+    </g>
+  </g>
+</svg>

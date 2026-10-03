@@ -47,6 +47,7 @@ import { ClientRegistrationModal } from './ClientRegistrationModal';
 import { SmartCaseSearchModal } from './SmartCaseSearchModal';
 import { logActivity } from '../services/activityLogService';
 import { generateDplCaseNumber, getDestinationCode, getCaseInvoiceNumber } from '../services/caseNumberService';
+import { useActiveCompany, getActiveCompanyPrefix } from '../services/companyService';
 
 export interface UploadedDocRecord {
   id: string;
@@ -359,8 +360,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   currentClientName: propClientName
 }) => {
   const branding = useBranding();
+  const { activeCompany } = useActiveCompany();
   const { companyName, subtitle } = branding;
-  const activeLogo = customLogo || branding.customLogo;
+  const activeLogo = customLogo || branding.customLogo || activeCompany?.logo;
   const [view, setView] = useState<'list' | 'register' | 'details'>('list');
   const [activeNotificationId, setActiveNotificationId] = useState<number | null>(null);
   const [showSmartSearchModal, setShowSmartSearchModal] = useState(false);
@@ -1224,9 +1226,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             return fresh;
           }
           const parts = prev.split('-');
-          if (parts.length === 5 && parts[0] === 'DPL') {
-            if (parts[1] !== destCode) {
-              const updated = `DPL-${destCode}-${parts[2]}-${parts[3]}-${parts[4]}`;
+          const currentPrefix = getActiveCompanyPrefix();
+          if (parts.length === 5 && (parts[0] === 'DPL' || parts[0] === 'MI' || parts[0] === 'VSL' || parts[0] === 'TRK' || parts[0] === currentPrefix)) {
+            if (parts[1] !== destCode || parts[0] !== currentPrefix) {
+              const updated = `${currentPrefix}-${destCode}-${parts[2]}-${parts[3]}-${parts[4]}`;
               safeAppStorage.setItem('dpl_reg_caseno', updated);
               return updated;
             }
@@ -2451,7 +2454,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                         className="font-semibold text-amber-300 hover:text-amber-200 underline decoration-dotted flex items-center gap-1 cursor-pointer transition-colors"
                         title="Click to view/update Shipping Line DO step"
                       >
-                        <span>{c.serviceArrangements?.shippingLineDO?.arrangedBy === 'DPL' ? 'DPL (Docks Pvt Ltd)' : 'Client Arranged'}</span>
+                        <span>{c.serviceArrangements?.shippingLineDO?.arrangedBy === 'DPL' ? `${activeCompany?.shortName || 'Company'} (${activeCompany?.name || 'In-House'})` : 'Client Arranged'}</span>
                         <ExternalLink size={11} className="text-amber-400" />
                       </button>
                     </div>
@@ -2610,7 +2613,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           {/* Modal Footer */}
           <div className="p-4 sm:p-5 border-t border-white/10 bg-slate-950/80 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
             <span className="text-xs text-gray-400">
-              DPL Operations Audit & Clearance Record
+              {activeCompany?.name || 'Company'} Operations Audit &amp; Clearance Record
             </span>
             <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
               <button
@@ -4887,15 +4890,15 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           <div>
             <h4 className="text-sm font-bold text-white uppercase flex items-center gap-2">
               <Layers size={16} className="text-amber-400" />
-              <span>Operational Logistics Services & Charges (Arranged by DPL vs Client)</span>
+              <span>Operational Logistics Services & Charges (Arranged by {activeCompany?.shortName || 'Company'} vs Client)</span>
             </h4>
             <p className="text-xs text-gray-400 mt-0.5">
-              Items marked <span className="text-emerald-400 font-semibold">Arranged by DPL</span> are automatically added to the invoice charges. Items marked <span className="text-sky-400 font-semibold">Arranged by Client</span> are excluded from invoice.
+              Items marked <span className="text-emerald-400 font-semibold">Arranged by {activeCompany?.shortName || 'Company'}</span> are automatically added to the invoice charges. Items marked <span className="text-sky-400 font-semibold">Arranged by Client</span> are excluded from invoice.
             </p>
           </div>
           <div className="flex items-center gap-2 self-start sm:self-auto text-xs">
             <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full font-semibold flex items-center gap-1">
-              <CheckCircle size={12} /> {dplArrangedCount} Invoiced by DPL
+              <CheckCircle size={12} /> {dplArrangedCount} Invoiced by {activeCompany?.shortName || 'Company'}
             </span>
             <span className="bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2.5 py-1 rounded-full font-semibold flex items-center gap-1">
               <User size={12} /> {clientArrangedCount} Client Direct
@@ -4933,10 +4936,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                           ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/40' 
                           : 'text-gray-400 hover:text-gray-200'
                       }`}
-                      title="Arranged by DPL: adds to client invoice"
+                      title={`Arranged by ${activeCompany?.shortName || 'Company'}: adds to client invoice`}
                     >
                       <CheckCircle size={11} />
-                      <span>DPL</span>
+                      <span>{activeCompany?.shortName || 'Company'}</span>
                     </button>
                     <button
                       type="button"
@@ -4956,12 +4959,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
                 {/* Amount Field or Client Direct Settlement Notice */}
                 {isDpl ? (
-                  /* Arranged by DPL: Amount is written step-by-step for invoicing */
+                  /* Arranged by Company: Amount is written step-by-step for invoicing */
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-emerald-500/20">
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] text-emerald-300 font-medium flex items-center gap-1">
                         <DollarSign size={12} className="text-emerald-400" />
-                        <span>DPL Charge:</span>
+                        <span>{activeCompany?.shortName || 'Company'} Charge:</span>
                       </span>
                       <div className="relative w-32">
                         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] font-mono text-emerald-400/80 font-bold">PKR</span>
@@ -5017,7 +5020,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 </span>
               </div>
               <p className="text-xs text-amber-200/80">
-                Default Charges: <strong className="text-emerald-400">Loading Charges & Unloading Charges (Arranged by DPL)</strong>. Vehicle Rent, Builty, Labor & Detention as required.
+                Default Charges: <strong className="text-emerald-400">Loading Charges & Unloading Charges (Arranged by {activeCompany?.shortName || 'Company'})</strong>. Vehicle Rent, Builty, Labor & Detention as required.
               </p>
             </div>
           </div>
@@ -6482,7 +6485,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 <span>Invoice Charges & Estimated Billing Summary</span>
               </h4>
               <p className="text-xs text-gray-400 mt-0.5">
-                Charges automatically synced from DPL-arranged services above. Client-arranged services are excluded from the invoice.
+                Charges automatically synced from {activeCompany?.shortName || 'Company'}-arranged services above. Client-arranged services are excluded from the invoice.
               </p>
             </div>
             <button

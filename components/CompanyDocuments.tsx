@@ -38,6 +38,7 @@ import {
 } from '../services/dbService';
 import { analyzeCompanyDocumentWithAI } from '../services/geminiService';
 import { useBranding } from '../services/brandingService';
+import { useActiveCompany } from '../services/companyService';
 import { jsPDF } from 'jspdf';
 import {
   Building2,
@@ -247,6 +248,7 @@ const getCategoryStyle = (cat: string) => {
 
 export const CompanyDocuments: React.FC = () => {
   const { customLogo, companyName } = useBranding();
+  const { activeCompany } = useActiveCompany();
 
   // State
   const [documents, setDocuments] = useState<CompanyDocument[]>([]);
@@ -551,7 +553,7 @@ export const CompanyDocuments: React.FC = () => {
     pdf.setTextColor(255, 255, 255);
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(16);
-    pdf.text(companyName || 'DOCKS (PVT) LTD', 15, 14);
+    pdf.text(companyName || activeCompany?.name || 'Company', 15, 14);
 
     pdf.setFontSize(9);
     pdf.setTextColor(245, 158, 11);

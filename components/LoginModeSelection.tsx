@@ -294,37 +294,42 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
       {/* Top Header with Corporate Identity */}
       <div className="w-full max-w-xl mx-auto flex flex-col items-center text-center pt-2 pb-1 relative z-10">
         <div className="flex items-center justify-center mb-2 transform hover:scale-105 transition-transform duration-300">
-          {customLogo ? (
-            <img 
-              src={customLogo} 
-              alt="Corporate Logo" 
-              className="w-28 sm:w-36 max-h-24 object-contain drop-shadow-[0_4px_20px_rgba(245,158,11,0.25)]" 
-            />
-          ) : (
-            <Logo className="w-24 sm:w-32 h-auto drop-shadow-xl" />
-          )}
+          <img 
+            src="/logos/mak_group_logo.svg" 
+            alt="MAK Group of Companies" 
+            className="w-32 sm:w-40 max-h-28 object-contain drop-shadow-[0_4px_24px_rgba(245,158,11,0.35)]" 
+          />
         </div>
 
         {/* Corporate Company Name */}
-        {(() => {
-          const rawName = (companyName || '').trim();
-          const isDocks = !rawName || rawName.toLowerCase().includes('docks');
-          const formattedTitle = isDocks ? 'DOCKS PRIVATE LIMITED' : rawName.toUpperCase();
-          return (
-            <h1 
-              className="text-xl sm:text-2xl font-extrabold tracking-wider text-amber-300 uppercase drop-shadow-[0_2px_14px_rgba(245,158,11,0.65)] font-sans px-2"
-              style={{ color: '#FCD34D', textShadow: '0 2px 14px rgba(245, 158, 11, 0.65)' }}
-            >
-              {formattedTitle}
-            </h1>
-          );
-        })()}
+        <h1 
+          className="text-xl sm:text-2xl font-extrabold tracking-wider text-amber-300 uppercase drop-shadow-[0_2px_14px_rgba(245,158,11,0.65)] font-serif px-2"
+          style={{ color: '#FCD34D', textShadow: '0 2px 14px rgba(245, 158, 11, 0.65)' }}
+        >
+          MAK Group of Companies
+        </h1>
         <p 
-          className="text-[11px] sm:text-xs font-bold text-amber-400 tracking-widest uppercase mt-0.5 px-4 max-w-xl leading-relaxed"
+          className="text-[10px] sm:text-[11px] font-bold text-amber-400 tracking-wider uppercase mt-0.5 px-4 max-w-xl leading-relaxed"
           style={{ color: '#FBBF24' }}
         >
-          {subtitle || 'CUSTOMS CLEARANCE, BONDED CARRIER, AFGHAN TRANSIT & LOGISTICS'}
+          DOCKS (PVT) LTD • MUHIB INTERNATIONAL • VINTAGE SHIPPING LINE • TRUCKIT (PVT) LTD
         </p>
+
+        {/* 4 Mini Subsidiary Badges in Login Header */}
+        <div className="flex flex-wrap items-center justify-center gap-1.5 mt-2 px-2">
+          <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30">
+            Docks (Pvt.) Ltd.
+          </span>
+          <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/30">
+            Muhib International
+          </span>
+          <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
+            Vintage Shipping Line
+          </span>
+          <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-red-500/10 text-red-300 border border-red-500/30">
+            Truckit (Pvt.) Ltd.
+          </span>
+        </div>
       </div>
 
       {/* Main Single Login Form Container */}

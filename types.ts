@@ -224,6 +224,7 @@ export interface StaffLoadingBill {
 
 export interface PersonalLedgerAccount {
   id: string;
+  companyId?: string;
   ownerId: number | string;
   ownerUserId: string;
   ownerName: string;
@@ -238,6 +239,7 @@ export interface PersonalLedgerAccount {
 
 export interface PersonalLedgerEntry {
   id: string;
+  companyId?: string;
   accountId: string;
   ownerId: number | string;
   ownerUserId: string;
@@ -308,6 +310,7 @@ export interface MockDocument {
 
 export interface CompanyDocument {
   id: string;
+  companyId?: string;
   title: string;
   category?: string;
   subcategory?: string;
@@ -984,6 +987,7 @@ export interface LedgerEntry {
 
 export interface FinanceEntry {
   id: number;
+  companyId?: string;
   date: string;
   description: string;
   amount: number;

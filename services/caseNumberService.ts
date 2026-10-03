@@ -17,6 +17,8 @@
  * Case Number is identical to the Invoice Number.
  */
 
+import { getActiveCompanyPrefix } from './companyService';
+
 const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'] as const;
 
 export const DESTINATION_CODES: Record<string, string> = {
@@ -85,14 +87,16 @@ export function getDestinationCode(destination?: string): string {
 
 /**
  * Scans existing cases and generates the next strictly sequential case number
- * format: DPL-[DEST]-[YY]-[MMM]-[SERIAL]
+ * format: [PREFIX]-[DEST]-[YY]-[MMM]-[SERIAL] (e.g. DPL-LHR-26-OCT-001, MI-LHR-26-OCT-001, VSL-KHI-26-OCT-001, TRK-LHR-26-OCT-001)
  * Serial resets ONLY when Year changes. Month updates dynamically.
  */
 export function generateDplCaseNumber(
   existingCases: Array<{ caseNo?: string; createdAt?: string; date?: string }>,
   destination?: string,
-  targetDate: Date = new Date()
+  targetDate: Date = new Date(),
+  customPrefix?: string
 ): string {
+  const prefix = customPrefix || getActiveCompanyPrefix();
   const destCode = getDestinationCode(destination);
   const currentYearFull = targetDate.getFullYear();
   const currentYear2Digit = String(currentYearFull).slice(-2);
@@ -107,8 +111,8 @@ export function generateDplCaseNumber(
     // Check if this case belongs to the current year
     let caseYear2Digit: string | null = null;
 
-    // Pattern 1: DPL-LHR-26-SEP-001 or DPL-26-000001
-    const yearMatch = caseStr.match(/DPL-(?:[A-Z0-9]+-)?(\d{2})-(?:[A-Z]{3}-)?(\d+)/i);
+    // Pattern 1: [PREFIX]-[DEST]-[YY]-[MMM]-[SERIAL] or [PREFIX]-26-000001
+    const yearMatch = caseStr.match(/(?:DPL|MI|VSL|TRK|[A-Z]{2,4})-(?:[A-Z0-9]+-)?(\d{2})-(?:[A-Z]{3}-)?(\d+)/i);
     if (yearMatch) {
       caseYear2Digit = yearMatch[1];
       const seq = parseInt(yearMatch[2], 10);
@@ -118,8 +122,8 @@ export function generateDplCaseNumber(
       return;
     }
 
-    // Pattern 2: DPL-(\d+) legacy format
-    const legacyMatch = caseStr.match(/DPL-(\d+)/i);
+    // Pattern 2: [PREFIX]-(\d+) legacy format
+    const legacyMatch = caseStr.match(/(?:DPL|MI|VSL|TRK|[A-Z]{2,4})-(\d+)/i);
     if (legacyMatch) {
       // Check if createdAt is in current year
       const dateStr = c.createdAt || c.date || '';
@@ -144,7 +148,7 @@ export function generateDplCaseNumber(
   const nextSeq = maxSeq + 1;
   const serialStr = String(nextSeq).padStart(3, '0');
 
-  return `DPL-${destCode}-${currentYear2Digit}-${currentMonth3Letter}-${serialStr}`;
+  return `${prefix}-${destCode}-${currentYear2Digit}-${currentMonth3Letter}-${serialStr}`;
 }
 
 /**
@@ -152,12 +156,13 @@ export function generateDplCaseNumber(
  * Business Rule: "Aur Jo hamara case number hoga vahi hamara invoice number hoga same to same"
  */
 export function getCaseInvoiceNumber(caseItem?: { caseNo?: string; id?: string; extractedData?: any }): string {
-  if (!caseItem) return 'DPL-INV-PENDING';
+  const prefix = getActiveCompanyPrefix();
+  if (!caseItem) return `${prefix}-INV-PENDING`;
   if (caseItem.caseNo && caseItem.caseNo.trim()) {
     return caseItem.caseNo.trim();
   }
   if (caseItem.extractedData?.invoiceNumber) {
     return String(caseItem.extractedData.invoiceNumber).trim();
   }
-  return `DPL-${caseItem.id || 'NEW'}`;
+  return `${prefix}-${caseItem.id || 'NEW'}`;
 }

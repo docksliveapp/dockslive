@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { Vehicle } from '../types';
+import { getActiveCompany, getActiveCompanyPrefix } from './companyService';
 
 export interface GeneralLedgerExportItem {
   date: string;
@@ -33,9 +34,13 @@ export function exportGeneralLedgerToExcel(
   const wb = XLSX.utils.book_new();
   const today = new Date().toISOString().split('T')[0];
 
+  const activeComp = getActiveCompany();
+  const prefix = getActiveCompanyPrefix();
+  const compTitle = (activeComp.legalTitle || activeComp.name).toUpperCase();
+
   // Title and metadata block
   const sheetData: any[][] = [
-    ['DPL LOGISTICS & SUPPLY CHAIN - DOCKS (PVT.) LTD'],
+    [`${prefix} LOGISTICS & SUPPLY CHAIN - ${compTitle}`],
     ['GENERAL LEDGER STATEMENT (AUDIT RECORD)'],
     [`Generated On: ${today}`, `Filter / Account: ${accountFilter}`, `Status: Active Official Book`],
     [], // Blank separator
@@ -96,7 +101,7 @@ export function exportGeneralLedgerToExcel(
 
   // Also create a Summary Sheet
   const summarySheetData: any[][] = [
-    ['DOCKS (PVT.) LTD - FINANCIAL METRICS SUMMARY'],
+    [`${compTitle} - FINANCIAL METRICS SUMMARY`],
     [`Statement Period as of: ${today}`],
     [],
     ['Metric Description', 'Amount (PKR)'],
@@ -114,7 +119,7 @@ export function exportGeneralLedgerToExcel(
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Ledger Overview');
 
   const cleanFilter = accountFilter.replace(/[^a-zA-Z0-9]/g, '_');
-  const filename = `General_Ledger_DPL_${cleanFilter}_${today}.xlsx`;
+  const filename = `General_Ledger_${prefix}_${cleanFilter}_${today}.xlsx`;
   XLSX.writeFile(wb, filename);
 }
 
@@ -129,8 +134,12 @@ export function exportClientLedgerToExcel(
   const wb = XLSX.utils.book_new();
   const today = new Date().toISOString().split('T')[0];
 
+  const activeComp = getActiveCompany();
+  const prefix = getActiveCompanyPrefix();
+  const compTitle = (activeComp.legalTitle || activeComp.name).toUpperCase();
+
   const sheetData: any[][] = [
-    ['DOCKS (PVT.) LTD - CLIENT STATEMENT OF ACCOUNT'],
+    [`${compTitle} - CLIENT STATEMENT OF ACCOUNT`],
     [`Client Name: ${clientName}`],
     [`Statement Date: ${today}`, `Financial Status: Reconciled Official Statement`],
     [],
@@ -182,7 +191,7 @@ export function exportClientLedgerToExcel(
   const safeClient = clientName.slice(0, 25).replace(/[^a-zA-Z0-9]/g, '_');
   XLSX.utils.book_append_sheet(wb, ws, `${safeClient} Statement`);
 
-  const filename = `Client_Statement_${safeClient}_${today}.xlsx`;
+  const filename = `Client_Statement_${prefix}_${safeClient}_${today}.xlsx`;
   XLSX.writeFile(wb, filename);
 }
 
@@ -192,11 +201,14 @@ export function exportClientLedgerToExcel(
 export function exportVehiclesToExcel(vehicles: Vehicle[]) {
   const wb = XLSX.utils.book_new();
   const today = new Date().toISOString().split('T')[0];
+  const activeComp = getActiveCompany();
+  const prefix = getActiveCompanyPrefix();
+  const compTitle = (activeComp.legalTitle || activeComp.name).toUpperCase();
 
   const headers = [
     'Sr No',
     'Vehicle Registration Number',
-    'DPL Serial No',
+    `${prefix} Serial No`,
     'Category',
     'Type',
     'Size',
@@ -215,7 +227,7 @@ export function exportVehiclesToExcel(vehicles: Vehicle[]) {
   ];
 
   const sheetData: any[][] = [
-    ['DOCKS (PVT.) LTD - MASTER FLEET & VEHICLE REGISTRY'],
+    [`${compTitle} - MASTER FLEET & VEHICLE REGISTRY`],
     [`Export Date: ${today}`, `Total Vehicles Registered: ${vehicles.length}`],
     [],
     headers
@@ -267,7 +279,7 @@ export function exportVehiclesToExcel(vehicles: Vehicle[]) {
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Fleet Master');
-  XLSX.writeFile(wb, `DPL_Master_Vehicles_Fleet_${today}.xlsx`);
+  XLSX.writeFile(wb, `${prefix}_Master_Vehicles_Fleet_${today}.xlsx`);
 }
 
 /**

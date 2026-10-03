@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 300" width="100%" height="100%">
+  <defs>
+    <filter id="truckitShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <g transform="translate(190, 40)" filter="url(#truckitShadow)">
+    <!-- ============================================== -->
+    <!-- LEFT SIDE: 3 GREY AERODYNAMIC WING SLATS      -->
+    <!-- ============================================== -->
+
+    <!-- Top Wing Blade -->
+    <path d="M 0,22 C 0,10 14,0 28,0 L 114,0 L 114,24 L 0,24 Z" 
+          fill="#5A626A"/>
+
+    <!-- Middle Wing Blade -->
+    <path d="M 12,32 C 12,25 22,22 32,22 L 114,22 L 114,46 L 12,46 Z" 
+          fill="#5A626A" transform="translate(0, 10)"/>
+
+    <!-- Bottom Shorter Wing Blade -->
+    <path d="M 52,58 C 52,52 60,48 70,48 L 114,48 L 114,68 L 52,68 Z" 
+          fill="#5A626A" transform="translate(0, 26)"/>
+
+    <!-- ============================================== -->
+    <!-- RIGHT SIDE: RED CAB PROFILE & DUAL WHEELS      -->
+    <!-- ============================================== -->
+
+    <!-- Upper Curved Red Cab Section -->
+    <path d="M 122,0 L 148,0 C 192,0 216,14 216,24 L 122,24 Z" 
+          fill="#DC2626"/>
+
+    <!-- Middle Red Bar -->
+    <path d="M 122,32 L 216,32 C 220,38 220,44 220,54 L 122,54 Z" 
+          fill="#DC2626" transform="translate(0, 2)"/>
+
+    <!-- Bottom Twin Red Wheels / Headlights -->
+    <circle cx="140" cy="84" r="14" fill="#DC2626"/>
+    <circle cx="180" cy="84" r="14" fill="#DC2626"/>
+  </g>
+
+  <!-- Typography Below -->
+  <text x="300" y="224" 
+        font-family="'Montserrat', 'Arial Black', sans-serif" 
+        font-size="24" 
+        font-weight="900" 
+        letter-spacing="4" 
+        fill="#FFFFFF" 
+        text-anchor="middle">
+    TRUCKIT (PVT.) LTD.
+  </text>
+  <text x="300" y="252" 
+        font-family="'Montserrat', sans-serif" 
+        font-size="11" 
+        font-weight="700" 
+        letter-spacing="3" 
+        fill="#EF4444" 
+        text-anchor="middle">
+    NATIONWIDE FLEET • HEAVY HAULAGE &amp; CARGO LOGISTICS
+  </text>
+</svg>

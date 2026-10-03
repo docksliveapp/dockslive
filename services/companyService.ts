@@ -1,0 +1,274 @@
+import { useState, useEffect } from 'react';
+import { safeAppStorage } from './storage';
+
+export type CompanyId = 'docks' | 'muhib' | 'vantage' | 'truckit';
+
+export interface CompanyInfo {
+  id: CompanyId;
+  name: string;
+  shortName: string;
+  prefix: string;
+  legalTitle: string;
+  category: string;
+  tagline: string;
+  logo: string;
+  accentColor: string;
+  borderColor: string;
+  badgeBg: string;
+  badgeText: string;
+  themeGradient: string;
+  description: string;
+  address: string;
+  phone: string;
+  cell: string;
+  email: string;
+  web: string;
+  directorName: string;
+  directorTitle: string;
+  features: string[];
+}
+
+export const PARENT_GROUP = {
+  id: 'mak',
+  name: 'MAK Group of Companies',
+  title: 'MAK GROUP OF COMPANIES',
+  tagline: 'Premier Multi-Entity Logistics, Customs & International Trade Conglomerate',
+  subtitle: 'DOCKS • TRUCKIT • MUHIB • VANTAGE',
+  logo: '/logos/mak_group_logo.svg',
+  address: 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
+  phone: '+92-21-32330103, +92-21-32330104',
+  cell: '+92-321-9222883, +92-321-8496006',
+  email: 'info@makgroup.com.pk',
+  web: 'www.makgroup.com.pk'
+};
+
+export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
+  docks: {
+    id: 'docks',
+    name: 'Docks (Pvt.) Ltd.',
+    shortName: 'DPL',
+    prefix: 'DPL',
+    legalTitle: 'Docks (Pvt.) Ltd.',
+    category: 'Customs Bonded Carrier & Port Logistics',
+    tagline: 'Nationwide Bonded Carrier & Afghan Transit Logistics Specialist',
+    logo: '/logos/docks_logo.svg',
+    accentColor: '#F59E0B', // Amber / Gold
+    borderColor: 'border-amber-500/40',
+    badgeBg: 'bg-amber-500/20',
+    badgeText: 'text-amber-300',
+    themeGradient: 'from-amber-500/20 via-slate-900 to-black',
+    description: 'Premier Customs Bonded Carrier operating safe containerized transit across all Pakistani ports, dry ports, customs borders & Afghan trade routes.',
+    address: 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
+    phone: '+92-21-32330103, +92-21-32330104',
+    cell: '+92-321-9222883, +92-321-8496006',
+    email: 'info@dockspk.com',
+    web: 'www.dockspk.com',
+    directorName: 'Arbab Khan',
+    directorTitle: 'Director',
+    features: [
+      'Customs Bonded Carrier Fleet',
+      'Port to Dry Port Container Movement',
+      'Afghan Transit Trade (ATT) Corridors',
+      'Real-Time Gate-Pass & Tracking'
+    ]
+  },
+
+  muhib: {
+    id: 'muhib',
+    name: 'Muhib International (SMC-Pvt.) Ltd.',
+    shortName: 'MI',
+    prefix: 'MI',
+    legalTitle: 'Muhib International (SMC-Pvt.) Ltd.',
+    category: 'International Freight Forwarding & Trade Logistics',
+    tagline: 'Global Import, Export & Customs Clearance Facilitation',
+    logo: '/logos/muhib_logo.svg',
+    accentColor: '#2563EB', // Royal Blue & Crimson
+    borderColor: 'border-blue-500/40',
+    badgeBg: 'bg-blue-500/20',
+    badgeText: 'text-blue-300',
+    themeGradient: 'from-blue-600/20 via-slate-900 to-black',
+    description: 'End-to-end International Freight Forwarding, import/export cargo handling, and dedicated global shipping solutions.',
+    address: 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
+    phone: '+92-21-32330103, +92-21-32330104',
+    cell: '+92-321-9222883, +92-321-8496006',
+    email: 'info@muhibinternational.com',
+    web: 'www.muhibinternational.com',
+    directorName: 'Director',
+    directorTitle: 'Director',
+    features: [
+      'Air & Sea International Freight',
+      'Import / Export Clearing & Forwarding',
+      'Customs Tariff & Document Facilitation',
+      'Worldwide Partner Cargo Network'
+    ]
+  },
+
+  vantage: {
+    id: 'vantage',
+    name: 'Vintage Shipping Line',
+    shortName: 'VSL',
+    prefix: 'VSL',
+    legalTitle: 'Vintage Shipping Line (Pvt.) Ltd.',
+    category: 'Ocean Freight & Maritime Container Vessel Logistics',
+    tagline: 'Worldwide Ocean Freight, Shipping Agency & Container Management',
+    logo: '/logos/vantage_logo.svg',
+    accentColor: '#0EA5E9', // Sky / Cyan
+    borderColor: 'border-cyan-500/40',
+    badgeBg: 'bg-cyan-500/20',
+    badgeText: 'text-cyan-300',
+    themeGradient: 'from-cyan-600/20 via-slate-900 to-black',
+    description: 'Full-service ocean container shipping line and vessel agency managing sea freight, chartering, and regional marine logistics.',
+    address: 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
+    phone: '+92-21-32330103, +92-21-32330104',
+    cell: '+92-321-9222883, +92-321-8496006',
+    email: 'info@vantageshipping.com',
+    web: 'www.vantageshipping.com',
+    directorName: 'Director',
+    directorTitle: 'Director',
+    features: [
+      'Ocean Container Vessel Lines',
+      'Full Container Load (FCL) & LCL',
+      'Terminal Handling & Port Operations',
+      'Marine Shipping Documentation'
+    ]
+  },
+
+  truckit: {
+    id: 'truckit',
+    name: 'Truckit (Pvt.) Ltd.',
+    shortName: 'TRK',
+    prefix: 'TRK',
+    legalTitle: 'Truckit (Pvt.) Ltd.',
+    category: 'Nationwide Fleet Haulage & Fast Cargo Trucking',
+    tagline: 'High-Speed Cargo Haulage, Heavy Transport & Inter-City Fleet',
+    logo: '/logos/truckit_logo.svg',
+    accentColor: '#EF4444', // Red
+    borderColor: 'border-red-500/40',
+    badgeBg: 'bg-red-500/20',
+    badgeText: 'text-red-300',
+    themeGradient: 'from-red-600/20 via-slate-900 to-black',
+    description: 'Modern long-haul fleet and heavy cargo trucking network providing rapid, tracked road freight across all national transport corridors.',
+    address: 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
+    phone: '+92-21-32330103, +92-21-32330104',
+    cell: '+92-321-9222883, +92-321-8496006',
+    email: 'info@truckitpk.com',
+    web: 'www.truckitpk.com',
+    directorName: 'Director',
+    directorTitle: 'Director',
+    features: [
+      'Nationwide Heavy Haulage Fleet',
+      'Flatbed & Low-Bed Trailers',
+      '24/7 Road Cargo Dispatch',
+      'Direct Factory & Mill Deliveries'
+    ]
+  }
+};
+
+export const COMPANIES_LIST: CompanyInfo[] = Object.values(GROUP_COMPANIES);
+
+const ACTIVE_COMPANY_KEY = 'dpl_active_company_id';
+const COMPANY_CHANGE_EVENT = 'mak_active_company_changed';
+
+// In-memory cache
+let currentActiveCompanyId: CompanyId = (() => {
+  const stored = safeAppStorage.getItem(ACTIVE_COMPANY_KEY) as CompanyId;
+  if (stored && GROUP_COMPANIES[stored]) return stored;
+  return 'docks';
+})();
+
+const companyListeners = new Set<(company: CompanyInfo) => void>();
+
+/**
+ * Returns currently active company ID.
+ */
+export function getActiveCompanyId(): CompanyId {
+  return currentActiveCompanyId;
+}
+
+/**
+ * Returns currently active CompanyInfo object.
+ */
+export function getActiveCompany(): CompanyInfo {
+  return GROUP_COMPANIES[currentActiveCompanyId] || GROUP_COMPANIES.docks;
+}
+
+/**
+ * Returns the short prefix for serial numbers and codes for the active company:
+ * - Docks -> 'DPL'
+ * - Muhib -> 'MI'
+ * - Vintage -> 'VSL'
+ * - Truckit -> 'TRK'
+ */
+export function getActiveCompanyPrefix(companyId?: CompanyId): string {
+  const active = companyId ? GROUP_COMPANIES[companyId] : getActiveCompany();
+  if (!active) return 'DPL';
+  return active.prefix || (active.id === 'muhib' ? 'MI' : active.id === 'vantage' ? 'VSL' : active.id === 'truckit' ? 'TRK' : 'DPL');
+}
+
+/**
+ * Switches the active company, persists to storage, and notifies all subscribers.
+ */
+export function setActiveCompany(id: CompanyId): void {
+  if (!GROUP_COMPANIES[id]) return;
+  if (currentActiveCompanyId === id) return;
+
+  currentActiveCompanyId = id;
+  safeAppStorage.setItem(ACTIVE_COMPANY_KEY, id);
+
+  const comp = GROUP_COMPANIES[id];
+  companyListeners.forEach(fn => {
+    try { fn(comp); } catch (e) { console.warn(e); }
+  });
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(COMPANY_CHANGE_EVENT, { detail: comp }));
+  }
+}
+
+/**
+ * Scopes a storage key to the active company.
+ * Note: 'docks' uses the base key for backward compatibility so no existing data is lost.
+ */
+export function getCompanyStorageKey(baseKey: string, companyId?: CompanyId): string {
+  const active = companyId || currentActiveCompanyId;
+  if (active === 'docks') {
+    return baseKey;
+  }
+  return `${baseKey}_${active}`;
+}
+
+/**
+ * Subscribes to company changes.
+ */
+export function subscribeToActiveCompany(listener: (company: CompanyInfo) => void): () => void {
+  listener(getActiveCompany());
+  companyListeners.add(listener);
+  return () => {
+    companyListeners.delete(listener);
+  };
+}
+
+/**
+ * React hook to get and switch active company anywhere.
+ */
+export function useActiveCompany() {
+  const [activeCompany, setActiveCompanyState] = useState<CompanyInfo>(() => getActiveCompany());
+
+  useEffect(() => {
+    return subscribeToActiveCompany((comp) => {
+      setActiveCompanyState(comp);
+    });
+  }, []);
+
+  return {
+    activeCompany,
+    companyId: activeCompany.id,
+    companies: COMPANIES_LIST,
+    parentGroup: PARENT_GROUP,
+    setActiveCompany,
+    isDocks: activeCompany.id === 'docks',
+    isMuhib: activeCompany.id === 'muhib',
+    isVantage: activeCompany.id === 'vantage',
+    isTruckit: activeCompany.id === 'truckit'
+  };
+}

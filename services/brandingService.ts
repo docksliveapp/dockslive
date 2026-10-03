@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { safeAppStorage } from './storage';
+import { getActiveCompany, getActiveCompanyId, subscribeToActiveCompany, CompanyInfo, GROUP_COMPANIES } from './companyService';
 
 export interface CompanyBranding {
   customLogo: string | null;
@@ -18,18 +19,22 @@ export interface CompanyBranding {
   updatedBy?: string;
 }
 
-export const DEFAULT_BRANDING: CompanyBranding = {
-  customLogo: null,
-  companyName: 'DOCKS PRIVATE LIMITED',
-  subtitle: 'CUSTOMS BONDED CARRIER',
-  address: 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
-  phone: '+92-21-32330103, +92-21-32330104',
-  cell: '+92-321-9222883, +92-321-8496006',
-  email: 'info@dockspk.com',
-  web: 'www.dockspk.com',
-  directorName: 'Arbab Khan',
-  directorTitle: 'Director',
-};
+export function getDefaultBranding(comp: CompanyInfo = getActiveCompany()): CompanyBranding {
+  return {
+    customLogo: comp.logo || '/logos/docks_logo.svg',
+    companyName: comp.legalTitle || comp.name,
+    subtitle: comp.tagline || comp.category,
+    address: comp.address || 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
+    phone: comp.phone || '+92-21-32330103, +92-21-32330104',
+    cell: comp.cell || '+92-321-9222883, +92-321-8496006',
+    email: comp.email || 'info@dockspk.com',
+    web: comp.web || 'www.dockspk.com',
+    directorName: comp.directorName || 'Director',
+    directorTitle: comp.directorTitle || 'Director',
+  };
+}
+
+export const DEFAULT_BRANDING: CompanyBranding = getDefaultBranding(GROUP_COMPANIES.docks);
 
 const STORAGE_KEY = 'dpl_company_branding_v1';
 const BRANDING_EVENT = 'dpl_branding_changed';
@@ -38,28 +43,38 @@ const BRANDING_EVENT = 'dpl_branding_changed';
  * Returns current branding synchronously from cache/storage to prevent UI flickering.
  */
 export function getStoredBranding(): CompanyBranding {
-  const stored = safeAppStorage.getJSON<Partial<CompanyBranding>>(STORAGE_KEY, {});
-  const rawCompanyName = stored.companyName || DEFAULT_BRANDING.companyName;
-  const normalizedCompanyName = (!rawCompanyName || rawCompanyName.toLowerCase().includes('docks'))
-    ? 'DOCKS PRIVATE LIMITED'
-    : rawCompanyName;
+  const activeCompany = getActiveCompany();
+  const defaultB = getDefaultBranding(activeCompany);
+  const companyKey = `${STORAGE_KEY}_${activeCompany.id}`;
+  // Read ONLY this company's custom branding if set, do NOT fallback to global DPL storage key!
+  const stored = safeAppStorage.getJSON<Partial<CompanyBranding>>(companyKey, {});
 
-  const resolvedEmail = stored.email && !stored.email.toLowerCase().includes('director@')
-    ? stored.email
-    : 'info@dockspk.com';
+  // Determine correct company name according to active subsidiary:
+  let companyName = defaultB.companyName;
+  if (stored.companyName) {
+    if (activeCompany.id !== 'docks' && stored.companyName.toLowerCase().includes('docks')) {
+      companyName = defaultB.companyName;
+    } else {
+      companyName = stored.companyName;
+    }
+  }
+
+  const companyLogo = stored.customLogo || defaultB.customLogo;
+  const subtitle = stored.subtitle || defaultB.subtitle;
 
   return {
-    ...DEFAULT_BRANDING,
+    ...defaultB,
     ...stored,
-    companyName: normalizedCompanyName,
-    subtitle: stored.subtitle || DEFAULT_BRANDING.subtitle,
-    address: stored.address || DEFAULT_BRANDING.address,
-    phone: stored.phone || DEFAULT_BRANDING.phone,
-    cell: stored.cell || DEFAULT_BRANDING.cell,
-    email: resolvedEmail,
-    web: stored.web || DEFAULT_BRANDING.web,
-    directorName: stored.directorName || DEFAULT_BRANDING.directorName,
-    directorTitle: stored.directorTitle || DEFAULT_BRANDING.directorTitle,
+    customLogo: companyLogo,
+    companyName: companyName,
+    subtitle: subtitle,
+    address: stored.address || defaultB.address,
+    phone: stored.phone || defaultB.phone,
+    cell: stored.cell || defaultB.cell,
+    email: stored.email || defaultB.email,
+    web: stored.web || defaultB.web,
+    directorName: stored.directorName || defaultB.directorName,
+    directorTitle: stored.directorTitle || defaultB.directorTitle,
   };
 }
 
@@ -68,6 +83,17 @@ let activeBrandingCache: CompanyBranding = getStoredBranding();
 const brandingListeners = new Set<(branding: CompanyBranding) => void>();
 let firestoreUnsubscribe: (() => void) | null = null;
 
+// Recompute when active company changes
+subscribeToActiveCompany((comp) => {
+  activeBrandingCache = getStoredBranding();
+  brandingListeners.forEach(fn => {
+    try { fn(activeBrandingCache); } catch (_) {}
+  });
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(BRANDING_EVENT, { detail: activeBrandingCache }));
+  }
+});
+
 function ensureFirestoreSubscription() {
   if (firestoreUnsubscribe) return;
   try {
@@ -75,17 +101,27 @@ function ensureFirestoreSubscription() {
     firestoreUnsubscribe = onSnapshot(
       brandingRef,
       (docSnap) => {
+        // If current company is not docks, Firestore settings doc must not overwrite it!
+        const activeComp = getActiveCompany();
+        if (activeComp.id !== 'docks') {
+          activeBrandingCache = getStoredBranding();
+          brandingListeners.forEach(fn => {
+            try { fn(activeBrandingCache); } catch (_) {}
+          });
+          return;
+        }
+
         if (docSnap.exists()) {
           const data = docSnap.data();
           const rawDocName = (data.companyName || '').trim();
           const normalizedDocName = (!rawDocName || rawDocName.toLowerCase() === 'docks (pvt.) ltd' || rawDocName.toLowerCase() === 'docks (pvt) ltd' || rawDocName.toLowerCase() === 'docks (pvt) ltd.')
-            ? 'DOCKS PRIVATE LIMITED'
+            ? 'DOCKS (PVT) LTD.'
             : (data.companyName || DEFAULT_BRANDING.companyName);
 
           const merged: CompanyBranding = {
-            customLogo: data.customLogo || null,
+            customLogo: activeComp.logo,
             companyName: normalizedDocName,
-            subtitle: data.subtitle || DEFAULT_BRANDING.subtitle,
+            subtitle: data.subtitle || activeComp.tagline,
             address: data.address || DEFAULT_BRANDING.address,
             phone: data.phone || DEFAULT_BRANDING.phone,
             cell: data.cell || DEFAULT_BRANDING.cell,
@@ -120,11 +156,19 @@ function ensureFirestoreSubscription() {
  * Broadcasts branding change across all subscribers without window event storming.
  */
 function broadcastBranding(branding: CompanyBranding) {
+  const activeCompany = getActiveCompany();
+  const companyKey = `${STORAGE_KEY}_${activeCompany.id}`;
   activeBrandingCache = branding;
-  safeAppStorage.setJSON(STORAGE_KEY, branding);
+  safeAppStorage.setJSON(companyKey, branding);
+  if (activeCompany.id === 'docks') {
+    safeAppStorage.setJSON(STORAGE_KEY, branding);
+  }
   brandingListeners.forEach(fn => {
     try { fn(branding); } catch (_) {}
   });
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(BRANDING_EVENT, { detail: branding }));
+  }
 }
 
 /**
@@ -199,6 +243,7 @@ export async function optimizeLogoImage(file: File, maxWidth = 800, maxHeight = 
  * Persists updated branding to both Firestore and LocalStorage.
  */
 export async function saveBranding(updates: Partial<CompanyBranding>): Promise<CompanyBranding> {
+  const activeCompany = getActiveCompany();
   const current = getStoredBranding();
   const next: CompanyBranding = {
     ...current,
@@ -209,9 +254,10 @@ export async function saveBranding(updates: Partial<CompanyBranding>): Promise<C
   // 1. Immediately cache locally
   broadcastBranding(next);
 
-  // 2. Persist to Firestore
+  // 2. Persist to Firestore scoped to current company
   try {
-    const brandingRef = doc(db, 'settings', 'branding');
+    const docId = activeCompany.id === 'docks' ? 'branding' : `branding_${activeCompany.id}`;
+    const brandingRef = doc(db, 'settings', docId);
     await setDoc(brandingRef, next, { merge: true });
   } catch (error) {
     console.error('Failed to persist branding to Firestore:', error);
@@ -222,11 +268,13 @@ export async function saveBranding(updates: Partial<CompanyBranding>): Promise<C
 }
 
 /**
- * Resets custom logo back to default DPL system branding.
+ * Resets custom logo back to default system branding for active company.
  */
 export async function resetBrandingToDefault(): Promise<CompanyBranding> {
+  const activeCompany = getActiveCompany();
+  const defaultB = getDefaultBranding(activeCompany);
   const next: CompanyBranding = {
-    ...DEFAULT_BRANDING,
+    ...defaultB,
     updatedAt: new Date().toISOString(),
   };
 
@@ -235,7 +283,8 @@ export async function resetBrandingToDefault(): Promise<CompanyBranding> {
 
   // 2. Persist to Firestore
   try {
-    const brandingRef = doc(db, 'settings', 'branding');
+    const docId = activeCompany.id === 'docks' ? 'branding' : `branding_${activeCompany.id}`;
+    const brandingRef = doc(db, 'settings', docId);
     await setDoc(brandingRef, { customLogo: null, updatedAt: next.updatedAt }, { merge: true });
   } catch (error) {
     console.error('Failed to reset branding in Firestore:', error);
@@ -248,27 +297,37 @@ export async function resetBrandingToDefault(): Promise<CompanyBranding> {
  * React Hook for consuming and updating branding anywhere in the app.
  */
 export function useBranding() {
-  const [branding, setBranding] = useState<CompanyBranding>(() => activeBrandingCache);
+  const { activeCompany } = useActiveCompany();
+  const [branding, setBranding] = useState<CompanyBranding>(() => getStoredBranding());
 
   useEffect(() => {
+    setBranding(getStoredBranding());
     return subscribeToBranding((data) => {
       setBranding(data);
     });
-  }, []);
+  }, [activeCompany.id]);
+
+  const defaultB = getDefaultBranding(activeCompany);
+
+  const finalCompanyName = (activeCompany.id !== 'docks' && branding.companyName?.toLowerCase().includes('docks'))
+    ? defaultB.companyName
+    : (branding.companyName || defaultB.companyName);
+
+  const finalLogo = branding.customLogo || defaultB.customLogo;
 
   return {
     branding,
-    customLogo: branding.customLogo,
-    activeLogo: branding.customLogo,
-    companyName: branding.companyName || DEFAULT_BRANDING.companyName,
-    subtitle: branding.subtitle || DEFAULT_BRANDING.subtitle,
-    address: branding.address || DEFAULT_BRANDING.address,
-    phone: branding.phone || DEFAULT_BRANDING.phone,
-    cell: branding.cell || DEFAULT_BRANDING.cell,
-    email: branding.email || DEFAULT_BRANDING.email,
-    web: branding.web || DEFAULT_BRANDING.web,
-    directorName: branding.directorName || DEFAULT_BRANDING.directorName,
-    directorTitle: branding.directorTitle || DEFAULT_BRANDING.directorTitle,
+    customLogo: finalLogo,
+    activeLogo: finalLogo,
+    companyName: finalCompanyName,
+    subtitle: branding.subtitle || defaultB.subtitle,
+    address: branding.address || defaultB.address,
+    phone: branding.phone || defaultB.phone,
+    cell: branding.cell || defaultB.cell,
+    email: branding.email || defaultB.email,
+    web: branding.web || defaultB.web,
+    directorName: branding.directorName || defaultB.directorName,
+    directorTitle: branding.directorTitle || defaultB.directorTitle,
     isCustomLogo: !!branding.customLogo,
     saveBranding,
     resetBrandingToDefault,

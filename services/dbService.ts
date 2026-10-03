@@ -22,6 +22,19 @@ import {
 import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry } from '../types';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
+import { getActiveCompanyId, subscribeToActiveCompany, CompanyId } from './companyService';
+
+/**
+ * Checks if a record belongs to the currently active company.
+ * Note: 'docks' owns records with companyId === 'docks' as well as legacy untagged records.
+ */
+export function matchesActiveCompany(itemCompanyId?: string, targetCompanyId?: string): boolean {
+  const current = targetCompanyId || getActiveCompanyId();
+  if (current === 'docks') {
+    return !itemCompanyId || itemCompanyId === 'docks';
+  }
+  return itemCompanyId === current;
+}
 
 /**
  * Sanitizes an object recursively to ensure it is 100% compliant with Firestore:
@@ -61,28 +74,52 @@ export function subscribeToCases(
   onError?: (err: any) => void
 ) {
   const path = 'cases';
-  return onSnapshot(
+  let cachedDocs: any[] = [];
+
+  const emit = () => {
+    const active = getActiveCompanyId();
+    const casesList: Case[] = [];
+    cachedDocs.forEach((docData) => {
+      if (matchesActiveCompany(docData.companyId, active)) {
+        casesList.push(docData as Case);
+      }
+    });
+    onData(dedupeArrayById(casesList));
+  };
+
+  const unsubCompany = subscribeToActiveCompany(() => {
+    emit();
+  });
+
+  const unsubFirestore = onSnapshot(
     collection(db, path),
     (snapshot) => {
-      const casesList: Case[] = [];
+      cachedDocs = [];
       snapshot.forEach((docSnap) => {
-        casesList.push({ ...docSnap.data(), id: docSnap.id } as Case);
+        cachedDocs.push({ ...docSnap.data(), id: docSnap.id });
       });
-      onData(dedupeArrayById(casesList));
+      emit();
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
       if (onError) onError(error);
     }
   );
+
+  return () => {
+    unsubFirestore();
+    unsubCompany();
+  };
 }
 
 export async function saveCaseToFirestore(newCase: Case): Promise<void> {
   const path = 'cases';
   const docId = newCase.id || String(Date.now());
+  const activeCompany = getActiveCompanyId();
   try {
     const payload = sanitizeForFirestore({
       ...newCase,
+      companyId: newCase.companyId || activeCompany,
       id: docId,
       createdBy: auth.currentUser?.uid || 'guest',
       updatedAt: new Date().toISOString()
@@ -96,9 +133,11 @@ export async function saveCaseToFirestore(newCase: Case): Promise<void> {
 export async function updateCaseInFirestore(caseItem: Case): Promise<void> {
   const path = 'cases';
   const docId = caseItem.id;
+  const activeCompany = getActiveCompanyId();
   try {
     const payload = sanitizeForFirestore({
       ...caseItem,
+      companyId: caseItem.companyId || activeCompany,
       updatedAt: new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload, { merge: true });
@@ -122,11 +161,28 @@ export function subscribeToFinances(
   onError?: (err: any) => void
 ) {
   const path = 'finances';
-  return onSnapshot(
+  let cachedDocs: any[] = [];
+
+  const emit = () => {
+    const active = getActiveCompanyId();
+    const items: FinanceEntry[] = [];
+    let idx = 0;
+    cachedDocs.forEach((data) => {
+      if (!matchesActiveCompany(data.companyId, active)) return;
+      const numId = parseNumericDocId(data.id, data._docId || String(idx), idx++);
+      items.push({ ...data, id: numId } as FinanceEntry);
+    });
+    onData(dedupeArrayById(items));
+  };
+
+  const unsubCompany = subscribeToActiveCompany(() => {
+    emit();
+  });
+
+  const unsubFirestore = onSnapshot(
     collection(db, path),
     (snapshot) => {
-      const items: FinanceEntry[] = [];
-      let idx = 0;
+      cachedDocs = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
         const partyLower = (data.party || '').toLowerCase();
@@ -141,21 +197,26 @@ export function subscribeToFinances(
           return;
         }
 
-        const numId = parseNumericDocId(docSnap.data().id, docSnap.id, idx++);
-        items.push({ ...docSnap.data(), id: numId } as FinanceEntry);
+        cachedDocs.push({ ...data, _docId: docSnap.id });
       });
-      onData(dedupeArrayById(items));
+      emit();
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
       if (onError) onError(error);
     }
   );
+
+  return () => {
+    unsubFirestore();
+    unsubCompany();
+  };
 }
 
 export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void> {
   const path = 'finances';
   const docId = String(entry.id || Date.now());
+  const activeCompany = getActiveCompanyId();
   try {
     // Monthly recurring fixed overheads and staff payroll are auto-approved upon entry
     const isMonthlyOrRecurring = 
@@ -174,6 +235,7 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
 
     const payload = sanitizeForFirestore({
       ...entryToSave,
+      companyId: entry.companyId || activeCompany,
       id: Number(docId),
       createdBy: auth.currentUser?.uid || 'guest',
       updatedAt: new Date().toISOString()
@@ -267,8 +329,13 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
 export async function updateFinanceInFirestore(entry: FinanceEntry): Promise<void> {
   const path = 'finances';
   const docId = String(entry.id);
+  const activeCompany = getActiveCompanyId();
   try {
-    const payload = sanitizeForFirestore({ ...entry, updatedAt: new Date().toISOString() });
+    const payload = sanitizeForFirestore({ 
+      ...entry, 
+      companyId: entry.companyId || activeCompany,
+      updatedAt: new Date().toISOString() 
+    });
     await setDoc(doc(db, path, docId), payload, { merge: true });
   } catch (error) {
     console.warn(`Firestore updateFinance warning:`, error);
@@ -492,30 +559,53 @@ export function subscribeToVehicles(
   onError?: (err: any) => void
 ) {
   const path = 'vehicles';
-  return onSnapshot(
+  let cachedDocs: any[] = [];
+
+  const emit = () => {
+    const active = getActiveCompanyId();
+    const items: Vehicle[] = [];
+    let idx = 0;
+    cachedDocs.forEach((data) => {
+      if (!matchesActiveCompany(data.companyId, active)) return;
+      const numId = parseNumericDocId(data.id, data._docId || String(idx), idx++);
+      items.push({ ...data, id: numId } as Vehicle);
+    });
+    onData(dedupeArrayById(items));
+  };
+
+  const unsubCompany = subscribeToActiveCompany(() => {
+    emit();
+  });
+
+  const unsubFirestore = onSnapshot(
     collection(db, path),
     (snapshot) => {
-      const items: Vehicle[] = [];
-      let idx = 0;
+      cachedDocs = [];
       snapshot.forEach((docSnap) => {
-        const numId = parseNumericDocId(docSnap.data().id, docSnap.id, idx++);
-        items.push({ ...docSnap.data(), id: numId } as Vehicle);
+        cachedDocs.push({ ...docSnap.data(), _docId: docSnap.id });
       });
-      onData(dedupeArrayById(items));
+      emit();
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
       if (onError) onError(error);
     }
   );
+
+  return () => {
+    unsubFirestore();
+    unsubCompany();
+  };
 }
 
 export async function saveVehicleToFirestore(vehicle: Vehicle): Promise<void> {
   const path = 'vehicles';
   const docId = String(vehicle.id || Date.now());
+  const activeCompany = getActiveCompanyId();
   try {
     const payload = sanitizeForFirestore({
       ...vehicle,
+      companyId: (vehicle as any).companyId || activeCompany,
       id: Number(docId),
       createdBy: auth.currentUser?.uid || 'guest',
       updatedAt: new Date().toISOString()
@@ -529,8 +619,13 @@ export async function saveVehicleToFirestore(vehicle: Vehicle): Promise<void> {
 export async function updateVehicleInFirestore(vehicle: Vehicle): Promise<void> {
   const path = 'vehicles';
   const docId = String(vehicle.id);
+  const activeCompany = getActiveCompanyId();
   try {
-    const payload = sanitizeForFirestore({ ...vehicle, updatedAt: new Date().toISOString() });
+    const payload = sanitizeForFirestore({ 
+      ...vehicle, 
+      companyId: (vehicle as any).companyId || activeCompany,
+      updatedAt: new Date().toISOString() 
+    });
     await setDoc(doc(db, path, docId), payload, { merge: true });
   } catch (error) {
     console.warn(`Firestore updateVehicle warning:`, error);
@@ -1185,20 +1280,42 @@ export function subscribeToClients(
   onError?: (err: any) => void
 ) {
   const path = 'clients';
-  return onSnapshot(
+  let cachedDocs: any[] = [];
+
+  const emit = () => {
+    const active = getActiveCompanyId();
+    const list: Client[] = [];
+    cachedDocs.forEach((docData) => {
+      if (matchesActiveCompany(docData.companyId, active)) {
+        list.push(docData as Client);
+      }
+    });
+    onData(list);
+  };
+
+  const unsubCompany = subscribeToActiveCompany(() => {
+    emit();
+  });
+
+  const unsubFirestore = onSnapshot(
     collection(db, path),
     (snapshot) => {
-      const list: Client[] = [];
+      cachedDocs = [];
       snapshot.forEach((docSnap) => {
-        list.push({ ...docSnap.data(), id: docSnap.id } as Client);
+        cachedDocs.push({ ...docSnap.data(), id: docSnap.id });
       });
-      onData(list);
+      emit();
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
       if (onError) onError(error);
     }
   );
+
+  return () => {
+    unsubFirestore();
+    unsubCompany();
+  };
 }
 
 export async function deleteClientFromFirestore(clientId: string): Promise<void> {
@@ -1213,8 +1330,11 @@ export async function deleteClientFromFirestore(clientId: string): Promise<void>
 export async function saveClientToFirestore(client: Partial<Client>): Promise<string> {
   const path = 'clients';
   const docId = client.id || `client_${Date.now()}`;
+  const activeCompany = getActiveCompanyId();
   try {
     const payload = sanitizeForFirestore({
+      ...client,
+      companyId: (client as any).companyId || activeCompany,
       id: docId,
       name: client.name?.trim() || 'New Client',
       ownerName: client.ownerName || '',
@@ -2210,9 +2330,11 @@ export function subscribeToCompanyDocuments(
 export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocument): Promise<void> {
   const path = 'company_documents';
   const docId = documentItem.id || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const activeCompany = getActiveCompanyId();
   try {
     const payload = sanitizeForFirestore({
       ...documentItem,
+      companyId: documentItem.companyId || activeCompany,
       id: docId,
       updatedAt: new Date().toISOString()
     });
@@ -2225,9 +2347,9 @@ export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocume
   const current = safeAppStorage.getJSON<CompanyDocument[]>(COMPANY_DOCS_KEY, []);
   const idx = current.findIndex(d => d.id === docId);
   if (idx >= 0) {
-    current[idx] = { ...documentItem, id: docId };
+    current[idx] = { ...documentItem, companyId: documentItem.companyId || activeCompany, id: docId };
   } else {
-    current.unshift({ ...documentItem, id: docId });
+    current.unshift({ ...documentItem, companyId: documentItem.companyId || activeCompany, id: docId });
   }
   safeAppStorage.setJSON(COMPANY_DOCS_KEY, current);
 }
@@ -2372,9 +2494,11 @@ export function subscribeToPersonalLedgerEntries(
 export async function savePersonalLedgerAccount(account: PersonalLedgerAccount): Promise<void> {
   const path = 'personal_ledger_accounts';
   const docId = account.id || `placct_${Date.now()}`;
+  const activeCompany = getActiveCompanyId();
   try {
     const payload = sanitizeForFirestore({
       ...account,
+      companyId: account.companyId || activeCompany,
       id: docId,
       updatedAt: new Date().toISOString()
     });
@@ -2387,9 +2511,9 @@ export async function savePersonalLedgerAccount(account: PersonalLedgerAccount):
   const current = safeAppStorage.getJSON<PersonalLedgerAccount[]>(PERSONAL_LEDGER_ACCOUNTS_KEY, []);
   const idx = current.findIndex(a => a.id === docId);
   if (idx >= 0) {
-    current[idx] = { ...account, id: docId };
+    current[idx] = { ...account, companyId: account.companyId || activeCompany, id: docId };
   } else {
-    current.unshift({ ...account, id: docId });
+    current.unshift({ ...account, companyId: account.companyId || activeCompany, id: docId });
   }
   safeAppStorage.setJSON(PERSONAL_LEDGER_ACCOUNTS_KEY, current);
 }
@@ -2409,9 +2533,11 @@ export async function deletePersonalLedgerAccount(accountId: string): Promise<vo
 export async function savePersonalLedgerEntry(entry: PersonalLedgerEntry): Promise<void> {
   const path = 'personal_ledger_entries';
   const docId = entry.id || `plentry_${Date.now()}`;
+  const activeCompany = getActiveCompanyId();
   try {
     const payload = sanitizeForFirestore({
       ...entry,
+      companyId: entry.companyId || activeCompany,
       id: docId,
       createdAt: entry.createdAt || new Date().toISOString()
     });
@@ -2424,9 +2550,9 @@ export async function savePersonalLedgerEntry(entry: PersonalLedgerEntry): Promi
   const current = safeAppStorage.getJSON<PersonalLedgerEntry[]>(PERSONAL_LEDGER_ENTRIES_KEY, []);
   const idx = current.findIndex(e => e.id === docId);
   if (idx >= 0) {
-    current[idx] = { ...entry, id: docId };
+    current[idx] = { ...entry, companyId: entry.companyId || activeCompany, id: docId };
   } else {
-    current.unshift({ ...entry, id: docId });
+    current.unshift({ ...entry, companyId: entry.companyId || activeCompany, id: docId });
   }
   safeAppStorage.setJSON(PERSONAL_LEDGER_ENTRIES_KEY, current);
 }

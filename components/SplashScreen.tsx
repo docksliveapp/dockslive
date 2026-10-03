@@ -225,51 +225,42 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             animation: mounted ? 'dplFloat 4s ease-in-out infinite' : undefined
           }}
         >
-          {customLogo ? (
-            <img 
-              src={customLogo} 
-              alt={companyName || "DOCKS Logo"} 
-              className="w-40 sm:w-56 max-h-44 object-contain drop-shadow-[0_12px_32px_rgba(245,158,11,0.5)] filter brightness-110 select-none mx-auto"
-            />
-          ) : (
-            <div className="w-40 sm:w-56 mx-auto drop-shadow-[0_14px_36px_rgba(245,158,11,0.45)] select-none">
-              <Logo className="w-full h-auto" />
-            </div>
-          )}
+          <img 
+            src="/logos/mak_group_logo.svg" 
+            alt="MAK Group of Companies" 
+            className="w-48 sm:w-64 max-h-52 object-contain drop-shadow-[0_12px_36px_rgba(245,158,11,0.55)] filter brightness-110 select-none mx-auto"
+          />
         </div>
 
         {/* Corporate Typography Cleanly Positioned Below Logo */}
         <div 
-          className={`text-center mt-6 space-y-2 transition-all duration-1000 delay-200 ease-out ${
+          className={`text-center mt-6 space-y-2.5 transition-all duration-1000 delay-200 ease-out ${
             mounted 
               ? 'opacity-100 translate-y-0' 
               : 'opacity-0 translate-y-4'
           }`}
         >
-          {(() => {
-            const rawName = (companyName || '').trim();
-            const isDocks = !rawName || rawName.toLowerCase().includes('docks');
-            const formattedTitle = isDocks ? 'DOCKS (PVT) LTD.' : rawName.toUpperCase();
-            return (
-              <h1 
-                className="text-2xl sm:text-4xl font-extrabold tracking-wider text-amber-300 uppercase drop-shadow-[0_2px_14px_rgba(245,158,11,0.7)] font-sans px-2"
-                style={{ color: '#FCD34D', textShadow: '0 2px 14px rgba(245, 158, 11, 0.7)' }}
-              >
-                {formattedTitle}
-              </h1>
-            );
-          })()}
+          <h1 
+            className="text-2xl sm:text-4xl font-extrabold tracking-wider text-amber-300 uppercase drop-shadow-[0_2px_16px_rgba(245,158,11,0.75)] font-serif px-2"
+            style={{ color: '#FCD34D', textShadow: '0 2px 16px rgba(245, 158, 11, 0.75)' }}
+          >
+            MAK Group of Companies
+          </h1>
           
           <div className="flex items-center justify-center gap-3">
             <div className="h-px w-10 sm:w-20 bg-gradient-to-r from-transparent to-amber-400/80" />
             <p 
-              className="text-amber-400 tracking-[0.35em] text-[10px] sm:text-xs font-bold uppercase"
+              className="text-amber-400 tracking-[0.25em] text-[10px] sm:text-xs font-bold uppercase font-sans"
               style={{ color: '#FBBF24' }}
             >
-              {subtitle || 'CUSTOMS BONDED CARRIER • ONE WINDOW LOGISTICS'}
+              DOCKS (PVT) LTD • MUHIB INTERNATIONAL • VINTAGE SHIPPING LINE • TRUCKIT (PVT) LTD
             </p>
             <div className="h-px w-10 sm:w-20 bg-gradient-to-l from-transparent to-amber-400/80" />
           </div>
+
+          <p className="text-[10px] sm:text-[11px] text-gray-400 font-medium tracking-widest uppercase">
+            Premier Multi-Entity Logistics, Customs &amp; International Trade Conglomerate
+          </p>
         </div>
 
       </div>
