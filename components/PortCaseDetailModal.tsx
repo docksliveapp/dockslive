@@ -7,6 +7,7 @@ import { Case, Container, CaseStatus } from '../types';
 import { downloadCustomsDeliveryOrderPdf } from '../services/pdfExportService';
 import { saveCaseToFirestore } from '../services/dbService';
 import { useBranding } from '../services/brandingService';
+import { useActiveCompany } from '../services/companyService';
 
 interface PortCaseDetailModalProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ export const PortCaseDetailModal: React.FC<PortCaseDetailModalProps> = ({
   staffName = 'Port Staff'
 }) => {
   const { customLogo, companyName } = useBranding();
+  const { activeCompany } = useActiveCompany();
   if (!isOpen) return null;
 
   const container: Container | undefined = targetCase.containers?.[0];
@@ -360,7 +362,7 @@ export const PortCaseDetailModal: React.FC<PortCaseDetailModalProps> = ({
         {/* Footer */}
         <div className="px-6 py-3.5 border-t border-white/10 bg-slate-950/80 flex items-center justify-between">
           <span className="text-[11px] text-gray-400">
-            DPL Port Operations Desk • Confidential Container Record
+            {activeCompany?.shortName || 'MAK'} Port Operations Desk • Confidential Container Record
           </span>
           <button
             type="button"

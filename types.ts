@@ -247,7 +247,7 @@ export interface PersonalLedgerEntry {
   partyName: string;
   date: string;
   description: string;
-  type: 'GIVEN' | 'RECEIVED'; // GIVEN: Money given (Debit / دیا گیا / لینا ہے), RECEIVED: Money received (Credit / وصول کیا / دینا ہے)
+  type: 'GIVEN' | 'RECEIVED'; // GIVEN: Money given (Debit / Receivable), RECEIVED: Money received (Credit / Payable)
   amount: number;
   paymentMethod?: 'CASH' | 'BANK_TRANSFER' | 'ONLINE' | 'CHEQUE' | 'OTHER';
   reference?: string;
@@ -1214,7 +1214,7 @@ export interface AppUser {
   designation?: string; // Free-text designation/title
   contact: string;
   email: string;
-  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'PENDING_APPROVAL';
+  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'PENDING_APPROVAL' | 'REJECTED';
   isSuspended?: boolean;
   suspendedAt?: string;
   suspendedReason?: string;
@@ -1224,6 +1224,8 @@ export interface AppUser {
   lastLogin?: string;
   authProvider?: 'password' | 'google' | 'database';
   isAdmin?: boolean;
+  isGlobalAdmin?: boolean; // Controls entire app across all 4 companies
+  allowedCompanies?: string[]; // e.g. ['docks', 'muhib', 'vantage', 'truckit']
 
   // HR Specific Profile Fields (SRS section 3)
   fatherName?: string;
@@ -1290,10 +1292,10 @@ export interface AppNotification {
   category?: 'CASE' | 'FINANCE' | 'APPROVAL' | 'TRANSPORTER' | 'GENERAL';
   read?: boolean;
   approvalData?: {
-    entityType: 'case' | 'vehicle' | 'finance' | 'client';
+    entityType: 'case' | 'vehicle' | 'finance' | 'client' | 'transporter';
     entityId: number | string;
     entityName?: string;
-    actionType: 'DELETE' | 'CANCEL' | 'EDIT' | 'VERIFY_PAYMENT' | 'APPROVE_CLIENT' | 'WORKFLOW_ACTION';
+    actionType: 'DELETE' | 'CANCEL' | 'EDIT' | 'VERIFY_PAYMENT' | 'APPROVE_CLIENT' | 'APPROVE_TRANSPORTER' | 'WORKFLOW_ACTION';
     requestedBy: string;
     requestedByRole?: string;
     reason?: string;

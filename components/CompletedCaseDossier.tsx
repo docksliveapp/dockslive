@@ -23,6 +23,7 @@ import {
 import { Case, CaseStatus, UserRole, WORKFLOW_8_STEPS } from '../types';
 import { downloadCustomsDeliveryOrderPdf } from '../services/pdfExportService';
 import { PdfViewerModal } from './PdfViewerModal';
+import { useActiveCompany } from '../services/companyService';
 
 interface CompletedCaseDossierProps {
   targetCase: Case;
@@ -39,6 +40,7 @@ export const CompletedCaseDossier: React.FC<CompletedCaseDossierProps> = ({
   onUpdateCase,
   onOpenDownloadAllModal
 }) => {
+  const { activeCompany } = useActiveCompany();
   const [isGeneratingDo, setIsGeneratingDo] = useState(false);
   const [activePdfUrl, setActivePdfUrl] = useState<string | null>(null);
   const [activePdfTitle, setActivePdfTitle] = useState<string>('');
@@ -58,7 +60,10 @@ export const CompletedCaseDossier: React.FC<CompletedCaseDossierProps> = ({
       setIsGeneratingDo(true);
       const res = await downloadCustomsDeliveryOrderPdf({
         targetCase,
-        branding: customLogo ? { customLogo, companyName: 'Docks (Pvt.) Ltd.' } : undefined
+        branding: { 
+          customLogo: customLogo || activeCompany?.logo, 
+          companyName: activeCompany?.legalTitle || activeCompany?.name || 'Company Operations' 
+        }
       });
       if (res?.blobUrl) {
         setActivePdfUrl(res.blobUrl);

@@ -15,7 +15,12 @@ const Logo: React.FC<LogoProps> = ({ className = "", variant = 'full', customSrc
 
   const defaultSrc = activeCompany?.logo || '/logos/docks_logo.svg';
   const fallbackSrc = activeCompany?.logo || '/logos/docks_logo.svg';
-  const activeLogo = customSrc !== undefined ? (customSrc || defaultSrc) : (globalLogo || defaultSrc);
+
+  let resolved = customSrc !== undefined ? customSrc : globalLogo;
+  if (activeCompany?.id !== 'docks' && resolved && resolved.includes('docks_logo')) {
+    resolved = defaultSrc;
+  }
+  const activeLogo = resolved || defaultSrc;
 
   if (activeLogo && !imgError) {
     return (

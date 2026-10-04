@@ -285,8 +285,12 @@ export const CompanyDocuments: React.FC = () => {
   const [docDate, setDocDate] = useState(new Date().toISOString().split('T')[0]);
   const [docTitle, setDocTitle] = useState('');
   const [docFrom, setDocFrom] = useState('');
-  const [docTo, setDocTo] = useState('Docks (Pvt.) Ltd, Karachi');
+  const [docTo, setDocTo] = useState(() => `${activeCompany?.legalTitle || activeCompany?.name || 'Company Operations'}, Karachi`);
   const [docSubject, setDocSubject] = useState('');
+
+  useEffect(() => {
+    setDocTo(`${activeCompany?.legalTitle || activeCompany?.name || 'Company Operations'}, Karachi`);
+  }, [activeCompany?.id]);
   const [docRefNo, setDocRefNo] = useState('');
   const [hearingRequired, setHearingRequired] = useState(false);
   const [hearingDate, setHearingDate] = useState('');
@@ -495,7 +499,7 @@ export const CompanyDocuments: React.FC = () => {
     setShowAddModal(false);
     setDocTitle('');
     setDocFrom('');
-    setDocTo('Docks (Pvt.) Ltd, Karachi');
+    setDocTo(`${activeCompany?.legalTitle || activeCompany?.name || 'Company Operations'}, Karachi`);
     setDocSubject('');
     setDocRefNo('');
     setHearingRequired(false);
@@ -610,7 +614,7 @@ export const CompanyDocuments: React.FC = () => {
     // Footer
     pdf.setFontSize(8);
     pdf.setTextColor(148, 163, 184);
-    pdf.text(`Generated on ${new Date().toLocaleString()} by DPL Digital Record System. Confidential.`, 15, 285);
+    pdf.text(`Generated on ${new Date().toLocaleString()} by ${activeCompany?.shortName || 'MAK'} Digital Record System. Confidential.`, 15, 285);
 
     pdf.save(`${docItem.title.replace(/\s+/g, '_')}_record.pdf`);
   };
@@ -970,7 +974,7 @@ export const CompanyDocuments: React.FC = () => {
                         </span>
                       </div>
                       <div className="truncate">
-                        <strong className="text-gray-300">To:</strong> {doc.to || 'Docks (Pvt.) Ltd'}
+                        <strong className="text-gray-300">To:</strong> {doc.to || activeCompany?.legalTitle || activeCompany?.name || 'Company'}
                       </div>
                     </div>
                   </div>
@@ -1383,7 +1387,7 @@ export const CompanyDocuments: React.FC = () => {
                     required
                     value={docTo}
                     onChange={(e) => setDocTo(e.target.value)}
-                    placeholder="e.g. Docks (Pvt.) Ltd, Executive Office, Karachi"
+                    placeholder={`e.g. ${activeCompany?.legalTitle || activeCompany?.name || 'Company'}, Executive Office, Karachi`}
                     className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
                   />
                 </div>
@@ -1802,7 +1806,7 @@ export const CompanyDocuments: React.FC = () => {
               </div>
               <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
                 <span className="text-gray-400 block text-[10px]">RECIPIENT (TO)</span>
-                <span className="text-white font-medium">{selectedDocForPreview.to || 'Docks (Pvt.) Ltd'}</span>
+                <span className="text-white font-medium">{selectedDocForPreview.to || activeCompany?.legalTitle || activeCompany?.name || 'Company'}</span>
               </div>
             </div>
 

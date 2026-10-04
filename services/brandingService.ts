@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { safeAppStorage } from './storage';
-import { getActiveCompany, getActiveCompanyId, subscribeToActiveCompany, CompanyInfo, GROUP_COMPANIES } from './companyService';
+import { getActiveCompany, getActiveCompanyId, subscribeToActiveCompany, useActiveCompany, CompanyInfo, GROUP_COMPANIES } from './companyService';
 
 export interface CompanyBranding {
   customLogo: string | null;
@@ -59,7 +59,10 @@ export function getStoredBranding(): CompanyBranding {
     }
   }
 
-  const companyLogo = stored.customLogo || defaultB.customLogo;
+  let companyLogo = stored.customLogo || defaultB.customLogo;
+  if (activeCompany.id !== 'docks' && companyLogo && companyLogo.includes('docks_logo')) {
+    companyLogo = defaultB.customLogo;
+  }
   const subtitle = stored.subtitle || defaultB.subtitle;
 
   return {
@@ -313,10 +316,27 @@ export function useBranding() {
     ? defaultB.companyName
     : (branding.companyName || defaultB.companyName);
 
-  const finalLogo = branding.customLogo || defaultB.customLogo;
+  let finalLogo = branding.customLogo || defaultB.customLogo;
+  if (activeCompany.id !== 'docks' && finalLogo && finalLogo.includes('docks_logo')) {
+    finalLogo = defaultB.customLogo;
+  }
+
+  const effectiveBranding: CompanyBranding = {
+    ...branding,
+    companyName: finalCompanyName,
+    customLogo: finalLogo,
+    subtitle: branding.subtitle || defaultB.subtitle,
+    address: branding.address || defaultB.address,
+    phone: branding.phone || defaultB.phone,
+    cell: branding.cell || defaultB.cell,
+    email: branding.email || defaultB.email,
+    web: branding.web || defaultB.web,
+    directorName: branding.directorName || defaultB.directorName,
+    directorTitle: branding.directorTitle || defaultB.directorTitle,
+  };
 
   return {
-    branding,
+    branding: effectiveBranding,
     customLogo: finalLogo,
     activeLogo: finalLogo,
     companyName: finalCompanyName,
@@ -328,7 +348,7 @@ export function useBranding() {
     web: branding.web || defaultB.web,
     directorName: branding.directorName || defaultB.directorName,
     directorTitle: branding.directorTitle || defaultB.directorTitle,
-    isCustomLogo: !!branding.customLogo,
+    isCustomLogo: !!branding.customLogo && branding.customLogo !== defaultB.customLogo,
     saveBranding,
     resetBrandingToDefault,
   };

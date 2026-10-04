@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { db } from './firebase';
 import { safeAppStorage } from './storage';
 
 export type CompanyId = 'docks' | 'muhib' | 'vantage' | 'truckit';
@@ -28,7 +30,23 @@ export interface CompanyInfo {
   features: string[];
 }
 
-export const PARENT_GROUP = {
+export interface ParentGroupInfo {
+  id: string;
+  name: string;
+  title: string;
+  tagline: string;
+  subtitle: string;
+  logo: string;
+  address: string;
+  phone: string;
+  cell: string;
+  email: string;
+  web: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export const DEFAULT_PARENT_GROUP: ParentGroupInfo = {
   id: 'mak',
   name: 'MAK Group of Companies',
   title: 'MAK GROUP OF COMPANIES',
@@ -41,6 +59,116 @@ export const PARENT_GROUP = {
   email: 'info@makgroup.com.pk',
   web: 'www.makgroup.com.pk'
 };
+
+export const PARENT_GROUP_STORAGE_KEY = 'mak_parent_group_branding';
+export const PARENT_GROUP_EVENT = 'mak_parent_group_updated';
+
+export function getParentGroupInfo(): ParentGroupInfo {
+  const stored = safeAppStorage.getJSON<Partial<ParentGroupInfo>>(PARENT_GROUP_STORAGE_KEY, {});
+  return {
+    ...DEFAULT_PARENT_GROUP,
+    ...stored,
+    logo: stored.logo || DEFAULT_PARENT_GROUP.logo,
+    name: stored.name || DEFAULT_PARENT_GROUP.name,
+    title: stored.title || DEFAULT_PARENT_GROUP.title,
+    tagline: stored.tagline || DEFAULT_PARENT_GROUP.tagline,
+    subtitle: stored.subtitle || DEFAULT_PARENT_GROUP.subtitle,
+    address: stored.address || DEFAULT_PARENT_GROUP.address,
+    phone: stored.phone || DEFAULT_PARENT_GROUP.phone,
+    cell: stored.cell || DEFAULT_PARENT_GROUP.cell,
+    email: stored.email || DEFAULT_PARENT_GROUP.email,
+    web: stored.web || DEFAULT_PARENT_GROUP.web,
+  };
+}
+
+export let PARENT_GROUP: ParentGroupInfo = getParentGroupInfo();
+
+const parentGroupListeners = new Set<(group: ParentGroupInfo) => void>();
+
+export function subscribeToParentGroup(listener: (group: ParentGroupInfo) => void): () => void {
+  listener(PARENT_GROUP);
+  parentGroupListeners.add(listener);
+  return () => {
+    parentGroupListeners.delete(listener);
+  };
+}
+
+export function broadcastParentGroupUpdate(newGroup: ParentGroupInfo): void {
+  PARENT_GROUP = newGroup;
+  safeAppStorage.setJSON(PARENT_GROUP_STORAGE_KEY, newGroup);
+  parentGroupListeners.forEach(fn => {
+    try { fn(newGroup); } catch (e) { console.warn(e); }
+  });
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(PARENT_GROUP_EVENT, { detail: newGroup }));
+  }
+}
+
+export async function saveParentGroupInfo(updates: Partial<ParentGroupInfo>, updatedBy?: string): Promise<ParentGroupInfo> {
+  const current = getParentGroupInfo();
+  const merged: ParentGroupInfo = {
+    ...current,
+    ...updates,
+    updatedAt: new Date().toISOString(),
+    updatedBy: updatedBy || 'System Administrator'
+  };
+
+  broadcastParentGroupUpdate(merged);
+
+  try {
+    const parentRef = doc(db, 'settings', 'parent_group');
+    await setDoc(parentRef, merged, { merge: true });
+  } catch (err) {
+    console.warn('Firestore parent_group save warning:', err);
+  }
+
+  return merged;
+}
+
+export async function resetParentGroupInfo(): Promise<ParentGroupInfo> {
+  return saveParentGroupInfo(DEFAULT_PARENT_GROUP);
+}
+
+let hasSubscribedParentGroup = false;
+export function initParentGroupFirestoreSync() {
+  if (hasSubscribedParentGroup) return;
+  hasSubscribedParentGroup = true;
+  try {
+    const parentRef = doc(db, 'settings', 'parent_group');
+    onSnapshot(parentRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        const merged: ParentGroupInfo = {
+          ...DEFAULT_PARENT_GROUP,
+          ...data,
+          logo: data.logo || DEFAULT_PARENT_GROUP.logo
+        };
+        broadcastParentGroupUpdate(merged);
+      }
+    }, (err) => {
+      console.warn('Parent group Firestore sync notice:', err);
+    });
+  } catch (e) {
+    console.warn('Parent group Firestore init error:', e);
+  }
+}
+
+export function useParentGroup() {
+  const [parentGroup, setParentGroup] = useState<ParentGroupInfo>(() => getParentGroupInfo());
+
+  useEffect(() => {
+    initParentGroupFirestoreSync();
+    return subscribeToParentGroup((group) => {
+      setParentGroup(group);
+    });
+  }, []);
+
+  return {
+    parentGroup,
+    saveParentGroup: (updates: Partial<ParentGroupInfo>, updatedBy?: string) => saveParentGroupInfo(updates, updatedBy),
+    resetParentGroup: () => resetParentGroupInfo()
+  };
+}
 
 export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
   docks: {
@@ -253,18 +381,26 @@ export function subscribeToActiveCompany(listener: (company: CompanyInfo) => voi
  */
 export function useActiveCompany() {
   const [activeCompany, setActiveCompanyState] = useState<CompanyInfo>(() => getActiveCompany());
+  const [parentGroupState, setParentGroupState] = useState<ParentGroupInfo>(() => getParentGroupInfo());
 
   useEffect(() => {
-    return subscribeToActiveCompany((comp) => {
+    const unsubComp = subscribeToActiveCompany((comp) => {
       setActiveCompanyState(comp);
     });
+    const unsubGroup = subscribeToParentGroup((group) => {
+      setParentGroupState(group);
+    });
+    return () => {
+      unsubComp();
+      unsubGroup();
+    };
   }, []);
 
   return {
     activeCompany,
     companyId: activeCompany.id,
     companies: COMPANIES_LIST,
-    parentGroup: PARENT_GROUP,
+    parentGroup: parentGroupState,
     setActiveCompany,
     isDocks: activeCompany.id === 'docks',
     isMuhib: activeCompany.id === 'muhib',

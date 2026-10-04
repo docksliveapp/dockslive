@@ -1016,7 +1016,8 @@ export function subscribeToUsers(
         const data = docSnap.data();
         const nameLower = (data.name || '').toLowerCase();
         const idLower = (data.userId || '').toLowerCase();
-        const isLegacyPersonal = 
+        const isClientOrTransporter = data.role === UserRole.CLIENT || data.role === UserRole.TRANSPORTER || data.status === 'PENDING_APPROVAL';
+        const isLegacyPersonal = !isClientOrTransporter && !data.isGlobalAdmin && (
           nameLower.includes('mohsin') || 
           nameLower.includes('shahid') || 
           nameLower.includes('danish') || 
@@ -1027,7 +1028,8 @@ export function subscribeToUsers(
           idLower === 'danish' || 
           idLower === 'documentmanager' ||
           idLower === 'lahore' ||
-          idLower === 'peshawar';
+          idLower === 'peshawar'
+        );
 
         if (isLegacyPersonal) {
           // Asynchronously clean up legacy document from Firestore

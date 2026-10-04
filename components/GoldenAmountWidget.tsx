@@ -16,12 +16,14 @@ import {
 } from 'lucide-react';
 import { subscribeToFinances } from '../services/dbService';
 import { FinanceEntry } from '../types';
+import { useActiveCompany } from '../services/companyService';
 
 interface GoldenAmountWidgetProps {
   onOpenFinance?: (tab?: string) => void;
 }
 
 export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({ onOpenFinance }) => {
+  const { activeCompany } = useActiveCompany();
   const [isOpen, setIsOpen] = useState(false);
   const [finances, setFinances] = useState<FinanceEntry[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -102,7 +104,7 @@ export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({ onOpenFi
               </div>
               <div>
                 <h3 className="text-base sm:text-lg font-black tracking-tight leading-tight">
-                  DOCKS Treasury & Balance
+                  {activeCompany?.shortName || 'MAK'} Treasury & Balance
                 </h3>
                 <p className="text-xs font-bold text-amber-950/80">
                   Treasury & Balance Summary
@@ -256,7 +258,7 @@ export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({ onOpenFi
           hover:from-amber-400 hover:via-yellow-300 hover:to-amber-500
           border-yellow-200/60 hover:border-yellow-100
           shadow-amber-500/25 hover:shadow-amber-500/40 shrink-0"
-        title="DOCKS Corporate Treasury & Amount"
+        title={`${activeCompany?.name || 'Company'} Corporate Treasury & Amount`}
       >
         {/* Animated Light Sweep Effect Across the Gold Surface */}
         <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/40 to-transparent pointer-events-none" />

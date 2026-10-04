@@ -458,6 +458,7 @@ const App: React.FC = () => {
         <CompanyWorkspaceSelector 
           userName={safeAppStorage.getItem('dpl_current_user_name') || 'Staff User'}
           userRoleTitle={currentDesignation || (currentRole as string)}
+          onSignOut={handleSignOut}
           onSelectCompany={(selectedId) => {
             setActiveCompany(selectedId);
             setShowCompanySelection(false);
@@ -623,7 +624,7 @@ const App: React.FC = () => {
             setMobileSidebarOpen(false);
           }}
           className="h-auto py-4 flex flex-col items-center justify-center border-b border-white/5 px-3 overflow-hidden gap-2 cursor-pointer hover:opacity-90 active:scale-95 transition-all group select-none"
-          title="DOCKS Dashboard"
+          title={`${activeCompany.shortName} Dashboard`}
         >
           {/* Full Logo - Shown when sidebar is expanded OR on mobile */}
           <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} flex items-center justify-center gap-2.5`}>
@@ -746,7 +747,7 @@ const App: React.FC = () => {
                 setNavigationFilter(null);
               }}
               className="flex items-center gap-2 cursor-pointer hover:opacity-85 transition-opacity shrink-0"
-              title="DOCKS Dashboard"
+              title={`${activeCompany.shortName} Dashboard`}
             >
               <Logo variant="icon" className="h-7 w-auto max-w-[36px]" />
             </button>

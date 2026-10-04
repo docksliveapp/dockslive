@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
+import { useActiveCompany } from '../services/companyService';
 import { Vehicle, Case, FinanceEntry, AvailableVehicle, TransporterRequest, Container } from '../types';
 import { 
   subscribeToVehicles, 
@@ -44,6 +45,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
   transporterName: initialName
 }) => {
   const { companyName, subtitle, activeLogo } = useBranding();
+  const { activeCompany } = useActiveCompany();
 
   // Navigation
   const [activeTab, setActiveTab] = useState<'vehicles' | 'ready_vehicles' | 'finance' | 'assigned_cases'>('vehicles');
@@ -588,7 +590,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
                 <Logo className="h-7 w-auto shrink-0" />
                 <div className="min-w-0">
                   <span className="text-xs sm:text-sm font-bold text-white block tracking-wide truncate">
-                    Docks (Pvt) Ltd.
+                    {activeCompany?.legalTitle || activeCompany?.name || companyName || 'Company Operations'}
                   </span>
                   <span className="text-[10px] text-gray-400 block font-medium truncate">
                     Transporter Desk

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
+import { useActiveCompany } from '../services/companyService';
 import { 
   downloadContainerInvoicePdf, 
   downloadCasePdf, 
@@ -103,6 +104,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   onSignOut
 }) => {
   const { companyName, subtitle, activeLogo, branding } = useBranding();
+  const { activeCompany } = useActiveCompany();
+  const compShort = activeCompany?.shortName || 'Company';
+  const compName = activeCompany?.name || 'Company Operations';
 
   // Navigation: 'cases' | 'case_status' | 'finance' | 'available_vehicles'
   const [activeTab, setActiveTab] = useState<'cases' | 'case_status' | 'finance' | 'available_vehicles'>('cases');
@@ -1271,7 +1275,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search by Case No (e.g. DPL-26-0001), B/L No, Container No, Port, Goods..."
+                  placeholder={`Search by Case No (e.g. ${compShort}-26-0001), B/L No, Container No, Port, Goods...`}
                   value={caseSearchQuery}
                   onChange={(e) => setCaseSearchQuery(e.target.value)}
                   className="w-full bg-slate-950 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none focus:border-amber-500 shadow-inner"
@@ -1608,19 +1612,19 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             {/* =================================================================== */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               
-              {/* Counter 1: Payable to DPL */}
+              {/* Counter 1: Payable to Company */}
               <div className="bg-slate-900 border border-amber-500/30 p-5 rounded-2xl space-y-1 shadow-lg">
                 <div className="flex justify-between items-center">
-                  <span className="text-xs font-semibold text-amber-400">Payable to DPL</span>
+                  <span className="text-xs font-semibold text-amber-400">Payable to {compShort}</span>
                   <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-medium">
-                    Company Balance
+                    {compShort} Balance
                   </span>
                 </div>
                 <p className="text-2xl font-mono font-bold text-white">
                   PKR {payableToDpl.toLocaleString()}
                 </p>
                 <span className="text-[11px] text-gray-400 block">
-                  Remaining balance due to DPL company (0 if nil)
+                  Remaining balance due to {compShort} ({compName}) (0 if nil)
                 </span>
               </div>
 
@@ -2332,7 +2336,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                   {[
-                    { id: 'Company Payment (DPL)', label: 'Company (DPL)', desc: 'DPL Invoice Settlement' },
+                    { id: 'Company Payment (DPL)', label: `Company (${compShort})`, desc: `${compShort} Invoice Settlement` },
                     { id: 'Loading Payment', label: 'Loading Staff', desc: 'Port Loading Desk' },
                     { id: 'Vehicle Rent', label: 'Vehicle Rent', desc: 'Transporter Freight' }
                   ].map((cat, cIdx) => (

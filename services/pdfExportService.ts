@@ -353,6 +353,7 @@ export function drawOfficialCompanyStampOnly(
     // Header
     const stampComp = getActiveCompany();
     const stampDef = getDefaultBranding(stampComp);
+    const b = getStoredBranding();
     const stampTitle = cleanPdfText(b.companyName) || stampDef.companyName;
     const stampSub = cleanPdfText(b.subtitle) || stampComp.category || 'LOGISTICS & CARRIER OPERATIONS';
 

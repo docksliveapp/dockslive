@@ -1205,44 +1205,57 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     return path.split('.').reduce((acc, part) => acc && acc[part], obj);
   };
 
-  // Generate strictly sequential case number: DPL-[DEST]-[YY]-[MMM]-[SERIAL]
+  // Generate strictly sequential case number: [PREFIX]-[DEST]-[YY]-[MMM]-[SERIAL]
   // Serial resets ONLY on Year change. Month changes dynamically.
   // Invoice Number is identical to Case Number.
   const generateCaseNumber = (customList?: Case[], destination?: string) => {
     const dest = destination || formData.pod || formData.extractedData?.dropoffDestination;
-    return generateDplCaseNumber(customList || cases, dest);
+    const currentPrefix = activeCompany?.prefix || getActiveCompanyPrefix();
+    return generateDplCaseNumber(customList || cases, dest, new Date(), currentPrefix);
   };
 
-  // Keep generatedCaseNo synchronized with chosen POD / destination during registration
+  // Keep generatedCaseNo synchronized with chosen POD / destination and active subsidiary prefix during registration
   useEffect(() => {
     if (view === 'register') {
       const dest = formData.pod || formData.extractedData?.dropoffDestination;
+      const currentPrefix = activeCompany?.prefix || getActiveCompanyPrefix();
       if (dest) {
         const destCode = getDestinationCode(dest);
         setGeneratedCaseNo(prev => {
           if (!prev) {
-            const fresh = generateDplCaseNumber(cases, dest);
+            const fresh = generateDplCaseNumber(cases, dest, new Date(), currentPrefix);
             safeAppStorage.setItem('dpl_reg_caseno', fresh);
             return fresh;
           }
           const parts = prev.split('-');
-          const currentPrefix = getActiveCompanyPrefix();
-          if (parts.length === 5 && (parts[0] === 'DPL' || parts[0] === 'MI' || parts[0] === 'VSL' || parts[0] === 'TRK' || parts[0] === currentPrefix)) {
+          if (parts.length === 5) {
             if (parts[1] !== destCode || parts[0] !== currentPrefix) {
               const updated = `${currentPrefix}-${destCode}-${parts[2]}-${parts[3]}-${parts[4]}`;
               safeAppStorage.setItem('dpl_reg_caseno', updated);
               return updated;
             }
           } else {
-            const fresh = generateDplCaseNumber(cases, dest);
+            const fresh = generateDplCaseNumber(cases, dest, new Date(), currentPrefix);
             safeAppStorage.setItem('dpl_reg_caseno', fresh);
             return fresh;
           }
           return prev;
         });
+      } else {
+        setGeneratedCaseNo(prev => {
+          if (prev) {
+            const parts = prev.split('-');
+            if (parts.length === 5 && parts[0] !== currentPrefix) {
+              const updated = `${currentPrefix}-${parts.slice(1).join('-')}`;
+              safeAppStorage.setItem('dpl_reg_caseno', updated);
+              return updated;
+            }
+          }
+          return prev;
+        });
       }
     }
-  }, [formData.pod, formData.extractedData?.dropoffDestination, view, cases]);
+  }, [formData.pod, formData.extractedData?.dropoffDestination, view, cases, activeCompany?.id, activeCompany?.prefix]);
 
   const handleResumeDraft = () => {
     const savedStep = parseInt(safeAppStorage.getItem('dpl_reg_step') || '1', 10);
@@ -6500,7 +6513,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
           {currentCharges.length === 0 ? (
             <div className="p-5 text-center rounded-xl bg-white/5 border border-dashed border-white/15 text-gray-400 text-xs space-y-2">
-              <p className="text-gray-300">No automatic charges applied. Switch any service above to "DPL" or add custom charges.</p>
+              <p className="text-gray-300">No automatic charges applied. Switch any service above to "{activeCompany?.shortName || 'Company'}" or add custom charges.</p>
               <button
                 type="button"
                 onClick={() => setShowRegistrationChargeModal(true)}

@@ -23,6 +23,7 @@ import {
   DOCKS_COMPANY
 } from '../services/vehicleDocxService';
 import { downloadCustomsVehicleListPdf } from '../services/pdfExportService';
+import { useActiveCompany } from '../services/companyService';
 
 export type DocumentType = 
   | 'REG_LETTER'        // Letter 10 Vehicles registration letter (Company Letterhead)
@@ -51,6 +52,7 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
   initialDocType = 'REG_LETTER'
 }) => {
   const allVehicles = rawAllVehicles || altVehicles || [];
+  const { activeCompany } = useActiveCompany();
 
   const [activeTab, setActiveTab] = useState<DocumentType>(initialDocType);
   const [searchQuery, setSearchQuery] = useState('');
@@ -459,10 +461,10 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
               </span>
               <p className="text-xs text-gray-300">
                 {activeTab === 'REG_LETTER' && 'Generates official application letter addressed to The Deputy / Assistant Director, Licensing of Bonded Carrier, Custom House Karachi.'}
-                {activeTab === 'CUSTOMS_PERMIT' && 'Customs officers ask Docks (Pvt) Ltd to bring this pre-printed permit letter so they can review and endorse signatures.'}
+                {activeTab === 'CUSTOMS_PERMIT' && `Customs officers ask ${activeCompany?.legalTitle || activeCompany?.name || 'Company'} to bring this pre-printed permit letter so they can review and endorse signatures.`}
                 {activeTab === 'LEASE_AGREEMENT' && 'Mandatory legal agreement executed with vehicle owners on official Stamp Paper with clauses (a) to (h).'}
                 {activeTab === 'LEASE_TERMINATION' && 'Mutual covenant agreement on Stamp Paper between Lessor and Lessee concluding operational lease.'}
-                {activeTab === 'CANCELLATION_NOC' && 'Formal notice printed on Docks (Pvt) Ltd letterhead notifying Customs of vehicle contract conclusion.'}
+                {activeTab === 'CANCELLATION_NOC' && `Formal notice printed on ${activeCompany?.legalTitle || activeCompany?.name || 'Company'} letterhead notifying Customs of vehicle contract conclusion.`}
               </p>
             </div>
 

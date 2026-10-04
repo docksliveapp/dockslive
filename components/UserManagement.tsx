@@ -32,6 +32,7 @@ import { ClientRegistrationModal } from './ClientRegistrationModal';
 import { StaffLedgerModal } from './StaffLedgerModal';
 import { ClientLedgerModal } from './ClientLedgerModal';
 import { DestinationStaffModal } from './DestinationStaffModal';
+import { useActiveCompany } from '../services/companyService';
 
 export const CASE_CATEGORIES = [
   "Afghan Transit",
@@ -43,6 +44,7 @@ export const CASE_CATEGORIES = [
 ];
 
 const UserManagement: React.FC = () => {
+  const { activeCompany } = useActiveCompany();
   const [activeTab, setActiveTab] = useState<'office' | 'clients' | 'transporters' | 'destinations'>(() => {
     return (safeAppStorage.getItem('dpl_user_tab') as any) || 'office';
   });
@@ -529,10 +531,10 @@ const UserManagement: React.FC = () => {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
         <div>
           <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2 drop-shadow-md">
-            <Users className="text-brand-400" /> User Management & Unified Directory
+            <Users className="text-brand-400" /> {activeCompany.legalTitle || activeCompany.name} • Staff &amp; Entity Directory
           </h2>
           <p className="text-xs text-gray-400 mt-1">
-            Unified Management: Office Staff (HR & Dual Ledgers), Clients (Tariffs & Financial Statements), Transporters/Brokers & Destinations Staff.
+            Managing personnel, clients, transporters, and staff for {activeCompany.legalTitle || activeCompany.name}. (Global Master Admins are managed from the Admin Management Hub on the Companies page).
           </p>
         </div>
         <button 

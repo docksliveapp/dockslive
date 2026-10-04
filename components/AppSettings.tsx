@@ -8,6 +8,7 @@ import {
 import { enhanceDocumentWithAI, fileToBase64, downloadFile } from '../services/geminiService';
 import { CompanyDocument } from '../types';
 import { useBranding, optimizeLogoImage } from '../services/brandingService';
+import { useActiveCompany } from '../services/companyService';
 import { 
   wipeCompleteDatabase, 
   exportSelectiveDatabaseBackup, 
@@ -95,7 +96,8 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
 
   // Branding & Logo State
   const { branding, saveBranding, resetBrandingToDefault, isCustomLogo } = useBranding();
-  const [brandCompanyName, setBrandCompanyName] = useState(branding.companyName);
+  const { activeCompany } = useActiveCompany();
+  const [brandCompanyName, setBrandCompanyName] = useState(branding.companyName || activeCompany?.legalTitle || activeCompany?.name);
   const [brandSubtitle, setBrandSubtitle] = useState(branding.subtitle || '');
   const [logoPreview, setLogoPreview] = useState<string | null>(branding.customLogo);
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -106,15 +108,15 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setBrandCompanyName(branding.companyName);
-    setBrandSubtitle(branding.subtitle || '');
+    setBrandCompanyName(branding.companyName || activeCompany?.legalTitle || activeCompany?.name);
+    setBrandSubtitle(branding.subtitle || activeCompany?.tagline || '');
     if (!logoFile) {
-      setLogoPreview(branding.customLogo);
+      setLogoPreview(branding.customLogo || activeCompany?.logo);
     }
-  }, [branding.companyName, branding.subtitle, branding.customLogo, logoFile]);
+  }, [branding.companyName, branding.subtitle, branding.customLogo, logoFile, activeCompany?.id]);
 
   // General
-  const companyName = branding.companyName || 'Docks Private Limited';
+  const companyName = branding.companyName || activeCompany?.legalTitle || activeCompany?.name || 'Company Operations';
   const [adminUsername, setAdminUsername] = useState('Arbab Khan');
   const [adminUserId, setAdminUserId] = useState('AK001');
   const [adminPassword, setAdminPassword] = useState('******');
@@ -977,8 +979,8 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
     try {
       await saveBranding({
         customLogo: logoPreview,
-        companyName: brandCompanyName.trim() || 'Docks Private Limited',
-        subtitle: brandSubtitle.trim() || 'Customs Clearance, Bonded Carrier & Freight Terminal Operations'
+        companyName: brandCompanyName.trim() || activeCompany?.legalTitle || activeCompany?.name || 'Company Operations',
+        subtitle: brandSubtitle.trim() || activeCompany?.tagline || 'Customs Clearance, Freight & Logistics Operations'
       });
       setLogoFile(null);
       setBrandingSuccess(true);
@@ -992,7 +994,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
   };
 
   const handleResetLogo = async () => {
-    if (window.confirm("Are you sure you want to remove your uploaded logo and restore the default Docks (Pvt.) Ltd logo?")) {
+    if (window.confirm(`Are you sure you want to remove your uploaded logo and restore the default ${activeCompany?.name || 'company'} logo?`)) {
       setBrandingSaving(true);
       try {
         await resetBrandingToDefault();
@@ -1032,7 +1034,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
           ) : (
             <div className="flex items-center gap-2 bg-brand-500/15 border border-brand-500/30 text-brand-300 px-3 py-1.5 rounded-full text-xs font-semibold">
               <Sparkles size={13} className="text-brand-400" />
-              Default System Logo (DPL Metallic Gold)
+              Default System Logo ({activeCompany?.shortName || 'MAK'} Official)
             </div>
           )}
         </div>
@@ -1057,8 +1059,8 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
               <Logo customSrc={logoPreview} className="h-12 w-auto max-w-[220px]" />
             </div>
             <div className="mt-3 text-center">
-              <p className="text-xs text-white font-medium">{brandCompanyName || 'Docks (Pvt.) Ltd'}</p>
-              <p className="text-[10px] text-gray-400 truncate">{brandSubtitle || 'Customs Clearance, Bonded Carrier & Freight Terminal Operations'}</p>
+              <p className="text-xs text-white font-medium">{brandCompanyName || activeCompany?.legalTitle || activeCompany?.name}</p>
+              <p className="text-[10px] text-gray-400 truncate">{brandSubtitle || activeCompany?.tagline || 'Customs Clearance, Logistics & Cargo Operations'}</p>
             </div>
           </div>
 
@@ -1073,10 +1075,10 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
             <div className="flex flex-col items-center justify-center py-3 bg-gray-50 rounded-lg border border-gray-200">
               <Logo customSrc={logoPreview} className="h-12 w-auto max-w-[220px] mb-2" />
               <h5 className="text-sm font-bold uppercase text-black tracking-wide">
-                {brandCompanyName || 'Docks (Pvt.) Ltd'}
+                {brandCompanyName || activeCompany?.legalTitle || activeCompany?.name}
               </h5>
               <p className="text-[10px] text-gray-600 font-medium">
-                {brandSubtitle || 'Customs Clearance, Bonded Carrier & Freight Terminal Operations'}
+                {brandSubtitle || activeCompany?.tagline || 'Customs Clearance, Logistics & Cargo Operations'}
               </p>
             </div>
             <div className="mt-2 text-right text-[10px] text-gray-500 font-mono">
@@ -1194,7 +1196,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
               type="text"
               value={brandCompanyName}
               onChange={(e) => setBrandCompanyName(e.target.value)}
-              placeholder="e.g. Docks (Pvt.) Ltd"
+              placeholder={`e.g. ${activeCompany?.legalTitle || activeCompany?.name || 'Company Name'}`}
               className="w-full glass-input rounded-lg p-2.5 outline-none text-sm text-white"
             />
             <p className="text-[11px] text-gray-500 mt-1">Displayed alongside your logo on reports and invoices.</p>

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
+import { useActiveCompany } from '../services/companyService';
 
 interface VendorPortalProps {
   onSignOut: () => void;
@@ -44,6 +45,7 @@ export const VendorPortal: React.FC<VendorPortalProps> = ({
   vendorId = 'vendor'
 }) => {
   const { customLogo, companyName } = useBranding();
+  const { activeCompany } = useActiveCompany();
 
   // Invoices & Payment Slips
   const [invoices, setInvoices] = useState<VendorInvoiceDoc[]>([
@@ -151,7 +153,7 @@ export const VendorPortal: React.FC<VendorPortalProps> = ({
           )}
           <div className="hidden sm:block border-l border-white/10 pl-3">
             <h1 className="text-sm font-extrabold text-amber-300 uppercase tracking-wider">
-              {companyName || 'DOCKS PRIVATE LIMITED'}
+              {activeCompany?.legalTitle || activeCompany?.name || companyName || 'COMPANY OPERATIONS'}
             </h1>
             <p className="text-[10px] text-gray-400">Vendor & Supplier Portal</p>
           </div>

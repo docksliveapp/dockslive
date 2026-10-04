@@ -176,7 +176,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
       map.set(acc.id, {
         totalGiven: given,
         totalReceived: received,
-        netBalance: given - received, // > 0: you will receive (لینا ہے), < 0: you will pay (دینا ہے)
+        netBalance: given - received, // > 0: you will receive (Receivable), < 0: you will pay (Payable)
         count: accEntries.length + (op !== 0 ? 1 : 0)
       });
     });
@@ -245,7 +245,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
         ownerName: selectedAccount.ownerName,
         partyName: selectedAccount.partyName,
         date: selectedAccount.createdAt ? selectedAccount.createdAt.split('T')[0] : 'Opening',
-        description: 'Opening Balance (ابتدائی بقایا)',
+        description: 'Opening Balance',
         type: op > 0 ? 'GIVEN' : 'RECEIVED',
         amount: Math.abs(op),
         paymentMethod: 'OTHER',
@@ -448,7 +448,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
               <BookKey size={20} className="text-emerald-400" />
               <span>Personal Ledger</span>
               <span className="text-xs font-normal text-emerald-400/80 font-mono">
-                (ذاتی کھاتہ &bull; پرائیویٹ لین دین)
+                (Confidential Account Book)
               </span>
             </h3>
             <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 text-[10px] font-semibold border border-emerald-500/20 flex items-center gap-1">
@@ -492,18 +492,18 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
             className="bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-brand-500/40 flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-brand-950/40"
           >
             <Plus size={15} />
-            <span>New Personal Account (نیا کھاتہ)</span>
+            <span>New Personal Account</span>
           </button>
         </div>
       </div>
 
       {/* 4 Summary Counters */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        {/* Card 1: Total Receivable (لینا ہے) */}
+        {/* Card 1: Total Receivable */}
         <div className="p-4 bg-gradient-to-br from-slate-900/90 to-emerald-950/30 rounded-2xl border border-emerald-500/30 shadow-lg">
           <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wider text-emerald-400 font-semibold block">
-              You Will Receive (لینا ہے)
+              Total Receivable
             </span>
             <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400">
               <ArrowDownLeft size={16} />
@@ -517,11 +517,11 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
           </span>
         </div>
 
-        {/* Card 2: Total Payable (دینا ہے) */}
+        {/* Card 2: Total Payable */}
         <div className="p-4 bg-gradient-to-br from-slate-900/90 to-rose-950/30 rounded-2xl border border-rose-500/30 shadow-lg">
           <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wider text-rose-400 font-semibold block">
-              You Owe / Have To Pay (دینا ہے)
+              Total Payable
             </span>
             <div className="p-1.5 rounded-lg bg-rose-500/20 text-rose-400">
               <ArrowUpRight size={16} />
@@ -539,7 +539,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
         <div className="p-4 bg-gradient-to-br from-slate-900/90 to-blue-950/30 rounded-2xl border border-blue-500/30 shadow-lg">
           <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wider text-blue-300 font-semibold block">
-              Net Balance (خالص پوزیشن)
+              Net Balance
             </span>
             <div className="p-1.5 rounded-lg bg-blue-500/20 text-blue-300">
               <DollarSign size={16} />
@@ -552,8 +552,8 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
             PKR {Math.abs(portfolioSummary.netBalance).toLocaleString()}
           </div>
           <span className="text-[11px] text-gray-400 mt-1 block">
-            {portfolioSummary.netBalance > 0 ? 'Net Receivable (آپ نے لینا ہے)' : 
-             portfolioSummary.netBalance < 0 ? 'Net Payable (آپ نے دینا ہے)' : 'Fully Balanced (برابر)'}
+            {portfolioSummary.netBalance > 0 ? 'Net Receivable' : 
+             portfolioSummary.netBalance < 0 ? 'Net Payable' : 'Fully Balanced'}
           </span>
         </div>
 
@@ -561,7 +561,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
         <div className="p-4 bg-slate-900/90 rounded-2xl border border-white/10 shadow-lg">
           <div className="flex items-center justify-between">
             <span className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold block">
-              Active Accounts (کل کھاتے)
+              Active Accounts
             </span>
             <div className="p-1.5 rounded-lg bg-white/10 text-gray-300">
               <User size={16} />
@@ -697,8 +697,8 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                             stats.netBalance > 0 ? 'text-emerald-400' : 
                             stats.netBalance < 0 ? 'text-rose-400' : 'text-gray-500'
                           }`}>
-                            {stats.netBalance > 0 ? 'Receive (لینا ہے)' : 
-                             stats.netBalance < 0 ? 'Pay (دینا ہے)' : 'Settled (صاف)'}
+                            {stats.netBalance > 0 ? 'Receivable' : 
+                             stats.netBalance < 0 ? 'Payable' : 'Settled'}
                           </span>
                         </div>
                       </div>
@@ -768,7 +768,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                     className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-xl border border-emerald-500/40 flex items-center gap-1.5 transition-all shadow-md active:scale-95"
                   >
                     <Plus size={15} />
-                    <span>Add Entry (نیا اندراج)</span>
+                    <span>Add Entry</span>
                   </button>
 
                   <button
@@ -799,26 +799,26 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                 return (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-black/40 rounded-xl border border-white/5">
                     <div>
-                      <span className="text-[10px] uppercase text-gray-400 block font-semibold">Total Money Given (دیا)</span>
+                      <span className="text-[10px] uppercase text-gray-400 block font-semibold">Total Given (Debit)</span>
                       <span className="text-base font-mono font-bold text-rose-300">
                         PKR {stats.totalGiven.toLocaleString()}
                       </span>
                     </div>
                     <div>
-                      <span className="text-[10px] uppercase text-gray-400 block font-semibold">Total Received (لیا)</span>
+                      <span className="text-[10px] uppercase text-gray-400 block font-semibold">Total Received (Credit)</span>
                       <span className="text-base font-mono font-bold text-emerald-300">
                         PKR {stats.totalReceived.toLocaleString()}
                       </span>
                     </div>
                     <div>
-                      <span className="text-[10px] uppercase text-gray-400 block font-semibold">Net Balance (خالص بقایا)</span>
+                      <span className="text-[10px] uppercase text-gray-400 block font-semibold">Net Balance</span>
                       <span className={`text-base font-mono font-bold ${
                         stats.netBalance > 0 ? 'text-emerald-400' : 
                         stats.netBalance < 0 ? 'text-rose-400' : 'text-white'
                       }`}>
                         PKR {Math.abs(stats.netBalance).toLocaleString()} 
                         <span className="text-xs ml-1 font-sans">
-                          {stats.netBalance > 0 ? '(لینا ہے)' : stats.netBalance < 0 ? '(دینا ہے)' : '(برابر)'}
+                          {stats.netBalance > 0 ? '(Receivable)' : stats.netBalance < 0 ? '(Payable)' : '(Settled)'}
                         </span>
                       </span>
                     </div>
@@ -834,8 +834,8 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                       <th className="p-3 w-28">Date</th>
                       <th className="p-3">Description & Details</th>
                       <th className="p-3 w-28">Payment Mode</th>
-                      <th className="p-3 text-right w-32">Given / دیے (Debit)</th>
-                      <th className="p-3 text-right w-32">Received / لیے (Credit)</th>
+                      <th className="p-3 text-right w-32">Given (Debit)</th>
+                      <th className="p-3 text-right w-32">Received (Credit)</th>
                       <th className="p-3 text-right w-36">Running Balance</th>
                       <th className="p-3 text-center w-20 no-print">Action</th>
                     </tr>
@@ -889,7 +889,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                               PKR {Math.abs(item.runningBalance).toLocaleString()}
                             </span>
                             <span className="text-[9px] text-gray-400 block font-normal">
-                              {item.runningBalance > 0 ? 'Receive (لینا)' : item.runningBalance < 0 ? 'Pay (دینا)' : 'Settled'}
+                              {item.runningBalance > 0 ? 'Receivable' : item.runningBalance < 0 ? 'Payable' : 'Settled'}
                             </span>
                           </td>
                           <td className="p-3 text-center no-print">
@@ -936,7 +936,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                 className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl border border-emerald-500/40 inline-flex items-center gap-2 transition-all shadow-lg shadow-emerald-950/40"
               >
                 <Plus size={15} />
-                <span>Create New Personal Account (نیا کھاتہ کھولیں)</span>
+                <span>Create New Personal Account</span>
               </button>
             </div>
           )}
@@ -954,7 +954,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-white">
-                    {editingAccount ? 'Edit Personal Account' : 'New Personal Account (نیا ذاتی کھاتہ)'}
+                    {editingAccount ? 'Edit Personal Account' : 'New Personal Account'}
                   </h3>
                   <p className="text-[11px] text-gray-400">Add a person or contact with whom you have daily dealings</p>
                 </div>
@@ -966,7 +966,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
 
             <div className="p-4 space-y-3 text-xs">
               <div>
-                <label className="block text-gray-400 font-medium mb-1">Person / Party Name * (نام / پارٹی)</label>
+                <label className="block text-gray-400 font-medium mb-1">Person / Party Name *</label>
                 <input
                   type="text"
                   placeholder="e.g. Ahmed Bhai, Zubair Khan, Kashif (Shop)"
@@ -978,7 +978,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-gray-400 font-medium mb-1">Phone / Mobile (فون نمبر)</label>
+                  <label className="block text-gray-400 font-medium mb-1">Phone / Mobile</label>
                   <input
                     type="text"
                     placeholder="0300-1234567"
@@ -989,17 +989,17 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                 </div>
 
                 <div>
-                  <label className="block text-gray-400 font-medium mb-1">Category / Relation (قسم)</label>
+                  <label className="block text-gray-400 font-medium mb-1">Category / Relation</label>
                   <select
                     value={accountFormData.relationCategory}
                     onChange={(e) => setAccountFormData(prev => ({ ...prev, relationCategory: e.target.value }))}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white outline-none focus:border-emerald-500 cursor-pointer"
                   >
-                    <option value="Daily Dealing" className="bg-slate-900">Daily Dealing (روزمرہ لین دین)</option>
-                    <option value="Cash Loan" className="bg-slate-900">Cash Loan (قرضہ)</option>
-                    <option value="Personal Partner" className="bg-slate-900">Personal Partner (شریک کار)</option>
-                    <option value="Friend / Relative" className="bg-slate-900">Friend / Relative (دوست / رشتہ دار)</option>
-                    <option value="Other" className="bg-slate-900">Other (دیگر)</option>
+                    <option value="Daily Dealing" className="bg-slate-900">Daily Dealing</option>
+                    <option value="Cash Loan" className="bg-slate-900">Cash Loan</option>
+                    <option value="Personal Partner" className="bg-slate-900">Personal Partner</option>
+                    <option value="Friend / Relative" className="bg-slate-900">Friend / Relative</option>
+                    <option value="Other" className="bg-slate-900">Other</option>
                   </select>
                 </div>
               </div>
@@ -1007,7 +1007,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
               {/* Opening Balance (Optional) */}
               <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-2">
                 <span className="text-[11px] font-semibold text-gray-300 block">
-                  Opening Balance (ابتدائی بقایا رقم - اختیاری)
+                  Opening Balance (Optional)
                 </span>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -1027,15 +1027,15 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                       onChange={(e) => setAccountFormData(prev => ({ ...prev, openingBalanceType: e.target.value as any }))}
                       className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-white outline-none focus:border-emerald-500 cursor-pointer"
                     >
-                      <option value="GIVEN" className="bg-slate-900">I will receive (لینا ہے)</option>
-                      <option value="RECEIVED" className="bg-slate-900">I owe / to pay (دینا ہے)</option>
+                      <option value="GIVEN" className="bg-slate-900">I will receive (Receivable)</option>
+                      <option value="RECEIVED" className="bg-slate-900">I owe / to pay (Payable)</option>
                     </select>
                   </div>
                 </div>
               </div>
 
               <div>
-                <label className="block text-gray-400 font-medium mb-1">Notes / Remarks (نوٹس)</label>
+                <label className="block text-gray-400 font-medium mb-1">Notes / Remarks</label>
                 <textarea
                   rows={2}
                   placeholder="Details, reason for dealing, agreement terms..."
@@ -1059,7 +1059,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                   className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-950/40"
                 >
                   <CheckCircle2 size={14} />
-                  <span>{editingAccount ? 'Update Account' : 'Save Account (محفوظ کریں)'}</span>
+                  <span>{editingAccount ? 'Update Account' : 'Save Account'}</span>
                 </button>
               </div>
             </div>
@@ -1078,7 +1078,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-white">
-                    {editingEntry ? 'Edit Entry' : 'Record Transaction (لین دین درج کریں)'}
+                    {editingEntry ? 'Edit Entry' : 'Record Transaction'}
                   </h3>
                   <p className="text-[11px] text-gray-400">Add cash given or received from personal contact</p>
                 </div>
@@ -1108,7 +1108,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
 
               {/* Type Switcher: Given vs Received */}
               <div>
-                <label className="block text-gray-400 font-medium mb-1">Transaction Type (قسم) *</label>
+                <label className="block text-gray-400 font-medium mb-1">Transaction Type *</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -1120,7 +1120,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                     }`}
                   >
                     <ArrowUpRight size={14} />
-                    <span>Money Given / دیے (Debit)</span>
+                    <span>Money Given (Debit)</span>
                   </button>
                   <button
                     type="button"
@@ -1132,7 +1132,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                     }`}
                   >
                     <ArrowDownLeft size={14} />
-                    <span>Received / لیے (Credit)</span>
+                    <span>Received (Credit)</span>
                   </button>
                 </div>
               </div>
@@ -1149,7 +1149,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                   />
                 </div>
                 <div>
-                  <label className="block text-gray-400 font-medium mb-1">Date (تاریخ) *</label>
+                  <label className="block text-gray-400 font-medium mb-1">Date *</label>
                   <input
                     type="date"
                     value={entryFormData.date}
@@ -1160,7 +1160,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
               </div>
 
               <div>
-                <label className="block text-gray-400 font-medium mb-1">Description / Purpose * (تفصیل / مقصد)</label>
+                <label className="block text-gray-400 font-medium mb-1">Description / Purpose *</label>
                 <input
                   type="text"
                   placeholder="e.g. Cash given for spare parts, Returned partial loan, Tea bill"
@@ -1178,15 +1178,15 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                     onChange={(e) => setEntryFormData(prev => ({ ...prev, paymentMethod: e.target.value as any }))}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white outline-none focus:border-emerald-500 cursor-pointer"
                   >
-                    <option value="CASH" className="bg-slate-900">Cash (نقد)</option>
-                    <option value="BANK_TRANSFER" className="bg-slate-900">Bank Transfer (بینک ٹرانسفر)</option>
+                    <option value="CASH" className="bg-slate-900">Cash</option>
+                    <option value="BANK_TRANSFER" className="bg-slate-900">Bank Transfer</option>
                     <option value="ONLINE" className="bg-slate-900">Online / EasyPaisa / JazzCash</option>
-                    <option value="CHEQUE" className="bg-slate-900">Cheque (چیک)</option>
-                    <option value="OTHER" className="bg-slate-900">Other (دیگر)</option>
+                    <option value="CHEQUE" className="bg-slate-900">Cheque</option>
+                    <option value="OTHER" className="bg-slate-900">Other</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-gray-400 font-medium mb-1">Reference / Slip No. (اختیاری)</label>
+                  <label className="block text-gray-400 font-medium mb-1">Reference / Slip No. (Optional)</label>
                   <input
                     type="text"
                     placeholder="e.g. Slip #401"
@@ -1198,7 +1198,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
               </div>
 
               <div>
-                <label className="block text-gray-400 font-medium mb-1">Notes (نوٹس - اختیاری)</label>
+                <label className="block text-gray-400 font-medium mb-1">Notes (Optional)</label>
                 <textarea
                   rows={2}
                   placeholder="Additional context..."
@@ -1222,7 +1222,7 @@ export const PersonalLedgerView: React.FC<PersonalLedgerViewProps> = ({ users = 
                   className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-950/40"
                 >
                   <CheckCircle2 size={14} />
-                  <span>{editingEntry ? 'Update Transaction' : 'Save Transaction (اندراج کریں)'}</span>
+                  <span>{editingEntry ? 'Update Transaction' : 'Save Transaction'}</span>
                 </button>
               </div>
             </div>
