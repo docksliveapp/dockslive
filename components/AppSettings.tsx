@@ -11,6 +11,7 @@ import { useBranding, optimizeLogoImage } from '../services/brandingService';
 import { useActiveCompany } from '../services/companyService';
 import { 
   wipeCompleteDatabase, 
+  wipeCompanyDatabase,
   exportSelectiveDatabaseBackup, 
   restoreDatabaseSnapshot,
   subscribeToCases,

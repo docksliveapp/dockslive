@@ -371,13 +371,16 @@ export async function syncMonthlyStaffSalariesToPayables(
   const newlyCreated: FinanceEntry[] = [];
 
   for (const user of staffUsers) {
-    // Skip external client or transporter entities, and admin accounts (System Administrator has no salary)
+    // Skip external client or transporter entities, admin accounts, and legacy seed test profiles
+    const nameLower = (user.name || '').toLowerCase();
+    const isLegacyPersonal = nameLower.includes('mohsin') || nameLower.includes('shahid') || nameLower.includes('danish') || nameLower.includes('tariq') || nameLower.includes('rashid') || nameLower.includes('bilal');
     if (
       user.role === UserRole.CLIENT || 
       user.role === UserRole.TRANSPORTER || 
       user.role === UserRole.ADMIN || 
       user.userId === 'admin' || 
-      (user.name || '').toLowerCase().includes('administrator')
+      nameLower.includes('administrator') ||
+      isLegacyPersonal
     ) continue;
     const salary = Number(user.baseSalary || 0);
     if (salary <= 0) continue;
@@ -448,10 +451,10 @@ export async function autoPostMonthlyRecurringAndSalaries(
   const addedPayables: FinanceEntry[] = [];
   const addedReceivables: FinanceEntry[] = [];
 
-  // 1. Process Recurring Fixed Expense Templates
+  // 1. Process Recurring Fixed Expense Templates (Only if explicitly created by user)
   const templatesToProcess = (recurringTemplates && recurringTemplates.length > 0)
     ? recurringTemplates
-    : DEFAULT_RECURRING_TEMPLATES;
+    : [];
 
   for (const tpl of templatesToProcess) {
     const isTplActive = tpl.isActive !== undefined ? tpl.isActive : (tpl.active !== undefined ? tpl.active : true);
@@ -498,12 +501,15 @@ export async function autoPostMonthlyRecurringAndSalaries(
   // 2. Process Staff Base Salaries
   if (staffUsers && staffUsers.length > 0) {
     for (const user of staffUsers) {
+      const nameLower = (user.name || '').toLowerCase();
+      const isLegacyPersonal = nameLower.includes('mohsin') || nameLower.includes('shahid') || nameLower.includes('danish') || nameLower.includes('tariq') || nameLower.includes('rashid') || nameLower.includes('bilal');
       if (
         user.role === UserRole.CLIENT || 
         user.role === UserRole.TRANSPORTER || 
         user.role === UserRole.ADMIN || 
         user.userId === 'admin' || 
-        (user.name || '').toLowerCase().includes('administrator')
+        nameLower.includes('administrator') ||
+        isLegacyPersonal
       ) continue;
       const salary = Number(user.baseSalary || 0);
       if (salary <= 0) continue;
@@ -1812,7 +1818,111 @@ export async function wipeCompleteDatabase(): Promise<{
     try { sessionStorage.removeItem(k); } catch (_) {}
   });
 
+  // Ensure all payables and finances in memory and storage are strictly empty
+  safeAppStorage.setJSON('dpl_live_finance', []);
+  safeAppStorage.setJSON('dpl_live_payables', []);
+  safeAppStorage.setJSON('dpl_live_receivables', []);
+  safeAppStorage.setJSON('dpl_live_cases', []);
+
+  // Remove custom branding for all companies and parent group
+  ['docks', 'muhib', 'vantage', 'truckit'].forEach(cId => {
+    safeAppStorage.removeItem(`dpl_company_branding_v1_${cId}`);
+    try { localStorage.removeItem(`dpl_company_branding_v1_${cId}`); } catch (_) {}
+  });
+  safeAppStorage.removeItem('mak_parent_group_branding');
+  try { localStorage.removeItem('mak_parent_group_branding'); } catch (_) {}
+
+  // Reset Firestore settings docs to empty logos
+  try {
+    await setDoc(doc(db, 'settings', 'branding'), { customLogo: null, updatedAt: new Date().toISOString() }, { merge: true });
+    await setDoc(doc(db, 'settings', 'parent_group'), { logo: '', updatedAt: new Date().toISOString() }, { merge: true });
+  } catch (err) {
+    console.warn('Error resetting Firestore settings docs:', err);
+  }
+
   // 3. Dispatch live update events so currently rendered views immediately flush state
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('dpl_cases_updated'));
+    window.dispatchEvent(new Event('dpl_finance_updated'));
+    window.dispatchEvent(new Event('dpl_branding_changed'));
+    window.dispatchEvent(new Event('storage'));
+  }
+
+  return {
+    success: true,
+    deletedCounts
+  };
+}
+
+/**
+ * Wipes operational data for a SINGLE specific subsidiary company only.
+ * Leaves all other 3 subsidiaries 100% intact and untouched.
+ */
+export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
+  success: boolean;
+  deletedCounts: {
+    cases: number;
+    finances: number;
+    vehicles: number;
+  };
+}> {
+  const deletedCounts = {
+    cases: 0,
+    finances: 0,
+    vehicles: 0
+  };
+
+  // 1. Wipe Firestore docs for this specific company only
+  const collectionsToCheck = [
+    { name: 'cases', type: 'cases' },
+    { name: 'finances', type: 'finances' },
+    { name: 'finance', type: 'finances' },
+    { name: 'vehicles', type: 'vehicles' }
+  ] as const;
+
+  for (const item of collectionsToCheck) {
+    try {
+      const snap = await getDocs(collection(db, item.name));
+      const deletePromises = snap.docs.map(async (docSnap) => {
+        const data = docSnap.data();
+        if (matchesActiveCompany(data.companyId, companyId)) {
+          await deleteDoc(doc(db, item.name, docSnap.id));
+          if (item.type === 'cases') deletedCounts.cases++;
+          else if (item.type === 'finances') deletedCounts.finances++;
+          else if (item.type === 'vehicles') deletedCounts.vehicles++;
+        }
+      });
+      await Promise.all(deletePromises);
+    } catch (err) {
+      console.warn(`Error wiping company ${companyId} data from ${item.name}:`, err);
+    }
+  }
+
+  // 2. Filter local storage cached arrays to remove only this company's items
+  try {
+    const liveFinance = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', []);
+    safeAppStorage.setJSON('dpl_live_finance', liveFinance.filter(f => !matchesActiveCompany(f.companyId, companyId)));
+
+    const livePayables = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', []);
+    safeAppStorage.setJSON('dpl_live_payables', livePayables.filter(f => !matchesActiveCompany(f.companyId, companyId)));
+
+    const liveReceivables = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_receivables', []);
+    safeAppStorage.setJSON('dpl_live_receivables', liveReceivables.filter(f => !matchesActiveCompany(f.companyId, companyId)));
+
+    const liveCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
+    safeAppStorage.setJSON('dpl_live_cases', liveCases.filter(c => !matchesActiveCompany(c.companyId, companyId)));
+
+    const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+    safeAppStorage.setJSON('dpl_live_vehicles', liveVehicles.filter(v => !matchesActiveCompany((v as any).companyId, companyId)));
+
+    // Reset this specific company's branding
+    safeAppStorage.removeItem(`dpl_company_branding_v1_${companyId}`);
+    try { localStorage.removeItem(`dpl_company_branding_v1_${companyId}`); } catch (_) {}
+  } catch (e) {
+    console.warn('Company storage cleanup notice:', e);
+  }
+
+  // 3. Dispatch live update events so views re-render with 0 items for this company
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('dpl_cases_updated'));
     window.dispatchEvent(new Event('dpl_finance_updated'));
@@ -2027,52 +2137,7 @@ export async function restoreDatabaseSnapshot(snapshot: any): Promise<{
 }
 
 // RECURRING FINANCE TEMPLATES (Monthly Fixed Expenses & Receivables)
-export const DEFAULT_RECURRING_TEMPLATES: RecurringFinanceTemplate[] = [
-  {
-    id: 'rec_office_rent',
-    title: 'Head Office Monthly Rent',
-    type: 'PAYABLE',
-    amount: 150000,
-    party: 'Karachi Corporate Plaza Landlord',
-    category: 'Rent & Facilities',
-    frequency: 'MONTHLY_FIRST',
-    active: true,
-    notes: 'Payable automatically on 1st of every month'
-  },
-  {
-    id: 'rec_vehicle_loan',
-    title: 'Fleet Vehicle Financing (EMI)',
-    type: 'PAYABLE',
-    amount: 85000,
-    party: 'Meezan Bank Ltd (Auto Ijarah)',
-    category: 'Loan Repayment',
-    frequency: 'MONTHLY_FIRST',
-    active: true,
-    notes: 'Monthly loan installment'
-  },
-  {
-    id: 'rec_internet_util',
-    title: 'High Speed Optical Internet & Telecom',
-    type: 'PAYABLE',
-    amount: 14500,
-    party: 'PTCL Corporate Services',
-    category: 'Utilities & Telecom',
-    frequency: 'MONTHLY_FIRST',
-    active: true,
-    notes: 'Monthly broadband bill'
-  },
-  {
-    id: 'rec_security_guard',
-    title: 'Armed Security & Port Yard Retainer',
-    type: 'PAYABLE',
-    amount: 65000,
-    party: 'Askari Security Guards (Pvt) Ltd',
-    category: 'Security & Operations',
-    frequency: 'MONTHLY_FIRST',
-    active: true,
-    notes: 'Monthly security guard services'
-  }
-];
+export const DEFAULT_RECURRING_TEMPLATES: RecurringFinanceTemplate[] = [];
 
 export function subscribeToRecurringTemplates(
   onData: (items: RecurringFinanceTemplate[]) => void,

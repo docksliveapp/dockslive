@@ -5,6 +5,16 @@ import { safeAppStorage } from './storage';
 
 export type CompanyId = 'docks' | 'muhib' | 'vantage' | 'truckit';
 
+export function isUploadedLogo(url?: string | null): boolean {
+  if (!url) return false;
+  const s = url.trim();
+  if (!s) return false;
+  if (s.startsWith('/logos/') || s.includes('docks_logo') || s.includes('mak_group_logo') || s.includes('muhib_logo') || s.includes('vantage_logo') || s.includes('truckit_logo')) {
+    return false;
+  }
+  return true;
+}
+
 export interface CompanyInfo {
   id: CompanyId;
   name: string;
@@ -52,7 +62,7 @@ export const DEFAULT_PARENT_GROUP: ParentGroupInfo = {
   title: 'MAK GROUP OF COMPANIES',
   tagline: 'Premier Multi-Entity Logistics, Customs & International Trade Conglomerate',
   subtitle: 'DOCKS • TRUCKIT • MUHIB • VANTAGE',
-  logo: '/logos/mak_group_logo.svg',
+  logo: '',
   address: 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
   phone: '+92-21-32330103, +92-21-32330104',
   cell: '+92-321-9222883, +92-321-8496006',
@@ -65,10 +75,11 @@ export const PARENT_GROUP_EVENT = 'mak_parent_group_updated';
 
 export function getParentGroupInfo(): ParentGroupInfo {
   const stored = safeAppStorage.getJSON<Partial<ParentGroupInfo>>(PARENT_GROUP_STORAGE_KEY, {});
+  const cleanLogo = isUploadedLogo(stored.logo) ? stored.logo! : '';
   return {
     ...DEFAULT_PARENT_GROUP,
     ...stored,
-    logo: stored.logo || DEFAULT_PARENT_GROUP.logo,
+    logo: cleanLogo,
     name: stored.name || DEFAULT_PARENT_GROUP.name,
     title: stored.title || DEFAULT_PARENT_GROUP.title,
     tagline: stored.tagline || DEFAULT_PARENT_GROUP.tagline,
@@ -179,7 +190,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Docks (Pvt.) Ltd.',
     category: 'Customs Bonded Carrier & Port Logistics',
     tagline: 'Nationwide Bonded Carrier & Afghan Transit Logistics Specialist',
-    logo: '/logos/docks_logo.svg',
+    logo: '',
     accentColor: '#F59E0B', // Amber / Gold
     borderColor: 'border-amber-500/40',
     badgeBg: 'bg-amber-500/20',
@@ -209,7 +220,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Muhib International (SMC-Pvt.) Ltd.',
     category: 'International Freight Forwarding & Trade Logistics',
     tagline: 'Global Import, Export & Customs Clearance Facilitation',
-    logo: '/logos/muhib_logo.svg',
+    logo: '',
     accentColor: '#2563EB', // Royal Blue & Crimson
     borderColor: 'border-blue-500/40',
     badgeBg: 'bg-blue-500/20',
@@ -239,7 +250,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Vintage Shipping Line (Pvt.) Ltd.',
     category: 'Ocean Freight & Maritime Container Vessel Logistics',
     tagline: 'Worldwide Ocean Freight, Shipping Agency & Container Management',
-    logo: '/logos/vantage_logo.svg',
+    logo: '',
     accentColor: '#0EA5E9', // Sky / Cyan
     borderColor: 'border-cyan-500/40',
     badgeBg: 'bg-cyan-500/20',
@@ -269,7 +280,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Truckit (Pvt.) Ltd.',
     category: 'Nationwide Fleet Haulage & Fast Cargo Trucking',
     tagline: 'High-Speed Cargo Haulage, Heavy Transport & Inter-City Fleet',
-    logo: '/logos/truckit_logo.svg',
+    logo: '',
     accentColor: '#EF4444', // Red
     borderColor: 'border-red-500/40',
     badgeBg: 'bg-red-500/20',

@@ -24,7 +24,8 @@ import {
   GROUP_COMPANIES, 
   COMPANIES_LIST, 
   useActiveCompany,
-  useParentGroup
+  useParentGroup,
+  isUploadedLogo
 } from '../services/companyService';
 import { subscribeToUsers } from '../services/dbService';
 import { GroupAdminManagementModal, AdminSettingsTab } from './GroupAdminManagementModal';
@@ -200,11 +201,17 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
       {/* 2. CENTER CONGLOMERATE HEADER (Compact, Zero-Scroll Design) */}
       <div className="text-center my-1 sm:my-2 shrink-0">
         <div className="inline-flex items-center justify-center mb-1.5 transform hover:scale-105 transition-transform duration-300">
-          <img 
-            src={parentGroup.logo} 
-            alt={parentGroup.name} 
-            className="h-10 sm:h-12 w-auto max-w-[200px] object-contain drop-shadow-[0_4px_16px_rgba(245,158,11,0.3)]"
-          />
+          {isUploadedLogo(parentGroup.logo) ? (
+            <img 
+              src={parentGroup.logo} 
+              alt={parentGroup.name} 
+              className="h-10 sm:h-12 w-auto max-w-[200px] object-contain drop-shadow-[0_4px_16px_rgba(245,158,11,0.3)]"
+            />
+          ) : (
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/25 to-yellow-600/30 border border-amber-400/50 flex items-center justify-center shadow-lg shadow-amber-500/20">
+              <Crown className="w-5 h-5 text-amber-400" />
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-center gap-2 mb-1">
@@ -302,11 +309,20 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 
                 {/* Company Logo in Card (Compact Box) */}
                 <div className="h-14 sm:h-16 w-full flex items-center justify-center p-2 rounded-xl bg-black/40 border border-white/5 mb-2.5 group-hover:scale-[1.03] transition-transform duration-300">
-                  <img 
-                    src={comp.logo} 
-                    alt={comp.name} 
-                    className="max-h-full max-w-full object-contain filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)]" 
-                  />
+                  {isUploadedLogo(comp.logo) ? (
+                    <img 
+                      src={comp.logo} 
+                      alt={comp.name} 
+                      className="max-h-full max-w-full object-contain filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)]" 
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-1 text-center">
+                      <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center border border-white/10">
+                        {getCompanyIcon(comp.id)}
+                      </div>
+                      <span className="text-[10px] font-mono font-bold text-gray-300 tracking-wider">{comp.shortName}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Title & Short Category */}

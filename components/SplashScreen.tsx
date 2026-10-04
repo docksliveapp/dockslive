@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useRef } from 'react';
-import Logo from './Logo';
-import { useBranding } from '../services/brandingService';
+import { useParentGroup, isUploadedLogo } from '../services/companyService';
+import { Crown } from 'lucide-react';
 
 interface SplashScreenProps {
   onComplete: () => void;
 }
 
 const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
-  const { customLogo, companyName, subtitle } = useBranding();
+  const { parentGroup } = useParentGroup();
   const [fadingOut, setFadingOut] = useState(false);
   const [mounted, setMounted] = useState(false);
   const hasFinishedRef = useRef(false);
@@ -37,6 +37,8 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
       clearTimeout(exitTimer);
     };
   }, []);
+
+  const adminUploadedLogo = isUploadedLogo(parentGroup?.logo) ? parentGroup.logo : null;
 
   return (
     <div 
@@ -137,7 +139,6 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
       />
 
       {/* Deep Ambient Moving Orbs */}
-      {/* Orb 1: Warm Golden Amber (Center-Top behind logo) */}
       <div 
         className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] h-[520px] sm:w-[640px] sm:h-[640px] rounded-full pointer-events-none"
         style={{
@@ -146,7 +147,6 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
         }}
       />
 
-      {/* Orb 2: Deep Cyan / Azure Glow (Bottom-Left) */}
       <div 
         className="absolute -bottom-24 -left-20 w-[420px] h-[420px] rounded-full pointer-events-none"
         style={{
@@ -155,7 +155,6 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
         }}
       />
 
-      {/* Orb 3: Royal Cobalt Glow (Top-Right) */}
       <div 
         className="absolute -top-20 -right-20 w-[440px] h-[440px] rounded-full pointer-events-none"
         style={{
@@ -201,11 +200,11 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
       </div>
 
       {/* ============================================================ */}
-      {/* 2. DIRECT ANIMATED LOGO (NO SEPARATE CARD/BOX BACKGROUND)     */}
+      {/* 2. DIRECT ANIMATED LOGO ONLY - NO TEXT                       */}
       {/* ============================================================ */}
       <div className="relative flex flex-col items-center justify-center z-10 px-4 text-center">
         
-        {/* Soft Radial Gold Halo Aura Directly Behind Logo (Not a card or box) */}
+        {/* Soft Radial Gold Halo Aura Directly Behind Logo */}
         <div 
           className="absolute w-72 sm:w-96 h-72 sm:h-96 rounded-full pointer-events-none -z-10"
           style={{
@@ -225,42 +224,19 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             animation: mounted ? 'dplFloat 4s ease-in-out infinite' : undefined
           }}
         >
-          <img 
-            src="/logos/mak_group_logo.svg" 
-            alt="MAK Group of Companies" 
-            className="w-48 sm:w-64 max-h-52 object-contain drop-shadow-[0_12px_36px_rgba(245,158,11,0.55)] filter brightness-110 select-none mx-auto"
-          />
-        </div>
-
-        {/* Corporate Typography Cleanly Positioned Below Logo */}
-        <div 
-          className={`text-center mt-6 space-y-2.5 transition-all duration-1000 delay-200 ease-out ${
-            mounted 
-              ? 'opacity-100 translate-y-0' 
-              : 'opacity-0 translate-y-4'
-          }`}
-        >
-          <h1 
-            className="text-2xl sm:text-4xl font-extrabold tracking-wider text-amber-300 uppercase drop-shadow-[0_2px_16px_rgba(245,158,11,0.75)] font-serif px-2"
-            style={{ color: '#FCD34D', textShadow: '0 2px 16px rgba(245, 158, 11, 0.75)' }}
-          >
-            MAK Group of Companies
-          </h1>
-          
-          <div className="flex items-center justify-center gap-3">
-            <div className="h-px w-10 sm:w-20 bg-gradient-to-r from-transparent to-amber-400/80" />
-            <p 
-              className="text-amber-400 tracking-[0.25em] text-[10px] sm:text-xs font-bold uppercase font-sans"
-              style={{ color: '#FBBF24' }}
-            >
-              DOCKS (PVT) LTD • MUHIB INTERNATIONAL • VINTAGE SHIPPING LINE • TRUCKIT (PVT) LTD
-            </p>
-            <div className="h-px w-10 sm:w-20 bg-gradient-to-l from-transparent to-amber-400/80" />
-          </div>
-
-          <p className="text-[10px] sm:text-[11px] text-gray-400 font-medium tracking-widest uppercase">
-            Premier Multi-Entity Logistics, Customs &amp; International Trade Conglomerate
-          </p>
+          {adminUploadedLogo ? (
+            <img 
+              src={adminUploadedLogo} 
+              alt="Logo" 
+              className="w-56 sm:w-80 max-h-64 object-contain drop-shadow-[0_12px_40px_rgba(245,158,11,0.65)] filter brightness-110 select-none mx-auto"
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center">
+              <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-3xl bg-gradient-to-br from-amber-500/25 via-yellow-500/15 to-amber-600/30 border border-amber-400/50 flex items-center justify-center shadow-[0_0_50px_rgba(245,158,11,0.45)]">
+                <Crown size={56} className="text-amber-400 animate-pulse sm:w-16 sm:h-16" />
+              </div>
+            </div>
+          )}
         </div>
 
       </div>

@@ -21,7 +21,7 @@ export interface CompanyBranding {
 
 export function getDefaultBranding(comp: CompanyInfo = getActiveCompany()): CompanyBranding {
   return {
-    customLogo: comp.logo || '/logos/docks_logo.svg',
+    customLogo: null,
     companyName: comp.legalTitle || comp.name,
     subtitle: comp.tagline || comp.category,
     address: comp.address || 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
@@ -59,10 +59,9 @@ export function getStoredBranding(): CompanyBranding {
     }
   }
 
-  let companyLogo = stored.customLogo || defaultB.customLogo;
-  if (activeCompany.id !== 'docks' && companyLogo && companyLogo.includes('docks_logo')) {
-    companyLogo = defaultB.customLogo;
-  }
+  // Only allow explicitly uploaded custom logos (no default SVG files)
+  const isUploaded = (src?: string | null) => Boolean(src && !src.startsWith('/logos/') && !src.includes('docks_logo') && !src.includes('mak_group_logo'));
+  let companyLogo = isUploaded(stored.customLogo) ? stored.customLogo! : null;
   const subtitle = stored.subtitle || defaultB.subtitle;
 
   return {
