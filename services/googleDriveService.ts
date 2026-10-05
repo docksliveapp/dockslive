@@ -283,6 +283,37 @@ export const isDrivePermanentlyConnected = (): boolean => {
   return isConnectionActive || safeAppStorage.getItem(STORAGE_KEY_STATUS) === 'CONNECTED' || !!getDriveAccessToken();
 };
 
+/**
+ * Manually connect or designate an enterprise Google account for cloud backups
+ */
+export async function setConnectedDriveAccount(email: string, displayName?: string): Promise<DriveUserInfo> {
+  const cleanEmail = email.trim();
+  const userInfo: DriveUserInfo = {
+    email: cleanEmail,
+    displayName: displayName?.trim() || cleanEmail
+  };
+  cachedUserInfo = userInfo;
+  isConnectionActive = true;
+  safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
+  safeAppStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
+
+  try {
+    const driveDocRef = doc(db, 'settings', 'google_drive_connection');
+    await setDoc(driveDocRef, {
+      status: 'CONNECTED',
+      manualDisconnect: false,
+      email: userInfo.email,
+      displayName: userInfo.displayName,
+      lastUpdated: new Date().toISOString(),
+      connectedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (fsErr) {
+    console.warn('Failed to save manual account to Firestore:', fsErr);
+  }
+
+  return userInfo;
+}
+
 export const setDriveAccessToken = (token: string | null) => {
   cachedAccessToken = token;
   if (token) {

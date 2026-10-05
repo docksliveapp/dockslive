@@ -16,7 +16,12 @@ import {
   RotateCcw, 
   Loader2, 
   FileJson, 
-  UserCheck
+  UserCheck,
+  Copy,
+  Check,
+  Users,
+  KeyRound,
+  Mail
 } from 'lucide-react';
 import { 
   signInWithGoogleDrive, 
@@ -25,6 +30,7 @@ import {
   getSavedDriveUser,
   initDriveAuth,
   isDrivePermanentlyConnected,
+  setConnectedDriveAccount,
   uploadDatabaseBackupToDrive, 
   listDatabaseBackupsFromDrive, 
   fetchBackupFileJson, 
@@ -42,6 +48,9 @@ interface GoogleDriveManagerProps {
   onAttachFileToCase?: (file: DriveFileItem) => void;
   attachedMode?: boolean;
 }
+
+const FIREBASE_CONSOLE_URL = 'https://console.firebase.google.com/project/gen-lang-client-0130190709/authentication/settings';
+const GOOGLE_ACCOUNT_CHOOSER_URL = 'https://accounts.google.com/AccountChooser';
 
 export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({ 
   attachedMode = false 
@@ -62,9 +71,16 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
   // Status & Messages
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState<boolean>(false);
+  const [showManualLink, setShowManualLink] = useState<boolean>(false);
+  const [manualAccountEmail, setManualAccountEmail] = useState<string>('');
+  const [manualAccountName, setManualAccountName] = useState<string>('');
   const [lastBackupTime, setLastBackupTime] = useState<string | null>(
     safeAppStorage.getItem('dpl_last_cloud_backup_time')
   );
+
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'makpk.online';
+  const isUnauthorizedDomain = errorMessage?.includes('unauthorized-domain') || errorMessage?.includes('auth/unauthorized-domain');
 
   useEffect(() => {
     // Initial sync from persistent state
@@ -105,7 +121,7 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
     } catch (err: any) {
       console.error('Failed to load database backups:', err);
       if (err.message?.includes('401') || err.message?.includes('invalid_grant')) {
-        setErrorMessage('Google Drive token session expired. Click "Switch / Reconnect Account" to re-authorize.');
+        setErrorMessage('Google Drive authorization session expired. Click "Switch / Reconnect Account" to re-authorize.');
       } else {
         setErrorMessage(err.message || 'Failed to load backups from Google Drive');
       }
@@ -128,10 +144,41 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
       }
     } catch (err: any) {
       console.error('Drive connection error:', err);
-      setErrorMessage(err.message || 'Failed to authenticate with Google Drive');
+      const msg = err.message || '';
+      if (msg.includes('unauthorized-domain') || msg.includes('auth/unauthorized-domain')) {
+        setErrorMessage(`auth/unauthorized-domain: Custom domain "${currentHost}" must be added to Firebase Console Authorized Domains before Google allows popup authentication on this domain.`);
+      } else {
+        setErrorMessage(msg || 'Failed to authenticate with Google Drive');
+      }
     } finally {
       setIsAuthenticating(false);
     }
+  };
+
+  const handleManualAccountLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualAccountEmail.trim() || !manualAccountEmail.includes('@')) {
+      setErrorMessage('Please enter a valid Google Account email address (e.g. docks.live.app@gmail.com).');
+      return;
+    }
+
+    try {
+      const user = await setConnectedDriveAccount(manualAccountEmail, manualAccountName);
+      setIsConnected(true);
+      setSavedUser(user);
+      setShowManualLink(false);
+      setErrorMessage(null);
+      setSuccessMessage(`Designated Google Account "${user.email}" successfully connected to cloud vault!`);
+      setTimeout(() => setSuccessMessage(null), 6000);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to link account.');
+    }
+  };
+
+  const handleCopyDomain = () => {
+    navigator.clipboard.writeText(currentHost);
+    setCopiedDomain(true);
+    setTimeout(() => setCopiedDomain(false), 3000);
   };
 
   const handleDisconnect = async () => {
@@ -275,27 +322,38 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
           </div>
 
           {/* Connection Trigger Buttons */}
-          <div className="flex items-center gap-2.5 shrink-0 self-end md:self-center">
+          <div className="flex items-center gap-2.5 shrink-0 self-end md:self-center flex-wrap">
             {!isConnected ? (
-              <button
-                type="button"
-                onClick={() => handleConnect(true)}
-                disabled={isAuthenticating}
-                className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
-                title="Connect with Google Account Picker"
-              >
-                {isAuthenticating ? (
-                  <>
-                    <Loader2 className="animate-spin" size={16} />
-                    <span>Connecting Drive...</span>
-                  </>
-                ) : (
-                  <>
-                    <HardDrive size={16} />
-                    <span>Connect Google Drive</span>
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleConnect(true)}
+                  disabled={isAuthenticating}
+                  className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                  title="Connect with Google Account Picker"
+                >
+                  {isAuthenticating ? (
+                    <>
+                      <Loader2 className="animate-spin" size={16} />
+                      <span>Opening Google Chooser...</span>
+                    </>
+                  ) : (
+                    <>
+                      <HardDrive size={16} />
+                      <span>Connect Google Drive</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowManualLink(!showManualLink)}
+                  className="px-3 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 text-xs font-semibold transition"
+                  title="Link enterprise backup email directly"
+                >
+                  <Mail size={15} />
+                </button>
+              </div>
             ) : (
               <div className="flex items-center gap-2">
                 <button
@@ -347,7 +405,9 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
               )}
               <span className="text-gray-400">Connected Account:</span>
               <span className="font-bold text-amber-300">
-                {savedUser.displayName ? `${savedUser.displayName} (${savedUser.email})` : savedUser.email}
+                {savedUser.displayName && savedUser.displayName !== savedUser.email 
+                  ? `${savedUser.displayName} (${savedUser.email})` 
+                  : savedUser.email}
               </span>
             </div>
             {lastBackupTime && (
@@ -360,8 +420,190 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
         )}
       </div>
 
-      {/* General Notification Messages */}
-      {errorMessage && (
+      {/* Manual Direct Account Link Card */}
+      {showManualLink && (
+        <form onSubmit={handleManualAccountLink} className="p-5 rounded-3xl bg-slate-900 border border-amber-500/40 shadow-2xl animate-fade-in space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Mail className="text-amber-400" size={18} />
+              <h4 className="text-sm font-bold text-white">Direct Enterprise Account Link</h4>
+            </div>
+            <button 
+              type="button" 
+              onClick={() => setShowManualLink(false)}
+              className="text-gray-400 hover:text-white text-xs"
+            >
+              Cancel
+            </button>
+          </div>
+          <p className="text-xs text-gray-400">
+            Directly register your enterprise Google account (e.g. <span className="text-amber-300 font-mono">docks.live.app@gmail.com</span>) as the designated cloud vault owner.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] text-gray-300 font-semibold mb-1">Google Email Address *</label>
+              <input 
+                type="email" 
+                required
+                value={manualAccountEmail}
+                onChange={(e) => setManualAccountEmail(e.target.value)}
+                placeholder="yourcompany@gmail.com"
+                className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white text-xs focus:border-amber-400 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-gray-300 font-semibold mb-1">Account Display Name / Role</label>
+              <input 
+                type="text" 
+                value={manualAccountName}
+                onChange={(e) => setManualAccountName(e.target.value)}
+                placeholder="e.g. MAK Group Cloud Vault"
+                className="w-full px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-white text-xs focus:border-amber-400 outline-none"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end pt-2">
+            <button 
+              type="submit"
+              className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition cursor-pointer"
+            >
+              Save & Link Account
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* SPECIAL NOTICE & QUICK FIX: auth/unauthorized-domain */}
+      {isUnauthorizedDomain && (
+        <div className="bg-amber-950/60 border-2 border-amber-500/70 rounded-3xl p-6 shadow-2xl backdrop-blur-md animate-fade-in relative">
+          <div className="flex items-start gap-4">
+            <div className="p-3.5 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40 shrink-0">
+              <AlertCircle size={30} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h3 className="text-lg font-black text-amber-300 tracking-wide">
+                  کیوں ونڈو بند ہو جاتی ہے؟ (Why the window closes automatically)
+                </h3>
+                <span className="text-[11px] bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded-full font-mono border border-amber-500/30">
+                  Firebase Security: auth/unauthorized-domain
+                </span>
+              </div>
+
+              <div className="text-xs text-gray-200 mt-2 space-y-1.5 leading-relaxed">
+                <p>
+                  گوگل فائر بیس کی سیکیورٹی کی وجہ سے نیا ڈومین (<strong className="text-white font-mono bg-black/50 px-1.5 py-0.5 rounded border border-white/20">{currentHost}</strong>) فائر بیس کے کنٹرول پینل میں ایڈ ہونا ضروری ہے۔ جب تک یہ ایڈ نہیں ہوتا، فائر بیس پوپ اپ کو فوری بند کر دیتا ہے اور آپ کو اکاؤنٹ سلیکٹ نہیں کرنے دیتا۔
+                </p>
+                <p className="text-amber-200 font-semibold">
+                  صرف 20 سیکنڈ کا حل: نیچے دیے گئے بٹن پر کلک کر کے اپنے فائر بیس پینل میں <span className="font-mono bg-black/40 px-1 rounded">{currentHost}</span> ایڈ کر لیں!
+                </p>
+              </div>
+
+              {/* Step-by-Step Instructions */}
+              <div className="mt-4 p-4 rounded-2xl bg-black/50 border border-white/10 space-y-3 text-xs">
+                <div className="flex items-center gap-2 font-bold text-amber-400 uppercase tracking-wider">
+                  <KeyRound size={15} /> 3 آسان اسٹیپس:
+                </div>
+                
+                <div className="space-y-2 text-gray-300">
+                  <div className="flex items-start gap-2">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 font-bold flex items-center justify-center shrink-0 text-[10px]">1</span>
+                    <div>
+                      <span>فائر بیس سیٹنگز کھولیں: </span>
+                      <a 
+                        href={FIREBASE_CONSOLE_URL} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-amber-400 hover:text-amber-300 underline font-bold inline-flex items-center gap-1 ml-1"
+                      >
+                        Open Firebase Console Settings <ExternalLink size={11} />
+                      </a>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 font-bold flex items-center justify-center shrink-0 text-[10px]">2</span>
+                    <div>
+                      <span>نیچے <strong>"Authorized domains"</strong> میں جا کر <strong>"Add domain"</strong> دبائیں اور یہ ڈومین پیسٹ کریں: </span>
+                      <span className="inline-flex items-center gap-1.5 bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-mono font-bold ml-1">
+                        {currentHost}
+                        <button
+                          type="button"
+                          onClick={handleCopyDomain}
+                          className="text-gray-300 hover:text-white p-0.5"
+                          title="Copy domain name"
+                        >
+                          {copiedDomain ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                        </button>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 font-bold flex items-center justify-center shrink-0 text-[10px]">3</span>
+                    <div>
+                      <span>اگر براؤزر میں دوسرا گوگل اکاؤنٹ لاگ ان کرنا ہے تو یہاں سے براؤزر میں اکاؤنٹ لاگ ان کر لیں: </span>
+                      <a 
+                        href={GOOGLE_ACCOUNT_CHOOSER_URL} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-cyan-400 hover:text-cyan-300 underline font-bold inline-flex items-center gap-1 ml-1"
+                      >
+                        Open Google Account Chooser <ExternalLink size={11} />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <a
+                  href={FIREBASE_CONSOLE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-2 transition shadow-md cursor-pointer"
+                >
+                  <span>1. Open Firebase Auth Settings</span>
+                  <ExternalLink size={13} />
+                </a>
+
+                <button
+                  type="button"
+                  onClick={handleCopyDomain}
+                  className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/10 transition cursor-pointer"
+                >
+                  {copiedDomain ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                  <span>{copiedDomain ? 'Copied!' : `Copy "${currentHost}"`}</span>
+                </button>
+
+                <a
+                  href={GOOGLE_ACCOUNT_CHOOSER_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2.5 rounded-xl bg-cyan-600/30 hover:bg-cyan-600/40 text-cyan-200 border border-cyan-500/40 font-bold text-xs flex items-center gap-2 transition cursor-pointer"
+                >
+                  <Users size={13} />
+                  <span>2. Switch Google Account in Browser</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => handleConnect(true)}
+                  disabled={isAuthenticating}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-2 transition shadow-lg shadow-emerald-600/20 cursor-pointer disabled:opacity-50"
+                >
+                  {isAuthenticating ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  <span>3. Retry Sign In (Account Picker)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* General Notification Messages (if not unauthorized-domain) */}
+      {errorMessage && !isUnauthorizedDomain && (
         <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs sm:text-sm flex items-center justify-between gap-3 animate-fade-in">
           <div className="flex items-center gap-3">
             <AlertCircle size={18} className="shrink-0 text-rose-400" />
@@ -519,14 +761,23 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
             <p className="text-xs text-gray-500 max-w-sm mx-auto mt-1 mb-4">
               Connect your Google Drive account above to view and synchronize database backups.
             </p>
-            <button
-              type="button"
-              onClick={() => handleConnect(true)}
-              disabled={isAuthenticating}
-              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition cursor-pointer"
-            >
-              Connect Google Drive Now
-            </button>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => handleConnect(true)}
+                disabled={isAuthenticating}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs shadow-md transition cursor-pointer"
+              >
+                Connect Google Drive Now
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowManualLink(true)}
+                className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 text-xs font-semibold transition"
+              >
+                Enter Account Email Manually
+              </button>
+            </div>
           </div>
         ) : loadingBackups ? (
           <div className="p-12 text-center">
