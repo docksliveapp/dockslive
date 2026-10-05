@@ -17,21 +17,41 @@ export function isUploadedLogo(url?: string | null): boolean {
 
 /**
  * Retrieves the custom logo uploaded in settings for any of the 4 companies.
+ * If the company has chosen "Use Main Group Logo as Official Document Logo",
+ * it returns the parent conglomerate logo.
  * Returns null if no custom logo has been uploaded.
  */
 export function getCompanyUploadedLogo(companyId: CompanyId): string | null {
   try {
     const brandingKey = `dpl_company_branding_v1_${companyId}`;
     const stored = safeAppStorage.getJSON<any>(brandingKey, {});
+
+    // 1. Check if the company opted to use Main Admin Group Logo
+    if (stored?.useMainLogoAsOfficial) {
+      const parentGroup = getParentGroupInfo();
+      if (parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
+        return parentGroup.logo;
+      }
+    }
+
+    // 2. Check company's directly uploaded custom logo
     if (stored?.customLogo && isUploadedLogo(stored.customLogo)) {
       return stored.customLogo;
     }
+
     if (companyId === 'docks') {
       const docksLegacy = safeAppStorage.getJSON<any>('dpl_company_branding_v1', {});
+      if (docksLegacy?.useMainLogoAsOfficial) {
+        const parentGroup = getParentGroupInfo();
+        if (parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
+          return parentGroup.logo;
+        }
+      }
       if (docksLegacy?.customLogo && isUploadedLogo(docksLegacy.customLogo)) {
         return docksLegacy.customLogo;
       }
     }
+
     const comp = GROUP_COMPANIES[companyId];
     if (comp?.logo && isUploadedLogo(comp.logo)) {
       return comp.logo;
@@ -40,6 +60,26 @@ export function getCompanyUploadedLogo(companyId: CompanyId): string | null {
     console.warn('Error reading uploaded logo for', companyId, e);
   }
   return null;
+}
+
+/**
+ * Returns whether a company has enabled "Use Main Group Logo as Official Document Logo".
+ */
+export function isCompanyUsingMainLogo(companyId: CompanyId): boolean {
+  try {
+    const brandingKey = `dpl_company_branding_v1_${companyId}`;
+    const stored = safeAppStorage.getJSON<any>(brandingKey, {});
+    if (typeof stored?.useMainLogoAsOfficial === 'boolean') {
+      return stored.useMainLogoAsOfficial;
+    }
+    if (companyId === 'docks') {
+      const docksLegacy = safeAppStorage.getJSON<any>('dpl_company_branding_v1', {});
+      if (typeof docksLegacy?.useMainLogoAsOfficial === 'boolean') {
+        return docksLegacy.useMainLogoAsOfficial;
+      }
+    }
+  } catch (e) {}
+  return false;
 }
 
 export interface CompanyInfo {
@@ -189,6 +229,63 @@ export function initParentGroupFirestoreSync() {
   } catch (e) {
     console.warn('Parent group Firestore init error:', e);
   }
+}
+
+const subscribedCompanies = new Set<CompanyId>();
+
+/**
+ * Initializes real-time Firestore sync for all 4 corporate entities.
+ * Automatically synchronizes uploaded logos, useMainLogoAsOfficial flags,
+ * and company titles across devices.
+ */
+export function initAllCompaniesFirestoreSync() {
+  initParentGroupFirestoreSync();
+  const allIds: CompanyId[] = ['docks', 'muhib', 'vantage', 'truckit'];
+  allIds.forEach((cId) => {
+    if (subscribedCompanies.has(cId)) return;
+    subscribedCompanies.add(cId);
+
+    try {
+      const docId = cId === 'docks' ? 'branding' : `branding_${cId}`;
+      const ref = doc(db, 'settings', docId);
+      onSnapshot(ref, (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          const key = `dpl_company_branding_v1_${cId}`;
+          const currentStored = safeAppStorage.getJSON<any>(key, {});
+          const cleanCustomLogo = data.customLogo || data.logo || currentStored.customLogo || null;
+          const updated = {
+            ...currentStored,
+            ...data,
+            customLogo: cleanCustomLogo,
+            useMainLogoAsOfficial: typeof data.useMainLogoAsOfficial === 'boolean' 
+              ? data.useMainLogoAsOfficial 
+              : currentStored.useMainLogoAsOfficial,
+            companyName: data.companyName || currentStored.companyName,
+            subtitle: data.subtitle || currentStored.subtitle,
+          };
+          safeAppStorage.setJSON(key, updated);
+          if (cId === 'docks') {
+            safeAppStorage.setJSON('dpl_company_branding_v1', updated);
+          }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('dpl_branding_changed', { detail: updated }));
+          }
+        }
+      }, (err) => {
+        console.warn(`Firestore sync notice for company ${cId}:`, err);
+      });
+    } catch (e) {
+      console.warn(`Failed to initialize sync for company ${cId}:`, e);
+    }
+  });
+}
+
+// Auto-initialize real-time Firestore subscriptions for all companies
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    initAllCompaniesFirestoreSync();
+  }, 100);
 }
 
 export function useParentGroup() {

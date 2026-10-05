@@ -2,10 +2,22 @@ import { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { safeAppStorage } from './storage';
-import { getActiveCompany, getActiveCompanyId, subscribeToActiveCompany, useActiveCompany, CompanyInfo, GROUP_COMPANIES } from './companyService';
+import { 
+  getActiveCompany, 
+  getActiveCompanyId, 
+  subscribeToActiveCompany, 
+  useActiveCompany, 
+  CompanyInfo, 
+  GROUP_COMPANIES,
+  getParentGroupInfo,
+  subscribeToParentGroup,
+  isUploadedLogo,
+  useParentGroup
+} from './companyService';
 
 export interface CompanyBranding {
   customLogo: string | null;
+  useMainLogoAsOfficial?: boolean;
   companyName: string;
   subtitle: string;
   address: string;
@@ -22,6 +34,7 @@ export interface CompanyBranding {
 export function getDefaultBranding(comp: CompanyInfo = getActiveCompany()): CompanyBranding {
   return {
     customLogo: null,
+    useMainLogoAsOfficial: false,
     companyName: comp.legalTitle || comp.name,
     subtitle: comp.tagline || comp.category,
     address: comp.address || 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
@@ -42,12 +55,12 @@ const BRANDING_EVENT = 'dpl_branding_changed';
 /**
  * Returns current branding synchronously from cache/storage to prevent UI flickering.
  */
-export function getStoredBranding(): CompanyBranding {
-  const activeCompany = getActiveCompany();
+export function getStoredBranding(companyOverride?: CompanyInfo): CompanyBranding {
+  const activeCompany = companyOverride || getActiveCompany();
   const defaultB = getDefaultBranding(activeCompany);
   const companyKey = `${STORAGE_KEY}_${activeCompany.id}`;
-  // Read ONLY this company's custom branding if set, do NOT fallback to global DPL storage key!
   const stored = safeAppStorage.getJSON<Partial<CompanyBranding>>(companyKey, {});
+  const parentGroup = getParentGroupInfo();
 
   // Determine correct company name according to active subsidiary:
   let companyName = defaultB.companyName;
@@ -59,14 +72,22 @@ export function getStoredBranding(): CompanyBranding {
     }
   }
 
-  // Only allow explicitly uploaded custom logos (no default SVG files)
-  const isUploaded = (src?: string | null) => Boolean(src && !src.startsWith('/logos/') && !src.includes('docks_logo') && !src.includes('mak_group_logo'));
-  let companyLogo = isUploaded(stored.customLogo) ? stored.customLogo! : null;
+  // Determine effective logo:
+  // If useMainLogoAsOfficial is checked, use Main Conglomerate Logo
+  let companyLogo: string | null = null;
+  const isUseMain = Boolean(stored.useMainLogoAsOfficial);
+  if (isUseMain && parentGroup.logo && isUploadedLogo(parentGroup.logo)) {
+    companyLogo = parentGroup.logo;
+  } else if (stored.customLogo && isUploadedLogo(stored.customLogo)) {
+    companyLogo = stored.customLogo;
+  }
+
   const subtitle = stored.subtitle || defaultB.subtitle;
 
   return {
     ...defaultB,
     ...stored,
+    useMainLogoAsOfficial: isUseMain,
     customLogo: companyLogo,
     companyName: companyName,
     subtitle: subtitle,
@@ -84,10 +105,12 @@ export function getStoredBranding(): CompanyBranding {
 let activeBrandingCache: CompanyBranding = getStoredBranding();
 const brandingListeners = new Set<(branding: CompanyBranding) => void>();
 let firestoreUnsubscribe: (() => void) | null = null;
+let currentSubscribedCompanyId: string | null = null;
 
 // Recompute when active company changes
 subscribeToActiveCompany((comp) => {
-  activeBrandingCache = getStoredBranding();
+  ensureFirestoreSubscription();
+  activeBrandingCache = getStoredBranding(comp);
   brandingListeners.forEach(fn => {
     try { fn(activeBrandingCache); } catch (_) {}
   });
@@ -96,52 +119,87 @@ subscribeToActiveCompany((comp) => {
   }
 });
 
+// Recompute if parent group updates and active company uses Main Group Logo
+subscribeToParentGroup((pGroup) => {
+  const current = getStoredBranding();
+  if (current.useMainLogoAsOfficial) {
+    activeBrandingCache = getStoredBranding();
+    brandingListeners.forEach(fn => {
+      try { fn(activeBrandingCache); } catch (_) {}
+    });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(BRANDING_EVENT, { detail: activeBrandingCache }));
+    }
+  }
+});
+
 function ensureFirestoreSubscription() {
-  if (firestoreUnsubscribe) return;
+  const activeComp = getActiveCompany();
+  if (firestoreUnsubscribe && currentSubscribedCompanyId === activeComp.id) return;
+
+  if (firestoreUnsubscribe) {
+    try { firestoreUnsubscribe(); } catch (_) {}
+    firestoreUnsubscribe = null;
+  }
+
+  currentSubscribedCompanyId = activeComp.id;
+
   try {
-    const brandingRef = doc(db, 'settings', 'branding');
+    const docId = activeComp.id === 'docks' ? 'branding' : `branding_${activeComp.id}`;
+    const brandingRef = doc(db, 'settings', docId);
+    
     firestoreUnsubscribe = onSnapshot(
       brandingRef,
       (docSnap) => {
-        // If current company is not docks, Firestore settings doc must not overwrite it!
-        const activeComp = getActiveCompany();
-        if (activeComp.id !== 'docks') {
-          activeBrandingCache = getStoredBranding();
-          brandingListeners.forEach(fn => {
-            try { fn(activeBrandingCache); } catch (_) {}
-          });
-          return;
-        }
-
         if (docSnap.exists()) {
           const data = docSnap.data();
+          const parentGroup = getParentGroupInfo();
           const rawDocName = (data.companyName || '').trim();
-          const normalizedDocName = (!rawDocName || rawDocName.toLowerCase() === 'docks (pvt.) ltd' || rawDocName.toLowerCase() === 'docks (pvt) ltd' || rawDocName.toLowerCase() === 'docks (pvt) ltd.')
-            ? 'DOCKS (PVT) LTD.'
-            : (data.companyName || DEFAULT_BRANDING.companyName);
+          const defaultB = getDefaultBranding(activeComp);
+          const normalizedDocName = rawDocName || defaultB.companyName;
+
+          const isUseMain = Boolean(data.useMainLogoAsOfficial);
+          const rawCustomLogo = data.customLogo || data.logo || null;
+          let effectiveLogo: string | null = null;
+          if (isUseMain && parentGroup.logo && isUploadedLogo(parentGroup.logo)) {
+            effectiveLogo = parentGroup.logo;
+          } else if (rawCustomLogo && isUploadedLogo(rawCustomLogo)) {
+            effectiveLogo = rawCustomLogo;
+          }
 
           const merged: CompanyBranding = {
-            customLogo: activeComp.logo,
+            ...defaultB,
+            ...data,
+            useMainLogoAsOfficial: isUseMain,
+            customLogo: effectiveLogo,
             companyName: normalizedDocName,
-            subtitle: data.subtitle || activeComp.tagline,
-            address: data.address || DEFAULT_BRANDING.address,
-            phone: data.phone || DEFAULT_BRANDING.phone,
-            cell: data.cell || DEFAULT_BRANDING.cell,
-            email: data.email || DEFAULT_BRANDING.email,
-            web: data.web || DEFAULT_BRANDING.web,
-            directorName: data.directorName || DEFAULT_BRANDING.directorName,
-            directorTitle: data.directorTitle || DEFAULT_BRANDING.directorTitle,
+            subtitle: data.subtitle || activeComp.tagline || defaultB.subtitle,
+            address: data.address || defaultB.address,
+            phone: data.phone || defaultB.phone,
+            cell: data.cell || defaultB.cell,
+            email: data.email || defaultB.email,
+            web: data.web || defaultB.web,
+            directorName: data.directorName || defaultB.directorName,
+            directorTitle: data.directorTitle || defaultB.directorTitle,
             updatedAt: data.updatedAt,
             updatedBy: data.updatedBy,
           };
 
+          const companyKey = `${STORAGE_KEY}_${activeComp.id}`;
+          safeAppStorage.setJSON(companyKey, merged);
+          if (activeComp.id === 'docks') {
+            safeAppStorage.setJSON(STORAGE_KEY, merged);
+          }
+
           // Only broadcast if content actually differs from current cache
           if (JSON.stringify(merged) !== JSON.stringify(activeBrandingCache)) {
             activeBrandingCache = merged;
-            safeAppStorage.setJSON(STORAGE_KEY, merged);
             brandingListeners.forEach(fn => {
               try { fn(merged); } catch (_) {}
             });
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent(BRANDING_EVENT, { detail: merged }));
+            }
           }
         }
       },
@@ -246,9 +304,13 @@ export async function optimizeLogoImage(file: File, maxWidth = 800, maxHeight = 
  */
 export async function saveBranding(updates: Partial<CompanyBranding>): Promise<CompanyBranding> {
   const activeCompany = getActiveCompany();
+  const companyKey = `${STORAGE_KEY}_${activeCompany.id}`;
+  const currentStored = safeAppStorage.getJSON<Partial<CompanyBranding>>(companyKey, {});
   const current = getStoredBranding();
+  
   const next: CompanyBranding = {
     ...current,
+    ...currentStored,
     ...updates,
     updatedAt: new Date().toISOString(),
   };
@@ -260,10 +322,13 @@ export async function saveBranding(updates: Partial<CompanyBranding>): Promise<C
   try {
     const docId = activeCompany.id === 'docks' ? 'branding' : `branding_${activeCompany.id}`;
     const brandingRef = doc(db, 'settings', docId);
-    await setDoc(brandingRef, next, { merge: true });
+    await setDoc(brandingRef, {
+      ...next,
+      useMainLogoAsOfficial: Boolean(next.useMainLogoAsOfficial),
+      customLogo: next.customLogo || null
+    }, { merge: true });
   } catch (error) {
     console.error('Failed to persist branding to Firestore:', error);
-    // Still saved locally via broadcastBranding
   }
 
   return next;
@@ -277,6 +342,8 @@ export async function resetBrandingToDefault(): Promise<CompanyBranding> {
   const defaultB = getDefaultBranding(activeCompany);
   const next: CompanyBranding = {
     ...defaultB,
+    useMainLogoAsOfficial: false,
+    customLogo: null,
     updatedAt: new Date().toISOString(),
   };
 
@@ -287,7 +354,11 @@ export async function resetBrandingToDefault(): Promise<CompanyBranding> {
   try {
     const docId = activeCompany.id === 'docks' ? 'branding' : `branding_${activeCompany.id}`;
     const brandingRef = doc(db, 'settings', docId);
-    await setDoc(brandingRef, { customLogo: null, updatedAt: next.updatedAt }, { merge: true });
+    await setDoc(brandingRef, { 
+      customLogo: null, 
+      useMainLogoAsOfficial: false,
+      updatedAt: next.updatedAt 
+    }, { merge: true });
   } catch (error) {
     console.error('Failed to reset branding in Firestore:', error);
   }
@@ -300,9 +371,11 @@ export async function resetBrandingToDefault(): Promise<CompanyBranding> {
  */
 export function useBranding() {
   const { activeCompany } = useActiveCompany();
+  const { parentGroup } = useParentGroup();
   const [branding, setBranding] = useState<CompanyBranding>(() => getStoredBranding());
 
   useEffect(() => {
+    ensureFirestoreSubscription();
     setBranding(getStoredBranding());
     return subscribeToBranding((data) => {
       setBranding(data);
@@ -315,13 +388,19 @@ export function useBranding() {
     ? defaultB.companyName
     : (branding.companyName || defaultB.companyName);
 
-  let finalLogo = branding.customLogo || defaultB.customLogo;
-  if (activeCompany.id !== 'docks' && finalLogo && finalLogo.includes('docks_logo')) {
-    finalLogo = defaultB.customLogo;
+  // Determine effective logo:
+  // If useMainLogoAsOfficial is checked, use Main Group Logo
+  let finalLogo: string | null = null;
+  const isUseMain = Boolean(branding.useMainLogoAsOfficial);
+  if (isUseMain && parentGroup.logo && isUploadedLogo(parentGroup.logo)) {
+    finalLogo = parentGroup.logo;
+  } else if (branding.customLogo && isUploadedLogo(branding.customLogo)) {
+    finalLogo = branding.customLogo;
   }
 
   const effectiveBranding: CompanyBranding = {
     ...branding,
+    useMainLogoAsOfficial: isUseMain,
     companyName: finalCompanyName,
     customLogo: finalLogo,
     subtitle: branding.subtitle || defaultB.subtitle,
@@ -338,6 +417,8 @@ export function useBranding() {
     branding: effectiveBranding,
     customLogo: finalLogo,
     activeLogo: finalLogo,
+    useMainLogoAsOfficial: isUseMain,
+    mainGroupLogo: parentGroup.logo || null,
     companyName: finalCompanyName,
     subtitle: branding.subtitle || defaultB.subtitle,
     address: branding.address || defaultB.address,
@@ -347,7 +428,7 @@ export function useBranding() {
     web: branding.web || defaultB.web,
     directorName: branding.directorName || defaultB.directorName,
     directorTitle: branding.directorTitle || defaultB.directorTitle,
-    isCustomLogo: !!branding.customLogo && branding.customLogo !== defaultB.customLogo,
+    isCustomLogo: isUseMain || (!!branding.customLogo && isUploadedLogo(branding.customLogo)),
     saveBranding,
     resetBrandingToDefault,
   };

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Building2, 
   CheckCircle2, 
@@ -44,6 +44,13 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   const { parentGroup } = useParentGroup();
   const [isAdminManagementOpen, setIsAdminManagementOpen] = useState(false);
   const [adminInitialTab, setAdminInitialTab] = useState<AdminSettingsTab>('users');
+  const [, setBrandingVersion] = useState(0);
+
+  useEffect(() => {
+    const handleBrandingChange = () => setBrandingVersion(v => v + 1);
+    window.addEventListener('dpl_branding_changed', handleBrandingChange);
+    return () => window.removeEventListener('dpl_branding_changed', handleBrandingChange);
+  }, []);
 
   const openAdminModal = (tab: AdminSettingsTab = 'users') => {
     setAdminInitialTab(tab);

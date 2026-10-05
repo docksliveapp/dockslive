@@ -8,7 +8,7 @@ import {
 import { enhanceDocumentWithAI, fileToBase64, downloadFile } from '../services/geminiService';
 import { CompanyDocument } from '../types';
 import { useBranding, optimizeLogoImage } from '../services/brandingService';
-import { useActiveCompany } from '../services/companyService';
+import { useActiveCompany, isUploadedLogo } from '../services/companyService';
 import { 
   wipeCompleteDatabase, 
   wipeCompanyDatabase,
@@ -96,10 +96,11 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
   };
 
   // Branding & Logo State
-  const { branding, saveBranding, resetBrandingToDefault, isCustomLogo } = useBranding();
-  const { activeCompany } = useActiveCompany();
+  const { branding, saveBranding, resetBrandingToDefault, isCustomLogo, mainGroupLogo } = useBranding();
+  const { activeCompany, parentGroup } = useActiveCompany();
   const [brandCompanyName, setBrandCompanyName] = useState(branding.companyName || activeCompany?.legalTitle || activeCompany?.name);
   const [brandSubtitle, setBrandSubtitle] = useState(branding.subtitle || '');
+  const [useMainLogoAsOfficial, setUseMainLogoAsOfficial] = useState<boolean>(Boolean(branding.useMainLogoAsOfficial));
   const [logoPreview, setLogoPreview] = useState<string | null>(branding.customLogo);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [isOptimizingLogo, setIsOptimizingLogo] = useState(false);
@@ -111,10 +112,15 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
   useEffect(() => {
     setBrandCompanyName(branding.companyName || activeCompany?.legalTitle || activeCompany?.name);
     setBrandSubtitle(branding.subtitle || activeCompany?.tagline || '');
+    setUseMainLogoAsOfficial(Boolean(branding.useMainLogoAsOfficial));
     if (!logoFile) {
-      setLogoPreview(branding.customLogo || activeCompany?.logo);
+      if (branding.useMainLogoAsOfficial && parentGroup?.logo) {
+        setLogoPreview(parentGroup.logo);
+      } else {
+        setLogoPreview(branding.customLogo || activeCompany?.logo || null);
+      }
     }
-  }, [branding.companyName, branding.subtitle, branding.customLogo, logoFile, activeCompany?.id]);
+  }, [branding.companyName, branding.subtitle, branding.customLogo, branding.useMainLogoAsOfficial, parentGroup?.logo, logoFile, activeCompany?.id]);
 
   // General
   const companyName = branding.companyName || activeCompany?.legalTitle || activeCompany?.name || 'Company Operations';
@@ -965,7 +971,8 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
     setBrandingSuccess(false);
     try {
       await saveBranding({
-        customLogo: logoPreview,
+        customLogo: useMainLogoAsOfficial ? (branding.customLogo || null) : logoPreview,
+        useMainLogoAsOfficial: useMainLogoAsOfficial,
         companyName: brandCompanyName.trim() || activeCompany?.legalTitle || activeCompany?.name || 'Company Operations',
         subtitle: brandSubtitle.trim() || activeCompany?.tagline || 'Customs Clearance, Freight & Logistics Operations'
       });
@@ -981,10 +988,11 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
   };
 
   const handleResetLogo = async () => {
-    if (window.confirm(`Are you sure you want to remove your uploaded logo and restore the default ${activeCompany?.name || 'company'} logo?`)) {
+    if (window.confirm(`Are you sure you want to remove your custom settings and restore the default ${activeCompany?.name || 'company'} configuration?`)) {
       setBrandingSaving(true);
       try {
         await resetBrandingToDefault();
+        setUseMainLogoAsOfficial(false);
         setLogoFile(null);
         setLogoPreview(null);
         setBrandingSuccess(true);
@@ -997,277 +1005,342 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
     }
   };
 
-  const renderLogoSettings = () => (
-    <div className="glass-card rounded-2xl p-6 sm:p-8 shadow-2xl animate-fade-in text-left font-sans space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-5">
-        <div>
-          <h3 className="text-xl sm:text-2xl font-semibold text-white flex items-center gap-2.5">
-            <ImageIcon className="text-brand-400" size={24} />
-            Company Logo & Branding
-          </h3>
-          <p className="text-xs sm:text-sm text-gray-400 mt-1 max-w-2xl">
-            Upload your official company logo. Once saved, this logo will instantly replace the default branding across all screens, headers, sidebars, customer portals, invoices, and customs clearing print documents. It remains permanently active until you modify or remove it.
-          </p>
-        </div>
-        
-        {/* Status Badge */}
-        <div className="self-start sm:self-auto">
-          {isCustomLogo || (logoPreview && logoPreview !== branding.customLogo) ? (
-            <div className="flex items-center gap-2 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-3 py-1.5 rounded-full text-xs font-semibold">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              Active Custom Logo
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 bg-brand-500/15 border border-brand-500/30 text-brand-300 px-3 py-1.5 rounded-full text-xs font-semibold">
-              <Sparkles size={13} className="text-brand-400" />
-              Default System Logo ({activeCompany?.shortName || 'MAK'} Official)
-            </div>
-          )}
-        </div>
-      </div>
+  const renderLogoSettings = () => {
+    const effectivePreviewLogo = useMainLogoAsOfficial && parentGroup?.logo && isUploadedLogo(parentGroup.logo)
+      ? parentGroup.logo
+      : logoPreview;
 
-      {/* Live Dual Previews */}
-      <div className="space-y-3">
-        <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-2">
-          <Eye size={16} className="text-brand-400" />
-          Live Dual Preview
-        </h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Dark Mode Screen Preview */}
-          <div className="p-5 rounded-xl bg-slate-950/80 border border-white/10 flex flex-col justify-between min-h-[160px]">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-[11px] font-mono text-gray-400 uppercase tracking-wide">
-                App UI (Dark Mode Header & Sidebar)
-              </span>
-              <span className="text-[10px] bg-white/10 text-gray-300 px-2 py-0.5 rounded">Digital Screen</span>
-            </div>
-            <div className="flex items-center justify-center py-4 bg-slate-900/60 rounded-lg border border-white/5">
-              <Logo customSrc={logoPreview} className="h-12 w-auto max-w-[220px]" />
-            </div>
-            <div className="mt-3 text-center">
-              <p className="text-xs text-white font-medium">{brandCompanyName || activeCompany?.legalTitle || activeCompany?.name}</p>
-              <p className="text-[10px] text-gray-400 truncate">{brandSubtitle || activeCompany?.tagline || 'Customs Clearance, Logistics & Cargo Operations'}</p>
-            </div>
+    return (
+      <div className="glass-card rounded-2xl p-6 sm:p-8 shadow-2xl animate-fade-in text-left font-sans space-y-8">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-5">
+          <div>
+            <h3 className="text-xl sm:text-2xl font-semibold text-white flex items-center gap-2.5">
+              <ImageIcon className="text-brand-400" size={24} />
+              Company Official Logo & Branding
+            </h3>
+            <p className="text-xs sm:text-sm text-gray-300 mt-1 max-w-2xl leading-relaxed">
+              Har company ka <strong className="text-amber-300">sirf ek hi official logo</strong> hoga jo unke tamam documents (Invoices, Gate Passes, Delivery Orders, B/L summaries, Ledgers) aur app screens per aayega.
+            </p>
           </div>
+          
+          {/* Status Badge */}
+          <div className="self-start sm:self-auto">
+            {useMainLogoAsOfficial ? (
+              <div className="flex items-center gap-2 bg-amber-500/20 border border-amber-500/40 text-amber-300 px-3 py-1.5 rounded-full text-xs font-semibold shadow-sm">
+                <Sparkles size={13} className="text-amber-400" />
+                Main Group Logo Active
+              </div>
+            ) : (isCustomLogo || (logoPreview && logoPreview !== branding.customLogo)) ? (
+              <div className="flex items-center gap-2 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 px-3 py-1.5 rounded-full text-xs font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                Company Custom Logo Active
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 bg-brand-500/15 border border-brand-500/30 text-brand-300 px-3 py-1.5 rounded-full text-xs font-semibold">
+                <Sparkles size={13} className="text-brand-400" />
+                Default System Monogram
+              </div>
+            )}
+          </div>
+        </div>
 
-          {/* Light Mode / Print Document Preview */}
-          <div className="p-5 rounded-xl bg-white border border-gray-300 flex flex-col justify-between min-h-[160px] text-black shadow-lg">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-[11px] font-mono text-gray-600 uppercase tracking-wide">
-                Official Document & Invoice Print (A4 Paper)
-              </span>
-              <span className="text-[10px] bg-gray-200 text-gray-800 px-2 py-0.5 rounded font-semibold">Print Output</span>
-            </div>
-            <div className="flex flex-col items-center justify-center py-3 bg-gray-50 rounded-lg border border-gray-200">
-              <Logo customSrc={logoPreview} className="h-12 w-auto max-w-[220px] mb-2" />
-              <h5 className="text-sm font-bold uppercase text-black tracking-wide">
-                {brandCompanyName || activeCompany?.legalTitle || activeCompany?.name}
-              </h5>
-              <p className="text-[10px] text-gray-600 font-medium">
-                {brandSubtitle || activeCompany?.tagline || 'Customs Clearance, Logistics & Cargo Operations'}
+        {/* 1. TICKBOX OPTION: "Use Main Group Logo as Your Official Document Logo" */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-slate-900/90 to-amber-500/10 border-2 border-amber-500/40 shadow-lg">
+          <label className="flex items-start sm:items-center gap-3.5 cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={useMainLogoAsOfficial}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setUseMainLogoAsOfficial(checked);
+                if (checked && parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
+                  setLogoPreview(parentGroup.logo);
+                } else if (!checked) {
+                  setLogoPreview(branding.customLogo || null);
+                }
+              }}
+              className="w-5 h-5 rounded-lg text-amber-500 bg-slate-900 border-white/20 focus:ring-amber-400 focus:ring-offset-slate-900 cursor-pointer mt-0.5 sm:mt-0 shrink-0"
+            />
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm sm:text-base font-bold text-white">
+                  Main Logo as Your Official Document Logo
+                </span>
+                <span className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                  {useMainLogoAsOfficial ? '✓ Active' : 'Optional Tickbox'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-300 mt-1 leading-relaxed">
+                Jab aap is option per tick laga denge to is company ka alag logo upload karne ki zaroorat nahi hogi, balki hamari app ka <strong className="text-amber-300">Main Admin Group Logo</strong> hi is company ke tamam documents aur screens per implement ho jayega.
               </p>
+              {useMainLogoAsOfficial && (
+                <div className="mt-2.5 p-2 rounded-xl bg-black/40 border border-white/10 flex items-center gap-2 text-xs text-amber-200">
+                  <CheckCircle2 size={14} className="text-amber-400 shrink-0" />
+                  <span>Main Logo ko badalne ke liye Main Admin Settings me jakar logo tabdeel karein.</span>
+                </div>
+              )}
             </div>
-            <div className="mt-2 text-right text-[10px] text-gray-500 font-mono">
-              CONFIDENTIAL LOGISTICS & INVOICE VOUCHER
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Upload Dropzone */}
-      <div className="space-y-4 border-t border-white/10 pt-6">
-        <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-2">
-          <Upload size={16} className="text-brand-400" />
-          Upload Logo Image
-        </h4>
-
-        <input 
-          type="file" 
-          ref={logoInputRef}
-          accept="image/png,image/svg+xml,image/jpeg,image/jpg,image/webp,.png,.svg,.jpg,.jpeg,.webp"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) handleLogoFileSelect(file);
-          }}
-        />
-
-        <div 
-          onClick={() => logoInputRef.current?.click()}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setIsDraggingLogo(true);
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setIsDraggingLogo(false);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setIsDraggingLogo(false);
-            const file = e.dataTransfer.files?.[0];
-            if (file) handleLogoFileSelect(file);
-          }}
-          className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all group ${
-            isDraggingLogo 
-              ? 'border-brand-400 bg-brand-500/10 scale-[1.01]' 
-              : 'border-white/15 hover:border-brand-500/60 hover:bg-white/5'
-          }`}
-        >
-          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform shadow-inner ${
-            isDraggingLogo ? 'bg-brand-500/20 text-brand-300 scale-110' : 'bg-brand-500/10 text-brand-400 group-hover:scale-110'
-          }`}>
-            <Upload size={28} />
-          </div>
-          <p className="text-sm sm:text-base font-medium text-white mb-1">
-            Click to upload or drag and drop your company logo
-          </p>
-          <p className="text-xs text-gray-400 max-w-md mb-3">
-            Supports PNG, SVG, and JPG / JPEG formats. Transparent PNG or SVG is recommended for optimal rendering on both dark app headers and white invoice prints.
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-2 text-[11px]">
-            <span className="bg-brand-500/10 text-brand-300 border border-brand-500/20 px-2.5 py-1 rounded-md font-medium flex items-center gap-1">
-              ✓ PNG Supported
-            </span>
-            <span className="bg-brand-500/10 text-brand-300 border border-brand-500/20 px-2.5 py-1 rounded-md font-medium flex items-center gap-1">
-              ✓ SVG Supported
-            </span>
-            <span className="bg-brand-500/10 text-brand-300 border border-brand-500/20 px-2.5 py-1 rounded-md font-medium flex items-center gap-1">
-              ✓ JPG / JPEG Supported
-            </span>
-          </div>
-
-          {isOptimizingLogo && (
-            <div className="mt-4 flex items-center gap-2 text-xs text-brand-300 bg-brand-500/10 px-3 py-1.5 rounded-lg border border-brand-500/20 animate-pulse">
-              <Loader2 size={14} className="animate-spin" />
-              Optimizing image for high-definition rendering and cloud synchronization...
-            </div>
-          )}
+          </label>
         </div>
 
-        {logoFile && (
-          <div className="flex items-center justify-between p-3.5 rounded-xl bg-brand-500/10 border border-brand-500/20 text-xs">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 size={16} className="text-green-400" />
-              <div>
-                <p className="text-white font-medium">{logoFile.name}</p>
-                <p className="text-gray-400 text-[11px]">Ready to save ({Math.round(logoFile.size / 1024)} KB)</p>
+        {/* 2. Live Dual Previews (One Logo for Screens & Print) */}
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+            <Eye size={16} className="text-brand-400" />
+            Official Logo Preview (Both Digital Screens & Invoices)
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Dark Mode Screen Preview */}
+            <div className="p-5 rounded-xl bg-slate-950/80 border border-white/10 flex flex-col justify-between min-h-[160px]">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-[11px] font-mono text-gray-400 uppercase tracking-wide">
+                  App UI (Dark Mode Header & Screens)
+                </span>
+                <span className="text-[10px] bg-white/10 text-gray-300 px-2 py-0.5 rounded">Digital Screen</span>
+              </div>
+              <div className="flex items-center justify-center py-4 bg-slate-900/60 rounded-lg border border-white/5">
+                <Logo customSrc={effectivePreviewLogo} className="h-12 w-auto max-w-[220px]" />
+              </div>
+              <div className="mt-3 text-center">
+                <p className="text-xs text-white font-medium">{brandCompanyName || activeCompany?.legalTitle || activeCompany?.name}</p>
+                <p className="text-[10px] text-gray-400 truncate">{brandSubtitle || activeCompany?.tagline || 'Customs Clearance, Logistics & Cargo Operations'}</p>
               </div>
             </div>
-            <button 
-              type="button"
-              onClick={() => logoInputRef.current?.click()}
-              className="text-brand-300 hover:text-white underline text-xs font-semibold"
-            >
-              Choose Different Image
-            </button>
-          </div>
-        )}
-      </div>
 
-      {/* Company Name & Details */}
-      <div className="space-y-4 border-t border-white/10 pt-6">
-        <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-2">
-          <Building2 size={16} className="text-brand-400" />
-          Company Text & Headings
-        </h4>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-400 mb-1">Company Legal Name</label>
-            <input 
-              type="text"
-              value={brandCompanyName}
-              onChange={(e) => setBrandCompanyName(e.target.value)}
-              placeholder={`e.g. ${activeCompany?.legalTitle || activeCompany?.name || 'Company Name'}`}
-              className="w-full glass-input rounded-lg p-2.5 outline-none text-sm text-white"
-            />
-            <p className="text-[11px] text-gray-500 mt-1">Displayed alongside your logo on reports and invoices.</p>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-400 mb-1">Company Subtitle / Operations</label>
-            <input 
-              type="text"
-              value={brandSubtitle}
-              onChange={(e) => setBrandSubtitle(e.target.value)}
-              placeholder="e.g. Customs Clearance, Bonded Carrier & Freight Terminal Operations"
-              className="w-full glass-input rounded-lg p-2.5 outline-none text-sm text-white"
-            />
-            <p className="text-[11px] text-gray-500 mt-1">Appears below the logo on print letterheads.</p>
+            {/* Light Mode / Print Document Preview */}
+            <div className="p-5 rounded-xl bg-white border border-gray-300 flex flex-col justify-between min-h-[160px] text-black shadow-lg">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-[11px] font-mono text-gray-600 uppercase tracking-wide">
+                  Official Document & Invoice Print (A4 Paper)
+                </span>
+                <span className="text-[10px] bg-gray-200 text-gray-800 px-2 py-0.5 rounded font-semibold">Print Output</span>
+              </div>
+              <div className="flex flex-col items-center justify-center py-3 bg-gray-50 rounded-lg border border-gray-200">
+                <Logo customSrc={effectivePreviewLogo} className="h-12 w-auto max-w-[220px] mb-2" />
+                <h5 className="text-sm font-bold uppercase text-black tracking-wide">
+                  {brandCompanyName || activeCompany?.legalTitle || activeCompany?.name}
+                </h5>
+                <p className="text-[10px] text-gray-600 font-medium">
+                  {brandSubtitle || activeCompany?.tagline || 'Customs Clearance, Logistics & Cargo Operations'}
+                </p>
+              </div>
+              <div className="mt-2 text-right text-[10px] text-gray-500 font-mono">
+                CONFIDENTIAL LOGISTICS & INVOICE VOUCHER
+              </div>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Persistence Note */}
-      <div className="p-4 rounded-xl bg-slate-900/80 border border-white/10 flex items-start gap-3 text-xs text-gray-300">
-        <CheckCircle2 size={16} className="text-brand-400 shrink-0 mt-0.5" />
-        <div>
-          <p className="font-semibold text-white">Guaranteed Permanent Persistence</p>
-          <p className="text-gray-400 mt-0.5">
-            Your uploaded logo is synchronized with your cloud database and preserved in browser storage. It will remain active across page reloads, tab switches, and all computers until you explicitly click &quot;Reset to Default Logo&quot;.
-          </p>
-        </div>
-      </div>
-
-      {/* Action Footer */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-white/10 pt-6">
-        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
-          {onReplaySplash && (
-            <button 
-              type="button"
-              onClick={onReplaySplash}
-              className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-amber-500/30 text-amber-300 hover:bg-amber-500/10 transition-colors text-xs sm:text-sm font-semibold flex items-center justify-center gap-2"
-              title="Preview the full animated welcome splash screen"
-            >
-              <Sparkles size={15} className="text-amber-400" />
-              Preview Splash Screen
-            </button>
-          )}
-
-          <button 
-            type="button"
-            disabled={brandingSaving || (!isCustomLogo && !logoPreview)}
-            onClick={handleResetLogo}
-            className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <RotateCcw size={15} />
-            Reset to Default Logo
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3 w-full sm:w-auto">
-          {brandingSuccess && (
-            <span className="text-xs text-emerald-400 font-medium flex items-center gap-1.5 animate-in fade-in">
-              <CheckCircle2 size={16} /> Logo & Branding Saved!
-            </span>
-          )}
-          <button 
-            type="button"
-            disabled={brandingSaving || isOptimizingLogo}
-            onClick={handleSaveBranding}
-            className="w-full sm:w-auto bg-brand-600 hover:bg-brand-500 text-white px-6 py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 shadow-lg shadow-brand-600/30 transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {brandingSaving ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Saving to Cloud...
-              </>
-            ) : (
-              <>
-                <Save size={16} />
-                Save & Apply Logo
-              </>
+        {/* 3. Upload Custom Company Logo Dropzone */}
+        <div className={`space-y-4 border-t border-white/10 pt-6 ${useMainLogoAsOfficial ? 'opacity-60' : 'opacity-100'}`}>
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+              <Upload size={16} className="text-brand-400" />
+              {useMainLogoAsOfficial ? 'Upload Custom Logo (Overrides Main Logo if unchecked)' : `Upload Custom Logo for ${activeCompany?.name || 'this Company'}`}
+            </h4>
+            {useMainLogoAsOfficial && (
+              <span className="text-xs text-amber-300 font-medium">
+                (Uncheck tickbox above to use custom logo instead)
+              </span>
             )}
-          </button>
+          </div>
+
+          <input 
+            type="file" 
+            ref={logoInputRef}
+            accept="image/png,image/svg+xml,image/jpeg,image/jpg,image/webp,.png,.svg,.jpg,.jpeg,.webp"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleLogoFileSelect(file);
+            }}
+          />
+
+          <div 
+            onClick={() => {
+              if (useMainLogoAsOfficial) {
+                setUseMainLogoAsOfficial(false);
+              }
+              logoInputRef.current?.click();
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDraggingLogo(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDraggingLogo(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsDraggingLogo(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file) {
+                if (useMainLogoAsOfficial) setUseMainLogoAsOfficial(false);
+                handleLogoFileSelect(file);
+              }
+            }}
+            className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all group ${
+              isDraggingLogo 
+                ? 'border-brand-400 bg-brand-500/10 scale-[1.01]' 
+                : 'border-white/15 hover:border-brand-500/60 hover:bg-white/5'
+            }`}
+          >
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform shadow-inner ${
+              isDraggingLogo ? 'bg-brand-500/20 text-brand-300 scale-110' : 'bg-brand-500/10 text-brand-400 group-hover:scale-110'
+            }`}>
+              <Upload size={28} />
+            </div>
+            <p className="text-sm sm:text-base font-medium text-white mb-1">
+              Click to upload or drag and drop logo for {activeCompany?.name}
+            </p>
+            <p className="text-xs text-gray-400 max-w-md mb-3">
+              Supports PNG, SVG, and JPG / JPEG formats. Once saved, this single logo will apply to all invoices, gate passes, and screens for {activeCompany?.name}.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2 text-[11px]">
+              <span className="bg-brand-500/10 text-brand-300 border border-brand-500/20 px-2.5 py-1 rounded-md font-medium flex items-center gap-1">
+                ✓ PNG Supported
+              </span>
+              <span className="bg-brand-500/10 text-brand-300 border border-brand-500/20 px-2.5 py-1 rounded-md font-medium flex items-center gap-1">
+                ✓ SVG Supported
+              </span>
+              <span className="bg-brand-500/10 text-brand-300 border border-brand-500/20 px-2.5 py-1 rounded-md font-medium flex items-center gap-1">
+                ✓ JPG / JPEG Supported
+              </span>
+            </div>
+
+            {isOptimizingLogo && (
+              <div className="mt-4 flex items-center gap-2 text-xs text-brand-300 bg-brand-500/10 px-3 py-1.5 rounded-lg border border-brand-500/20 animate-pulse">
+                <Loader2 size={14} className="animate-spin" />
+                Optimizing image for high-definition rendering and cloud synchronization...
+              </div>
+            )}
+          </div>
+
+          {logoFile && (
+            <div className="flex items-center justify-between p-3.5 rounded-xl bg-brand-500/10 border border-brand-500/20 text-xs">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 size={16} className="text-green-400" />
+                <div>
+                  <p className="text-white font-medium">{logoFile.name}</p>
+                  <p className="text-gray-400 text-[11px]">Ready to save ({Math.round(logoFile.size / 1024)} KB)</p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => logoInputRef.current?.click()}
+                className="text-brand-300 hover:text-white underline text-xs font-semibold"
+              >
+                Choose Different Image
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Company Name & Details */}
+        <div className="space-y-4 border-t border-white/10 pt-6">
+          <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+            <Building2 size={16} className="text-brand-400" />
+            Company Text & Headings
+          </h4>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1">Company Legal Name</label>
+              <input 
+                type="text" 
+                value={brandCompanyName}
+                onChange={(e) => setBrandCompanyName(e.target.value)}
+                placeholder={`e.g. ${activeCompany?.legalTitle || activeCompany?.name || 'Company Name'}`}
+                className="w-full glass-input rounded-lg p-2.5 outline-none text-sm text-white"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">Displayed alongside your logo on reports and invoices.</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1">Company Subtitle / Operations</label>
+              <input 
+                type="text" 
+                value={brandSubtitle}
+                onChange={(e) => setBrandSubtitle(e.target.value)}
+                placeholder="e.g. Customs Clearance, Bonded Carrier & Freight Terminal Operations"
+                className="w-full glass-input rounded-lg p-2.5 outline-none text-sm text-white"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">Appears below the logo on print letterheads.</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Persistence Note */}
+        <div className="p-4 rounded-xl bg-slate-900/80 border border-white/10 flex items-start gap-3 text-xs text-gray-300">
+          <CheckCircle2 size={16} className="text-brand-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold text-white">Guaranteed Permanent Cloud & Database Persistence</p>
+            <p className="text-gray-400 mt-0.5">
+              Saved settings are synchronized in real-time to your Firestore cloud database and cached in browser storage. Logos will immediately be visible on other tabs, devices, invoices, and receipts without manual refresh.
+            </p>
+          </div>
+        </div>
+
+        {/* Action Footer */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-white/10 pt-6">
+          <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+            {onReplaySplash && (
+              <button 
+                type="button"
+                onClick={onReplaySplash}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-amber-500/30 text-amber-300 hover:bg-amber-500/10 transition-colors text-xs sm:text-sm font-semibold flex items-center justify-center gap-2"
+                title="Preview the full animated welcome splash screen"
+              >
+                <Sparkles size={15} className="text-amber-400" />
+                Preview Splash Screen
+              </button>
+            )}
+
+            <button 
+              type="button"
+              disabled={brandingSaving || (!isCustomLogo && !logoPreview && !useMainLogoAsOfficial)}
+              onClick={handleResetLogo}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <RotateCcw size={15} />
+              Reset to Default Monogram
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            {brandingSuccess && (
+              <span className="text-xs text-emerald-400 font-medium flex items-center gap-1.5 animate-in fade-in">
+                <CheckCircle2 size={16} /> Logo & Branding Saved to Cloud!
+              </span>
+            )}
+            <button 
+              type="button"
+              disabled={brandingSaving || isOptimizingLogo}
+              onClick={handleSaveBranding}
+              className="w-full sm:w-auto bg-brand-600 hover:bg-brand-500 text-white px-6 py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 shadow-lg shadow-brand-600/30 transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {brandingSaving ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Saving to Cloud Database...
+                </>
+              ) : (
+                <>
+                  <Save size={16} />
+                  Save & Apply Logo
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-fade-in pb-36 sm:pb-16">
@@ -1284,10 +1357,6 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
           <FileText size={15} />
           Tax & Finance
         </button>
-        <button onClick={() => setActiveSection('drive')} className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 font-sans flex items-center gap-2 ${activeSection === 'drive' ? 'border-brand-500 text-white font-bold' : 'border-transparent text-gray-400 hover:text-white'}`}>
-          <HardDrive size={15} />
-          Google Drive
-        </button>
         <button onClick={() => setActiveSection('banks')} className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 font-sans ${activeSection === 'banks' ? 'border-brand-500 text-white font-bold' : 'border-transparent text-gray-400 hover:text-white'}`}>Banks</button>
         <button onClick={() => setActiveSection('backup')} className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 font-sans ${activeSection === 'backup' ? 'border-brand-500 text-white font-bold' : 'border-transparent text-gray-400 hover:text-white'}`}>Backup</button>
       </div>
@@ -1296,11 +1365,6 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
         {activeSection === 'general' && renderGeneralSettings()}
         {activeSection === 'logo' && renderLogoSettings()}
         {activeSection === 'tax' && renderTaxSettings()}
-        {activeSection === 'drive' && (
-          <div className="glass-card rounded-2xl p-6 shadow-2xl animate-fade-in text-left">
-            <GoogleDriveManager attachedMode={true} />
-          </div>
-        )}
         {activeSection === 'banks' && renderBanksManagement()}
         {activeSection === 'backup' && renderBackupSystem()}
       </div>

@@ -50,6 +50,9 @@ const App: React.FC = () => {
   const [isReplaySplashOnly, setIsReplaySplashOnly] = useState<boolean>(false);
   const { customLogo, companyName } = useBranding();
   const { activeCompany } = useActiveCompany();
+  const activeUploadedLogo = (customLogo && isUploadedLogo(customLogo)) 
+    ? customLogo 
+    : getCompanyUploadedLogo(activeCompany.id);
 
   // Failsafe: Ensure splash screen never hangs the app under any browser condition
   useEffect(() => {
@@ -153,7 +156,6 @@ const App: React.FC = () => {
   const adminNavItems = [
     { id: 'cases', label: 'Case Management', icon: FolderKanban },
     { id: 'company_documents', label: 'Company Documents', icon: FolderArchive },
-    { id: 'drive', label: 'Google Drive', icon: HardDrive },
     { id: 'finance', label: 'Finance', icon: FileText },
     { id: 'vehicles', label: 'Vehicles', icon: Truck },
     { id: 'available_vehicles', label: 'Available Fleet', icon: MapPin },
@@ -739,24 +741,24 @@ const App: React.FC = () => {
 
       {/* Content Area */}
       <main className="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden relative">
-        {/* Top Header - Perfect 3-Way Centered Layout:
-            Left: Sidebar Toggle & Company Prefix Badge
-            Center: Change Company Button (Opens 4-Company Modal)
-            Right: Compact Treasury Widget, Notifications & LogOut
+        {/* Top Header - Exact Layout Requested:
+            Left: Sidebar Menu Button
+            Center: Company Logo (Centered Prominently - Uploaded from settings)
+            Right: Notifications & LogOut (+ Compact Treasury)
         */}
         <header className="h-14 sm:h-16 bg-slate-900 border-b border-white/10 flex items-center justify-between px-2.5 sm:px-6 z-20 flex-shrink-0 sticky top-0 shadow-md">
-          {/* Left: Sidebar Menu Toggle & Active Company Badge */}
+          {/* Left: Sidebar Menu Toggle & Active View Title */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 justify-start">
             <button 
               type="button"
               onClick={() => window.innerWidth < 1024 ? setMobileSidebarOpen(!mobileSidebarOpen) : setDesktopSidebarExpanded(!desktopSidebarExpanded)} 
-              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-gray-300 hover:text-white border border-white/10 hover:border-amber-400/40 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
-              title="Toggle Menu"
+              className="p-2 sm:p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-gray-300 hover:text-white border border-white/10 hover:border-amber-400/40 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
+              title="Toggle Sidebar Menu"
             >
               <Menu size={19} className="text-amber-400" />
             </button>
 
-            <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono font-black text-xs shrink-0 shadow-sm">
+            <span className="hidden sm:inline-flex px-2 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono font-black text-xs shrink-0 shadow-sm">
               {activeCompany.prefix || activeCompany.shortName}
             </span>
 
@@ -767,18 +769,30 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Center: "Change Company" Button - Clean, Reliable, No Corrupted Image */}
+          {/* Center: Company Logo Centered (Strictly uploaded logo from company settings) */}
           <div className="flex items-center justify-center min-w-0 flex-shrink-0 px-1 sm:px-2">
             <button
               type="button"
-              id="header-change-company-btn"
+              id="header-center-company-logo-btn"
               onClick={() => setIsCompanyModalOpen(true)}
-              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 border border-amber-500/30 hover:border-amber-400 text-amber-200 hover:text-white transition-all duration-200 shadow-sm cursor-pointer active:scale-95 group shrink-0"
-              title="Change Company (Switch Workspace)"
+              className="flex items-center justify-center p-1 sm:px-3 sm:py-1.5 rounded-2xl hover:bg-white/5 border border-transparent hover:border-white/10 transition-all duration-200 cursor-pointer group shrink-0"
+              title={`${activeCompany.name} (Click to switch company)`}
             >
-              <Building2 size={13} className="text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
-              <span className="whitespace-nowrap font-bold text-[11px] sm:text-xs">Change Company</span>
-              <ChevronDown size={13} className="text-amber-400/80 group-hover:translate-y-0.5 transition-transform shrink-0" />
+              {activeUploadedLogo ? (
+                <img 
+                  src={activeUploadedLogo} 
+                  alt={activeCompany.name} 
+                  className="h-8 sm:h-10 w-auto max-w-[140px] sm:max-w-[220px] object-contain drop-shadow-[0_2px_10px_rgba(0,0,0,0.6)] group-hover:scale-105 transition-transform duration-200" 
+                />
+              ) : (
+                <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-slate-800/90 border border-amber-500/30 group-hover:border-amber-400 text-amber-200 group-hover:text-white transition-all shadow-sm">
+                  <Building2 size={15} className="text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
+                  <span className="font-extrabold text-xs sm:text-sm tracking-wide text-white group-hover:text-amber-300 transition-colors truncate max-w-[120px] sm:max-w-[180px]">
+                    {activeCompany.name}
+                  </span>
+                  <ChevronDown size={13} className="text-amber-400/80 group-hover:translate-y-0.5 transition-transform shrink-0" />
+                </div>
+              )}
             </button>
           </div>
 

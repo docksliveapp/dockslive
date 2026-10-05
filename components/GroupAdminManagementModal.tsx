@@ -409,7 +409,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     setBrandingSuccess(false);
 
     try {
-      // 1. Update Parent Group
+      // 1. Update Master Conglomerate Parent Group in Firestore (settings/parent_group)
       await saveParentGroup({
         name: groupName.trim(),
         title: groupTitle.trim(),
@@ -421,19 +421,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
         email: groupEmail.trim(),
         web: groupWeb.trim(),
         logo: groupLogoPreview
-      });
-
-      // 2. Also mirror to primary branding service
-      await saveBranding({
-        companyName: groupTitle.trim() || groupName.trim(),
-        subtitle: groupSubtitle.trim() || groupTagline.trim(),
-        address: groupAddress.trim(),
-        phone: groupPhone.trim(),
-        cell: groupCell.trim(),
-        email: groupEmail.trim(),
-        web: groupWeb.trim(),
-        customLogo: groupLogoPreview
-      });
+      }, currentUserName || 'System Administrator');
 
       setBrandingSuccess(true);
       setTimeout(() => setBrandingSuccess(false), 4000);
