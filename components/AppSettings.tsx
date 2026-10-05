@@ -388,39 +388,25 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
     setShowResetWarningModal(true);
   };
 
-  // Execute complete factory reset
+  // Execute complete factory reset for this company only
   const handleExecuteFactoryReset = async () => {
     try {
       setIsResetting(true);
 
-      // 1. Wipe Firebase Firestore live operational data (cases, finances, vehicles, clients, notifications)
-      const wipeResult = await wipeCompleteDatabase();
+      const targetCompanyId = activeCompany?.id || 'docks';
+      // 1. Wipe Firebase Firestore operational data for THIS SPECIFIC SUBSIDIARY ONLY
+      const wipeResult = await wipeCompanyDatabase(targetCompanyId);
 
-      // 2. If Google Drive is connected, delete backup archives from Drive as well
-      const driveToken = getDriveAccessToken();
-      if (driveToken) {
-        try {
-          const driveFiles = await listDatabaseBackupsFromDrive();
-          for (const file of driveFiles) {
-            if (file.id) {
-              await deleteDriveFile(file.id).catch(() => {});
-            }
-          }
-        } catch (driveCleanupErr) {
-          console.warn("Drive cleanup notice:", driveCleanupErr);
-        }
-      }
-
-      // 3. Reset local settings state
+      // 2. Reset local settings state
       setCompanyDocuments([]);
       setBanks([{ id: 1, name: 'HBL Corporate', acct: '0011-2233-4455', iban: 'PK36HABB001122334455', branch: 'Clifton' }]);
 
       setShowResetWarningModal(false);
       setResetSuccessMessage(
-        `System Factory Reset Successful: All ${wipeResult.deletedCounts.cases} cases, ${wipeResult.deletedCounts.finances} finance entries, ${wipeResult.deletedCounts.vehicles} vehicles, ${wipeResult.deletedCounts.clients} clients, and all general ledger caches were completely wiped from Firebase Firestore and local storage.`
+        `Reset for ${activeCompany?.name || 'Company'} Successful: Wiped ${wipeResult.deletedCounts.cases} cases and ${wipeResult.deletedCounts.finances} finance entries for ${activeCompany?.name || 'this company'}. All other 3 subsidiaries remain completely intact.`
       );
 
-      // Reload window after brief delay so state starts 100% clean
+      // Reload window after brief delay so state starts clean
       setTimeout(() => {
         window.location.reload();
       }, 1600);
@@ -822,8 +808,8 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
                           <AlertCircle size={22} />
                        </div>
                        <div>
-                          <h3 className="text-lg font-bold text-red-300">Warning: Factory Reset</h3>
-                          <p className="text-xs text-red-300/80">Permanent erasure of operational data</p>
+                          <h3 className="text-lg font-bold text-red-300">Warning: Reset {activeCompany?.name || 'Company'}</h3>
+                          <p className="text-xs text-red-300/80">Permanent erasure of operational data for this company only</p>
                        </div>
                     </div>
                     <button onClick={() => setShowResetWarningModal(false)} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10">
@@ -833,13 +819,13 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
 
                  <div className="p-6 space-y-4 text-left">
                     <div className="p-4 rounded-xl bg-red-950/40 border border-red-500/20 text-xs text-red-200/90 leading-relaxed space-y-2">
-                       <p className="font-semibold text-red-300">This action will delete:</p>
+                       <p className="font-semibold text-red-300">This action will delete operational data for {activeCompany?.name || 'this company'} only:</p>
                        <ul className="list-disc pl-5 space-y-1">
-                          <li>All registered Cases, B/Ls, and Containers</li>
-                          <li>All Finance records, Client Ledgers, and Vouchers</li>
-                          <li>All Registered Vehicles and Fleet Drivers</li>
-                          <li>All Saved Clients and Custom Tariffs</li>
-                          <li>Google Drive backup archives and local storage cache</li>
+                          <li>All registered Cases, B/Ls, and Containers for {activeCompany?.name || 'this company'}</li>
+                          <li>All Finance records, Payables, Receivables, and Ledgers for {activeCompany?.name || 'this company'}</li>
+                          <li>All Registered Vehicles and Fleet Drivers for {activeCompany?.name || 'this company'}</li>
+                          <li>Custom branding and document settings for {activeCompany?.name || 'this company'}</li>
+                          <li className="text-emerald-300 font-semibold list-none pt-1">✓ Important: All other 3 corporate subsidiaries remain completely untouched.</li>
                        </ul>
                     </div>
 

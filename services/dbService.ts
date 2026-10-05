@@ -22,7 +22,7 @@ import {
 import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry } from '../types';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
-import { getActiveCompanyId, subscribeToActiveCompany, CompanyId } from './companyService';
+import { getActiveCompanyId, subscribeToActiveCompany, CompanyId, PARENT_GROUP, GROUP_COMPANIES } from './companyService';
 
 /**
  * Checks if a record belongs to the currently active company.
@@ -71,7 +71,8 @@ function sanitizeForFirestore(obj: any): any {
 // CASES
 export function subscribeToCases(
   onData: (cases: Case[]) => void,
-  onError?: (err: any) => void
+  onError?: (err: any) => void,
+  options?: { allCompanies?: boolean }
 ) {
   const path = 'cases';
   let cachedDocs: any[] = [];
@@ -80,7 +81,7 @@ export function subscribeToCases(
     const active = getActiveCompanyId();
     const casesList: Case[] = [];
     cachedDocs.forEach((docData) => {
-      if (matchesActiveCompany(docData.companyId, active)) {
+      if (options?.allCompanies || matchesActiveCompany(docData.companyId, active)) {
         casesList.push(docData as Case);
       }
     });
@@ -568,20 +569,15 @@ export function subscribeToVehicles(
   let cachedDocs: any[] = [];
 
   const emit = () => {
-    const active = getActiveCompanyId();
     const items: Vehicle[] = [];
     let idx = 0;
     cachedDocs.forEach((data) => {
-      if (!matchesActiveCompany(data.companyId, active)) return;
+      // NOTE: Vehicles are universally shared across all 4 subsidiaries (Docks, Truckit, Muhib, Vantage)
       const numId = parseNumericDocId(data.id, data._docId || String(idx), idx++);
       items.push({ ...data, id: numId } as Vehicle);
     });
     onData(dedupeArrayById(items));
   };
-
-  const unsubCompany = subscribeToActiveCompany(() => {
-    emit();
-  });
 
   const unsubFirestore = onSnapshot(
     collection(db, path),
@@ -600,7 +596,6 @@ export function subscribeToVehicles(
 
   return () => {
     unsubFirestore();
-    unsubCompany();
   };
 }
 
@@ -971,15 +966,15 @@ export async function updateNotificationInFirestore(notif: AppNotification): Pro
 
 export const DEFAULT_DATABASE_USERS: AppUser[] = [
   { id: 1, userId: 'admin', password: 'dpl01234', name: 'System Administrator', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'System Administrator', contact: '0300-1234567', email: 'admin@docks.com', status: 'ACTIVE', isAdmin: true, baseSalary: 0 },
-  { id: 2, userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER], designation: 'Finance Manager', contact: '0333-5554444', email: 'finance@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 110000 },
-  { id: 3, userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER], designation: 'Operations Manager', contact: '0321-9876543', email: 'casemanager@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 95000 },
-  { id: 4, userId: 'vehiclemanager', password: 'dpl01234', name: 'Vehicles Manager', role: UserRole.VEHICLE_MANAGER, roles: [UserRole.VEHICLE_MANAGER], designation: 'Fleet & Vehicle Manager', contact: '0301-2233445', email: 'transport@docks.com', status: 'ACTIVE', baseSalary: 85000 },
-  { id: 5, userId: 'officestaff', password: 'dpl01234', name: 'Office Staff', role: UserRole.OFFICE_STAFF, roles: [UserRole.OFFICE_STAFF], designation: 'Office Staff Coordinator', contact: '0312-7788990', email: 'office@docks.com', status: 'ACTIVE', baseSalary: 65000 },
-  { id: 6, userId: 'transporter', password: 'dpl01234', name: 'Transporter Portal', role: UserRole.TRANSPORTER, roles: [UserRole.TRANSPORTER], designation: 'Goods Transporter / Fleet Partner', contact: '0300-8889999', email: 'transporter@docks.com', status: 'ACTIVE' },
-  { id: 7, userId: 'client', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines' },
-  { id: 8, userId: 'vendor', password: 'dpl01234', name: 'Vendor Portal', role: UserRole.VENDOR, roles: [UserRole.VENDOR], designation: 'Supplier / Service Vendor', contact: '0300-5556677', email: 'vendor@docks.com', status: 'ACTIVE', clientName: 'Al-Makkah Logistics & Equipment Services' },
+  { id: 2, userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER], designation: 'Finance Manager', contact: '0333-5554444', email: 'finance@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 0 },
+  { id: 3, userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER], designation: 'Operations Manager', contact: '0321-9876543', email: 'casemanager@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 0 },
+  { id: 4, userId: 'vehiclemanager', password: 'dpl01234', name: 'Vehicles Manager', role: UserRole.VEHICLE_MANAGER, roles: [UserRole.VEHICLE_MANAGER], designation: 'Fleet & Vehicle Manager', contact: '0301-2233445', email: 'transport@docks.com', status: 'ACTIVE', baseSalary: 0 },
+  { id: 5, userId: 'officestaff', password: 'dpl01234', name: 'Office Staff', role: UserRole.OFFICE_STAFF, roles: [UserRole.OFFICE_STAFF], designation: 'Office Staff Coordinator', contact: '0312-7788990', email: 'office@docks.com', status: 'ACTIVE', baseSalary: 0 },
+  { id: 6, userId: 'transporter', password: 'dpl01234', name: 'Transporter Portal', role: UserRole.TRANSPORTER, roles: [UserRole.TRANSPORTER], designation: 'Goods Transporter / Fleet Partner', contact: '0300-8889999', email: 'transporter@docks.com', status: 'ACTIVE', baseSalary: 0 },
+  { id: 7, userId: 'client', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines', baseSalary: 0 },
+  { id: 8, userId: 'vendor', password: 'dpl01234', name: 'Vendor Portal', role: UserRole.VENDOR, roles: [UserRole.VENDOR], designation: 'Supplier / Service Vendor', contact: '0300-5556677', email: 'vendor@docks.com', status: 'ACTIVE', clientName: 'Al-Makkah Logistics & Equipment Services', baseSalary: 0 },
   // Compatibility aliases
-  { id: 9, userId: 'client01', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client01@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines' }
+  { id: 9, userId: 'client01', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client01@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines', baseSalary: 0 }
 ];
 
 let hasSeededInitialUsers = false;
@@ -1791,6 +1786,32 @@ export async function wipeCompleteDatabase(): Promise<{
     }
   }
 
+  // Reset all user base salaries and remove any non-default staff in Firestore users collection
+  try {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    for (const uDoc of usersSnap.docs) {
+      const uData = uDoc.data();
+      const isDefault = DEFAULT_DATABASE_USERS.some(def => String(def.id) === uDoc.id || def.userId === uData.userId);
+      if (!isDefault) {
+        await deleteDoc(doc(db, 'users', uDoc.id));
+      } else {
+        await updateDoc(doc(db, 'users', uDoc.id), {
+          baseSalary: 0,
+          loansAdvances: 0,
+          updatedAt: new Date().toISOString()
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Error resetting users collection in wipeCompleteDatabase:', err);
+  }
+
+  // Reset in-memory logos
+  PARENT_GROUP.logo = '';
+  Object.keys(GROUP_COMPANIES).forEach((k) => {
+    GROUP_COMPANIES[k as CompanyId].logo = '';
+  });
+
   // 1. Wipe universal unified storage (all operational dpl_ keys in memory, localStorage, and sessionStorage)
   try {
     safeAppStorage.wipeAppOperationalData(true);
@@ -1836,6 +1857,9 @@ export async function wipeCompleteDatabase(): Promise<{
   try {
     await setDoc(doc(db, 'settings', 'branding'), { customLogo: null, updatedAt: new Date().toISOString() }, { merge: true });
     await setDoc(doc(db, 'settings', 'parent_group'), { logo: '', updatedAt: new Date().toISOString() }, { merge: true });
+    for (const cId of ['muhib', 'vantage', 'truckit']) {
+      await setDoc(doc(db, 'settings', `branding_${cId}`), { customLogo: null, updatedAt: new Date().toISOString() }, { merge: true });
+    }
   } catch (err) {
     console.warn('Error resetting Firestore settings docs:', err);
   }
@@ -1877,7 +1901,9 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
     { name: 'cases', type: 'cases' },
     { name: 'finances', type: 'finances' },
     { name: 'finance', type: 'finances' },
-    { name: 'vehicles', type: 'vehicles' }
+    { name: 'vehicles', type: 'vehicles' },
+    { name: 'recurring_templates', type: 'finances' },
+    { name: 'staff_ledgers', type: 'finances' }
   ] as const;
 
   for (const item of collectionsToCheck) {
@@ -1896,6 +1922,11 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
     } catch (err) {
       console.warn(`Error wiping company ${companyId} data from ${item.name}:`, err);
     }
+  }
+
+  // Reset this company's logo in memory
+  if (GROUP_COMPANIES[companyId]) {
+    GROUP_COMPANIES[companyId].logo = '';
   }
 
   // 2. Filter local storage cached arrays to remove only this company's items
@@ -1918,6 +1949,16 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
     // Reset this specific company's branding
     safeAppStorage.removeItem(`dpl_company_branding_v1_${companyId}`);
     try { localStorage.removeItem(`dpl_company_branding_v1_${companyId}`); } catch (_) {}
+    safeAppStorage.removeItem(`dpl_custom_banks_${companyId}`);
+    try { localStorage.removeItem(`dpl_custom_banks_${companyId}`); } catch (_) {}
+
+    // Reset Firestore branding doc for this company
+    try {
+      const docId = companyId === 'docks' ? 'branding' : `branding_${companyId}`;
+      await setDoc(doc(db, 'settings', docId), { customLogo: null, updatedAt: new Date().toISOString() }, { merge: true });
+    } catch (err) {
+      console.warn('Error resetting Firestore branding doc for company:', err);
+    }
   } catch (e) {
     console.warn('Company storage cleanup notice:', e);
   }

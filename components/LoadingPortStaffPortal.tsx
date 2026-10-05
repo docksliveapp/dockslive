@@ -109,13 +109,13 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
     };
   }, [isPortDropdownOpen]);
 
-  // Subscribe to live cases
+  // Subscribe to live cases across ALL subsidiaries (Docks, Muhib, Vantage, Truckit)
   useEffect(() => {
     setLoadingCases(true);
     const unsubCases = subscribeToCases((items) => {
       setCases(items || []);
       setLoadingCases(false);
-    });
+    }, undefined, { allCompanies: true });
     return () => unsubCases();
   }, []);
 
@@ -911,6 +911,9 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                         </div>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-white/10 text-amber-300 border border-white/15 uppercase">
+                              {c.companyId ? c.companyId.toUpperCase() : 'DPL'}
+                            </span>
                             <span className="text-sm font-black text-white font-mono">{mainCntr?.number || 'Container TBD'}</span>
                             <span className="bg-white/5 border border-white/10 text-[10px] text-gray-400 font-bold px-2 py-0.5 rounded">
                               {mainCntr?.size || '40ft'}

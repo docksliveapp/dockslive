@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParentGroup, isUploadedLogo } from '../services/companyService';
+import { useBranding } from '../services/brandingService';
+import { safeAppStorage } from '../services/storage';
 import { Crown } from 'lucide-react';
 
 interface SplashScreenProps {
@@ -8,6 +10,7 @@ interface SplashScreenProps {
 
 const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
   const { parentGroup } = useParentGroup();
+  const { customLogo: brandingLogo } = useBranding();
   const [fadingOut, setFadingOut] = useState(false);
   const [mounted, setMounted] = useState(false);
   const hasFinishedRef = useRef(false);
@@ -38,7 +41,9 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
     };
   }, []);
 
-  const adminUploadedLogo = isUploadedLogo(parentGroup?.logo) ? parentGroup.logo : null;
+  const storedParentLogo = safeAppStorage.getJSON<any>('mak_parent_group_branding', {})?.logo;
+  const candidateLogo = parentGroup?.logo || brandingLogo || storedParentLogo;
+  const adminUploadedLogo = isUploadedLogo(candidateLogo) ? candidateLogo : null;
 
   return (
     <div 

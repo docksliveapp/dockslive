@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf';
 import { Case, Container, Vehicle, FinanceEntry } from '../types';
 import { getStoredBranding, getDefaultBranding } from './brandingService';
-import { getActiveCompany, getActiveCompanyPrefix } from './companyService';
+import { getActiveCompany, getActiveCompanyPrefix, isUploadedLogo } from './companyService';
 
 export interface PdfExportOptions {
   onlyInvoice?: boolean;
@@ -93,9 +93,72 @@ export async function getDefaultLogoPngUrl(): Promise<string> {
   });
 }
 
+export async function getCompanyMonogramLogoPngUrl(companyId?: string): Promise<string> {
+  const active = getActiveCompany();
+  const cId = companyId || active.id;
+  const prefix = cId === 'muhib' ? 'MI' : cId === 'vantage' ? 'VSL' : cId === 'truckit' ? 'TRK' : 'DPL';
+  const name = cId === 'muhib' ? 'MUHIB INTL' : cId === 'vantage' ? 'VINTAGE SHIPPING' : cId === 'truckit' ? 'TRUCKIT LOGISTICS' : 'DOCKS (PVT) LTD';
+  const color = cId === 'muhib' ? '#2563EB' : cId === 'vantage' ? '#0EA5E9' : cId === 'truckit' ? '#E11D48' : '#D97706';
+
+  if (typeof window === 'undefined') return '';
+
+  return new Promise((resolve) => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 620;
+      canvas.height = 140;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return resolve('');
+
+      // Background
+      ctx.fillStyle = '#0F172A';
+      ctx.beginPath();
+      ctx.roundRect(5, 5, 610, 130, 20);
+      ctx.fill();
+
+      // Border
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.roundRect(5, 5, 610, 130, 20);
+      ctx.stroke();
+
+      // Prefix Badge
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(18, 18, 95, 104, 14);
+      ctx.fill();
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 44px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(prefix, 65, 70);
+
+      // Company Title
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 36px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(name, 130, 58);
+
+      // Category Subtext
+      ctx.fillStyle = color;
+      ctx.font = 'bold 18px sans-serif';
+      ctx.fillText('CUSTOMS BONDED & FREIGHT LOGISTICS', 130, 95);
+
+      resolve(canvas.toDataURL('image/png'));
+    } catch {
+      resolve('');
+    }
+  });
+}
+
 export async function resolvePdfLogoUrl(customLogo?: string | null): Promise<string> {
-  if (customLogo && typeof customLogo === 'string' && customLogo.startsWith('data:image/')) {
-    if (customLogo.includes('image/svg+xml')) {
+  const activeComp = getActiveCompany();
+  const candidate = (customLogo && isUploadedLogo(customLogo)) ? customLogo : activeComp.logo;
+
+  if (candidate && typeof candidate === 'string' && candidate.startsWith('data:image/')) {
+    if (candidate.includes('image/svg+xml')) {
       return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -107,18 +170,23 @@ export async function resolvePdfLogoUrl(customLogo?: string | null): Promise<str
             ctx.drawImage(img, 0, 0);
             resolve(canvas.toDataURL('image/png'));
           } else {
-            resolve(customLogo);
+            resolve(candidate);
           }
         };
         img.onerror = async () => {
-          resolve(await getDefaultLogoPngUrl());
+          resolve(await getCompanyMonogramLogoPngUrl(activeComp.id));
         };
-        img.src = customLogo;
+        img.src = candidate;
       });
     }
-    return customLogo;
+    return candidate;
   }
-  return await getDefaultLogoPngUrl();
+
+  if (candidate && isUploadedLogo(candidate)) {
+    return candidate;
+  }
+
+  return await getCompanyMonogramLogoPngUrl(activeComp.id);
 }
 
 /**

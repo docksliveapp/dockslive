@@ -603,13 +603,14 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     setIsResetting(true);
     try {
       await wipeCompleteDatabase();
-      setResetSuccessMessage("Database has been reset to clean state.");
+      setResetSuccessMessage("System database has been reset to clean state across all companies. Reloading...");
       setShowResetWarningModal(false);
       setResetConfirmInput('');
-      setTimeout(() => setResetSuccessMessage(null), 5000);
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
     } catch (err: any) {
       alert("Factory reset failed: " + (err.message || String(err)));
-    } finally {
       setIsResetting(false);
     }
   };
@@ -1321,10 +1322,10 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
               <div className="p-5 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                   <h4 className="text-sm font-bold text-rose-300 flex items-center gap-2">
-                    <ShieldAlert size={16} /> Danger Zone: Factory Reset Database
+                    <ShieldAlert size={16} /> Danger Zone: Master Conglomerate Factory Reset
                   </h4>
                   <p className="text-xs text-rose-200/80 mt-1 max-w-xl">
-                    Wipes all transactional cases, finances, and test data. Protected by administrator verification confirmation.
+                    Wipes all transactional cases, finances, payables, receivables, and branding across ALL 4 subsidiaries simultaneously. Protected by master administrator confirmation.
                   </p>
                 </div>
 
@@ -1333,7 +1334,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                   onClick={() => setShowResetWarningModal(true)}
                   className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white transition shadow-lg shadow-rose-600/30 cursor-pointer shrink-0"
                 >
-                  Factory Reset Database
+                  Global Master Reset
                 </button>
               </div>
             </div>
@@ -1985,11 +1986,11 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
             <div className="relative w-full max-w-md bg-slate-950 border border-rose-500/50 rounded-3xl p-6 shadow-2xl space-y-4">
               <div className="flex items-center gap-3 text-rose-400">
                 <ShieldAlert size={28} />
-                <h3 className="text-base font-bold text-white">Confirm Factory Reset</h3>
+                <h3 className="text-base font-bold text-white">Confirm Global Conglomerate Reset</h3>
               </div>
 
               <p className="text-xs text-gray-300 leading-relaxed">
-                This will delete all live cases, financial entries, and records from cloud storage. Ensure you have downloaded a JSON backup first.
+                This will delete all live cases, financial entries, payables, receivables, and operational data across <span className="text-rose-300 font-bold">ALL 4 subsidiaries</span> (Docks, Muhib, Vintage, Truckit) and the Parent Group. Ensure you have downloaded a JSON backup first.
               </p>
 
               <div>

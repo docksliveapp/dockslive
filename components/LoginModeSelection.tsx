@@ -10,10 +10,11 @@ import {
   User,
   CheckCircle2,
   ArrowRight,
-  HelpCircle
+  HelpCircle,
+  Crown
 } from 'lucide-react';
 import { UserRole } from '../types';
-import { useParentGroup } from '../services/companyService';
+import { useParentGroup, isUploadedLogo } from '../services/companyService';
 import { safeAppStorage } from '../services/storage';
 import { authenticateDatabaseUser } from '../services/dbService';
 import { NewRegistrationModal } from './NewRegistrationModal';
@@ -199,11 +200,17 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
       {/* Top Header: Exact MAK Group Corporate Identity */}
       <div className="w-full max-w-md mx-auto flex flex-col items-center text-center pt-4 pb-2 relative z-10">
         <div className="inline-flex items-center justify-center mb-3 transform hover:scale-105 transition-transform duration-300">
-          <img 
-            src={parentGroup.logo || "/logos/mak_group_logo.svg"} 
-            alt={parentGroup.name || "MAK Group of Companies"} 
-            className="w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-[0_8px_30px_rgba(245,158,11,0.35)]" 
-          />
+          {isUploadedLogo(parentGroup.logo) ? (
+            <img 
+              src={parentGroup.logo} 
+              alt={parentGroup.name || "MAK Group of Companies"} 
+              className="w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-[0_8px_30px_rgba(245,158,11,0.35)]" 
+            />
+          ) : (
+            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-gradient-to-br from-amber-500/20 via-slate-900 to-black border border-amber-500/40 flex items-center justify-center shadow-lg shadow-amber-500/20">
+              <Crown className="w-8 h-8 sm:w-10 sm:h-10 text-amber-400" />
+            </div>
+          )}
         </div>
 
         {/* Corporate Title */}
