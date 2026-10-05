@@ -68,6 +68,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Database Backups & Cloud Vault Snapshots
+    match /database_backups/{backupId} {
+      allow read, write: if true;
+    }
+
     // Registered Utility & Office Vendors
     match /vendors/{vendorId} {
       allow read, write: if true;

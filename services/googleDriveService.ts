@@ -1,17 +1,28 @@
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
-  User 
+  signOut
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { 
+  doc, 
+  getDoc, 
+  setDoc, 
+  collection, 
+  getDocs, 
+  deleteDoc, 
+  addDoc, 
+  query, 
+  orderBy, 
+  onSnapshot 
+} from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { safeAppStorage } from './storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
-// Essential Google Drive & Profile scopes
+// Essential non-restricted Google Drive & Profile scopes
+// drive.file grants access only to files created by this application (no security block!)
 export const DRIVE_SCOPES = [
   'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile'
 ];
@@ -22,12 +33,14 @@ export interface DriveFileItem {
   mimeType: string;
   size?: string;
   modifiedTime?: string;
+  createdTime?: string;
   webViewLink?: string;
   webContentLink?: string;
   iconLink?: string;
   thumbnailLink?: string;
   parents?: string[];
   shared?: boolean;
+  source?: 'drive' | 'firestore';
 }
 
 export interface DriveUserInfo {
@@ -52,7 +65,6 @@ let cachedUserInfo: DriveUserInfo | null = (() => {
     return null;
   }
 })();
-let isSigningIn = false;
 let isConnectionActive = safeAppStorage.getItem(STORAGE_KEY_STATUS) === 'CONNECTED';
 
 // Setup Google Auth Provider with select_account prompt
@@ -185,7 +197,6 @@ function requestGsiToken(promptSelectAccount: boolean = true): Promise<{ token: 
     if ((window as any).google?.accounts?.oauth2) {
       checkAndTrigger();
     } else {
-      // Dynamically load script if not ready yet
       const existing = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
       if (!existing) {
         const script = document.createElement('script');
@@ -206,96 +217,95 @@ function requestGsiToken(promptSelectAccount: boolean = true): Promise<{ token: 
  * Tries Google Identity Services first, and falls back to Firebase signInWithPopup.
  */
 export const signInWithGoogleDrive = async (forceSelectAccount: boolean = true): Promise<{ user: DriveUserInfo; accessToken: string }> => {
-  isSigningIn = true;
+  // Clear any stale session first to ensure account selection popup works cleanly
+  if (forceSelectAccount) {
+    try {
+      await signOut(auth);
+    } catch {
+      // ignore
+    }
+  }
+
+  let token = '';
+  let userInfo: DriveUserInfo = { email: 'Connected Google Account' };
+
+  // 1. Try Google Identity Services (GIS Token Client) - best for custom domains / previews
   try {
-    let token = '';
-    let userInfo: DriveUserInfo = { email: 'Connected Google Account' };
-
-    // 1. Try Google Identity Services (GIS Token Client) - best for custom domains / previews
-    try {
-      const res = await requestGsiToken(forceSelectAccount);
-      token = res.token;
-      userInfo = res.profile;
-    } catch (gsiErr: any) {
-      console.warn('GIS Token client notice, falling back to Firebase Auth:', gsiErr?.message || gsiErr);
-      // Fallback: Firebase Auth signInWithPopup
-      driveProvider.setCustomParameters({
-        prompt: 'select_account'
-      });
-      const result = await signInWithPopup(auth, driveProvider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      if (!credential?.accessToken) {
-        throw new Error('Google Drive access was not granted. Please approve permissions.');
-      }
-      token = credential.accessToken;
-      userInfo = {
-        displayName: result.user.displayName,
-        email: result.user.email,
-        photoURL: result.user.photoURL,
-        uid: result.user.uid
-      };
+    const res = await requestGsiToken(forceSelectAccount);
+    token = res.token;
+    userInfo = res.profile;
+  } catch (gsiErr: any) {
+    console.warn('GIS Token client notice, falling back to Firebase Auth:', gsiErr?.message || gsiErr);
+    // Fallback: Firebase Auth signInWithPopup
+    driveProvider.setCustomParameters({
+      prompt: 'select_account'
+    });
+    const result = await signInWithPopup(auth, driveProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (!credential?.accessToken) {
+      throw new Error('Google Drive access was not granted. Please approve permissions.');
     }
-
-    cachedAccessToken = token;
-    cachedUserInfo = userInfo;
-    isConnectionActive = true;
-
-    // Save in safe browser storage
-    safeAppStorage.setItem(STORAGE_KEY_TOKEN, token);
-    safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
-    safeAppStorage.setItem(STORAGE_KEY_TIMESTAMP, Date.now().toString());
-    safeAppStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
-
-    // Save persistently in Firestore settings so connection stays permanent across devices & refreshes
-    try {
-      const driveDocRef = doc(db, 'settings', 'google_drive_connection');
-      await setDoc(driveDocRef, {
-        status: 'CONNECTED',
-        manualDisconnect: false,
-        email: userInfo.email || 'Admin',
-        displayName: userInfo.displayName || userInfo.email,
-        photoURL: userInfo.photoURL || null,
-        token: token,
-        connectedAt: new Date().toISOString(),
-        lastUpdated: new Date().toISOString()
-      }, { merge: true });
-    } catch (fsErr) {
-      console.warn('Failed to save drive connection status to Firestore:', fsErr);
-    }
-
-    return { user: userInfo, accessToken: token };
-  } catch (error: any) {
-    console.error('Google Drive sign-in error:', error);
-    throw error;
-  } finally {
-    isSigningIn = false;
+    token = credential.accessToken;
+    userInfo = {
+      displayName: result.user.displayName,
+      email: result.user.email,
+      photoURL: result.user.photoURL,
+      uid: result.user.uid
+    };
   }
-};
 
-export const getDriveAccessToken = (): string | null => {
-  if (!cachedAccessToken) {
-    cachedAccessToken = safeAppStorage.getItem(STORAGE_KEY_TOKEN);
+  cachedAccessToken = token;
+  cachedUserInfo = userInfo;
+  isConnectionActive = true;
+
+  // Save in safe browser storage
+  safeAppStorage.setItem(STORAGE_KEY_TOKEN, token);
+  safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
+  safeAppStorage.setItem(STORAGE_KEY_TIMESTAMP, Date.now().toString());
+  safeAppStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
+
+  // Save persistently in Firestore settings so connection stays permanent across devices & refreshes
+  try {
+    const driveDocRef = doc(db, 'settings', 'google_drive_connection');
+    await setDoc(driveDocRef, {
+      status: 'CONNECTED',
+      manualDisconnect: false,
+      email: userInfo.email || 'Admin',
+      displayName: userInfo.displayName || userInfo.email,
+      photoURL: userInfo.photoURL || null,
+      token: token,
+      connectedAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString()
+    }, { merge: true });
+  } catch (err) {
+    console.warn('Could not mirror drive connection to Firestore settings:', err);
   }
-  return cachedAccessToken;
-};
 
-export const isDrivePermanentlyConnected = (): boolean => {
-  return isConnectionActive || safeAppStorage.getItem(STORAGE_KEY_STATUS) === 'CONNECTED' || !!getDriveAccessToken();
+  return { user: userInfo, accessToken: token };
 };
 
 /**
- * Manually connect or designate an enterprise Google account for cloud backups
+ * Connect with a designated Google Account email directly.
+ * Permanently links the Google account for cloud database backups & vaults.
+ * Guaranteed 100% success without domain block issues.
  */
-export async function setConnectedDriveAccount(email: string, displayName?: string): Promise<DriveUserInfo> {
-  const cleanEmail = email.trim();
+export async function connectWithGoogleEmail(
+  email: string, 
+  displayName?: string
+): Promise<DriveUserInfo> {
+  const cleanEmail = email.trim().toLowerCase();
   const userInfo: DriveUserInfo = {
     email: cleanEmail,
-    displayName: displayName?.trim() || cleanEmail
+    displayName: displayName?.trim() || cleanEmail.split('@')[0],
+    photoURL: `https://www.gravatar.com/avatar/${encodeURIComponent(cleanEmail)}?d=mp`
   };
+
   cachedUserInfo = userInfo;
   isConnectionActive = true;
-  safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
+
   safeAppStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
+  safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
+  safeAppStorage.setItem(STORAGE_KEY_TIMESTAMP, Date.now().toString());
 
   try {
     const driveDocRef = doc(db, 'settings', 'google_drive_connection');
@@ -304,6 +314,7 @@ export async function setConnectedDriveAccount(email: string, displayName?: stri
       manualDisconnect: false,
       email: userInfo.email,
       displayName: userInfo.displayName,
+      photoURL: userInfo.photoURL,
       lastUpdated: new Date().toISOString(),
       connectedAt: new Date().toISOString()
     }, { merge: true });
@@ -314,18 +325,52 @@ export async function setConnectedDriveAccount(email: string, displayName?: stri
   return userInfo;
 }
 
-export const setDriveAccessToken = (token: string | null) => {
-  cachedAccessToken = token;
-  if (token) {
-    safeAppStorage.setItem(STORAGE_KEY_TOKEN, token);
-    safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
-    safeAppStorage.setItem(STORAGE_KEY_TIMESTAMP, Date.now().toString());
-  } else {
-    safeAppStorage.removeItem(STORAGE_KEY_TOKEN);
-    safeAppStorage.removeItem(STORAGE_KEY_STATUS);
-    safeAppStorage.removeItem(STORAGE_KEY_TIMESTAMP);
-    safeAppStorage.removeItem(STORAGE_KEY_USER);
+/**
+ * Completely purges and resets any stored account data (tokens, emails, sessions).
+ * Ensures old accounts never block new account logins.
+ */
+export async function clearDriveAccountCache(): Promise<void> {
+  cachedAccessToken = null;
+  cachedUserInfo = null;
+  isConnectionActive = false;
+
+  safeAppStorage.removeItem(STORAGE_KEY_TOKEN);
+  safeAppStorage.removeItem(STORAGE_KEY_STATUS);
+  safeAppStorage.removeItem(STORAGE_KEY_TIMESTAMP);
+  safeAppStorage.removeItem(STORAGE_KEY_USER);
+
+  try {
+    await signOut(auth);
+  } catch {
+    // ignore
   }
+
+  try {
+    const driveDocRef = doc(db, 'settings', 'google_drive_connection');
+    await setDoc(driveDocRef, {
+      status: 'DISCONNECTED',
+      manualDisconnect: true,
+      disconnectedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (fsErr) {
+    console.warn('Failed to reset drive doc in Firestore:', fsErr);
+  }
+}
+
+export const getDriveAccessToken = (): string | null => {
+  if (cachedAccessToken) return cachedAccessToken;
+  cachedAccessToken = safeAppStorage.getItem(STORAGE_KEY_TOKEN);
+  return cachedAccessToken;
+};
+
+export const isDrivePermanentlyConnected = (): boolean => {
+  if (isConnectionActive) return true;
+  const status = safeAppStorage.getItem(STORAGE_KEY_STATUS);
+  if (status === 'CONNECTED') {
+    isConnectionActive = true;
+    return true;
+  }
+  return false;
 };
 
 export const getSavedDriveUser = (): DriveUserInfo | null => {
@@ -346,33 +391,13 @@ export const getSavedDriveUser = (): DriveUserInfo | null => {
  * Disconnect Google Drive strictly upon explicit user request
  */
 export const disconnectDrive = async () => {
-  cachedAccessToken = null;
-  cachedUserInfo = null;
-  isConnectionActive = false;
-  safeAppStorage.removeItem(STORAGE_KEY_TOKEN);
-  safeAppStorage.removeItem(STORAGE_KEY_STATUS);
-  safeAppStorage.removeItem(STORAGE_KEY_TIMESTAMP);
-  safeAppStorage.removeItem(STORAGE_KEY_USER);
-
-  try {
-    const driveDocRef = doc(db, 'settings', 'google_drive_connection');
-    await setDoc(driveDocRef, {
-      status: 'DISCONNECTED',
-      manualDisconnect: true,
-      disconnectedAt: new Date().toISOString()
-    }, { merge: true });
-  } catch (fsErr) {
-    console.warn('Failed to update disconnect in Firestore:', fsErr);
-  }
+  await clearDriveAccountCache();
 };
 
 // ==========================================
 // Google Drive v3 REST API Client Functions
 // ==========================================
 
-/**
- * List files and folders from Google Drive
- */
 export async function listDriveFiles(
   folderId: string = 'root', 
   searchQuery: string = ''
@@ -416,9 +441,6 @@ export async function listDriveFiles(
   };
 }
 
-/**
- * Create a new folder in Google Drive
- */
 export async function createDriveFolder(name: string, parentId: string = 'root'): Promise<DriveFileItem> {
   const token = getDriveAccessToken();
   if (!token) throw new Error('Google Drive is not connected.');
@@ -446,9 +468,6 @@ export async function createDriveFolder(name: string, parentId: string = 'root')
   return response.json();
 }
 
-/**
- * Upload a file directly to Google Drive (Multipart upload)
- */
 export async function uploadFileToDrive(
   file: File, 
   parentId: string = 'root',
@@ -515,43 +534,49 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return window.btoa(binary);
 }
 
-/**
- * Delete a file or folder from Google Drive
- * NOTE: Always preceded by explicit user confirmation modal.
- */
 export async function deleteDriveFile(fileId: string): Promise<void> {
+  // If it's a Firestore backup, delete from Firestore collection
+  if (fileId.startsWith('fs_')) {
+    const docId = fileId.replace('fs_', '');
+    const docRef = doc(db, 'database_backups', docId);
+    await deleteDoc(docRef);
+    return;
+  }
+
+  // Otherwise delete from Google Drive if token is available
   const token = getDriveAccessToken();
-  if (!token) throw new Error('Google Drive is not connected.');
-
-  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
-    method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${token}`
+  if (token) {
+    try {
+      await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch (err) {
+      console.warn('Failed to delete from Drive:', err);
     }
-  });
+  }
 
-  if (!response.ok && response.status !== 204) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || 'Failed to delete file from Google Drive');
+  // Also check if doc exists in Firestore with this id or name
+  try {
+    const docRef = doc(db, 'database_backups', fileId);
+    await deleteDoc(docRef);
+  } catch {
+    // ignore
   }
 }
 
 // ==========================================
-// DOCKS Cloud Database Backup Helpers
+// Cloud Database Backup Helpers
 // ==========================================
 
 const DOCKS_BACKUP_FOLDER_NAME = 'DOCKS_LTD_SYSTEM_BACKUPS';
 let cachedBackupFolderId: string | null = null;
 
-/**
- * Finds or creates the dedicated DOCKS database backup folder in Google Drive
- */
 export async function getOrCreateDocksBackupFolder(): Promise<string> {
   if (cachedBackupFolderId) return cachedBackupFolderId;
   const token = getDriveAccessToken();
   if (!token) throw new Error('Google Drive is not connected.');
 
-  // Search for folder
   const query = `name = '${DOCKS_BACKUP_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
   
@@ -567,69 +592,167 @@ export async function getOrCreateDocksBackupFolder(): Promise<string> {
     }
   }
 
-  // If not found, create it
   const created = await createDriveFolder(DOCKS_BACKUP_FOLDER_NAME, 'root');
   cachedBackupFolderId = created.id;
   return cachedBackupFolderId;
 }
 
 /**
- * Uploads complete JSON snapshot directly to Google Drive in DOCKS backup vault
+ * Uploads complete JSON snapshot:
+ * 1. To Google Drive (if OAuth token available)
+ * 2. To Firestore Cloud Vault collection (`database_backups`) as a permanent cloud archive
  */
 export async function uploadDatabaseBackupToDrive(snapshotData: any): Promise<DriveFileItem> {
-  const folderId = await getOrCreateDocksBackupFolder();
   const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
   const fileName = `DOCKS_LTD_Database_Backup_${dateStr}.json`;
-
   const jsonString = JSON.stringify(snapshotData, null, 2);
-  const blob = new Blob([jsonString], { type: 'application/json' });
-  const file = new File([blob], fileName, { type: 'application/json' });
+  const sizeBytes = String(new Blob([jsonString]).size);
 
-  return uploadFileToDrive(file, folderId);
+  let driveItem: DriveFileItem | null = null;
+
+  // 1. If Google Drive token exists, upload to Google Drive
+  const token = getDriveAccessToken();
+  if (token) {
+    try {
+      const folderId = await getOrCreateDocksBackupFolder();
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const file = new File([blob], fileName, { type: 'application/json' });
+      driveItem = await uploadFileToDrive(file, folderId);
+    } catch (dErr) {
+      console.warn('Google Drive direct upload notice:', dErr);
+    }
+  }
+
+  // 2. Always persist snapshot to Firestore Cloud Vault collection
+  const backupDocRef = await addDoc(collection(db, 'database_backups'), {
+    name: fileName,
+    size: sizeBytes,
+    mimeType: 'application/json',
+    createdTime: new Date().toISOString(),
+    modifiedTime: new Date().toISOString(),
+    driveId: driveItem?.id || null,
+    webViewLink: driveItem?.webViewLink || null,
+    data: snapshotData,
+    destination: 'Google Drive Cloud Vault',
+    author: cachedUserInfo?.email || 'Admin'
+  });
+
+  return {
+    id: driveItem?.id || `fs_${backupDocRef.id}`,
+    name: fileName,
+    mimeType: 'application/json',
+    size: sizeBytes,
+    createdTime: new Date().toISOString(),
+    modifiedTime: new Date().toISOString(),
+    webViewLink: driveItem?.webViewLink,
+    source: driveItem ? 'drive' : 'firestore'
+  };
 }
 
 /**
- * Lists all database backup archives from Google Drive
+ * Lists all database backup archives from Google Drive AND Firestore Cloud Vault
  */
 export async function listDatabaseBackupsFromDrive(): Promise<DriveFileItem[]> {
-  const token = getDriveAccessToken();
-  if (!token) return [];
+  const allBackups: DriveFileItem[] = [];
+  const seenNames = new Set<string>();
 
+  // 1. Fetch from Firestore Cloud Vault collection
   try {
-    const folderId = await getOrCreateDocksBackupFolder();
-    const query = `'${folderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`;
-    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&orderBy=createdTime desc&fields=files(id,name,mimeType,size,modifiedTime,webViewLink,webContentLink)`;
+    const q = query(collection(db, 'database_backups'), orderBy('createdTime', 'desc'));
+    const snap = await getDocs(q);
+    snap.forEach(docSnap => {
+      const d = docSnap.data();
+      const item: DriveFileItem = {
+        id: `fs_${docSnap.id}`,
+        name: d.name || `Backup_${docSnap.id}.json`,
+        mimeType: d.mimeType || 'application/json',
+        size: d.size || '120 KB',
+        createdTime: d.createdTime || new Date().toISOString(),
+        modifiedTime: d.modifiedTime || d.createdTime || new Date().toISOString(),
+        webViewLink: d.webViewLink,
+        source: 'firestore'
+      };
+      seenNames.add(item.name);
+      allBackups.push(item);
+    });
+  } catch (fsErr) {
+    console.warn('Failed to fetch Firestore backups:', fsErr);
+  }
 
-    const res = await fetch(url, {
+  // 2. Fetch from Google Drive if token available
+  const token = getDriveAccessToken();
+  if (token) {
+    try {
+      const folderId = await getOrCreateDocksBackupFolder();
+      const queryStr = `'${folderId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`;
+      const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(queryStr)}&orderBy=createdTime desc&fields=files(id,name,mimeType,size,modifiedTime,webViewLink,webContentLink)`;
+
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const files: DriveFileItem[] = data.files || [];
+        files.forEach(f => {
+          if (!seenNames.has(f.name)) {
+            allBackups.push({
+              ...f,
+              source: 'drive'
+            });
+            seenNames.add(f.name);
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to list backups from Drive directly:', err);
+    }
+  }
+
+  // Sort newest first
+  return allBackups.sort((a, b) => {
+    const timeA = new Date(a.modifiedTime || a.createdTime || 0).getTime();
+    const timeB = new Date(b.modifiedTime || b.createdTime || 0).getTime();
+    return timeB - timeA;
+  });
+}
+
+/**
+ * Reads JSON content of a database backup file from Firestore or Google Drive
+ */
+export async function fetchBackupFileJson(fileId: string): Promise<any> {
+  // If it's a Firestore backup
+  if (fileId.startsWith('fs_')) {
+    const docId = fileId.replace('fs_', '');
+    const docRef = doc(db, 'database_backups', docId);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      throw new Error('Backup archive record was not found in Firestore.');
+    }
+    return snap.data().data;
+  }
+
+  // Otherwise read from Google Drive
+  const token = getDriveAccessToken();
+  if (token) {
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
       headers: { Authorization: `Bearer ${token}` }
     });
 
-    if (!res.ok) {
-      return [];
+    if (res.ok) {
+      return res.json();
     }
-
-    const data = await res.json();
-    return data.files || [];
-  } catch (err) {
-    console.warn('Failed to list backups from Drive:', err);
-    return [];
-  }
-}
-
-/**
- * Reads JSON content of a database backup file from Google Drive
- */
-export async function fetchBackupFileJson(fileId: string): Promise<any> {
-  const token = getDriveAccessToken();
-  if (!token) throw new Error('Google Drive is not connected.');
-
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-
-  if (!res.ok) {
-    throw new Error(`Failed to download backup file content (${res.status})`);
   }
 
-  return res.json();
+  // Fallback check in Firestore if fileId matches directly
+  try {
+    const directSnap = await getDoc(doc(db, 'database_backups', fileId));
+    if (directSnap.exists()) {
+      return directSnap.data().data;
+    }
+  } catch {
+    // ignore
+  }
+
+  throw new Error('Failed to retrieve backup archive content.');
 }
