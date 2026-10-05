@@ -692,14 +692,29 @@ const App: React.FC = () => {
                 setNavigationFilter(null); 
                 setMobileSidebarOpen(false); 
               }} 
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl transition-all ${
                 activeView === item.id 
                   ? 'bg-brand-600/20 text-white border border-brand-500/20 shadow-lg shadow-brand-500/10' 
                   : 'text-gray-400 hover:bg-white/5 hover:text-white'
               } ${!desktopSidebarExpanded && 'lg:justify-center'}`}
             >
-              <item.icon size={20} className={`${activeView === item.id ? 'text-brand-400' : 'text-gray-500'} group-hover:text-white`} />
-              <span className={`${!desktopSidebarExpanded && 'lg:hidden'} font-medium text-xs sm:text-sm`}>{item.label}</span>
+              <div className="flex items-center gap-3 min-w-0 truncate">
+                <item.icon size={20} className={`${activeView === item.id ? 'text-brand-400' : 'text-gray-500'} group-hover:text-white shrink-0`} />
+                <span className={`${!desktopSidebarExpanded && 'lg:hidden'} font-medium text-xs sm:text-sm truncate`}>{item.label}</span>
+              </div>
+
+              {/* Total Amount Available Counter directly beside Finance in sidebar */}
+              {item.id === 'finance' && (
+                <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} shrink-0 ml-1`}>
+                  <GoldenAmountWidget 
+                    variant="sidebar"
+                    onOpenFinance={() => {
+                      setActiveView('finance');
+                      setMobileSidebarOpen(false);
+                    }}
+                  />
+                </div>
+              )}
             </button>
           ))}
         </nav>
@@ -796,13 +811,8 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          {/* Right: Treasury Gold Widget, Notifications & LogOut */}
+          {/* Right: Notifications & LogOut (Amount Counter moved to Sidebar next to Finance) */}
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 justify-end shrink-0">
-            {/* Compact Sone se Amount / Treasury Widget */}
-            <GoldenAmountWidget 
-              onOpenFinance={() => setActiveView('finance')}
-            />
-
             {/* Live Real-time Notification Center */}
             <LiveNotificationCenter
               currentRole={currentRole}

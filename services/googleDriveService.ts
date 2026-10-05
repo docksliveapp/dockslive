@@ -1,27 +1,19 @@
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
-  onAuthStateChanged, 
   User 
 } from 'firebase/auth';
-import { auth } from './firebase';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { auth, db } from './firebase';
 import { safeAppStorage } from './storage';
+import firebaseConfig from '../firebase-applet-config.json';
 
-// Google Drive scopes requested & configured in OAuth setup
+// Essential Google Drive & Profile scopes
 export const DRIVE_SCOPES = [
-  'https://www.googleapis.com/auth/drive',
-  'https://www.googleapis.com/auth/drive.activity',
-  'https://www.googleapis.com/auth/drive.activity.readonly',
-  'https://www.googleapis.com/auth/drive.appdata',
-  'https://www.googleapis.com/auth/drive.apps.readonly',
   'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive.install',
-  'https://www.googleapis.com/auth/drive.meet.readonly',
-  'https://www.googleapis.com/auth/drive.metadata',
-  'https://www.googleapis.com/auth/drive.metadata.readonly',
-  'https://www.googleapis.com/auth/drive.photos.readonly',
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/drive.scripts'
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile'
 ];
 
 export interface DriveFileItem {
@@ -38,67 +30,240 @@ export interface DriveFileItem {
   shared?: boolean;
 }
 
+export interface DriveUserInfo {
+  displayName?: string | null;
+  email?: string | null;
+  photoURL?: string | null;
+  uid?: string | null;
+}
+
 const STORAGE_KEY_TOKEN = 'dpl_drive_access_token';
 const STORAGE_KEY_USER = 'dpl_drive_user_info';
+const STORAGE_KEY_STATUS = 'dpl_drive_connected_status';
 const STORAGE_KEY_TIMESTAMP = 'dpl_drive_token_timestamp';
 
-// Persistent token cache so user remains connected across page refreshes
+// In-memory token & state cache
 let cachedAccessToken: string | null = safeAppStorage.getItem(STORAGE_KEY_TOKEN);
+let cachedUserInfo: DriveUserInfo | null = (() => {
+  try {
+    const raw = safeAppStorage.getItem(STORAGE_KEY_USER);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+})();
 let isSigningIn = false;
+let isConnectionActive = safeAppStorage.getItem(STORAGE_KEY_STATUS) === 'CONNECTED';
 
-// Initialize Drive Provider with scopes
+// Setup Google Auth Provider with select_account prompt
 const driveProvider = new GoogleAuthProvider();
 DRIVE_SCOPES.forEach(scope => driveProvider.addScope(scope));
+driveProvider.setCustomParameters({
+  prompt: 'select_account'
+});
 
-// Initialize Auth Listener
-export const initDriveAuth = (
-  onAuthSuccess?: (user: User, token: string) => void,
-  onAuthFailure?: () => void
-) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
-    const savedToken = safeAppStorage.getItem(STORAGE_KEY_TOKEN);
-    if (savedToken) {
-      cachedAccessToken = savedToken;
-      if (user && onAuthSuccess) {
-        onAuthSuccess(user, savedToken);
+// Real-time Firestore sync for Google Drive connection
+let hasSubscribedToDriveStatus = false;
+export function initDriveAuth(
+  onStatusChange?: (connected: boolean, user: DriveUserInfo | null) => void
+) {
+  // Check local cache immediately
+  if (isConnectionActive && onStatusChange) {
+    onStatusChange(true, cachedUserInfo);
+  }
+
+  if (hasSubscribedToDriveStatus) return () => {};
+  hasSubscribedToDriveStatus = true;
+
+  try {
+    const driveDocRef = doc(db, 'settings', 'google_drive_connection');
+    const unsub = onSnapshot(driveDocRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.status === 'CONNECTED' && data.manualDisconnect !== true) {
+          isConnectionActive = true;
+          safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
+          if (data.token && !cachedAccessToken) {
+            cachedAccessToken = data.token;
+            safeAppStorage.setItem(STORAGE_KEY_TOKEN, data.token);
+          }
+          if (data.email) {
+            const userObj: DriveUserInfo = {
+              email: data.email,
+              displayName: data.displayName || data.email,
+              photoURL: data.photoURL || null
+            };
+            cachedUserInfo = userObj;
+            safeAppStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userObj));
+          }
+          if (onStatusChange) onStatusChange(true, cachedUserInfo);
+        } else if (data.status === 'DISCONNECTED' || data.manualDisconnect === true) {
+          isConnectionActive = false;
+          cachedAccessToken = null;
+          cachedUserInfo = null;
+          safeAppStorage.removeItem(STORAGE_KEY_STATUS);
+          safeAppStorage.removeItem(STORAGE_KEY_TOKEN);
+          safeAppStorage.removeItem(STORAGE_KEY_USER);
+          if (onStatusChange) onStatusChange(false, null);
+        }
       }
-    } else if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn) {
-        if (onAuthFailure) onAuthFailure();
+    }, (err) => {
+      console.warn('Google Drive Firestore sync warning:', err);
+    });
+
+    return unsub;
+  } catch (err) {
+    console.warn('Error setting up drive sync:', err);
+    return () => {};
+  }
+}
+
+/**
+ * Sign in using Google Identity Services (GIS) Token Client.
+ * Always prompts with 'select_account' so user can pick any account or reset account.
+ */
+function requestGsiToken(promptSelectAccount: boolean = true): Promise<{ token: string; profile: DriveUserInfo }> {
+  return new Promise((resolve, reject) => {
+    const oAuthClientId = (firebaseConfig as any).oAuthClientId;
+    if (!oAuthClientId) {
+      reject(new Error('OAuth Client ID is missing in applet configuration.'));
+      return;
+    }
+
+    const checkAndTrigger = () => {
+      const g = (window as any).google;
+      if (!g?.accounts?.oauth2) {
+        reject(new Error('Google Identity Services library is not loaded.'));
+        return;
       }
+
+      try {
+        const tokenClient = g.accounts.oauth2.initTokenClient({
+          client_id: oAuthClientId,
+          scope: DRIVE_SCOPES.join(' '),
+          prompt: promptSelectAccount ? 'select_account' : '',
+          callback: async (resp: any) => {
+            if (resp.error) {
+              reject(new Error(resp.error_description || resp.error || 'Authentication canceled or failed.'));
+              return;
+            }
+            const token = resp.access_token;
+            if (!token) {
+              reject(new Error('No access token returned from Google.'));
+              return;
+            }
+
+            // Fetch user info from Google OAuth2 endpoint
+            let profile: DriveUserInfo = { email: 'Connected Google User' };
+            try {
+              const uRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              if (uRes.ok) {
+                const uData = await uRes.json();
+                profile = {
+                  displayName: uData.name || uData.email,
+                  email: uData.email,
+                  photoURL: uData.picture || null,
+                  uid: uData.sub
+                };
+              }
+            } catch (uErr) {
+              console.warn('Failed to fetch userinfo from Google endpoint:', uErr);
+            }
+
+            resolve({ token, profile });
+          }
+        });
+
+        tokenClient.requestAccessToken({ prompt: promptSelectAccount ? 'select_account' : '' });
+      } catch (err) {
+        reject(err);
+      }
+    };
+
+    if ((window as any).google?.accounts?.oauth2) {
+      checkAndTrigger();
     } else {
-      if (!savedToken) {
-        cachedAccessToken = null;
-        if (onAuthFailure) onAuthFailure();
+      // Dynamically load script if not ready yet
+      const existing = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+      if (!existing) {
+        const script = document.createElement('script');
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.onload = () => setTimeout(checkAndTrigger, 100);
+        script.onerror = () => reject(new Error('Failed to load Google Identity Services'));
+        document.head.appendChild(script);
+      } else {
+        setTimeout(checkAndTrigger, 300);
       }
     }
   });
-};
+}
 
-// Sign in with Google with Drive Scopes
-export const signInWithGoogleDrive = async (): Promise<{ user: User; accessToken: string } | null> => {
+/**
+ * Connect Google Drive with account chooser / reset option.
+ * Tries Google Identity Services first, and falls back to Firebase signInWithPopup.
+ */
+export const signInWithGoogleDrive = async (forceSelectAccount: boolean = true): Promise<{ user: DriveUserInfo; accessToken: string }> => {
+  isSigningIn = true;
   try {
-    isSigningIn = true;
-    const result = await signInWithPopup(auth, driveProvider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Could not retrieve access token for Google Drive. Please approve the permissions.');
-    }
-    cachedAccessToken = credential.accessToken;
-    
-    // Save persistently so connection remains active
-    safeAppStorage.setItem(STORAGE_KEY_TOKEN, credential.accessToken);
-    safeAppStorage.setItem(STORAGE_KEY_TIMESTAMP, Date.now().toString());
-    safeAppStorage.setItem(STORAGE_KEY_USER, JSON.stringify({
-      displayName: result.user.displayName,
-      email: result.user.email,
-      photoURL: result.user.photoURL,
-      uid: result.user.uid
-    }));
+    let token = '';
+    let userInfo: DriveUserInfo = { email: 'Connected Google Account' };
 
-    return { user: result.user, accessToken: cachedAccessToken };
+    // 1. Try Google Identity Services (GIS Token Client) - best for custom domains / previews
+    try {
+      const res = await requestGsiToken(forceSelectAccount);
+      token = res.token;
+      userInfo = res.profile;
+    } catch (gsiErr: any) {
+      console.warn('GIS Token client notice, falling back to Firebase Auth:', gsiErr?.message || gsiErr);
+      // Fallback: Firebase Auth signInWithPopup
+      driveProvider.setCustomParameters({
+        prompt: 'select_account'
+      });
+      const result = await signInWithPopup(auth, driveProvider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (!credential?.accessToken) {
+        throw new Error('Google Drive access was not granted. Please approve permissions.');
+      }
+      token = credential.accessToken;
+      userInfo = {
+        displayName: result.user.displayName,
+        email: result.user.email,
+        photoURL: result.user.photoURL,
+        uid: result.user.uid
+      };
+    }
+
+    cachedAccessToken = token;
+    cachedUserInfo = userInfo;
+    isConnectionActive = true;
+
+    // Save in safe browser storage
+    safeAppStorage.setItem(STORAGE_KEY_TOKEN, token);
+    safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
+    safeAppStorage.setItem(STORAGE_KEY_TIMESTAMP, Date.now().toString());
+    safeAppStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
+
+    // Save persistently in Firestore settings so connection stays permanent across devices & refreshes
+    try {
+      const driveDocRef = doc(db, 'settings', 'google_drive_connection');
+      await setDoc(driveDocRef, {
+        status: 'CONNECTED',
+        manualDisconnect: false,
+        email: userInfo.email || 'Admin',
+        displayName: userInfo.displayName || userInfo.email,
+        photoURL: userInfo.photoURL || null,
+        token: token,
+        connectedAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString()
+      }, { merge: true });
+    } catch (fsErr) {
+      console.warn('Failed to save drive connection status to Firestore:', fsErr);
+    }
+
+    return { user: userInfo, accessToken: token };
   } catch (error: any) {
     console.error('Google Drive sign-in error:', error);
     throw error;
@@ -114,32 +279,60 @@ export const getDriveAccessToken = (): string | null => {
   return cachedAccessToken;
 };
 
+export const isDrivePermanentlyConnected = (): boolean => {
+  return isConnectionActive || safeAppStorage.getItem(STORAGE_KEY_STATUS) === 'CONNECTED' || !!getDriveAccessToken();
+};
+
 export const setDriveAccessToken = (token: string | null) => {
   cachedAccessToken = token;
   if (token) {
     safeAppStorage.setItem(STORAGE_KEY_TOKEN, token);
+    safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
     safeAppStorage.setItem(STORAGE_KEY_TIMESTAMP, Date.now().toString());
   } else {
     safeAppStorage.removeItem(STORAGE_KEY_TOKEN);
+    safeAppStorage.removeItem(STORAGE_KEY_STATUS);
     safeAppStorage.removeItem(STORAGE_KEY_TIMESTAMP);
     safeAppStorage.removeItem(STORAGE_KEY_USER);
   }
 };
 
-export const getSavedDriveUser = (): any | null => {
+export const getSavedDriveUser = (): DriveUserInfo | null => {
+  if (cachedUserInfo) return cachedUserInfo;
   try {
     const data = safeAppStorage.getItem(STORAGE_KEY_USER);
-    return data ? JSON.parse(data) : null;
+    if (data) {
+      cachedUserInfo = JSON.parse(data);
+      return cachedUserInfo;
+    }
+    return null;
   } catch {
     return null;
   }
 };
 
+/**
+ * Disconnect Google Drive strictly upon explicit user request
+ */
 export const disconnectDrive = async () => {
   cachedAccessToken = null;
+  cachedUserInfo = null;
+  isConnectionActive = false;
   safeAppStorage.removeItem(STORAGE_KEY_TOKEN);
+  safeAppStorage.removeItem(STORAGE_KEY_STATUS);
   safeAppStorage.removeItem(STORAGE_KEY_TIMESTAMP);
   safeAppStorage.removeItem(STORAGE_KEY_USER);
+
+  try {
+    const driveDocRef = doc(db, 'settings', 'google_drive_connection');
+    await setDoc(driveDocRef, {
+      status: 'DISCONNECTED',
+      manualDisconnect: true,
+      disconnectedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (fsErr) {
+    console.warn('Failed to update disconnect in Firestore:', fsErr);
+  }
 };
 
 // ==========================================

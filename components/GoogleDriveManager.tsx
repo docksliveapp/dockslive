@@ -5,37 +5,37 @@ import {
   AlertCircle, 
   Lock, 
   Download, 
-  ShieldCheck,
-  RefreshCw,
-  ExternalLink,
-  Trash2,
-  Copy,
-  Check,
-  Database,
-  Archive,
-  CloudUpload,
-  Clock,
-  RotateCcw,
-  Loader2,
-  FileJson,
-  Info
+  ShieldCheck, 
+  RefreshCw, 
+  ExternalLink, 
+  Trash2, 
+  Database, 
+  Archive, 
+  CloudUpload, 
+  Clock, 
+  RotateCcw, 
+  Loader2, 
+  FileJson, 
+  UserCheck
 } from 'lucide-react';
 import { 
   signInWithGoogleDrive, 
-  disconnectDrive,
+  disconnectDrive, 
   getDriveAccessToken, 
   getSavedDriveUser,
-  uploadDatabaseBackupToDrive,
-  listDatabaseBackupsFromDrive,
-  fetchBackupFileJson,
-  deleteDriveFile,
-  DriveFileItem 
+  initDriveAuth,
+  isDrivePermanentlyConnected,
+  uploadDatabaseBackupToDrive, 
+  listDatabaseBackupsFromDrive, 
+  fetchBackupFileJson, 
+  deleteDriveFile, 
+  DriveFileItem,
+  DriveUserInfo
 } from '../services/googleDriveService';
 import { 
   exportCompleteDatabaseSnapshot, 
   restoreDatabaseSnapshot 
 } from '../services/dbService';
-import { auth, onAuthStateChanged, FirebaseUser } from '../services/firebase';
 import { safeAppStorage } from '../services/storage';
 
 interface GoogleDriveManagerProps {
@@ -43,14 +43,11 @@ interface GoogleDriveManagerProps {
   attachedMode?: boolean;
 }
 
-const FIREBASE_CONSOLE_URL = 'https://console.firebase.google.com/project/gen-lang-client-0135652581/authentication/settings';
-
 export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({ 
   attachedMode = false 
 }) => {
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(auth.currentUser);
-  const [savedUser, setSavedUser] = useState<any>(getSavedDriveUser());
-  const [isConnected, setIsConnected] = useState<boolean>(!!getDriveAccessToken());
+  const [savedUser, setSavedUser] = useState<DriveUserInfo | null>(getSavedDriveUser());
+  const [isConnected, setIsConnected] = useState<boolean>(isDrivePermanentlyConnected());
   const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
   const [loadingBackups, setLoadingBackups] = useState<boolean>(false);
   const [backups, setBackups] = useState<DriveFileItem[]>([]);
@@ -62,40 +59,40 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
   const [deleteConfirmFile, setDeleteConfirmFile] = useState<DriveFileItem | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
-  // Status & Error Messages
+  // Status & Messages
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [copiedDomain, setCopiedDomain] = useState<boolean>(false);
   const [lastBackupTime, setLastBackupTime] = useState<string | null>(
     safeAppStorage.getItem('dpl_last_cloud_backup_time')
   );
 
-  // Check if current domain error is auth/unauthorized-domain
-  const isUnauthorizedDomainError = errorMessage?.includes('auth/unauthorized-domain');
-  const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'docks.live';
-
   useEffect(() => {
-    // Listen to Firebase auth or restored saved session
-    const unsub = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      const token = getDriveAccessToken();
-      setIsConnected(!!token);
-      if (!user && !token) {
-        setSavedUser(null);
-      } else {
-        setSavedUser(getSavedDriveUser());
-      }
-    });
+    // Initial sync from persistent state
+    const connectedInit = isDrivePermanentlyConnected();
+    setIsConnected(connectedInit);
+    const userInit = getSavedDriveUser();
+    if (userInit) setSavedUser(userInit);
 
-    // Check if token exists in persistent storage
-    const token = getDriveAccessToken();
-    if (token) {
-      setIsConnected(true);
-      setSavedUser(getSavedDriveUser());
+    if (connectedInit) {
       loadBackups();
     }
 
-    return () => unsub();
+    // Subscribe to permanent connection changes (Firestore & storage)
+    const unsub = initDriveAuth((connected, user) => {
+      setIsConnected(connected);
+      if (user) {
+        setSavedUser(user);
+        if (connected) {
+          loadBackups();
+        }
+      } else if (!connected) {
+        setSavedUser(null);
+      }
+    });
+
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
   }, []);
 
   const loadBackups = async () => {
@@ -107,9 +104,8 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
       setBackups(items);
     } catch (err: any) {
       console.error('Failed to load database backups:', err);
-      if (err.message?.includes('401') || err.message?.includes('expired') || err.message?.includes('invalid_grant')) {
-        handleDisconnect();
-        setErrorMessage('Google Drive connection session expired. Please sign in again.');
+      if (err.message?.includes('401') || err.message?.includes('invalid_grant')) {
+        setErrorMessage('Google Drive token session expired. Click "Switch / Reconnect Account" to re-authorize.');
       } else {
         setErrorMessage(err.message || 'Failed to load backups from Google Drive');
       }
@@ -118,22 +114,16 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
     }
   };
 
-  const handleConnect = async () => {
+  const handleConnect = async (forceSelectAccount: boolean = true) => {
     setIsAuthenticating(true);
     setErrorMessage(null);
     try {
-      const res = await signInWithGoogleDrive();
+      const res = await signInWithGoogleDrive(forceSelectAccount);
       if (res) {
         setIsConnected(true);
-        setCurrentUser(res.user);
-        setSavedUser({
-          displayName: res.user.displayName,
-          email: res.user.email,
-          photoURL: res.user.photoURL,
-          uid: res.user.uid
-        });
-        setSuccessMessage('Successfully connected Google Drive for Database Cloud Backups!');
-        setTimeout(() => setSuccessMessage(null), 4000);
+        setSavedUser(res.user);
+        setSuccessMessage(`Connected with ${res.user.email || 'Google Account'}! Real-time cloud vault active.`);
+        setTimeout(() => setSuccessMessage(null), 5000);
         loadBackups();
       }
     } catch (err: any) {
@@ -168,7 +158,7 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
       const snapshot = await exportCompleteDatabaseSnapshot();
       
       // 2. Upload to dedicated DOCKS_LTD_SYSTEM_BACKUPS folder in Google Drive
-      const uploadedFile = await uploadDatabaseBackupToDrive(snapshot);
+      await uploadDatabaseBackupToDrive(snapshot);
 
       const timestampNow = new Date().toLocaleString();
       setLastBackupTime(timestampNow);
@@ -178,12 +168,10 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
         `Database backup saved to Google Drive! (${snapshot.stats.casesCount} Cases, ${snapshot.stats.financeCount} Finance entries, ${snapshot.stats.vehiclesCount} Vehicles archived).`
       );
       setTimeout(() => setSuccessMessage(null), 6000);
-
-      // Refresh backup list
-      await loadBackups();
+      loadBackups();
     } catch (err: any) {
-      console.error('Backup creation error:', err);
-      setErrorMessage(err.message || 'Failed to create and upload database backup');
+      console.error('Failed to create cloud backup:', err);
+      setErrorMessage(err.message || 'Failed to upload backup snapshot to Google Drive');
     } finally {
       setIsCreatingBackup(false);
     }
@@ -192,20 +180,17 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
   const handleDownloadLocalBackup = async () => {
     try {
       const snapshot = await exportCompleteDatabaseSnapshot();
-      const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
       const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `DOCKS_LTD_Database_Backup_${dateStr}.json`;
+      a.download = `DOCKS_LTD_Database_Backup_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      setSuccessMessage('Database snapshot downloaded to your device.');
-      setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: any) {
-      setErrorMessage('Failed to generate local database download.');
+      setErrorMessage('Failed to generate local backup file');
     }
   };
 
@@ -213,21 +198,20 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
     if (!restoreConfirmFile) return;
     setIsRestoring(true);
     setErrorMessage(null);
+    setSuccessMessage(null);
 
     try {
-      // Fetch JSON from Google Drive
-      const snapshot = await fetchBackupFileJson(restoreConfirmFile.id);
+      // 1. Fetch JSON data from Google Drive
+      const snapshotData = await fetchBackupFileJson(restoreConfirmFile.id);
       
-      // Restore into Firestore
-      const result = await restoreDatabaseSnapshot(snapshot);
+      // 2. Restore Firestore collections
+      const stats = await restoreDatabaseSnapshot(snapshotData);
 
       setSuccessMessage(
-        `Database successfully restored from Google Drive! (${result.restoredCounts.cases} Cases, ${result.restoredCounts.finance} Finance & Ledger entries, ${result.restoredCounts.vehicles} Vehicles). Refreshing application...`
+        `Database successfully restored from "${restoreConfirmFile.name}"! (${stats.restoredCounts.cases} Cases, ${stats.restoredCounts.finance} Finance entries restored).`
       );
       setRestoreConfirmFile(null);
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
+      setTimeout(() => setSuccessMessage(null), 8000);
     } catch (err: any) {
       console.error('Restore error:', err);
       setErrorMessage(err.message || 'Failed to restore database from backup file');
@@ -239,23 +223,18 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
   const handleDeleteBackup = async () => {
     if (!deleteConfirmFile) return;
     setIsDeleting(true);
+    setErrorMessage(null);
     try {
       await deleteDriveFile(deleteConfirmFile.id);
-      setSuccessMessage('Backup archive deleted from Google Drive.');
-      setTimeout(() => setSuccessMessage(null), 3000);
+      setBackups(prev => prev.filter(f => f.id !== deleteConfirmFile.id));
+      setSuccessMessage(`Backup "${deleteConfirmFile.name}" deleted from Google Drive.`);
       setDeleteConfirmFile(null);
-      await loadBackups();
+      setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to delete backup from Google Drive');
+      setErrorMessage(err.message || 'Failed to delete backup file');
     } finally {
       setIsDeleting(false);
     }
-  };
-
-  const handleCopyDomain = () => {
-    navigator.clipboard.writeText(currentHost);
-    setCopiedDomain(true);
-    setTimeout(() => setCopiedDomain(false), 3000);
   };
 
   return (
@@ -278,7 +257,7 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
                   Google Drive Cloud Database Vault
                 </h2>
                 {isConnected ? (
-                  <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                     Always Connected & Active
                   </span>
@@ -289,8 +268,8 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
                 )}
               </div>
               <p className="text-xs sm:text-sm text-gray-400 mt-1 max-w-2xl leading-relaxed">
-                Dedicated cloud repository for automated & manual backups of all DOCKS (PVT) LTD data. 
-                All cases, financial ledgers, vehicles, and documents are securely mirrored.
+                Dedicated cloud repository for automated & manual backups of all enterprise data. 
+                All cases, financial ledgers, fleet records, and documents are securely mirrored.
               </p>
             </div>
           </div>
@@ -300,9 +279,10 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
             {!isConnected ? (
               <button
                 type="button"
-                onClick={handleConnect}
+                onClick={() => handleConnect(true)}
                 disabled={isAuthenticating}
                 className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                title="Connect with Google Account Picker"
               >
                 {isAuthenticating ? (
                   <>
@@ -320,6 +300,16 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  onClick={() => handleConnect(true)}
+                  disabled={isAuthenticating}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Switch to another Google Account (Reset account selection)"
+                >
+                  <RotateCcw size={13} className={isAuthenticating ? 'animate-spin' : ''} />
+                  <span>Switch Account</span>
+                </button>
+                <button
+                  type="button"
                   onClick={loadBackups}
                   disabled={loadingBackups}
                   className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition-colors cursor-pointer"
@@ -331,6 +321,7 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
                   type="button"
                   onClick={handleDisconnect}
                   className="text-xs px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold transition-colors cursor-pointer"
+                  title="Disconnect Google Drive"
                 >
                   Disconnect
                 </button>
@@ -340,12 +331,23 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
         </div>
 
         {/* Connected User Account Info Strip */}
-        {isConnected && (savedUser || currentUser) && (
+        {isConnected && savedUser && (
           <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between flex-wrap gap-2 text-xs text-gray-400">
-            <div className="flex items-center gap-2">
-              <span className="text-gray-400">Connected Google Account:</span>
+            <div className="flex items-center gap-2.5">
+              {savedUser.photoURL ? (
+                <img 
+                  src={savedUser.photoURL} 
+                  alt={savedUser.displayName || 'Google User'} 
+                  className="w-6 h-6 rounded-full border border-amber-500/40 object-cover"
+                />
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300">
+                  <UserCheck size={12} />
+                </div>
+              )}
+              <span className="text-gray-400">Connected Account:</span>
               <span className="font-bold text-amber-300">
-                {savedUser?.email || currentUser?.email || 'Authorized Administrator'}
+                {savedUser.displayName ? `${savedUser.displayName} (${savedUser.email})` : savedUser.email}
               </span>
             </div>
             {lastBackupTime && (
@@ -358,111 +360,20 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
         )}
       </div>
 
-      {/* SPECIAL NOTICE: auth/unauthorized-domain Error Guide */}
-      {isUnauthorizedDomainError && (
-        <div className="bg-amber-950/50 border-2 border-amber-500/60 rounded-3xl p-6 shadow-2xl backdrop-blur-md animate-fade-in relative">
-          <div className="flex items-start gap-4">
-            <div className="p-3 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40 shrink-0">
-              <AlertCircle size={28} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <h3 className="text-lg font-black text-amber-300 tracking-wide">
-                  Domain Authorization Required for "{currentHost}"
-                </h3>
-                <span className="text-[11px] bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded-full font-mono border border-amber-500/30">
-                  Firebase Error: auth/unauthorized-domain
-                </span>
-              </div>
-
-              <p className="text-xs sm:text-sm text-gray-300 mt-2 leading-relaxed">
-                Google Firebase Authentication security rule requires custom domains like{' '}
-                <strong className="text-white font-mono bg-black/40 px-1.5 py-0.5 rounded border border-white/10">{currentHost}</strong>{' '}
-                to be registered in your Firebase Project’s <strong>Authorized Domains</strong> before Google Sign-In is allowed.
-              </p>
-
-              {/* Step-by-Step Instructions */}
-              <div className="mt-4 p-4 rounded-2xl bg-black/40 border border-white/10 space-y-2.5 text-xs">
-                <div className="font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Info size={14} /> Quick 30-Second Fix in Firebase Console:
-                </div>
-                <ol className="list-decimal list-inside space-y-1.5 text-gray-300 leading-relaxed">
-                  <li>
-                    Open your Firebase Authentication settings in a new tab:
-                    <a 
-                      href={FIREBASE_CONSOLE_URL} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="ml-2 text-amber-400 hover:text-amber-300 underline font-bold inline-flex items-center gap-1"
-                    >
-                      Open Firebase Console Settings <ExternalLink size={11} />
-                    </a>
-                  </li>
-                  <li>
-                    Go to the <strong>"Settings"</strong> tab and scroll down to the <strong>"Authorized domains"</strong> section.
-                  </li>
-                  <li>
-                    Click <strong>"Add domain"</strong> and enter:
-                    <span className="inline-flex items-center gap-1.5 ml-1.5 bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-mono font-bold">
-                      {currentHost}
-                      <button
-                        type="button"
-                        onClick={handleCopyDomain}
-                        className="text-gray-300 hover:text-white p-0.5"
-                        title="Copy domain name"
-                      >
-                        {copiedDomain ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                      </button>
-                    </span>
-                    <span className="text-gray-400 ml-1">(Also add <code className="text-amber-300">www.{currentHost}</code>)</span>
-                  </li>
-                  <li>
-                    Click <strong>Save</strong>. After saving, click "Retry Google Drive Sign In" below!
-                  </li>
-                </ol>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <a
-                  href={FIREBASE_CONSOLE_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-2 transition shadow-md cursor-pointer"
-                >
-                  <span>1. Open Firebase Auth Settings</span>
-                  <ExternalLink size={13} />
-                </a>
-
-                <button
-                  type="button"
-                  onClick={handleCopyDomain}
-                  className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/10 transition cursor-pointer"
-                >
-                  {copiedDomain ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                  <span>{copiedDomain ? 'Domain Copied!' : `Copy "${currentHost}"`}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleConnect}
-                  disabled={isAuthenticating}
-                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center gap-2 transition shadow-md cursor-pointer"
-                >
-                  {isAuthenticating ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                  <span>2. Retry Google Drive Sign In</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* General Notification Messages */}
-      {errorMessage && !isUnauthorizedDomainError && (
-        <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs sm:text-sm flex items-center gap-3 animate-fade-in">
-          <AlertCircle size={18} className="shrink-0 text-rose-400" />
-          <span>{errorMessage}</span>
+      {errorMessage && (
+        <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs sm:text-sm flex items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <AlertCircle size={18} className="shrink-0 text-rose-400" />
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleConnect(true)}
+            className="px-3 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 text-xs font-bold shrink-0 transition"
+          >
+            Retry Connection
+          </button>
         </div>
       )}
 
@@ -564,7 +475,7 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
               Instant System Recovery
             </h3>
             <p className="text-xs text-gray-400 leading-relaxed mb-4">
-              Restore the entire DOCKS system database state (cases, accounts, vehicles) from any previous Google Drive backup snapshot with zero downtime.
+              Restore the entire system database state (cases, accounts, vehicles) from any previous Google Drive backup snapshot with zero downtime.
             </p>
           </div>
 
@@ -610,7 +521,7 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
             </p>
             <button
               type="button"
-              onClick={handleConnect}
+              onClick={() => handleConnect(true)}
               disabled={isAuthenticating}
               className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition cursor-pointer"
             >

@@ -20,9 +20,13 @@ import { useActiveCompany } from '../services/companyService';
 
 interface GoldenAmountWidgetProps {
   onOpenFinance?: (tab?: string) => void;
+  variant?: 'header' | 'sidebar';
 }
 
-export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({ onOpenFinance }) => {
+export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({ 
+  onOpenFinance,
+  variant = 'header'
+}) => {
   const { activeCompany } = useActiveCompany();
   const [isOpen, setIsOpen] = useState(false);
   const [finances, setFinances] = useState<FinanceEntry[]>([]);
@@ -248,31 +252,60 @@ export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({ onOpenFi
 
   return (
     <>
-      {/* Sone se Amount Button (Compact, Elegant, Non-Bulky) */}
-      <button
-        type="button"
-        id="golden-amount-header-btn"
-        onClick={() => setIsOpen(true)}
-        className="relative group overflow-hidden flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 h-8 sm:h-9 rounded-xl border transition-all duration-200 transform active:scale-95 cursor-pointer shadow-sm
-          bg-slate-800/90 hover:bg-slate-700/90
-          border-amber-500/40 hover:border-amber-400
-          text-amber-300 hover:text-amber-200 shrink-0"
-        title={`${activeCompany?.name || 'Company'} Treasury & Amount Balance`}
-      >
-        {/* Subtle Animated Glow Effect */}
-        <div className="absolute inset-0 bg-amber-500/5 group-hover:bg-amber-500/10 transition-colors pointer-events-none" />
-
-        {/* Small Golden Coin Icon */}
-        <div className="flex items-center justify-center w-5 h-5 rounded-lg bg-amber-500/20 text-amber-400 shrink-0">
-          <Coins size={12} className="text-amber-400" />
+      {variant === 'sidebar' ? (
+        /* Sidebar Amount Counter (Placed directly beside Finance in sidebar) */
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.stopPropagation();
+              setIsOpen(true);
+            }
+          }}
+          className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-amber-500/40 bg-gradient-to-r from-amber-500/20 via-yellow-500/15 to-amber-600/20 hover:from-amber-500/30 hover:to-amber-400/30 text-amber-300 hover:text-amber-200 transition-all duration-150 cursor-pointer shadow-sm active:scale-95 group/counter"
+          title="Total Available Amount Counter & Treasury (Click for breakdown)"
+        >
+          <Coins size={11} className="text-amber-400 shrink-0 group-hover/counter:rotate-12 transition-transform" />
+          <span className="text-[10px] font-mono font-black tracking-tight text-amber-300 whitespace-nowrap">
+            {totalRevenue >= 1000000 
+              ? `Rs ${(totalRevenue / 1000000).toFixed(1)}M` 
+              : totalRevenue >= 1000 
+                ? `Rs ${(totalRevenue / 1000).toFixed(0)}K` 
+                : `PKR ${totalRevenue.toLocaleString('en-PK')}`}
+          </span>
         </div>
+      ) : (
+        /* Top Header Sone se Amount Button (Fallback) */
+        <button
+          type="button"
+          id="golden-amount-header-btn"
+          onClick={() => setIsOpen(true)}
+          className="relative group overflow-hidden flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 h-8 sm:h-9 rounded-xl border transition-all duration-200 transform active:scale-95 cursor-pointer shadow-sm
+            bg-slate-800/90 hover:bg-slate-700/90
+            border-amber-500/40 hover:border-amber-400
+            text-amber-300 hover:text-amber-200 shrink-0"
+          title={`${activeCompany?.name || 'Company'} Treasury & Amount Balance`}
+        >
+          {/* Subtle Animated Glow Effect */}
+          <div className="absolute inset-0 bg-amber-500/5 group-hover:bg-amber-500/10 transition-colors pointer-events-none" />
 
-        {/* Amount Display with Compact Crisp Typography */}
-        <span className="text-[11px] sm:text-xs font-extrabold font-mono text-amber-300 tracking-tight whitespace-nowrap">
-          <span className="hidden md:inline">{formatPKR(totalRevenue)}</span>
-          <span className="inline md:hidden">Rs {(totalRevenue / 1000000).toFixed(1)}M</span>
-        </span>
-      </button>
+          {/* Small Golden Coin Icon */}
+          <div className="flex items-center justify-center w-5 h-5 rounded-lg bg-amber-500/20 text-amber-400 shrink-0">
+            <Coins size={12} className="text-amber-400" />
+          </div>
+
+          {/* Amount Display with Compact Crisp Typography */}
+          <span className="text-[11px] sm:text-xs font-extrabold font-mono text-amber-300 tracking-tight whitespace-nowrap">
+            <span className="hidden md:inline">{formatPKR(totalRevenue)}</span>
+            <span className="inline md:hidden">Rs {(totalRevenue / 1000000).toFixed(1)}M</span>
+          </span>
+        </button>
+      )}
 
       {/* Render Portal Modal directly to document.body */}
       {modalContent}
