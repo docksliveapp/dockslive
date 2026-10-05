@@ -61,7 +61,8 @@ import {
   ParentGroupInfo, 
   DEFAULT_PARENT_GROUP, 
   COMPANIES_LIST,
-  useActiveCompany
+  useActiveCompany,
+  isUploadedLogo
 } from '../services/companyService';
 import { useBranding, optimizeLogoImage } from '../services/brandingService';
 import { downloadTaxReportPdf } from '../services/pdfExportService';
@@ -1147,11 +1148,18 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                     Active Logo Preview
                   </h4>
                   <div className="h-32 w-full flex items-center justify-center p-3 rounded-2xl bg-black/60 border border-white/10 mb-3 shadow-inner">
-                    <img 
-                      src={groupLogoPreview} 
-                      alt="Company Logo Preview" 
-                      className="max-h-full max-w-full object-contain filter drop-shadow-[0_4px_16px_rgba(245,158,11,0.3)]"
-                    />
+                    {groupLogoPreview && isUploadedLogo(groupLogoPreview) ? (
+                      <img 
+                        src={groupLogoPreview} 
+                        alt="Company Logo Preview" 
+                        className="max-h-full max-w-full object-contain filter drop-shadow-[0_4px_16px_rgba(245,158,11,0.3)]"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-1.5 text-gray-500">
+                        <ImageIcon size={28} className="text-gray-600" />
+                        <span className="text-[11px] font-medium">No Logo Uploaded Yet</span>
+                      </div>
+                    )}
                   </div>
                   <span className="text-[10px] font-mono text-gray-500">
                     Live Display Sample

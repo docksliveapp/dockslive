@@ -16,7 +16,7 @@ import GoogleDriveManager from './components/GoogleDriveManager';
 import SplashScreen from './components/SplashScreen';
 import LoginModeSelection, { SelectedModePayload } from './components/LoginModeSelection';
 import CompanyWorkspaceSelector from './components/CompanyWorkspaceSelector';
-import { useActiveCompany, setActiveCompany } from './services/companyService';
+import { useActiveCompany, setActiveCompany, isUploadedLogo, getCompanyUploadedLogo } from './services/companyService';
 import GoldenAmountWidget from './components/GoldenAmountWidget';
 import ClientPortal from './components/ClientPortal';
 import { LoadingPortStaffPortal } from './components/LoadingPortStaffPortal';
@@ -614,68 +614,74 @@ const App: React.FC = () => {
       </div>
 
       {/* Main Sidebar */}
-      <aside className={`fixed top-0 left-0 h-full bg-slate-950/70 backdrop-blur-xl border-r border-white/5 transition-all duration-300 flex flex-col z-30 ${mobileSidebarOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full'} lg:static lg:translate-x-0 lg:h-auto ${desktopSidebarExpanded ? 'lg:w-64' : 'lg:w-20'}`}>
+      <aside className={`fixed top-0 left-0 h-full bg-slate-950/98 backdrop-blur-2xl border-r border-white/10 transition-all duration-300 flex flex-col z-40 shadow-2xl ${mobileSidebarOpen ? 'w-72 sm:w-80 translate-x-0' : 'w-72 sm:w-80 -translate-x-full'} lg:static lg:translate-x-0 lg:h-auto ${desktopSidebarExpanded ? 'lg:w-64' : 'lg:w-20'} overflow-hidden select-none`}>
         
-        {/* Click Logo at Top of Sidebar to Open Dashboard */}
+        {/* Mobile Safe-Area Header with Close Button */}
+        <div className="pt-3 pb-2.5 px-4 border-b border-white/10 flex items-center justify-between lg:hidden bg-slate-900/80 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-amber-300">
+              MAK Enterprise Menu
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen(false)}
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer"
+            title="Close Menu"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Company Identity Header in Sidebar (Compact, Beautiful, Safe) */}
         <div 
           onClick={() => {
             setActiveView('dashboard');
             setNavigationFilter(null);
             setMobileSidebarOpen(false);
           }}
-          className="h-auto py-4 flex flex-col items-center justify-center border-b border-white/5 px-3 overflow-hidden gap-2 cursor-pointer hover:opacity-90 active:scale-95 transition-all group select-none"
-          title={`${activeCompany.shortName} Dashboard`}
+          className="p-3 mx-3 my-2.5 rounded-2xl bg-gradient-to-br from-amber-500/10 via-slate-900 to-black border border-amber-500/25 flex items-center gap-2.5 cursor-pointer hover:border-amber-400/50 transition-all group shadow-md shrink-0"
+          title={`${activeCompany.name} Dashboard`}
         >
-          {/* Full Logo - Shown when sidebar is expanded OR on mobile */}
-          <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} flex items-center justify-center gap-2.5`}>
-            <Logo className="h-10 w-10 shrink-0 object-contain group-hover:brightness-110 transition-all" />
-            <div className="flex flex-col text-left min-w-0">
-              <span className="font-extrabold text-xs tracking-wider text-amber-300 font-sans uppercase truncate">
-                {activeCompany.name}
-              </span>
-              <span className="text-[9px] font-bold text-amber-400/90 tracking-wider uppercase truncate">
-                {activeCompany.shortName} • {activeCompany.category.split('&')[0]}
-              </span>
-            </div>
+          <div className="w-9 h-9 rounded-xl bg-black/60 border border-amber-500/30 flex items-center justify-center p-1.5 shrink-0 group-hover:scale-105 transition-transform">
+            <Logo variant="icon" className="max-h-full max-w-full object-contain" />
           </div>
-          
-          {/* Icon Logo - Shown ONLY when sidebar is collapsed on desktop */}
-          <div className={`${desktopSidebarExpanded ? 'hidden' : 'hidden lg:flex'} items-center justify-center`}>
-            <Logo variant="icon" className="h-8 w-8 object-contain group-hover:brightness-110 transition-all" />
+          <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} min-w-0 flex-1`}>
+            <h3 className="font-extrabold text-xs text-white group-hover:text-amber-300 transition-colors uppercase leading-tight truncate">
+              {activeCompany.name}
+            </h3>
+            <p className="text-[9px] font-mono text-amber-400/90 tracking-wider uppercase truncate mt-0.5">
+              {activeCompany.shortName} • {activeCompany.prefix}
+            </p>
           </div>
-
-          {/* Client Role Badge in Sidebar */}
-          {(currentRole as string) === UserRole.CLIENT && (
-            <div className={`mt-1 text-center ${!desktopSidebarExpanded && 'lg:hidden'}`}>
-              <span className="bg-brand-500/20 text-brand-300 text-[11px] px-2.5 py-0.5 rounded-full border border-brand-500/30 font-medium">
-                Client Portal
-              </span>
-            </div>
-          )}
         </div>
 
         {/* Switch Company Workspace Button in Sidebar */}
-        <div className="w-full px-2 pt-2 pb-1">
+        <div className="w-full px-3 pb-2 shrink-0">
           <button
             type="button"
-            onClick={() => setIsCompanyModalOpen(true)}
-            className="w-full flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all text-xs font-semibold cursor-pointer group shadow-sm"
+            onClick={() => {
+              setMobileSidebarOpen(false);
+              setIsCompanyModalOpen(true);
+            }}
+            className="w-full flex items-center justify-between gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all text-xs font-bold cursor-pointer group shadow-sm active:scale-95"
             title="Switch Subsidiary / Company Workspace"
           >
             <div className="flex items-center gap-2 truncate">
-              <Building2 size={15} className="text-amber-400 shrink-0" />
-              <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} truncate text-[11px] font-bold text-gray-200 group-hover:text-amber-300`}>
+              <Building2 size={14} className="text-amber-400 shrink-0" />
+              <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} truncate text-[11px]`}>
                 Switch Company
               </span>
             </div>
-            <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[9px] px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-bold uppercase`}>
+            <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[9px] px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-bold uppercase font-mono`}>
               4 Entities
             </span>
           </button>
         </div>
 
         {/* Navigation items (Strictly Cases & Finance only for Client) */}
-        <nav className="flex-1 py-6 space-y-1 px-3">
+        <nav className="flex-1 overflow-y-auto py-2 space-y-1 px-3 custom-scrollbar">
           {currentNavItems.map((item, idx) => (
             <button 
               key={`nav_item_${item.id}_${idx}`} 
@@ -684,20 +690,20 @@ const App: React.FC = () => {
                 setNavigationFilter(null); 
                 setMobileSidebarOpen(false); 
               }} 
-              className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-all ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
                 activeView === item.id 
                   ? 'bg-brand-600/20 text-white border border-brand-500/20 shadow-lg shadow-brand-500/10' 
                   : 'text-gray-400 hover:bg-white/5 hover:text-white'
               } ${!desktopSidebarExpanded && 'lg:justify-center'}`}
             >
-              <item.icon size={22} className={`${activeView === item.id ? 'text-brand-400' : 'text-gray-500'} group-hover:text-white`} />
-              <span className={`${!desktopSidebarExpanded && 'lg:hidden'} font-medium`}>{item.label}</span>
+              <item.icon size={20} className={`${activeView === item.id ? 'text-brand-400' : 'text-gray-500'} group-hover:text-white`} />
+              <span className={`${!desktopSidebarExpanded && 'lg:hidden'} font-medium text-xs sm:text-sm`}>{item.label}</span>
             </button>
           ))}
         </nav>
 
         {/* Active Session Info */}
-        <div className={`px-3 py-2 border-t border-white/5 ${!desktopSidebarExpanded && 'lg:hidden'}`}>
+        <div className={`px-3 py-2 border-t border-white/5 shrink-0 ${!desktopSidebarExpanded && 'lg:hidden'}`}>
           <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center gap-2.5">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
             <div className="min-w-0 flex-1">
@@ -719,11 +725,11 @@ const App: React.FC = () => {
         </div>
 
         {/* Logout at Sidebar Bottom */}
-        <div className="p-3 border-t border-white/5">
+        <div className="p-3 border-t border-white/5 shrink-0">
           <button 
             type="button"
             onClick={handleSignOut}
-            className={`w-full flex items-center gap-3 text-red-400 hover:bg-red-500/10 px-3 py-2 rounded-lg transition text-xs ${!desktopSidebarExpanded && 'lg:justify-center'}`}
+            className={`w-full flex items-center gap-3 text-red-400 hover:bg-red-500/10 px-3 py-2 rounded-xl transition text-xs cursor-pointer ${!desktopSidebarExpanded && 'lg:justify-center'}`}
             title="Sign Out"
           >
             <LogOut size={16} /> <span className={`${!desktopSidebarExpanded && 'lg:hidden'}`}>Logout</span>
@@ -733,89 +739,52 @@ const App: React.FC = () => {
 
       {/* Content Area */}
       <main className="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden relative">
+        {/* Top Header - Perfect 3-Way Centered Layout:
+            Left: Sidebar Toggle & Company Prefix Badge
+            Center: Change Company Button (Opens 4-Company Modal)
+            Right: Compact Treasury Widget, Notifications & LogOut
+        */}
         <header className="h-14 sm:h-16 bg-slate-900 border-b border-white/10 flex items-center justify-between px-2.5 sm:px-6 z-20 flex-shrink-0 sticky top-0 shadow-md">
-          <div className="flex items-center gap-1.5 sm:gap-4 min-w-0 flex-1">
-            <button onClick={() => window.innerWidth < 1024 ? setMobileSidebarOpen(!mobileSidebarOpen) : setDesktopSidebarExpanded(!desktopSidebarExpanded)} className="text-gray-400 hover:text-white p-1 shrink-0">
-              <Menu size={22} />
-            </button>
-
-            {/* Click Logo on Top Header to open Dashboard */}
-            <button
+          {/* Left: Sidebar Menu Toggle & Active Company Badge */}
+          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 justify-start">
+            <button 
               type="button"
-              onClick={() => {
-                setActiveView('dashboard');
-                setNavigationFilter(null);
-              }}
-              className="flex items-center gap-2 cursor-pointer hover:opacity-85 transition-opacity shrink-0"
-              title={`${activeCompany.shortName} Dashboard`}
+              onClick={() => window.innerWidth < 1024 ? setMobileSidebarOpen(!mobileSidebarOpen) : setDesktopSidebarExpanded(!desktopSidebarExpanded)} 
+              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-gray-300 hover:text-white border border-white/10 hover:border-amber-400/40 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
+              title="Toggle Menu"
             >
-              <Logo variant="icon" className="h-7 w-auto max-w-[36px]" />
+              <Menu size={19} className="text-amber-400" />
             </button>
 
-            {/* Transporter Branding Element (Static, non-scrollable, pinned at top) */}
-            {((currentRole as string) === UserRole.TRANSPORTER || activeView === 'vehicles' || activeView === 'available_vehicles') ? (
-              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center font-bold text-sm sm:text-base shrink-0">
-                  🚛
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 sm:gap-2">
-                    <h2 className="text-xs sm:text-sm font-bold text-white tracking-wide truncate">
-                      {(currentRole as string) === UserRole.TRANSPORTER 
-                        ? (safeAppStorage.getItem('dpl_current_user_name') || 'Bilal Goods Transport Co.')
-                        : (activeView === 'available_vehicles' ? 'Available Fleet Broadcast' : 'Fleet & Vehicle Operations')}
-                    </h2>
-                    <span className="hidden xs:inline-flex text-[9px] sm:text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
-                      Transporter Desk
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-gray-400 font-medium block truncate">
-                    {(currentRole as string) === UserRole.TRANSPORTER
-                      ? 'Verified Fleet Carrier • Logistics Operations'
-                      : 'Registered Transporters, Carriers & Vehicle Panels'}
-                  </span>
-                </div>
-              </div>
-            ) : activeView !== 'dashboard' ? (
-              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-                <h2 className="text-xs sm:text-base font-semibold text-gray-100 capitalize tracking-wide truncate max-w-[100px] xs:max-w-[140px] sm:max-w-none">
-                  {(currentRole as string) === UserRole.CLIENT ? 'Client Portal' : activeView.replace('-', ' ')}
-                </h2>
-                {(currentRole as string) === UserRole.CLIENT && (
-                  <span className="bg-brand-500/20 text-brand-300 text-[10px] sm:text-xs px-2 py-0.5 rounded-full border border-brand-500/30 font-medium truncate max-w-[90px] xs:max-w-[130px] sm:max-w-none">
-                    {currentClientName}
-                  </span>
-                )}
-              </div>
-            ) : null}
+            <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono font-black text-xs shrink-0 shadow-sm">
+              {activeCompany.prefix || activeCompany.shortName}
+            </span>
+
+            <div className="hidden md:flex items-center gap-2 min-w-0">
+              <span className="text-xs font-bold text-gray-300 uppercase tracking-wider truncate">
+                {activeView === 'dashboard' ? 'Overview' : activeView.replace('-', ' ')}
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0">
-            {/* Active Subsidiary Switcher Button in Top Bar */}
+          {/* Center: "Change Company" Button - Clean, Reliable, No Corrupted Image */}
+          <div className="flex items-center justify-center min-w-0 flex-shrink-0 px-1 sm:px-2">
             <button
               type="button"
-              id="header-company-switcher-btn"
+              id="header-change-company-btn"
               onClick={() => setIsCompanyModalOpen(true)}
-              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 border border-amber-500/30 hover:border-amber-400 transition-all text-left group shadow-sm cursor-pointer"
-              title="Switch Subsidiary / Company Workspace (4 Companies)"
+              className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 border border-amber-500/30 hover:border-amber-400 text-amber-200 hover:text-white transition-all duration-200 shadow-sm cursor-pointer active:scale-95 group shrink-0"
+              title="Change Company (Switch Workspace)"
             >
-              <img 
-                src={activeCompany.logo} 
-                alt={activeCompany.name} 
-                className="w-5 h-5 sm:w-6 sm:h-6 object-contain shrink-0 filter drop-shadow" 
-              />
-              <div className="flex flex-col min-w-0 hidden md:flex">
-                <span className="text-[11px] font-bold text-white group-hover:text-amber-300 transition-colors truncate max-w-[130px] xl:max-w-[170px]">
-                  {activeCompany.name}
-                </span>
-                <span className="text-[9px] text-amber-400/90 font-medium truncate max-w-[130px]">
-                  {activeCompany.shortName} • Switch
-                </span>
-              </div>
-              <ChevronDown size={14} className="text-gray-400 group-hover:text-amber-300 transition-transform group-hover:translate-y-0.5 ml-0.5 shrink-0" />
+              <Building2 size={13} className="text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
+              <span className="whitespace-nowrap font-bold text-[11px] sm:text-xs">Change Company</span>
+              <ChevronDown size={13} className="text-amber-400/80 group-hover:translate-y-0.5 transition-transform shrink-0" />
             </button>
+          </div>
 
-            {/* Sone se Amount Option (Golden Amount Display & Treasury Breakdown) */}
+          {/* Right: Treasury Gold Widget, Notifications & LogOut */}
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 justify-end shrink-0">
+            {/* Compact Sone se Amount / Treasury Widget */}
             <GoldenAmountWidget 
               onOpenFinance={() => setActiveView('finance')}
             />
@@ -838,17 +807,16 @@ const App: React.FC = () => {
               }}
             />
 
-            {/* Small Squircle (rounded-square) Sign Out Button with LogOut Logo */}
+            {/* Squircle Sign Out Button with LogOut Logo */}
             <button
               type="button"
               id="header-signout-btn"
               onClick={handleSignOut}
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 flex items-center justify-center transition-all duration-200 shadow-md hover:shadow-red-500/20 active:scale-95 cursor-pointer flex-shrink-0"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 flex items-center justify-center transition-all duration-200 shadow-sm active:scale-95 cursor-pointer flex-shrink-0"
               title="Sign Out"
             >
-              <LogOut size={17} className="text-red-400" />
+              <LogOut size={15} className="text-red-400" />
             </button>
-
           </div>
         </header>
 

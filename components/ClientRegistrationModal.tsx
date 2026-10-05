@@ -1338,10 +1338,12 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
               </button>
             </div>
             <div className="flex-1 overflow-auto flex items-center justify-center min-h-[300px]">
-              {previewDoc.url.startsWith('data:application/pdf') || previewDoc.url.endsWith('.pdf') ? (
+              {previewDoc.url && (previewDoc.url.startsWith('data:application/pdf') || previewDoc.url.endsWith('.pdf')) ? (
                 <iframe src={previewDoc.url} className="w-full h-[500px] rounded-xl border border-white/10" title={previewDoc.name} />
-              ) : (
+              ) : previewDoc.url ? (
                 <img src={previewDoc.url} alt={previewDoc.name} className="max-w-full max-h-[500px] object-contain rounded-xl" />
+              ) : (
+                <div className="p-8 text-center text-gray-400">No preview available</div>
               )}
             </div>
           </div>

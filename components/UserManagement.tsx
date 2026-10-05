@@ -668,7 +668,7 @@ const UserManagement: React.FC = () => {
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-11 h-11 rounded-xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-sm font-bold text-white shadow-lg overflow-hidden shrink-0">
-                      {user.profilePicture ? (
+                      {Boolean(user.profilePicture && user.profilePicture.trim()) ? (
                         <img src={user.profilePicture} alt={user.name} className="w-full h-full object-cover" />
                       ) : (
                         user.name.charAt(0)
@@ -792,7 +792,7 @@ const UserManagement: React.FC = () => {
                     <tr key={`user_row_${user.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                       <td className="p-4 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-sm font-bold text-white shadow-lg overflow-hidden shrink-0">
-                          {user.profilePicture ? (
+                          {Boolean(user.profilePicture && user.profilePicture.trim()) ? (
                             <img src={user.profilePicture} alt={user.name} className="w-full h-full object-cover" />
                           ) : (
                             user.name.charAt(0)
@@ -1520,7 +1520,7 @@ const UserManagement: React.FC = () => {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-11 h-11 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-sm font-bold text-amber-400 shadow-lg overflow-hidden shrink-0">
-                          {user.profilePicture ? (
+                          {Boolean(user.profilePicture && user.profilePicture.trim()) ? (
                             <img src={user.profilePicture} alt={user.name} className="w-full h-full object-cover" />
                           ) : (
                             user.name.charAt(0)
@@ -1629,7 +1629,7 @@ const UserManagement: React.FC = () => {
                         <tr key={`dusr_row_${user.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
                           <td className="p-4 flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-sm font-bold text-amber-400 shadow-lg overflow-hidden shrink-0">
-                              {user.profilePicture ? (
+                              {Boolean(user.profilePicture && user.profilePicture.trim()) ? (
                                 <img src={user.profilePicture} alt={user.name} className="w-full h-full object-cover" />
                               ) : (
                                 user.name.charAt(0)

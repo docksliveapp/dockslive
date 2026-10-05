@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { 
   Building2, 
-  ArrowRight, 
   CheckCircle2, 
   Sparkles, 
   X, 
@@ -11,9 +10,7 @@ import {
   Anchor,
   Crown,
   LogOut,
-  ChevronRight,
-  ExternalLink,
-  ShieldCheck
+  ArrowRight
 } from 'lucide-react';
 import { 
   CompanyId, 
@@ -21,9 +18,9 @@ import {
   COMPANIES_LIST, 
   useActiveCompany,
   useParentGroup,
-  isUploadedLogo
+  isUploadedLogo,
+  getCompanyUploadedLogo
 } from '../services/companyService';
-import { safeAppStorage } from '../services/storage';
 import { GroupAdminManagementModal, AdminSettingsTab } from './GroupAdminManagementModal';
 
 interface CompanyWorkspaceSelectorProps {
@@ -56,24 +53,55 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   const getCompanyIcon = (id: CompanyId) => {
     switch (id) {
       case 'docks':
-        return <Anchor className="w-5 h-5 text-amber-400" />;
+        return <Anchor className="w-8 h-8 text-amber-400" />;
       case 'muhib':
-        return <Globe className="w-5 h-5 text-blue-400" />;
+        return <Globe className="w-8 h-8 text-blue-400" />;
       case 'vantage':
-        return <Ship className="w-5 h-5 text-cyan-400" />;
+        return <Ship className="w-8 h-8 text-cyan-400" />;
       case 'truckit':
-        return <Truck className="w-5 h-5 text-rose-400" />;
+        return <Truck className="w-8 h-8 text-rose-400" />;
     }
   };
 
-  const getCompanyCardLogo = (comp: CompanyInfo) => {
-    const companyBranding = safeAppStorage.getJSON<any>(`dpl_company_branding_v1_${comp.id}`, {});
-    const candLogo = companyBranding?.customLogo || comp.logo;
-    return isUploadedLogo(candLogo) ? candLogo : null;
+  const getCompanyCardStyles = (id: CompanyId, isCurrentActive: boolean) => {
+    switch (id) {
+      case 'docks':
+        return {
+          cardBorder: isCurrentActive ? 'border-amber-400 ring-2 ring-amber-400/50 shadow-[0_0_35px_rgba(245,158,11,0.35)]' : 'border-amber-500/30 hover:border-amber-400/80 hover:shadow-[0_0_30px_rgba(245,158,11,0.25)]',
+          bgGradient: 'from-amber-950/30 via-slate-900/90 to-black',
+          accentText: 'text-amber-300',
+          badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+          glowPulse: 'group-hover:border-amber-400',
+        };
+      case 'muhib':
+        return {
+          cardBorder: isCurrentActive ? 'border-blue-400 ring-2 ring-blue-400/50 shadow-[0_0_35px_rgba(59,130,246,0.35)]' : 'border-blue-500/30 hover:border-blue-400/80 hover:shadow-[0_0_30px_rgba(59,130,246,0.25)]',
+          bgGradient: 'from-blue-950/30 via-slate-900/90 to-black',
+          accentText: 'text-blue-300',
+          badgeBg: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
+          glowPulse: 'group-hover:border-blue-400',
+        };
+      case 'vantage':
+        return {
+          cardBorder: isCurrentActive ? 'border-cyan-400 ring-2 ring-cyan-400/50 shadow-[0_0_35px_rgba(6,182,212,0.35)]' : 'border-cyan-500/30 hover:border-cyan-400/80 hover:shadow-[0_0_30px_rgba(6,182,212,0.25)]',
+          bgGradient: 'from-cyan-950/30 via-slate-900/90 to-black',
+          accentText: 'text-cyan-300',
+          badgeBg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
+          glowPulse: 'group-hover:border-cyan-400',
+        };
+      case 'truckit':
+        return {
+          cardBorder: isCurrentActive ? 'border-rose-400 ring-2 ring-rose-400/50 shadow-[0_0_35px_rgba(244,63,94,0.35)]' : 'border-rose-500/30 hover:border-rose-400/80 hover:shadow-[0_0_30px_rgba(244,63,94,0.25)]',
+          bgGradient: 'from-rose-950/30 via-slate-900/90 to-black',
+          accentText: 'text-rose-300',
+          badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+          glowPulse: 'group-hover:border-rose-400',
+        };
+    }
   };
 
   const content = (
-    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-6 flex flex-col justify-start">
+    <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-4 sm:py-6 flex flex-col justify-start">
       {/* 1. TOP EXECUTIVE ACTION BAR (ONLY Admin Settings & Logout as requested) */}
       <div className="flex items-center justify-between gap-3 pb-3 mb-4 sm:mb-6 border-b border-white/10 shrink-0">
         <div className="flex items-center gap-2.5">
@@ -129,7 +157,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
       </div>
 
       {/* 2. CENTER CONGLOMERATE HEADER */}
-      <div className="text-center mb-5 sm:mb-7 shrink-0">
+      <div className="text-center mb-6 sm:mb-8 shrink-0">
         <div className="inline-flex items-center justify-center mb-2 transform hover:scale-105 transition-transform duration-300">
           {isUploadedLogo(parentGroup.logo) ? (
             <img 
@@ -144,156 +172,73 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
           )}
         </div>
 
-        <div className="flex items-center justify-center gap-2 mb-1.5">
-          <span className="h-px w-8 sm:w-16 bg-gradient-to-r from-transparent to-amber-400/80" />
-          <span className="text-[10px] sm:text-xs font-bold uppercase tracking-[0.25em] text-amber-400 font-sans">
-            Enterprise Multi-Entity Workspace
-          </span>
-          <span className="h-px w-8 sm:w-16 bg-gradient-to-l from-transparent to-amber-400/80" />
-        </div>
-
-        <h1 className="text-2xl sm:text-3xl font-black text-white tracking-wide font-serif mb-1 drop-shadow-md">
+        <h1 className="text-xl sm:text-2xl font-black text-white tracking-wide font-serif mb-1 drop-shadow-md">
           {parentGroup.title || 'MAK GROUP OF COMPANIES'}
         </h1>
-
-        <p className="text-xs sm:text-sm text-amber-300/90 font-medium tracking-wide max-w-xl mx-auto mb-1">
-          DOCKS • TRUCKIT • MUHIB • VANTAGE
-        </p>
-        <p className="text-[11px] sm:text-xs text-gray-400 max-w-lg mx-auto">
-          Select an enterprise subsidiary from the list below to launch its dedicated operations and workspaces.
+        <p className="text-[11px] sm:text-xs text-amber-400/90 font-mono tracking-widest uppercase">
+          Select Company Workspace
         </p>
       </div>
 
-      {/* 3. COMPANIES LIST FORMAT (Clean Vertical Stack with Uploaded Logos & Animated Buttons) */}
-      <div className="space-y-3 sm:space-y-4 mb-6">
+      {/* 3. FOUR COMPANIES IN 2x2 SQUARE-SHAPED ANIMATED BUTTONS (Only Name & Uploaded Logo) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
         {COMPANIES_LIST.map((comp) => {
           const isCurrentActive = comp.id === currentActiveId;
-          const activeLogo = getCompanyCardLogo(comp);
-
-          const getListStyles = () => {
-            switch (comp.id) {
-              case 'docks':
-                return {
-                  border: isCurrentActive ? 'border-amber-400 ring-2 ring-amber-400/40' : 'border-amber-500/30 hover:border-amber-400',
-                  glow: 'hover:shadow-[0_0_30px_rgba(245,158,11,0.22)]',
-                  bgGradient: 'from-amber-950/40 via-slate-900/95 to-slate-950/95',
-                  badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-                  buttonGradient: 'from-amber-500 via-yellow-400 to-amber-600 hover:from-amber-400 hover:via-yellow-300 hover:to-amber-500 text-slate-950 shadow-amber-500/30',
-                  iconBoxBg: 'bg-amber-500/10 border-amber-500/30',
-                };
-              case 'muhib':
-                return {
-                  border: isCurrentActive ? 'border-blue-400 ring-2 ring-blue-400/40' : 'border-blue-500/30 hover:border-blue-400',
-                  glow: 'hover:shadow-[0_0_30px_rgba(37,99,235,0.25)]',
-                  bgGradient: 'from-blue-950/40 via-slate-900/95 to-slate-950/95',
-                  badgeBg: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
-                  buttonGradient: 'from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:via-indigo-500 hover:to-blue-600 text-white shadow-blue-600/30',
-                  iconBoxBg: 'bg-blue-500/10 border-blue-500/30',
-                };
-              case 'vantage':
-                return {
-                  border: isCurrentActive ? 'border-cyan-400 ring-2 ring-cyan-400/40' : 'border-cyan-500/30 hover:border-cyan-400',
-                  glow: 'hover:shadow-[0_0_30px_rgba(14,165,233,0.25)]',
-                  bgGradient: 'from-cyan-950/40 via-slate-900/95 to-slate-950/95',
-                  badgeBg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
-                  buttonGradient: 'from-cyan-500 via-sky-400 to-cyan-600 hover:from-cyan-400 hover:via-sky-300 hover:to-cyan-500 text-slate-950 shadow-cyan-500/30',
-                  iconBoxBg: 'bg-cyan-500/10 border-cyan-500/30',
-                };
-              case 'truckit':
-                return {
-                  border: isCurrentActive ? 'border-rose-400 ring-2 ring-rose-400/40' : 'border-rose-500/30 hover:border-rose-400',
-                  glow: 'hover:shadow-[0_0_30px_rgba(244,63,94,0.25)]',
-                  bgGradient: 'from-rose-950/40 via-slate-900/95 to-slate-950/95',
-                  badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
-                  buttonGradient: 'from-rose-600 via-red-600 to-rose-700 hover:from-rose-500 hover:via-red-500 hover:to-rose-600 text-white shadow-rose-600/30',
-                  iconBoxBg: 'bg-rose-500/10 border-rose-500/30',
-                };
-            }
-          };
-
-          const styles = getListStyles();
+          const uploadedLogo = getCompanyUploadedLogo(comp.id);
+          const styles = getCompanyCardStyles(comp.id, isCurrentActive);
 
           return (
-            <div
+            <button
               key={comp.id}
+              type="button"
               onClick={() => onSelectCompany(comp.id)}
-              className={`group relative rounded-2xl sm:rounded-3xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 cursor-pointer transition-all duration-300 backdrop-blur-xl bg-gradient-to-r ${styles.bgGradient} border ${styles.border} ${styles.glow} transform hover:-translate-y-0.5 active:scale-[0.99]`}
+              className={`group relative rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-300 backdrop-blur-xl bg-gradient-to-b ${styles.bgGradient} border ${styles.cardBorder} transform hover:-translate-y-1 hover:scale-[1.02] active:scale-[0.98] shadow-xl overflow-hidden min-h-[190px] sm:min-h-[220px]`}
             >
-              {/* Left / Center Info Box */}
-              <div className="flex items-center gap-3.5 sm:gap-5 flex-1 min-w-0">
-                {/* Uploaded Logo or Custom Monogram */}
-                <div className={`h-16 w-16 sm:h-20 sm:w-20 shrink-0 rounded-2xl flex items-center justify-center p-2.5 bg-black/50 border ${styles.iconBoxBg} shadow-inner group-hover:scale-105 transition-transform duration-300 overflow-hidden`}>
-                  {activeLogo ? (
-                    <img 
-                      src={activeLogo} 
-                      alt={comp.name} 
-                      className="max-h-full max-w-full object-contain filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.7)]" 
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center gap-1 text-center">
+              {/* Animated Background Shimmer Effect on Hover */}
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out pointer-events-none" />
+
+              {/* Active Badge */}
+              {isCurrentActive && (
+                <div className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold shadow-md">
+                  <CheckCircle2 size={11} className="text-emerald-400" />
+                  <span>Active</span>
+                </div>
+              )}
+
+              {/* Company Logo Display (Strictly uploaded logo from company settings) */}
+              <div className="h-20 sm:h-24 w-full flex items-center justify-center p-2 mb-3 transform group-hover:scale-105 transition-transform duration-300">
+                {uploadedLogo ? (
+                  <img 
+                    src={uploadedLogo} 
+                    alt={comp.name} 
+                    className="max-h-full max-w-[200px] sm:max-w-[240px] object-contain filter drop-shadow-[0_4px_16px_rgba(0,0,0,0.7)]" 
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center gap-1.5">
+                    <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-black/50 border border-white/10 flex items-center justify-center shadow-inner group-hover:border-white/20 transition-colors">
                       {getCompanyIcon(comp.id)}
-                      <span className="text-[10px] font-mono font-bold text-gray-300 tracking-wider">
-                        {comp.shortName}
-                      </span>
                     </div>
-                  )}
-                </div>
-
-                {/* Company Texts */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${styles.badgeBg} flex items-center gap-1.5`}>
-                      {getCompanyIcon(comp.id)}
-                      <span>{comp.shortName}</span>
-                    </span>
-
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest font-mono">
-                      ID: {comp.id.toUpperCase()}
-                    </span>
-
-                    {isCurrentActive && (
-                      <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold shadow-md">
-                        <CheckCircle2 size={11} className="text-emerald-400" />
-                        <span>Active Workspace</span>
-                      </span>
-                    )}
                   </div>
-
-                  <h3 className="text-base sm:text-lg font-bold text-white group-hover:text-amber-300 transition-colors truncate">
-                    {comp.name}
-                  </h3>
-
-                  <p className="text-xs sm:text-sm text-gray-300 line-clamp-1 mt-0.5">
-                    {comp.category}
-                  </p>
-
-                  <p className="text-[11px] text-gray-400 hidden sm:block mt-1 truncate">
-                    {comp.tagline}
-                  </p>
-                </div>
+                )}
               </div>
 
-              {/* Right: Prominent Animated Enter Button */}
-              <div className="w-full md:w-auto shrink-0 pt-2 md:pt-0">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectCompany(comp.id);
-                  }}
-                  className={`group/btn w-full md:w-auto px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl font-bold text-xs sm:text-sm uppercase tracking-wider shadow-lg flex items-center justify-center gap-2.5 transition-all duration-300 cursor-pointer bg-gradient-to-r ${styles.buttonGradient} transform group-hover:scale-105 active:scale-95`}
-                >
-                  <span>Launch Workspace</span>
-                  <ArrowRight size={15} className="group-hover/btn:translate-x-1.5 transition-transform duration-300" />
-                </button>
+              {/* Only Company Name (Clean & Prominent) */}
+              <h3 className="text-base sm:text-lg font-extrabold text-white group-hover:text-amber-300 transition-colors tracking-wide max-w-xs leading-tight">
+                {comp.name}
+              </h3>
+
+              {/* Subtle Animated Indicator */}
+              <div className="mt-3 flex items-center gap-1 text-[11px] font-bold text-gray-400 group-hover:text-white transition-colors">
+                <span>Enter Workspace</span>
+                <ArrowRight size={13} className="transform group-hover:translate-x-1 transition-transform" />
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
 
       {/* 4. FOOTER NOTE */}
-      <div className="text-center pt-2 pb-6 text-xs text-gray-500 font-sans shrink-0">
+      <div className="text-center pt-2 pb-4 text-xs text-gray-500 font-sans shrink-0">
         MAK Group of Companies • Cross-entity user authentication enabled. Subsidiaries can be switched at any time.
       </div>
 
@@ -310,7 +255,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   if (isModal) {
     return (
       <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
-        <div className="relative w-full max-w-5xl bg-slate-950/95 border border-white/10 rounded-3xl shadow-2xl my-6 flex flex-col overflow-visible">
+        <div className="relative w-full max-w-4xl bg-slate-950/95 border border-white/10 rounded-3xl shadow-2xl my-6 flex flex-col overflow-visible">
           {content}
         </div>
       </div>
@@ -337,3 +282,4 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 };
 
 export default CompanyWorkspaceSelector;
+

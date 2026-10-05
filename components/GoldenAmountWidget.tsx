@@ -248,40 +248,30 @@ export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({ onOpenFi
 
   return (
     <>
-      {/* Sone se Amount Button (Golden Metallic Styled Option on Top Right) */}
+      {/* Sone se Amount Button (Compact, Elegant, Non-Bulky) */}
       <button
         type="button"
         id="golden-amount-header-btn"
         onClick={() => setIsOpen(true)}
-        className="relative group overflow-hidden flex items-center gap-1.5 sm:gap-2.5 px-2 sm:px-3.5 py-1.5 rounded-xl border transition-all duration-300 transform active:scale-95 cursor-pointer shadow-lg
-          bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-600
-          hover:from-amber-400 hover:via-yellow-300 hover:to-amber-500
-          border-yellow-200/60 hover:border-yellow-100
-          shadow-amber-500/25 hover:shadow-amber-500/40 shrink-0"
-        title={`${activeCompany?.name || 'Company'} Corporate Treasury & Amount`}
+        className="relative group overflow-hidden flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 h-8 sm:h-9 rounded-xl border transition-all duration-200 transform active:scale-95 cursor-pointer shadow-sm
+          bg-slate-800/90 hover:bg-slate-700/90
+          border-amber-500/40 hover:border-amber-400
+          text-amber-300 hover:text-amber-200 shrink-0"
+        title={`${activeCompany?.name || 'Company'} Treasury & Amount Balance`}
       >
-        {/* Animated Light Sweep Effect Across the Gold Surface */}
-        <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/40 to-transparent pointer-events-none" />
+        {/* Subtle Animated Glow Effect */}
+        <div className="absolute inset-0 bg-amber-500/5 group-hover:bg-amber-500/10 transition-colors pointer-events-none" />
 
-        {/* Golden Coin Icon with Sparkle */}
-        <div className="relative flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-amber-950/30 text-amber-950 font-black shadow-inner shrink-0">
-          <Coins size={13} className="text-amber-950 animate-pulse sm:w-[15px] sm:h-[15px]" />
-          <Sparkles size={8} className="absolute -top-1 -right-1 text-white animate-spin-slow hidden sm:block" />
+        {/* Small Golden Coin Icon */}
+        <div className="flex items-center justify-center w-5 h-5 rounded-lg bg-amber-500/20 text-amber-400 shrink-0">
+          <Coins size={12} className="text-amber-400" />
         </div>
 
-        {/* Amount Display with Crisp Typography */}
-        <div className="flex flex-col text-left">
-          <span className="text-[9px] uppercase tracking-wider font-extrabold text-amber-950/80 leading-none hidden sm:block">
-            Treasury Balance
-          </span>
-          <span className="text-[11px] sm:text-sm font-black text-amber-950 tracking-tight leading-tight flex items-center gap-1 font-mono whitespace-nowrap">
-            <span className="hidden sm:inline">{formatPKR(totalRevenue)}</span>
-            <span className="inline sm:hidden font-bold">Rs {(totalRevenue / 1000000).toFixed(1)}M</span>
-          </span>
-        </div>
-
-        {/* Subtle Indicator Arrow */}
-        <ChevronRight size={14} className="text-amber-950/70 group-hover:translate-x-0.5 transition-transform hidden md:block" />
+        {/* Amount Display with Compact Crisp Typography */}
+        <span className="text-[11px] sm:text-xs font-extrabold font-mono text-amber-300 tracking-tight whitespace-nowrap">
+          <span className="hidden md:inline">{formatPKR(totalRevenue)}</span>
+          <span className="inline md:hidden">Rs {(totalRevenue / 1000000).toFixed(1)}M</span>
+        </span>
       </button>
 
       {/* Render Portal Modal directly to document.body */}

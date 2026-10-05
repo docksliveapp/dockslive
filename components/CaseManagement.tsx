@@ -4023,12 +4023,28 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                                     </button>
                                   )}
                                 </div>
-                                <div className="border border-gray-200 rounded overflow-hidden cursor-pointer" onClick={() => setLightboxImage(getDocSource(doc))}>
-                                     <img 
-                                        src={getDocSource(doc)} 
-                                        alt={doc?.name || `Document ${idx + 1}`} 
-                                        className="w-full h-auto object-contain max-h-[800px] mx-auto print:max-h-[235mm] print:w-auto hover:scale-[1.01] transition-transform document-scan"
-                                     />
+                                <div className="border border-gray-200 rounded overflow-hidden cursor-pointer" onClick={() => {
+                                  const src = getDocSource(doc);
+                                  if (src) setLightboxImage(src);
+                                }}>
+                                  {(() => {
+                                    const docSrc = getDocSource(doc);
+                                    if (docSrc && typeof docSrc === "string" && docSrc.trim() !== "") {
+                                      return (
+                                        <img 
+                                          src={docSrc} 
+                                          alt={doc?.name || `Document ${idx + 1}`} 
+                                          className="w-full h-auto object-contain max-h-[800px] mx-auto print:max-h-[235mm] print:w-auto hover:scale-[1.01] transition-transform document-scan"
+                                        />
+                                      );
+                                    }
+                                    return (
+                                      <div className="p-8 text-center text-gray-400 bg-gray-50 flex flex-col items-center justify-center gap-2">
+                                        <FileText size={32} className="text-gray-400" />
+                                        <span className="text-xs font-medium">{doc?.name || "Attached Document"}</span>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                             </div>
                         ))}

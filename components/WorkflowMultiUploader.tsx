@@ -536,7 +536,7 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
                   <div className="w-10 h-10 rounded-lg bg-slate-700/80 border border-white/10 flex items-center justify-center shrink-0 overflow-hidden relative">
                     {isPdf ? (
                       <FileText size={18} className="text-rose-400" />
-                    ) : (
+                    ) : file.url ? (
                       <img 
                         src={file.url} 
                         alt={file.name} 
@@ -545,6 +545,8 @@ export const WorkflowMultiUploader: React.FC<WorkflowMultiUploaderProps> = ({
                           (e.target as HTMLElement).style.display = 'none';
                         }} 
                       />
+                    ) : (
+                      <FileText size={18} className="text-amber-400" />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">

@@ -6,13 +6,40 @@ import { safeAppStorage } from './storage';
 export type CompanyId = 'docks' | 'muhib' | 'vantage' | 'truckit';
 
 export function isUploadedLogo(url?: string | null): boolean {
-  if (!url) return false;
+  if (!url || typeof url !== 'string') return false;
   const s = url.trim();
-  if (!s) return false;
+  if (!s || s.length < 5) return false;
   if (s.startsWith('/logos/') || s.includes('docks_logo') || s.includes('mak_group_logo') || s.includes('muhib_logo') || s.includes('vantage_logo') || s.includes('truckit_logo')) {
     return false;
   }
   return true;
+}
+
+/**
+ * Retrieves the custom logo uploaded in settings for any of the 4 companies.
+ * Returns null if no custom logo has been uploaded.
+ */
+export function getCompanyUploadedLogo(companyId: CompanyId): string | null {
+  try {
+    const brandingKey = `dpl_company_branding_v1_${companyId}`;
+    const stored = safeAppStorage.getJSON<any>(brandingKey, {});
+    if (stored?.customLogo && isUploadedLogo(stored.customLogo)) {
+      return stored.customLogo;
+    }
+    if (companyId === 'docks') {
+      const docksLegacy = safeAppStorage.getJSON<any>('dpl_company_branding_v1', {});
+      if (docksLegacy?.customLogo && isUploadedLogo(docksLegacy.customLogo)) {
+        return docksLegacy.customLogo;
+      }
+    }
+    const comp = GROUP_COMPANIES[companyId];
+    if (comp?.logo && isUploadedLogo(comp.logo)) {
+      return comp.logo;
+    }
+  } catch (e) {
+    console.warn('Error reading uploaded logo for', companyId, e);
+  }
+  return null;
 }
 
 export interface CompanyInfo {
