@@ -447,12 +447,16 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
           {/* Brand Header */}
           <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="bg-slate-950 p-1.5 rounded-xl border border-white/10">
-                <Logo className="h-7 w-auto" />
+              <div className="bg-slate-950 p-1 rounded-xl border border-white/10 shrink-0">
+                <img 
+                  src="/logos/mak_group_logo.svg" 
+                  alt="MAK Group of Companies" 
+                  className="h-9 w-auto object-contain" 
+                />
               </div>
-              <div>
-                <h1 className="text-sm font-bold text-white tracking-wide">Transporter Desk</h1>
-                <p className="text-[10px] text-amber-400 font-medium">Fleet & Transport Hub</p>
+              <div className="min-w-0">
+                <h1 className="text-xs sm:text-sm font-black text-amber-300 uppercase tracking-wider truncate">MAK-GROUP</h1>
+                <p className="text-[10px] text-gray-400 font-medium truncate">Transporter Operations Portal</p>
               </div>
             </div>
             <button
@@ -587,13 +591,17 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
                 <Menu size={20} />
               </button>
               <div className="flex items-center gap-2.5 min-w-0">
-                <Logo className="h-7 w-auto shrink-0" />
+                <img 
+                  src="/logos/mak_group_logo.svg" 
+                  alt="MAK Group of Companies" 
+                  className="h-8 w-auto shrink-0 drop-shadow" 
+                />
                 <div className="min-w-0">
-                  <span className="text-xs sm:text-sm font-bold text-white block tracking-wide truncate">
-                    {activeCompany?.legalTitle || activeCompany?.name || companyName || 'Company Operations'}
+                  <span className="text-xs sm:text-sm font-black text-amber-300 block tracking-wider uppercase truncate">
+                    MAK-GROUP OF COMPANIES
                   </span>
                   <span className="text-[10px] text-gray-400 block font-medium truncate">
-                    Transporter Desk
+                    Central Transporter Desk
                   </span>
                 </div>
               </div>

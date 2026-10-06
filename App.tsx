@@ -447,7 +447,15 @@ const App: React.FC = () => {
             safeAppStorage.setItem('dpl_last_location_role', payload.role);
             safeAppStorage.setItem('dpl_session_active', 'true');
             setShowModeSelection(false);
-            setShowCompanySelection(true);
+            const shouldPickCompany = !(
+              payload.role === UserRole.TRANSPORTER || 
+              payload.role === UserRole.CLIENT || 
+              payload.role === UserRole.VENDOR ||
+              payload.role === UserRole.LOADING_PORT_STAFF || 
+              payload.role === UserRole.DESTINATION_PORT_STAFF || 
+              payload.role === UserRole.UNLOADING_PORT_STAFF
+            );
+            setShowCompanySelection(shouldPickCompany);
           }}
         />
       </ErrorBoundary>

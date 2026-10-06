@@ -1,7 +1,7 @@
-// Service Worker for DPL - Docks Private Limited
+// Service Worker for MAK Group of Companies
 // Play Store / TWA / PWABuilder Compliant Service Worker with Dev-Bypass
 
-const CACHE_NAME = 'docks-pwa-v4';
+const CACHE_NAME = 'mak-group-pwa-v6';
 const OFFLINE_URL = '/';
 
 // Install: Immediately take control

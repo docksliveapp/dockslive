@@ -26,16 +26,14 @@ const Logo: React.FC<LogoProps> = ({ className = "", variant = 'full', customSrc
     );
   }
 
-  // If no custom logo has been uploaded, render a clean, high-class corporate monogram badge
-  const shortTitle = activeCompany?.shortName || (companyName ? companyName.substring(0, 3).toUpperCase() : 'MAK');
-
+  // Official MAK Group Corporate Medallion Logo
   return (
-    <div 
-      className={`inline-flex items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/20 via-slate-900 to-black border border-amber-500/40 text-amber-300 font-extrabold font-serif px-2.5 py-1 select-none shadow-md ${className}`}
-      title={activeCompany?.name || companyName || "Company"}
-    >
-      <span className="tracking-wider text-xs sm:text-sm font-mono">{shortTitle}</span>
-    </div>
+    <img 
+      src="/logos/mak_group_logo.svg" 
+      alt="MAK Group of Companies" 
+      className={`${className} object-contain select-none transition-all duration-300`}
+      onError={() => setImgError(true)}
+    />
   );
 };
 

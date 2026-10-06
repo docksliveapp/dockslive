@@ -27,9 +27,9 @@ export default defineConfig(({ mode }) => {
           },
           manifest: {
             id: '/',
-            name: 'Docks (Pvt.) Ltd',
-            short_name: 'Docks',
-            description: 'One Window Logistics Solution - Afghan Transit, Customs Clearance, Freight & Client Portal',
+            name: 'MAK Group of Companies',
+            short_name: 'MAK Group',
+            description: 'MAK Group of Companies - Docks, Truckit, Muhib & Vantage Unified Logistics & Customs Enterprise Portal',
             theme_color: '#0f172a',
             background_color: '#020617',
             display: 'standalone',

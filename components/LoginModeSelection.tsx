@@ -35,6 +35,9 @@ interface LoginModeSelectionProps {
 // Clean discrete demo role helper for quick testing (collapsed by default)
 const DEMO_TESTING_ACCOUNTS = [
   { id: 'admin', userId: 'admin', password: 'dpl01234', name: 'System Administrator', role: UserRole.ADMIN, designation: 'System Administrator' },
+  { id: 'loadingstaff', userId: 'loadingstaff', password: 'dpl01234', name: 'Loading Port Staff', role: UserRole.LOADING_PORT_STAFF, designation: 'Loading Port Customs Inspector' },
+  { id: 'destinationstaff', userId: 'destinationstaff', password: 'dpl01234', name: 'Destination Port Staff', role: UserRole.DESTINATION_PORT_STAFF, designation: 'Border Terminal Officer' },
+  { id: 'unloadingstaff', userId: 'unloadingstaff', password: 'dpl01234', name: 'Unloading Port Staff', role: UserRole.UNLOADING_PORT_STAFF, designation: 'Unloading Port Clearance Staff' },
   { id: 'finance', userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, designation: 'Finance Manager' },
   { id: 'casemanager', userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, designation: 'Operations Manager' },
   { id: 'vehiclemanager', userId: 'vehiclemanager', password: 'dpl01234', name: 'Fleet Manager', role: UserRole.VEHICLE_MANAGER, designation: 'Fleet & Vehicle Manager' },
@@ -200,16 +203,18 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
       {/* Top Header: Exact MAK Group Corporate Identity */}
       <div className="w-full max-w-md mx-auto flex flex-col items-center text-center pt-4 pb-2 relative z-10">
         <div className="inline-flex items-center justify-center mb-3 transform hover:scale-105 transition-transform duration-300">
-          {isUploadedLogo(parentGroup.logo) ? (
+          {parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? (
             <img 
               src={parentGroup.logo} 
               alt={parentGroup.name || "MAK Group of Companies"} 
               className="w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-[0_8px_30px_rgba(245,158,11,0.35)]" 
             />
           ) : (
-            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-3xl bg-gradient-to-br from-amber-500/20 via-slate-900 to-black border border-amber-500/40 flex items-center justify-center shadow-lg shadow-amber-500/20">
-              <Crown className="w-8 h-8 sm:w-10 sm:h-10 text-amber-400" />
-            </div>
+            <img 
+              src="/logos/mak_group_logo.svg" 
+              alt={parentGroup.name || "MAK Group of Companies"} 
+              className="w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-[0_8px_30px_rgba(245,158,11,0.35)]" 
+            />
           )}
         </div>
 
@@ -346,25 +351,59 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
             </div>
           </form>
 
-          {/* Tiny Discrete Demo Helper (Collapsed by Default) */}
-          <div className="mt-4 pt-3 border-t border-white/5 text-center">
-            <button
-              type="button"
-              onClick={() => setShowDemoGuide(!showDemoGuide)}
-              className="text-[11px] text-gray-500 hover:text-amber-400 transition cursor-pointer inline-flex items-center gap-1"
-            >
-              <HelpCircle size={12} />
-              <span>{showDemoGuide ? 'Hide Demo Logins' : 'Demo Test Accounts'}</span>
-            </button>
+          {/* Quick Demo Test Accounts Panel */}
+          <div className="mt-4 pt-3 border-t border-white/10">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                <HelpCircle size={13} className="text-amber-400" />
+                <span>Quick Demo Accounts</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowDemoGuide(!showDemoGuide)}
+                className="text-[10px] text-gray-400 hover:text-amber-300 font-semibold underline cursor-pointer"
+              >
+                {showDemoGuide ? 'Collapse All' : 'View All Accounts'}
+              </button>
+            </div>
+
+            {/* Quick Priority One-Tap Staff Pills */}
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => handleQuickLogin(DEMO_TESTING_ACCOUNTS[1])}
+                className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 transition text-left flex items-center justify-between gap-1 cursor-pointer group"
+                title="Sign in as Loading Port Staff (loadingstaff)"
+              >
+                <div className="min-w-0">
+                  <span className="text-[11px] font-bold block truncate text-white group-hover:text-amber-200">Loading Port Staff</span>
+                  <span className="text-[9px] font-mono text-amber-400/80 block">loadingstaff</span>
+                </div>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 shrink-0">1-Tap</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleQuickLogin(DEMO_TESTING_ACCOUNTS[2])}
+                className="p-2 rounded-xl bg-sky-500/10 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 transition text-left flex items-center justify-between gap-1 cursor-pointer group"
+                title="Sign in as Destination Port Staff (destinationstaff)"
+              >
+                <div className="min-w-0">
+                  <span className="text-[11px] font-bold block truncate text-white group-hover:text-sky-200">Destination Staff</span>
+                  <span className="text-[9px] font-mono text-sky-400/80 block">destinationstaff</span>
+                </div>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 shrink-0">1-Tap</span>
+              </button>
+            </div>
 
             {showDemoGuide && (
-              <div className="mt-2.5 p-2 rounded-xl bg-black/40 border border-white/5 grid grid-cols-3 gap-1.5 animate-fade-in text-[10px]">
+              <div className="mt-2 p-2 rounded-xl bg-black/50 border border-white/10 grid grid-cols-3 gap-1.5 animate-fade-in text-[10px]">
                 {DEMO_TESTING_ACCOUNTS.map((acc) => (
                   <button
                     key={acc.id}
                     type="button"
                     onClick={() => handleQuickLogin(acc)}
-                    className="p-1.5 rounded-lg bg-white/5 hover:bg-amber-500/20 text-gray-300 hover:text-amber-300 transition text-center truncate border border-white/5"
+                    className="p-1.5 rounded-lg bg-white/5 hover:bg-amber-500/20 text-gray-300 hover:text-amber-300 transition text-center truncate border border-white/5 cursor-pointer"
                   >
                     <span className="font-bold block truncate">{acc.name}</span>
                     <span className="text-gray-500 text-[9px] font-mono">{acc.userId}</span>

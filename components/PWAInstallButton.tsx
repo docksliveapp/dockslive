@@ -41,19 +41,13 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
 
   const handleDownloadApkPackage = () => {
     const pkg = {
-      appName: "DPL Port - Docks Private Limited",
-      packageName: "com.dockspvtltd.app",
+      appName: "MAK Group of Companies",
+      packageName: "com.makgroup.app",
       appUrl: appOrigin,
       manifestUrl: manifestUrl,
       assetLinksUrl: `${appOrigin}/.well-known/assetlinks.json`,
       apkGeneratorUrl: pwaBuilderUrl,
-      instructionsUrdu: [
-        "1. PWABuilder Link: https://www.pwabuilder.com par jayein aur apna live app URL dalein.",
-        "2. 'Package for Android' par click karein -> 'Download APK' button se direct .apk file download hojayegi.",
-        "3. Mobile par direct install ke liye: Chrome mein app khol kar 3 dots par click karein aur 'Install app' dabayein, phone automatically APK install kar leta hai.",
-        "4. Terminal se APK banane ke liye command: bubblewrap init --manifest=" + manifestUrl + " && bubblewrap build"
-      ],
-      instructionsEnglish: [
+      instructions: [
         "1. Go to https://www.pwabuilder.com and enter your app URL.",
         "2. Click 'Package for Android' -> 'Download APK' to get the compiled APK file directly.",
         "3. Or run 'bubblewrap build' in your terminal to compile the APK with your own Android SDK.",
@@ -65,7 +59,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'docks-port-apk-builder-config.json';
+    a.download = 'mak-group-app-builder-config.json';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -193,7 +187,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
               </button>
             </div>
 
-            {/* TAB 1: DOWNLOAD APK (Directly answers "Apk file bana kar dein") */}
+            {/* TAB 1: DOWNLOAD APK */}
             {activeTab === 'apk' && (
               <div className="space-y-3.5 text-xs text-gray-300">
                 <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-100 space-y-1">
@@ -202,7 +196,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                     <span>Android APK Generator Ready</span>
                   </div>
                   <p className="text-[11px] leading-relaxed text-emerald-200">
-                    Aapki application ka official Web Manifest aur Service Worker 100% configured hai. Neeche diye gaye 1-click generator se direct <strong>.apk file</strong> download karein aur kisi bhi Android mobile par install ya WhatsApp par share karein.
+                    The official Web Manifest and Service Worker are 100% configured. Use the 1-click generator below to download the direct <strong>.apk file</strong> and install it on any Android device or share it.
                   </p>
                 </div>
 
@@ -222,17 +216,17 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                 <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2">
                   <div className="text-white font-bold text-xs flex items-center gap-2">
                     <span className="text-sm">📱</span>
-                    <span>Apk File Hasil Karne Ke 3 Aasan Tareeqe:</span>
+                    <span>3 Easy Ways to Install or Get the App:</span>
                   </div>
                   <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-gray-300 leading-relaxed">
                     <li>
-                      <strong>Method 1 (Instant):</strong> Ooper diye gaye button par click karein &rarr; <em>PWABuilder</em> par <strong>&quot;Package for Android&quot;</strong> par click karein. Yeh seedha signed <code className="text-emerald-300 font-mono">docks-port.apk</code> file download kar dega.
+                      <strong>Method 1 (Instant):</strong> Click the generator button above &rarr; select <strong>&quot;Package for Android&quot;</strong> on <em>PWABuilder</em> to get the signed <code className="text-emerald-300 font-mono">mak-group.apk</code> file.
                     </li>
                     <li>
-                      <strong>Method 2 (Phone par direct install):</strong> Android mobile mein Google Chrome par yeh link kholein, aur <strong>&quot;Direct Install&quot;</strong> tab par jakar install dabayein. Android khud-bakhud APK bana kar phone mein app icon add kar deta hai.
+                      <strong>Method 2 (Direct Mobile Install):</strong> Open this web application in Google Chrome on your Android device and tap <strong>&quot;Install App&quot;</strong> from the Chrome menu.
                     </li>
                     <li>
-                      <strong>Method 3 (CLI / Terminal):</strong> Apne computer terminal par neeche di gayi command run karein:
+                      <strong>Method 3 (CLI / Terminal):</strong> Run the official command below in your development terminal:
                     </li>
                   </ol>
                 </div>
@@ -271,7 +265,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
             {activeTab === 'install' && (
               <div className="space-y-3.5 text-xs text-gray-300">
                 <p className="leading-relaxed">
-                  Apne mobile mein bina APK download kiye foran install karein. Yeh Android ke official WebAPK system ke tehat exact native app ki tarah chalta hai: offline caching, fast speed, full screen, aur zero browser bar.
+                  Install directly on your device without downloading raw APK files. Powered by Android's official WebAPK engine for native performance: instant offline caching, full-screen view, and no browser address bar.
                 </p>
 
                 {/* Direct Install Button */}
@@ -285,12 +279,12 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                     className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-brand-600 to-cyan-600 hover:from-brand-500 hover:to-cyan-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-brand-600/30 transition active:scale-95"
                   >
                     <Download size={18} />
-                    <span>Install DPL App Now (Instant)</span>
+                    <span>Install MAK Group App Now (Instant)</span>
                   </button>
                 ) : (
                   <div className="p-3 rounded-2xl bg-brand-500/10 border border-brand-500/20 text-brand-300 flex items-center gap-2">
                     <CheckCircle2 size={16} className="text-brand-400 shrink-0" />
-                    <span>Browser menu se foran install karne ke liye neeche diye gaye steps follow karein:</span>
+                    <span>Follow these quick steps to install directly from your mobile browser:</span>
                   </div>
                 )}
 
@@ -301,9 +295,9 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                     <span>Android (Google Chrome / Edge / Samsung Internet)</span>
                   </div>
                   <ol className="list-decimal list-inside space-y-1 text-gray-300 text-[11px] leading-relaxed">
-                    <li>Apne browser ke top-right par <strong>3 dots (⋮)</strong> menu par tap karein.</li>
-                    <li><strong>&quot;Install app&quot;</strong> ya <strong>&quot;Add to Home screen&quot;</strong> par tap karein.</li>
-                    <li>App automatically phone ke App Drawer mein install ho jayegi.</li>
+                    <li>Tap the <strong>3 dots (⋮)</strong> menu in the top-right corner of your browser.</li>
+                    <li>Select <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home screen&quot;</strong>.</li>
+                    <li>The app will install directly into your phone&apos;s app drawer.</li>
                   </ol>
                 </div>
 
@@ -314,9 +308,9 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                     <span>Apple iPhone / iPad (Safari)</span>
                   </div>
                   <ol className="list-decimal list-inside space-y-1 text-gray-300 text-[11px] leading-relaxed">
-                    <li>Safari browser mein neechay <strong>Share button</strong> (square with arrow) dabayein.</li>
-                    <li>Scroll down karke <strong>&quot;Add to Home Screen&quot;</strong> par tap karein.</li>
-                    <li>Top-right par <strong>&quot;Add&quot;</strong> dabayein — app screen par add ho jayegi.</li>
+                    <li>Tap the <strong>Share button</strong> (square with up-arrow) at the bottom in Safari.</li>
+                    <li>Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong>.</li>
+                    <li>Tap <strong>&quot;Add&quot;</strong> in the top-right corner to finish.</li>
                   </ol>
                 </div>
               </div>
@@ -331,30 +325,30 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                     <span>Google Play Console Ready (100% Compliant)</span>
                   </div>
                   <p className="text-[11px] leading-relaxed text-amber-100">
-                    Is application mein Google Play Store requirements ke tehat <strong>Web Manifest</strong>, <strong>Service Worker</strong>, <strong>192/512px High-Res Icons</strong>, aur <strong>Digital Asset Links</strong> mukammal configured hain.
+                    This application includes full Google Play Store compliance: <strong>Web Manifest</strong>, <strong>Service Worker</strong>, <strong>High-Res Icons (192px/512px)</strong>, and <strong>Digital Asset Links</strong>.
                   </p>
                 </div>
 
                 {/* Deployment Steps */}
                 <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2 text-[11px]">
-                  <p className="text-white font-semibold">Google Play Console Par Publish Karne Ka Mukammal Tareeqa:</p>
+                  <p className="text-white font-semibold">How to Publish on Google Play Console:</p>
                   <ol className="list-decimal list-inside space-y-2 text-gray-300">
                     <li>
-                      <strong>Step 1 (.aab file hasil karein):</strong>{' '}
+                      <strong>Step 1 (Generate .aab package):</strong>{' '}
                       <a href={pwaBuilderUrl} target="_blank" rel="noopener noreferrer" className="text-amber-400 underline font-bold">
-                        PWABuilder par click karein
+                        Open PWABuilder
                       </a>{' '}
-                      &rarr; <strong>&quot;Package for Android&quot;</strong> &rarr; <strong>&quot;Generate AAB&quot;</strong> select karein. Yeh aapko Google Play Store ke liye signed <code className="text-emerald-300 font-mono">.aab</code> file de dega.
+                      &rarr; <strong>&quot;Package for Android&quot;</strong> &rarr; select <strong>&quot;Generate AAB&quot;</strong>. This provides the signed <code className="text-emerald-300 font-mono">.aab</code> package.
                     </li>
                     <li>
-                      <strong>Step 2 (Google Play Console kholein):</strong>{' '}
+                      <strong>Step 2 (Open Google Play Console):</strong>{' '}
                       <a href="https://play.google.com/console" target="_blank" rel="noopener noreferrer" className="text-brand-400 underline font-bold">
                         play.google.com/console
                       </a>{' '}
-                      kholein aur <strong>&quot;Create App&quot;</strong> par click karein.
+                      and click <strong>&quot;Create App&quot;</strong>.
                     </li>
                     <li>
-                      <strong>Step 3 (.aab upload karein):</strong> Production ya Closed Testing track mein <strong>Create new release</strong> dabayein aur apni <code className="text-emerald-300 font-mono">.aab</code> file drag &amp; drop karein.
+                      <strong>Step 3 (Upload .aab):</strong> In the Production or Closed Testing track, click <strong>Create new release</strong> and upload your <code className="text-emerald-300 font-mono">.aab</code> file.
                     </li>
                   </ol>
                 </div>
@@ -368,12 +362,12 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center py-1 border-b border-white/5">
                       <span className="text-gray-400">App Name:</span>
-                      <span className="text-white font-semibold">DPL Port - Docks Private Limited</span>
+                      <span className="text-white font-semibold">MAK Group of Companies</span>
                     </div>
 
                     <div className="flex justify-between items-center py-1 border-b border-white/5">
                       <span className="text-gray-400">Package Name:</span>
-                      <span className="text-emerald-300 font-mono">com.dockspvtltd.app</span>
+                      <span className="text-emerald-300 font-mono">com.makgroup.app</span>
                     </div>
 
                     <div className="flex justify-between items-center py-1 border-b border-white/5">

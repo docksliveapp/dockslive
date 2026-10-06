@@ -51,6 +51,7 @@ import {
 import { getStandardChargesForCategory } from '../services/customsComplianceService';
 import { getCategoryArrangements, getArrangementCharges } from '../services/categoryTariffService';
 import { useActiveCompany, getActiveCompanyPrefix } from '../services/companyService';
+import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
 
 const INITIAL_FINANCE_DATA: FinanceEntry[] = [];
 
@@ -357,6 +358,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
   // Internal Transfer & Account Management State
   const [showInternalTransferModal, setShowInternalTransferModal] = useState(false);
   const [showAddBankModal, setShowAddBankModal] = useState(false);
+  const [showFinanceDocScanner, setShowFinanceDocScanner] = useState(false);
+  const [financeScanTarget, setFinanceScanTarget] = useState<'new_transaction' | 'proof_entry'>('new_transaction');
   const [transferSource, setTransferSource] = useState<string>('DRAWER');
   const [transferDestination, setTransferDestination] = useState<string>('HBL Corporate');
   const [transferAmount, setTransferAmount] = useState<string>('');
@@ -6612,17 +6615,31 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     </span>
                   )}
                 </div>
-                <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-white/15 rounded-xl hover:bg-brand-500/10 hover:border-brand-500/50 transition-all cursor-pointer bg-slate-900/50 group">
-                  <input type="file" className="hidden" accept="image/*,.pdf" onChange={handleDocumentChange} />
-                  <Upload size={16} className="text-brand-400 group-hover:scale-110 transition-transform" />
-                  <span className="text-xs text-gray-300 font-medium truncate max-w-[260px]">
-                    {newTransaction.documentName 
-                      ? `${newTransaction.documentName} ✅` 
-                      : (newTransaction.documentUrl || newTransaction.slipUrl) 
-                        ? 'Bill Attached ✅' 
-                        : 'Choose Bill / Receipt / Document'}
-                  </span>
-                </label>
+                <div className="flex gap-2">
+                  <label className="flex-1 flex items-center justify-center gap-2 p-3 border-2 border-dashed border-white/15 rounded-xl hover:bg-brand-500/10 hover:border-brand-500/50 transition-all cursor-pointer bg-slate-900/50 group">
+                    <input type="file" className="hidden" accept="image/*,.pdf" onChange={handleDocumentChange} />
+                    <Upload size={16} className="text-brand-400 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs text-gray-300 font-medium truncate max-w-[200px]">
+                      {newTransaction.documentName 
+                        ? `${newTransaction.documentName} ✅` 
+                        : (newTransaction.documentUrl || newTransaction.slipUrl) 
+                          ? 'Bill Attached ✅' 
+                          : 'Choose File'}
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFinanceScanTarget('new_transaction');
+                      setShowFinanceDocScanner(true);
+                    }}
+                    className="border-2 border-dashed border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 rounded-xl px-3 flex flex-col items-center justify-center text-amber-400 transition cursor-pointer shrink-0"
+                    title="Scan document using camera"
+                  >
+                    <Camera size={16} />
+                    <span className="text-[10px] font-bold mt-0.5">Camera Scan</span>
+                  </button>
+                </div>
               </div>
 
               {/* Uploaded Files Summary with Download Option */}
@@ -7845,23 +7862,38 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     ? 'Replace Attached Proof / Bill (Image or PDF)' 
                     : 'Upload Deposit Proof / Bill (Image or PDF)'}
                 </label>
-                <label className={`flex items-center justify-center gap-2 p-3.5 border-2 border-dashed border-amber-500/30 rounded-xl hover:bg-amber-500/10 hover:border-amber-500/60 transition-all cursor-pointer bg-slate-950/60 group ${isUploadingProof ? 'opacity-50 pointer-events-none' : ''}`}>
-                  <input 
-                    type="file" 
-                    className="hidden" 
-                    accept="image/*,.pdf" 
-                    onChange={handleAttachProofForEntry}
+                <div className="flex gap-2">
+                  <label className={`flex-1 flex items-center justify-center gap-2 p-3.5 border-2 border-dashed border-amber-500/30 rounded-xl hover:bg-amber-500/10 hover:border-amber-500/60 transition-all cursor-pointer bg-slate-950/60 group ${isUploadingProof ? 'opacity-50 pointer-events-none' : ''}`}>
+                    <input 
+                      type="file" 
+                      className="hidden" 
+                      accept="image/*,.pdf" 
+                      onChange={handleAttachProofForEntry}
+                      disabled={isUploadingProof}
+                    />
+                    {isUploadingProof ? (
+                      <Loader2 size={18} className="text-amber-400 animate-spin" />
+                    ) : (
+                      <Upload size={18} className="text-amber-400 group-hover:scale-110 transition-transform" />
+                    )}
+                    <span className="text-xs text-gray-200 font-semibold">
+                      {isUploadingProof ? 'Processing & saving file...' : 'Choose File to Attach'}
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFinanceScanTarget('proof_entry');
+                      setShowFinanceDocScanner(true);
+                    }}
                     disabled={isUploadingProof}
-                  />
-                  {isUploadingProof ? (
-                    <Loader2 size={18} className="text-amber-400 animate-spin" />
-                  ) : (
-                    <Upload size={18} className="text-amber-400 group-hover:scale-110 transition-transform" />
-                  )}
-                  <span className="text-xs text-gray-200 font-semibold">
-                    {isUploadingProof ? 'Processing & saving file...' : 'Choose File to Attach'}
-                  </span>
-                </label>
+                    className="border-2 border-dashed border-amber-500/40 hover:border-amber-500 hover:bg-amber-500/10 rounded-xl px-4 flex flex-col items-center justify-center text-amber-400 transition cursor-pointer shrink-0"
+                    title="Scan document using camera"
+                  >
+                    <Camera size={18} />
+                    <span className="text-[10px] font-bold mt-1">Camera Scan</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -7880,6 +7912,42 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
           </div>
         </div>
       )}
+
+      {/* Live Camera Document Scanner Modal for Bills, Invoices & Proofs */}
+      <CameraDocumentScannerModal
+        isOpen={showFinanceDocScanner}
+        onClose={() => setShowFinanceDocScanner(false)}
+        documentTitle={financeScanTarget === 'new_transaction' ? 'Bill / Invoice / Expense Voucher' : 'Payment Proof / Deposit Slip'}
+        suggestedFileName={`Finance_Scan_${Date.now()}`}
+        onScanComplete={async (result) => {
+          setShowFinanceDocScanner(false);
+          if (financeScanTarget === 'new_transaction') {
+            setNewTransaction(prev => ({
+              ...prev,
+              documentUrl: result.pdfDataUrl,
+              documentName: result.name
+            }));
+          } else if (financeScanTarget === 'proof_entry' && proofModalEntry) {
+            setIsUploadingProof(true);
+            try {
+              const updatedEntry: FinanceEntry = {
+                ...proofModalEntry,
+                documentUrl: result.pdfDataUrl,
+                slipUrl: result.pdfDataUrl,
+                documentName: result.name
+              };
+              await updateFinanceInFirestore(updatedEntry);
+              setFinanceData(prev => prev.map(f => f.id === updatedEntry.id ? updatedEntry : f));
+              setProofModalEntry(updatedEntry);
+              setProofSuccessMsg("Scanned document attached successfully!");
+            } catch (err) {
+              console.warn("Failed to attach scanned proof:", err);
+            } finally {
+              setIsUploadingProof(false);
+            }
+          }
+        }}
+      />
 
       {/* In-App PDF Viewer Modal for Receipts & Invoices */}
       <PdfViewerModal

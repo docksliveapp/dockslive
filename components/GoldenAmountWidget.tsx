@@ -280,7 +280,7 @@ export const GoldenAmountWidget: React.FC<GoldenAmountWidgetProps> = ({
           </span>
         </div>
       ) : (
-        /* Top Header Sone se Amount Button (Fallback) */
+        /* Top Header Amount Button (Fallback) */
         <button
           type="button"
           id="golden-amount-header-btn"

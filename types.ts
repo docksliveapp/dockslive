@@ -1141,6 +1141,8 @@ export interface Vehicle {
   transporterId: number;
   transporterName: string;
   brokerName?: string; // Broker / Agent Name
+  operatingCompany?: 'docks' | 'truckit' | 'muhib' | 'vantage' | string; // Registered Operating Entity
+  companyName?: string; // Display name of operating entity (e.g. Docks (Pvt.) Ltd., Truckit, Muhib, Vantage)
   
   // Status & Validation
   status: 'AVAILABLE' | 'ON_TRIP' | 'MAINTENANCE' | 'IN_LINE' | 'EXPIRED' | 'EXPIRE_SOON' | 'CANCELLED' | 'TRANSFERRED' | 'INACTIVE';

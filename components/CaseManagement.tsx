@@ -48,6 +48,8 @@ import { SmartCaseSearchModal } from './SmartCaseSearchModal';
 import { logActivity } from '../services/activityLogService';
 import { generateDplCaseNumber, getDestinationCode, getCaseInvoiceNumber } from '../services/caseNumberService';
 import { useActiveCompany, getActiveCompanyPrefix } from '../services/companyService';
+import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
+import { jsPDF } from 'jspdf';
 
 export interface UploadedDocRecord {
   id: string;
@@ -871,6 +873,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   const [isAttachingFiles, setIsAttachingFiles] = useState(false);
   const documentsSectionRef = useRef<HTMLDivElement>(null);
   const [showCamera, setShowCamera] = useState(false);
+  const [showCaseDocScanner, setShowCaseDocScanner] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const multiFileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -1413,43 +1416,47 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           objectUrl = URL.createObjectURL(f);
         } catch (_) {}
 
+        // Read real data URL immediately to guarantee offline, OCR & preview durability
+        let docDataUrl = '';
+        try {
+          docDataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve((e.target?.result as string) || '');
+            reader.onerror = () => resolve('');
+            reader.readAsDataURL(f);
+          });
+        } catch (_) {}
+
         const docType = f.type || detectMimeType(f).mimeType;
         const recId = `${f.name.replace(/[^a-zA-Z0-9.-]/g, '_')}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const detectedCategory = categoryHint || detectShippingDocumentType(f.name);
+
+        if (docDataUrl && docDataUrl.includes(',')) {
+          const b64 = docDataUrl.split(',')[1];
+          docDataCache.set(f.name, { base64: b64, mimeType: docType, name: f.name });
+          docDataCache.set(recId, { base64: b64, mimeType: docType, name: f.name });
+        }
 
         newDocRecords.push({
           id: recId,
           name: f.name,
           type: docType,
           size: f.size,
-          url: objectUrl,
+          url: docDataUrl || objectUrl,
           docCategory: detectedCategory
         });
       }
-
-      // Smoothly cache Base64 in background after UI finishes rendering to prevent freezing main UI thread
-      setTimeout(() => {
-        for (const f of newFiles) {
-          compressAndPrepareFile(f).then(processed => {
-            if (processed && processed.base64) {
-              const mime = processed.type || (processed.isImage ? 'image/jpeg' : 'application/pdf');
-              docDataCache.set(f.name, { base64: processed.base64, mimeType: mime, name: f.name });
-            }
-          }).catch(() => {});
-        }
-      }, 300);
 
       setFiles(prev => [...prev, ...newFiles]);
       setUploadedDocs(prev => {
         const combined = [...prev, ...newDocRecords];
         try {
-          // Store clean serializable records without volatile blob URLs that break storage
           const safeRecords = combined.map(d => ({
             id: d.id,
             name: d.name,
             type: d.type,
             size: d.size,
-            url: '',
+            url: d.url && d.url.startsWith('data:') && d.url.length < 500000 ? d.url : '',
             docCategory: d.docCategory
           }));
           safeAppStorage.setJSON('dpl_reg_docs', safeRecords);
@@ -1769,18 +1776,34 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
   const handleFinalSubmit = () => {
       const serializableDocs = uploadedDocs.length > 0 
-        ? uploadedDocs.map(d => ({
-            name: d.name || 'document',
-            type: d.type || 'application/octet-stream',
-            size: d.size || 0,
-            url: d.url || ''
-          }))
-        : files.map((f: any) => ({
-            name: (f as any).name || 'document',
-            type: (f as any).type || 'application/octet-stream',
-            size: (f as any).size || 0,
-            url: ''
-          }));
+        ? uploadedDocs.map(d => {
+            const cached = docDataCache.get(d.name);
+            const resolvedUrl = d.url && d.url.startsWith('data:') 
+              ? d.url 
+              : cached?.base64 
+                ? `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}` 
+                : d.url || '';
+            return {
+              name: d.name || 'document',
+              type: d.type || 'application/octet-stream',
+              size: d.size || 0,
+              url: resolvedUrl,
+              docCategory: d.docCategory || 'GENERAL'
+            };
+          })
+        : files.map((f: any) => {
+            const cached = docDataCache.get((f as any).name);
+            const resolvedUrl = cached?.base64 
+              ? `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}` 
+              : '';
+            return {
+              name: (f as any).name || 'document',
+              type: (f as any).type || 'application/octet-stream',
+              size: (f as any).size || 0,
+              url: resolvedUrl,
+              docCategory: 'GENERAL'
+            };
+          });
 
       const finalCharges = (formData.charges && formData.charges.length > 0)
         ? formData.charges
@@ -2336,9 +2359,75 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     const docName = doc.name || `Attached_Document_${idx + 1}`;
                     const docCategory = doc.docCategory || doc.type || 'Customs Paperwork';
                     let docUrl = doc.url;
+                    const cached = docDataCache.get(docName) || docDataCache.get(doc.name);
+                    if ((!docUrl || !docUrl.startsWith('data:')) && cached?.base64) {
+                      docUrl = `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}`;
+                    }
                     if (!docUrl && doc instanceof File) {
                       try { docUrl = URL.createObjectURL(doc); } catch (_) {}
                     }
+
+                    const handlePreview = () => {
+                      let activeUrl = docUrl;
+                      if (!activeUrl) {
+                        try {
+                          const docPdf = new jsPDF();
+                          docPdf.setFillColor(15, 23, 42);
+                          docPdf.rect(0, 0, 210, 297, 'F');
+                          docPdf.setTextColor(245, 158, 11);
+                          docPdf.setFontSize(16);
+                          docPdf.text('MAK GROUP OF COMPANIES', 105, 25, { align: 'center' });
+                          docPdf.setTextColor(255, 255, 255);
+                          docPdf.setFontSize(11);
+                          docPdf.text('Case Dossier Attached Document', 105, 34, { align: 'center' });
+                          docPdf.setFontSize(10);
+                          docPdf.setTextColor(200, 200, 200);
+                          docPdf.text(`Case No: #${c.caseNo}`, 20, 50);
+                          docPdf.text(`File: ${docName}`, 20, 58);
+                          docPdf.text(`Category: ${docCategory}`, 20, 66);
+                          docPdf.text(`Client: ${c.clientName || 'N/A'}`, 20, 74);
+                          docPdf.text(`Routing: ${c.pol || 'N/A'} -> ${c.pod || 'N/A'}`, 20, 82);
+                          activeUrl = docPdf.output('datauristring');
+                        } catch (_) {}
+                      }
+                      if (activeUrl) {
+                        const isPdf = docName.toLowerCase().endsWith('.pdf') || activeUrl.startsWith('data:application/pdf');
+                        if (isPdf) {
+                          setDirectDownloadUrl(activeUrl);
+                          setDirectDownloadFilename(docName.endsWith('.pdf') ? docName : `${docName}.pdf`);
+                          setIsPdfViewerOpen(true);
+                        } else {
+                          setLightboxImage(activeUrl);
+                        }
+                      }
+                    };
+
+                    const handleDownload = () => {
+                      let activeUrl = docUrl;
+                      if (!activeUrl) {
+                        try {
+                          const docPdf = new jsPDF();
+                          docPdf.setFillColor(15, 23, 42);
+                          docPdf.rect(0, 0, 210, 297, 'F');
+                          docPdf.setTextColor(245, 158, 11);
+                          docPdf.setFontSize(16);
+                          docPdf.text('MAK GROUP OF COMPANIES', 105, 25, { align: 'center' });
+                          docPdf.setTextColor(255, 255, 255);
+                          docPdf.setFontSize(11);
+                          docPdf.text('Case Dossier Attached Document', 105, 34, { align: 'center' });
+                          docPdf.setFontSize(10);
+                          docPdf.setTextColor(200, 200, 200);
+                          docPdf.text(`Case No: #${c.caseNo}`, 20, 50);
+                          docPdf.text(`File: ${docName}`, 20, 58);
+                          docPdf.text(`Category: ${docCategory}`, 20, 66);
+                          docPdf.text(`Client: ${c.clientName || 'N/A'}`, 20, 74);
+                          activeUrl = docPdf.output('datauristring');
+                        } catch (_) {}
+                      }
+                      if (activeUrl) {
+                        downloadFile(activeUrl, docName.includes('.') ? docName : `${docName}.pdf`);
+                      }
+                    };
 
                     return (
                       <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-950/60 border border-white/10 hover:border-white/20 transition-all text-xs">
@@ -2352,36 +2441,23 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          {docUrl && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const isPdf = docName.toLowerCase().endsWith('.pdf');
-                                if (isPdf) {
-                                  setDirectDownloadUrl(docUrl);
-                                  setDirectDownloadFilename(docName);
-                                  setIsPdfViewerOpen(true);
-                                } else {
-                                  setLightboxImage(docUrl);
-                                }
-                              }}
-                              className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition-colors"
-                              title="Preview Document"
-                            >
-                              <Eye size={14} />
-                            </button>
-                          )}
-                          {docUrl && (
-                            <a
-                              href={docUrl}
-                              download={docName}
-                              className="p-1.5 rounded-lg bg-brand-600/30 hover:bg-brand-600 text-brand-300 hover:text-white transition-colors flex items-center gap-1 font-medium text-[11px] px-2.5"
-                              title="Download File"
-                            >
-                              <Download size={13} />
-                              <span>Save</span>
-                            </a>
-                          )}
+                          <button
+                            type="button"
+                            onClick={handlePreview}
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition-colors cursor-pointer"
+                            title="Preview Document"
+                          >
+                            <Eye size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleDownload}
+                            className="p-1.5 rounded-lg bg-brand-600/30 hover:bg-brand-600 text-brand-300 hover:text-white transition-colors flex items-center gap-1 font-medium text-[11px] px-2.5 cursor-pointer"
+                            title="Download File"
+                          >
+                            <Download size={13} />
+                            <span>Save</span>
+                          </button>
                         </div>
                       </div>
                     );
@@ -4651,19 +4727,19 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 </div>
               </button>
 
-              {/* 2. Camera Button */}
+              {/* 2. Camera Document Scanner Button */}
               <button
                 type="button"
                 onClick={() => {
-                  startCamera();
+                  setShowCaseDocScanner(true);
                 }}
-                className="py-3.5 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold rounded-xl flex items-center justify-center gap-2.5 shadow-lg shadow-purple-600/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                title="Capture document photo via camera"
+                className="py-3.5 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold rounded-xl flex items-center justify-center gap-2.5 shadow-lg shadow-purple-600/30 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                title="Capture & scan document via camera"
               >
                 <Camera size={20} className="text-purple-200" />
                 <div className="text-left">
-                  <div className="text-sm font-bold leading-tight">Camera</div>
-                  <div className="text-[10px] text-purple-100/80 font-normal leading-tight">Take document photo</div>
+                  <div className="text-sm font-bold leading-tight">Camera Scanner</div>
+                  <div className="text-[10px] text-purple-100/80 font-normal leading-tight">Scan document directly</div>
                 </div>
               </button>
             </div>
@@ -4731,6 +4807,29 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                               <Eye size={14} />
                             </button>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cached = docDataCache.get(doc.name);
+                              const downloadUrl = (doc.url && doc.url.startsWith('data:')) 
+                                ? doc.url 
+                                : cached?.base64 
+                                  ? `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}` 
+                                  : doc.url || '';
+                              if (downloadUrl) {
+                                const a = document.createElement('a');
+                                a.href = downloadUrl;
+                                a.download = doc.name || `Document_${idx + 1}.pdf`;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                              }
+                            }}
+                            className="p-1 text-cyan-400 hover:text-cyan-300 rounded hover:bg-cyan-500/10"
+                            title="Download document"
+                          >
+                            <Download size={14} />
+                          </button>
                           <button
                             type="button"
                             onClick={() => {
@@ -8390,6 +8489,18 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         onSelectCase={(caseItem) => {
           setSelectedCase(caseItem);
           setView('details');
+        }}
+      />
+
+      {/* Live Camera Document Scanner Modal */}
+      <CameraDocumentScannerModal
+        isOpen={showCaseDocScanner}
+        onClose={() => setShowCaseDocScanner(false)}
+        documentTitle="Shipping Document (B/L, Commercial Invoice, Packing List, GD)"
+        suggestedFileName={`Scanned_Shipping_Doc_${Date.now()}`}
+        onScanComplete={(result) => {
+          setShowCaseDocScanner(false);
+          processFiles([result.file]);
         }}
       />
 

@@ -349,7 +349,16 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
           {/* Logo & Portal Identity */}
           <div className="px-2 pt-1 flex items-start justify-between">
             <div>
-              <Logo className="h-9 w-auto max-w-[150px] mb-2" />
+              <div className="flex items-center gap-2 mb-2">
+                <img 
+                  src="/logos/mak_group_logo.svg" 
+                  alt="MAK Group of Companies" 
+                  className="h-9 w-auto object-contain shrink-0 drop-shadow" 
+                />
+                <span className="text-xs font-black text-amber-300 uppercase tracking-wider block">
+                  MAK-GROUP
+                </span>
+              </div>
               <div className="space-y-0.5">
                 <span className="text-xs font-black text-white tracking-wider uppercase block">
                   {isDestinationStaff ? 'Destination Staff Portal' : 'Loading Staff Portal'}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Truck, Plus, Search, FileText, User, Settings, Save, MapPin, Calendar, Clock, AlertTriangle, Trash2, CheckCircle, X, ChevronRight, Eye, Activity, CreditCard, Filter, AlertCircle, Download, Loader2, Ban, FileCheck, ShieldCheck, UploadCloud, CheckSquare, Square, Layers } from 'lucide-react';
+import { Truck, Plus, Search, FileText, User, Settings, Save, MapPin, Calendar, Clock, AlertTriangle, Trash2, CheckCircle, X, ChevronRight, Eye, Activity, CreditCard, Filter, AlertCircle, Download, Loader2, Ban, FileCheck, ShieldCheck, UploadCloud, CheckSquare, Square, Layers, Camera, Building } from 'lucide-react';
 import { Vehicle, Transporter, VehicleCategory, VehicleType, TrackerInfo, VehicleHistory, UserRole } from '../types';
 import { submitVehicleActionApproval } from '../services/approvalService';
 import { autoFillVehicleData } from '../services/geminiService';
@@ -34,6 +34,7 @@ import {
 import { downloadCustomsVehicleListPdf } from '../services/pdfExportService';
 import { compressAndPrepareFile } from '../services/fileUtils';
 import { useActiveCompany, getActiveCompanyPrefix } from '../services/companyService';
+import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
 
 // --- Clean Live Data ---
 
@@ -623,12 +624,22 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   };
 
   const handleAddVehicle = (data: any) => {
+    const opCompany = data.operatingCompany || activeCompany.id || 'docks';
+    const compName = data.companyName || (
+      opCompany === 'truckit' ? 'Truckit (Pvt.) Ltd.' :
+      opCompany === 'muhib' ? 'Muhib International' :
+      opCompany === 'vantage' ? 'Vantage Shipping Line' :
+      'Docks (Pvt.) Ltd.'
+    );
+
     const newVehicle: Vehicle = {
       id: Date.now(),
       dplSerial: generateDPLSerial(),
       createdAt: new Date().toISOString().split('T')[0],
       history: [],
-      ...data
+      ...data,
+      operatingCompany: opCompany,
+      companyName: compName
     };
     setVehicles([...vehicles, newVehicle]);
     saveVehicleToFirestore(newVehicle);
@@ -1138,7 +1149,12 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                         )}
                       </button>
                       <div>
-                        <span className="font-mono font-bold text-white text-base block">{v.registrationNumber}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-white text-base">{v.registrationNumber}</span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
+                            {v.companyName || (v.operatingCompany === 'truckit' ? 'Truckit' : v.operatingCompany === 'muhib' ? 'Muhib' : v.operatingCompany === 'vantage' ? 'Vantage' : 'Docks')}
+                          </span>
+                        </div>
                         <span className="text-xs text-gray-400 font-medium">Broker: <strong className="text-gray-200 font-semibold">{v.brokerName || v.transporterName || 'Direct Broker'}</strong></span>
                       </div>
                     </div>
@@ -1279,7 +1295,12 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                     </button>
                   </div>
                   <div className="p-3.5 font-mono font-bold text-white text-base truncate" style={{ width: '22%', flexShrink: 0 }}>
-                    {v.registrationNumber}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span>{v.registrationNumber}</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
+                        {v.companyName || (v.operatingCompany === 'truckit' ? 'Truckit' : v.operatingCompany === 'muhib' ? 'Muhib' : v.operatingCompany === 'vantage' ? 'Vantage' : 'Docks')}
+                      </span>
+                    </div>
                     {v.dplSerial && (
                       <span className="block text-[11px] font-mono text-gray-400 font-normal">{v.dplSerial}</span>
                     )}
@@ -1990,8 +2011,10 @@ const AddTransporterModal = ({ onClose, onSave }: any) => {
 };
 
 const AddVehicleModal = ({ transporters, preSelectedTransporterId, onClose, onSave }: any) => {
+  const [showDocScanner, setShowDocScanner] = useState(false);
   const [formData, setFormData] = useState<any>({
     transporterId: preSelectedTransporterId || '',
+    operatingCompany: 'docks',
     category: VehicleCategory.DOMESTIC,
     type: VehicleType.FLATBED,
     size: '40ft',
@@ -2115,16 +2138,31 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, onClose, onSa
             </div>
           </div>
 
-          <div>
-            <label className="text-xs text-gray-400 block mb-1">Vehicle Registration No *</label>
-            <input 
-              type="text" 
-              placeholder="e.g. KLA-992" 
-              className="w-full glass-input rounded p-2 text-white font-mono font-bold uppercase tracking-wider" 
-              value={formData.registrationNumber} 
-              onChange={e => setFormData({...formData, registrationNumber: e.target.value.toUpperCase()})} 
-              required
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-amber-300 block mb-1 font-bold">Registered Company / Entity *</label>
+              <select 
+                className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 border border-amber-500/40 text-sm font-semibold"
+                value={formData.operatingCompany || 'docks'}
+                onChange={e => setFormData({...formData, operatingCompany: e.target.value})}
+              >
+                <option value="docks">Docks (Pvt.) Ltd. (DPL)</option>
+                <option value="truckit">Truckit (Pvt.) Ltd. (TRUCKIT)</option>
+                <option value="muhib">Muhib International (MI)</option>
+                <option value="vantage">Vantage Shipping Line (VLS)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Vehicle Registration No *</label>
+              <input 
+                type="text" 
+                placeholder="e.g. KLA-992" 
+                className="w-full glass-input rounded p-2 text-white font-mono font-bold uppercase tracking-wider" 
+                value={formData.registrationNumber} 
+                onChange={e => setFormData({...formData, registrationNumber: e.target.value.toUpperCase()})} 
+                required
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-white/5 p-3 rounded-xl border border-white/10">
@@ -2251,28 +2289,41 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, onClose, onSa
             </select>
           </div>
 
-          <div className="border border-dashed border-white/20 rounded p-4 text-center cursor-pointer hover:bg-white/5 relative">
-            <input 
-              type="file" 
-              className="hidden" 
-              id="reg-upload" 
-              accept=".xlsx, .xls, .docx, .pdf, image/*"
-              onChange={handleFileUpload} 
-              disabled={isExtracting} 
-            />
-            <label htmlFor="reg-upload" className="cursor-pointer block">
-              {isExtracting ? (
-                <div className="flex items-center justify-center gap-2 text-brand-400">
-                  <Loader2 size={16} className="animate-spin" />
-                  <span className="text-sm font-medium">Scanning & Extracting Vehicle Specs...</span>
-                </div>
-              ) : (
-                <>
-                  <p className="text-brand-400 font-medium">Upload Document (Excel .xlsx, Word .docx, PDF, or Photo)</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Extracts Registration No, Engine, Chassis, Driver, and Specs</p>
-                </>
-              )}
-            </label>
+          <div className="flex gap-2">
+            <div className="flex-1 border border-dashed border-white/20 rounded p-3 text-center cursor-pointer hover:bg-white/5 relative">
+              <input 
+                type="file" 
+                className="hidden" 
+                id="reg-upload" 
+                accept=".xlsx, .xls, .docx, .pdf, image/*"
+                onChange={handleFileUpload} 
+                disabled={isExtracting} 
+              />
+              <label htmlFor="reg-upload" className="cursor-pointer block">
+                {isExtracting ? (
+                  <div className="flex items-center justify-center gap-2 text-brand-400">
+                    <Loader2 size={16} className="animate-spin" />
+                    <span className="text-xs font-medium">Scanning & Extracting Vehicle Specs...</span>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-brand-400 font-medium text-xs">Upload Document (Excel, Word, PDF, Photo)</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">Extracts Reg No, Engine, Chassis, Driver, Specs</p>
+                  </>
+                )}
+              </label>
+            </div>
+            
+            <button
+              type="button"
+              onClick={() => setShowDocScanner(true)}
+              disabled={isExtracting}
+              className="border border-dashed border-amber-500/40 rounded p-3 text-center cursor-pointer hover:bg-amber-500/10 relative shrink-0 flex flex-col items-center justify-center px-3 text-amber-400 transition"
+              title="Scan document using camera"
+            >
+              <Camera size={18} />
+              <span className="text-[10px] font-bold mt-1">Camera Scan</span>
+            </button>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -2301,6 +2352,17 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, onClose, onSa
              });
           }} className="bg-brand-600 text-white px-4 py-2 rounded-lg">Save Vehicle</button>
         </div>
+
+        <CameraDocumentScannerModal
+          isOpen={showDocScanner}
+          onClose={() => setShowDocScanner(false)}
+          documentTitle="Vehicle Registration & Specifications"
+          suggestedFileName={`Scanned_Vehicle_Doc_${Date.now()}`}
+          onScanComplete={async (result) => {
+            setShowDocScanner(false);
+            await handleFileUpload({ target: { files: [result.file] } } as any);
+          }}
+        />
       </div>
     </div>
   );
@@ -2521,6 +2583,17 @@ const VehicleProfileModal = ({
                {/* Technical specifications */}
                <div className="space-y-3">
                  <h4 className="text-xs font-bold text-brand-400 uppercase tracking-wider border-b border-white/5 pb-1">Technical Specs</h4>
+                  <div className="flex justify-between text-sm py-1 bg-amber-500/10 px-2 rounded-lg border border-amber-500/20">
+                    <span className="text-gray-300 font-medium">Operating Entity</span>
+                    <span className="text-amber-300 font-bold">
+                      {vehicle.companyName || (
+                        vehicle.operatingCompany === 'truckit' ? 'Truckit (Pvt.) Ltd.' :
+                        vehicle.operatingCompany === 'muhib' ? 'Muhib International' :
+                        vehicle.operatingCompany === 'vantage' ? 'Vantage Shipping Line' :
+                        'Docks (Pvt.) Ltd.'
+                      )}
+                    </span>
+                  </div>
                  <div className="flex justify-between text-sm">
                    <span className="text-gray-400">Registration No</span>
                    <span className="text-white font-mono font-bold">{vehicle.registrationNumber}</span>

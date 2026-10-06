@@ -974,7 +974,11 @@ export const DEFAULT_DATABASE_USERS: AppUser[] = [
   { id: 7, userId: 'client', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines', baseSalary: 0 },
   { id: 8, userId: 'vendor', password: 'dpl01234', name: 'Vendor Portal', role: UserRole.VENDOR, roles: [UserRole.VENDOR], designation: 'Supplier / Service Vendor', contact: '0300-5556677', email: 'vendor@docks.com', status: 'ACTIVE', clientName: 'Al-Makkah Logistics & Equipment Services', baseSalary: 0 },
   // Compatibility aliases
-  { id: 9, userId: 'client01', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client01@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines', baseSalary: 0 }
+  { id: 9, userId: 'client01', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client01@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines', baseSalary: 0 },
+  // Port Staff Operational Accounts
+  { id: 10, userId: 'loadingstaff', password: 'dpl01234', name: 'Loading Port Staff', role: UserRole.LOADING_PORT_STAFF, roles: [UserRole.LOADING_PORT_STAFF], designation: 'Loading Port Customs Inspector', contact: '0300-4455667', email: 'loading@docks.com', status: 'ACTIVE', baseSalary: 0 },
+  { id: 11, userId: 'destinationstaff', password: 'dpl01234', name: 'Destination Port Staff', role: UserRole.DESTINATION_PORT_STAFF, roles: [UserRole.DESTINATION_PORT_STAFF], designation: 'Border Terminal Customs Officer', contact: '0300-7788991', email: 'destination@docks.com', status: 'ACTIVE', baseSalary: 0 },
+  { id: 12, userId: 'unloadingstaff', password: 'dpl01234', name: 'Unloading Port Staff', role: UserRole.UNLOADING_PORT_STAFF, roles: [UserRole.UNLOADING_PORT_STAFF], designation: 'Unloading Port Clearance Staff', contact: '0300-1122334', email: 'unloading@docks.com', status: 'ACTIVE', baseSalary: 0 }
 ];
 
 let hasSeededInitialUsers = false;
