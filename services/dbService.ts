@@ -23,6 +23,13 @@ import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
 import { getActiveCompanyId, subscribeToActiveCompany, CompanyId, PARENT_GROUP, GROUP_COMPANIES } from './companyService';
+import { 
+  saveDocumentToIndexedDB, 
+  backupCasesToIndexedDB, 
+  backupVehiclesToIndexedDB, 
+  restoreCasesFromIndexedDB, 
+  restoreVehiclesFromIndexedDB 
+} from './documentStorage';
 
 /**
  * Checks if a record belongs to the currently active company.
@@ -50,7 +57,7 @@ function sanitizeForFirestore(obj: any): any {
       name: (obj as File).name || 'document',
       type: (obj as File).type || 'application/octet-stream',
       size: (obj as File).size || 0,
-      url: (obj as any).url || ''
+      url: ''
     };
   }
 
@@ -62,7 +69,12 @@ function sanitizeForFirestore(obj: any): any {
   for (const key of Object.keys(obj)) {
     const val = obj[key];
     if (val !== undefined) {
-      clean[key] = sanitizeForFirestore(val);
+      // Guard against large base64 dataUrls (>150KB) that cause Firestore 1MB document rejection
+      if (typeof val === 'string' && val.startsWith('data:') && val.length > 150000) {
+        clean[key] = ''; // Kept safely in IndexedDB and safeAppStorage
+      } else {
+        clean[key] = sanitizeForFirestore(val);
+      }
     }
   }
   return clean;
@@ -78,14 +90,50 @@ export function subscribeToCases(
   let cachedDocs: any[] = [];
 
   const emit = () => {
-    const active = getActiveCompanyId();
-    const casesList: Case[] = [];
+    const firestoreList: Case[] = [];
     cachedDocs.forEach((docData) => {
-      if (options?.allCompanies || matchesActiveCompany(docData.companyId, active)) {
-        casesList.push(docData as Case);
+      firestoreList.push({
+        ...docData,
+        companyId: docData.companyId || 'docks'
+      } as Case);
+    });
+
+    // Intelligent Anti-Data-Loss Merge:
+    // Read local cache to ensure locally added cases that are not yet in Firestore (or rejected by size) are NEVER deleted!
+    const localCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
+    const mergedMap = new Map<string, Case>();
+
+    // 1. Seed with local cases
+    localCases.forEach(c => {
+      const k = c.caseNo || c.id;
+      if (k) mergedMap.set(k, c);
+    });
+
+    // 2. Merge with Firestore cases without overwriting richer local document data
+    firestoreList.forEach(fc => {
+      const k = fc.caseNo || fc.id;
+      if (!k) return;
+      const existing = mergedMap.get(k);
+      if (!existing) {
+        mergedMap.set(k, fc);
+      } else {
+        // Keep documents from existing if existing has actual base64/attachments
+        const existingDocsCount = existing.documents?.length || 0;
+        const firestoreDocsCount = fc.documents?.length || 0;
+        const bestDocs = (existingDocsCount >= firestoreDocsCount) ? existing.documents : fc.documents;
+        mergedMap.set(k, {
+          ...existing,
+          ...fc,
+          documents: bestDocs || []
+        });
       }
     });
-    onData(dedupeArrayById(casesList));
+
+    const finalCases = dedupeArrayById(Array.from(mergedMap.values()));
+    // Persist merged cases to storage and IndexedDB
+    safeAppStorage.setJSON('dpl_live_cases', finalCases);
+    backupCasesToIndexedDB(finalCases).catch(() => {});
+    onData(finalCases);
   };
 
   const unsubCompany = subscribeToActiveCompany(() => {
@@ -117,6 +165,31 @@ export async function saveCaseToFirestore(newCase: Case): Promise<void> {
   const path = 'cases';
   const docId = newCase.id || String(Date.now());
   const activeCompany = getActiveCompanyId();
+
+  // 1. Persist full attachments into IndexedDB immediately
+  if (newCase.documents && Array.isArray(newCase.documents)) {
+    for (const d of newCase.documents as any[]) {
+      if (d) {
+        const dataUrl = (d.url && d.url.startsWith('data:')) ? d.url : (d.dataUrl || '');
+        if (dataUrl) {
+          saveDocumentToIndexedDB({
+            key: `${newCase.caseNo}_${d.name}`,
+            id: d.id,
+            name: d.name,
+            type: d.type || 'application/pdf',
+            size: d.size || 0,
+            dataUrl,
+            caseNo: newCase.caseNo
+          }).catch(() => {});
+        }
+      }
+    }
+  }
+
+  // 2. Backup full case in IndexedDB & local storage
+  backupCasesToIndexedDB([newCase]).catch(() => {});
+
+  // 3. Write to Firestore with sanitized payload (no >150KB base64 strings to avoid 1MB reject)
   try {
     const payload = sanitizeForFirestore({
       ...newCase,
@@ -569,14 +642,42 @@ export function subscribeToVehicles(
   let cachedDocs: any[] = [];
 
   const emit = () => {
-    const items: Vehicle[] = [];
+    const firestoreItems: Vehicle[] = [];
     let idx = 0;
     cachedDocs.forEach((data) => {
       // NOTE: Vehicles are universally shared across all 4 subsidiaries (Docks, Truckit, Muhib, Vantage)
       const numId = parseNumericDocId(data.id, data._docId || String(idx), idx++);
-      items.push({ ...data, id: numId } as Vehicle);
+      firestoreItems.push({ ...data, id: numId } as Vehicle);
     });
-    onData(dedupeArrayById(items));
+
+    // Intelligent Anti-Data-Loss Merge for Vehicles
+    const localVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+    const mergedMap = new Map<string, Vehicle>();
+
+    // 1. Seed with local vehicles
+    localVehicles.forEach(v => {
+      const reg = v.registrationNumber?.trim().toUpperCase();
+      if (reg) mergedMap.set(reg, v);
+      else if (v.id) mergedMap.set(String(v.id), v);
+    });
+
+    // 2. Merge with Firestore vehicles
+    firestoreItems.forEach(fv => {
+      const reg = fv.registrationNumber?.trim().toUpperCase();
+      const k = reg || String(fv.id);
+      if (!k) return;
+      const existing = mergedMap.get(k);
+      if (!existing) {
+        mergedMap.set(k, fv);
+      } else {
+        mergedMap.set(k, { ...existing, ...fv });
+      }
+    });
+
+    const finalVehicles = dedupeArrayById(Array.from(mergedMap.values()));
+    safeAppStorage.setJSON('dpl_live_vehicles', finalVehicles);
+    backupVehiclesToIndexedDB(finalVehicles).catch(() => {});
+    onData(finalVehicles);
   };
 
   const unsubFirestore = onSnapshot(
@@ -603,6 +704,7 @@ export async function saveVehicleToFirestore(vehicle: Vehicle): Promise<void> {
   const path = 'vehicles';
   const docId = String(vehicle.id || Date.now());
   const activeCompany = getActiveCompanyId();
+  backupVehiclesToIndexedDB([vehicle]).catch(() => {});
   try {
     const payload = sanitizeForFirestore({
       ...vehicle,
@@ -2679,6 +2781,47 @@ export async function deletePersonalLedgerEntry(entryId: string): Promise<void> 
 
   const current = safeAppStorage.getJSON<PersonalLedgerEntry[]>(PERSONAL_LEDGER_ENTRIES_KEY, []);
   safeAppStorage.setJSON(PERSONAL_LEDGER_ENTRIES_KEY, current.filter(e => e.id !== entryId));
+}
+
+// Self-healing bootstrap: restore cases and vehicles from IndexedDB if memory/localStorage was wiped
+if (typeof window !== 'undefined') {
+  setTimeout(async () => {
+    try {
+      const storedCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
+      const idbCases = await restoreCasesFromIndexedDB();
+      if (idbCases.length > 0) {
+        const mergedMap = new Map<string, Case>();
+        storedCases.forEach(c => { if (c.caseNo || c.id) mergedMap.set(c.caseNo || c.id, c); });
+        idbCases.forEach(c => {
+          const k = c.caseNo || c.id;
+          if (k && !mergedMap.has(k)) mergedMap.set(k, c);
+        });
+        const final = Array.from(mergedMap.values());
+        if (final.length > storedCases.length) {
+          safeAppStorage.setJSON('dpl_live_cases', final);
+          window.dispatchEvent(new CustomEvent('dpl_cases_updated', { detail: final }));
+        }
+      }
+
+      const storedVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+      const idbVehicles = await restoreVehiclesFromIndexedDB();
+      if (idbVehicles.length > 0) {
+        const mergedMap = new Map<string, Vehicle>();
+        storedVehicles.forEach(v => {
+          const reg = v.registrationNumber?.trim().toUpperCase() || String(v.id);
+          if (reg) mergedMap.set(reg, v);
+        });
+        idbVehicles.forEach(v => {
+          const reg = v.registrationNumber?.trim().toUpperCase() || String(v.id);
+          if (reg && !mergedMap.has(reg)) mergedMap.set(reg, v);
+        });
+        const final = Array.from(mergedMap.values());
+        if (final.length > storedVehicles.length) {
+          safeAppStorage.setJSON('dpl_live_vehicles', final);
+        }
+      }
+    } catch (_) {}
+  }, 100);
 }
 
 

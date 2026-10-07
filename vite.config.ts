@@ -156,13 +156,22 @@ Return ONLY valid JSON.`;
 
                   parts.push({ text: extractionInstruction });
 
-                  const apiResponse = await ai.models.generateContent({
-                    model: 'gemini-3.8-flash',
-                    contents: { parts },
-                    config: {
-                      responseMimeType: 'application/json'
+                  let apiResponse: any = null;
+                  const models = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-2.5-pro'];
+                  for (const m of models) {
+                    try {
+                      apiResponse = await ai.models.generateContent({
+                        model: m,
+                        contents: { parts },
+                        config: {
+                          responseMimeType: 'application/json'
+                        }
+                      });
+                      if (apiResponse && apiResponse.text) break;
+                    } catch (mErr) {
+                      console.warn(`Vite OCR attempt with model ${m} notice:`, mErr);
                     }
-                  });
+                  }
 
                   res.statusCode = 200;
                   res.setHeader('Content-Type', 'application/json');

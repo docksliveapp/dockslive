@@ -650,7 +650,15 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     const targetVehicle = vehicles.find(v => v.id === id);
     if (!targetVehicle) return;
 
-    if (hasAdminRole) {
+    const isOfficeStaff = hasAdminRole || hasVehicleMgrRole || effectiveRoles.some(r => 
+      r === UserRole.OPERATIONS_MANAGER || 
+      r === UserRole.OFFICE_STAFF || 
+      r === UserRole.LOADING_PORT_STAFF || 
+      r === UserRole.DESTINATION_PORT_STAFF || 
+      r === UserRole.FINANCE_MANAGER
+    ) || !effectiveRoles.includes(UserRole.TRANSPORTER);
+
+    if (isOfficeStaff) {
       if (window.confirm("Are you sure you want to delete this vehicle?")) {
         setVehicles(vehicles.filter(v => v.id !== id));
         deleteVehicleFromFirestore(id);

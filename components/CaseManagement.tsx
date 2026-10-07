@@ -18,6 +18,16 @@ import { WorkflowStepModal } from './WorkflowStepModal';
 import { CompletedCaseDossier } from './CompletedCaseDossier';
 import { VirtualizedList, VirtualizedTable } from './VirtualizedList';
 import { submitCaseActionApproval } from '../services/approvalService';
+import { saveDocumentToIndexedDB, getDocumentFromIndexedDB } from '../services/documentStorage';
+
+function isOfficeStaffRole(role?: string | UserRole): boolean {
+  if (!role) return true;
+  const r = String(role).toUpperCase();
+  if (r === UserRole.CLIENT || r === UserRole.TRANSPORTER || r === UserRole.VENDOR) {
+    return false;
+  }
+  return true;
+}
 import { 
   PAKISTAN_CUSTOMS_COMPLIANCE, 
   getStandardChargesForCategory, 
@@ -57,7 +67,7 @@ export interface UploadedDocRecord {
   type: string;
   size: number;
   url: string;
-  docCategory?: 'BL' | 'INVOICE' | 'PACKING_LIST' | 'ALL_IN_ONE' | 'GENERAL';
+  docCategory?: 'BL' | 'INVOICE' | 'PACKING_LIST' | 'CLIENT_REQUEST' | 'DELIVERY_ORDER' | 'GOODS_DECLARATION' | 'ALL_IN_ONE' | 'GENERAL';
 }
 
 export const TOP_SHIPPING_LINES_SHOWCASE = [
@@ -422,7 +432,18 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         console.warn("Firestore case subscription note:", err);
       }
     );
-    return () => unsubscribe();
+
+    const handleCasesUpdated = (e: any) => {
+      if (e.detail && Array.isArray(e.detail)) {
+        setCases(e.detail);
+      }
+    };
+    window.addEventListener('dpl_cases_updated', handleCasesUpdated);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('dpl_cases_updated', handleCasesUpdated);
+    };
   }, [view, selectedCase?.id]);
 
   // Synchronize Registered Clients with Firestore & Cases
@@ -1435,6 +1456,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           const b64 = docDataUrl.split(',')[1];
           docDataCache.set(f.name, { base64: b64, mimeType: docType, name: f.name });
           docDataCache.set(recId, { base64: b64, mimeType: docType, name: f.name });
+          saveDocumentToIndexedDB({
+            id: recId,
+            name: f.name,
+            type: docType,
+            size: f.size,
+            dataUrl: docDataUrl
+          }).catch(() => {});
         }
 
         newDocRecords.push({
@@ -1456,7 +1484,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             name: d.name,
             type: d.type,
             size: d.size,
-            url: d.url && d.url.startsWith('data:') && d.url.length < 500000 ? d.url : '',
+            url: d.url,
             docCategory: d.docCategory
           }));
           safeAppStorage.setJSON('dpl_reg_docs', safeRecords);
@@ -1820,13 +1848,19 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       const initialWorkflow = getCategoryWorkflow(formData.category);
       const initialStepStatus = initialWorkflow.steps[0]?.id || CaseStatus.SHIPPING_LINE_DO;
 
+      // Check if registered by Office Staff vs Client
+      const isOfficeStaff = isOfficeStaffRole(effectiveRole);
+      const requiresApproval = isClientUser || (effectiveRole as any) === UserRole.CLIENT || (!isOfficeStaff);
+
       const newCase: Case = {
           id: Date.now().toString(),
           caseNo: finalCaseNo,
           clientName: formData.client,
           category: formData.category,
           subCategory: supportsSubCategories(formData.category) ? (formData.subCategory || 'Standard Container / General Cargo') : undefined,
-          status: initialStepStatus, 
+          status: requiresApproval ? 'Pending Approval' : initialStepStatus, 
+          approvalStatus: requiresApproval ? 'PENDING' : 'APPROVED',
+          registeredByRole: String(effectiveRole),
           createdAt: new Date().toISOString().split('T')[0],
           pol: formData.pol,
           pod: formData.pod,
@@ -1843,20 +1877,38 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       window.dispatchEvent(new CustomEvent('dpl_cases_updated', { detail: updatedCases }));
       saveCaseToFirestore(newCase).catch((e) => console.warn("Firestore saveCase error:", e));
 
-      // Dispatch real-time notification to Operations Manager, Client & Admin
-      sendAppNotification({
-        title: `New Case Registered: #${newCase.caseNo}`,
-        description: `New shipment #${newCase.caseNo} registered for ${newCase.clientName} (${newCase.containers?.length || 1} Containers: ${newCase.portOfLoading} → ${newCase.portOfDischarge}).`,
-        targetRole: UserRole.OPERATIONS_MANAGER,
-        targetClientName: newCase.clientName,
-        targetView: 'cases',
-        targetFilter: { caseNo: newCase.caseNo },
-        type: 'INFO',
-        actionLabel: 'View Case',
-        performedBy: effectiveRole,
-        performedByRole: String(effectiveRole),
-        category: 'CASE'
-      }).catch(e => console.warn("Could not dispatch case notif:", e));
+      // Dispatch appropriate real-time notification
+      if (requiresApproval) {
+        sendAppNotification({
+          title: `Client Case Approval Required: #${newCase.caseNo}`,
+          description: `Client "${newCase.clientName}" registered new case #${newCase.caseNo}. Needs Admin / Authorized approval to activate.`,
+          targetRole: 'ADMIN, OPERATIONS_MANAGER',
+          targetView: 'cases',
+          targetFilter: { caseNo: newCase.caseNo },
+          type: 'ACTION',
+          notificationSubType: 'CASE_APPROVAL',
+          actionLabel: 'Review & Approve',
+          performedBy: effectiveRole,
+          performedByRole: String(effectiveRole),
+          category: 'CASE',
+          priority: 'HIGH'
+        }).catch(e => console.warn("Could not dispatch case notif:", e));
+      } else {
+        // Office staff case: Direct registration without approval requirement
+        sendAppNotification({
+          title: `Case Registered: #${newCase.caseNo}`,
+          description: `Yeh case register ho gaya hai: #${newCase.caseNo} (${newCase.clientName}).`,
+          targetRole: UserRole.OPERATIONS_MANAGER,
+          targetClientName: newCase.clientName,
+          targetView: 'cases',
+          targetFilter: { caseNo: newCase.caseNo },
+          type: 'INFO',
+          actionLabel: 'View Case',
+          performedBy: effectiveRole,
+          performedByRole: String(effectiveRole),
+          category: 'CASE'
+        }).catch(e => console.warn("Could not dispatch case notif:", e));
+      }
 
       if (formData.client) {
         saveClientToFirestore({ name: formData.client }).catch(() => {});
@@ -2037,7 +2089,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     
     // Logic to move to next status
     let newStatus = target.status;
-    if (target.status === CaseStatus.SHIPPING_LINE_DO) {
+    if (target.status === 'Pending Approval' || target.approvalStatus === 'PENDING') {
+      const initialWorkflow = getCategoryWorkflow(target.category);
+      newStatus = initialWorkflow.steps[0]?.id || CaseStatus.SHIPPING_LINE_DO;
+    } else if (target.status === CaseStatus.SHIPPING_LINE_DO) {
         newStatus = CaseStatus.LOADING_PORT_PROCESSING;
     } else if (target.status === CaseStatus.LOADING_PORT_PROCESSING) {
         newStatus = CaseStatus.IN_TRANSIT;
@@ -2167,18 +2222,23 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       // 2. Trigger download of any attached document files
       if (docs.length > 0) {
         docs.forEach((doc: any, i: number) => {
-          setTimeout(() => {
+          setTimeout(async () => {
             try {
               const docName = doc.name || `Document_${caseNo}_${i + 1}`;
               let url = doc.url;
-              if (!url && doc instanceof File) url = URL.createObjectURL(doc);
+              if ((!url || !url.startsWith('data:')) && docDataCache.get(docName)?.base64) {
+                const cached = docDataCache.get(docName)!;
+                url = `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}`;
+              }
+              if (!url) {
+                const idbData = await getDocumentFromIndexedDB(`${caseNo}_${docName}`) || await getDocumentFromIndexedDB(docName);
+                if (idbData) url = idbData;
+              }
+              if (!url && doc instanceof File) {
+                try { url = URL.createObjectURL(doc); } catch (_) {}
+              }
               if (url) {
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = docName;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
+                downloadFile(url, docName.includes('.') ? docName : `${docName}.pdf`);
               }
             } catch (err) {
               console.warn("File download notice:", err);
@@ -2367,8 +2427,21 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                       try { docUrl = URL.createObjectURL(doc); } catch (_) {}
                     }
 
-                    const handlePreview = () => {
-                      let activeUrl = docUrl;
+                    const resolveActiveDocUrl = async (): Promise<string> => {
+                      if (docUrl && (docUrl.startsWith('data:') || docUrl.startsWith('http'))) {
+                        return docUrl;
+                      }
+                      const cached = docDataCache.get(docName) || docDataCache.get(doc.name);
+                      if (cached?.base64) {
+                        return `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}`;
+                      }
+                      const idbData = await getDocumentFromIndexedDB(`${c.caseNo}_${docName}`) || await getDocumentFromIndexedDB(docName) || (doc.id ? await getDocumentFromIndexedDB(doc.id) : null);
+                      if (idbData) return idbData;
+                      return docUrl || '';
+                    };
+
+                    const handlePreview = async () => {
+                      let activeUrl = await resolveActiveDocUrl();
                       if (!activeUrl) {
                         try {
                           const docPdf = new jsPDF();
@@ -2402,8 +2475,8 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                       }
                     };
 
-                    const handleDownload = () => {
-                      let activeUrl = docUrl;
+                    const handleDownload = async () => {
+                      let activeUrl = await resolveActiveDocUrl();
                       if (!activeUrl) {
                         try {
                           const docPdf = new jsPDF();

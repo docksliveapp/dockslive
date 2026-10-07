@@ -12,13 +12,11 @@
 const memoryCache: Record<string, string> = {};
 
 // Storage keys that are partitioned per company
+// NOTE: Cases and vehicles are unified across the group and tag their operating company inside each record.
 const COMPANY_PARTITIONED_KEYS = new Set([
-  'dpl_live_cases',
   'dpl_live_finance',
   'dpl_live_receivables',
   'dpl_live_payables',
-  'dpl_live_vehicles',
-  'dpl_cached_vehicles',
   'dpl_clients',
   'dpl_company_documents',
   'dpl_vendors',
