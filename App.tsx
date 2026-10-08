@@ -73,6 +73,7 @@ const App: React.FC = () => {
   const [isPublicContainerTrackingOpen, setIsPublicContainerTrackingOpen] = useState<boolean>(() => isContainerTrackingDomainOrRoute());
   const [isPublicVehicleTrackingOpen, setIsPublicVehicleTrackingOpen] = useState<boolean>(() => isVehicleTrackingDomainOrRoute());
   const [selectedPublicVehiclePlate, setSelectedPublicVehiclePlate] = useState<string>('');
+  const [openedFromInternalWorkspace, setOpenedFromInternalWorkspace] = useState<boolean>(false);
 
   const isDedicatedContainerSubdomain = typeof window !== 'undefined' && (
     window.location.hostname.toLowerCase().includes('status.makpk.online') || 
@@ -479,6 +480,7 @@ const App: React.FC = () => {
             userRoles={currentRoles}
             onOpenPublicTracker={(plate) => {
               if (plate) setSelectedPublicVehiclePlate(plate);
+              setOpenedFromInternalWorkspace(true);
               setIsPublicVehicleTrackingOpen(true);
             }}
           />
@@ -510,9 +512,9 @@ const App: React.FC = () => {
     return (
       <ErrorBoundary>
         <PublicContainerTrackingPortal
-          onExitPortal={!isDedicatedContainerSubdomain ? () => {
+          onExitPortal={openedFromInternalWorkspace ? () => {
             setIsPublicContainerTrackingOpen(false);
-            setShowModeSelection(true);
+            setOpenedFromInternalWorkspace(false);
           } : undefined}
           onSwitchToVehicleTracker={() => {
             setIsPublicContainerTrackingOpen(false);
@@ -528,9 +530,9 @@ const App: React.FC = () => {
       <ErrorBoundary>
         <PublicVehicleTrackingPortal
           initialQuery={selectedPublicVehiclePlate}
-          onExitPortal={!isDedicatedVehicleSubdomain ? () => {
+          onExitPortal={openedFromInternalWorkspace ? () => {
             setIsPublicVehicleTrackingOpen(false);
-            setShowModeSelection(true);
+            setOpenedFromInternalWorkspace(false);
           } : undefined}
           onSwitchToContainerTracker={() => {
             setIsPublicVehicleTrackingOpen(false);
