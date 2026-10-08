@@ -3,7 +3,7 @@ import {
   Search, Truck, Calendar, Clock, CheckCircle2, AlertCircle, AlertTriangle,
   Download, Share2, Copy, Check, ArrowRight, ShieldCheck, FileText, 
   MapPin, X, ArrowLeft, RefreshCw, Layers, Award, FileCheck, Phone, User,
-  Building2, ExternalLink
+  Building2, ExternalLink, Package
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Vehicle, VehicleCategory } from '../types';
@@ -88,12 +88,16 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
     };
   }, []);
 
-  // Trigger search on mount if initial query exists
+  // Trigger search on mount if initial query exists or when initialQuery changes
   useEffect(() => {
-    if (searchQuery.trim() && !activeSearch) {
+    if (initialQuery && initialQuery.trim()) {
+      setSearchQuery(initialQuery.trim());
+      setActiveSearch(initialQuery.trim());
+      setSelectedVehicle(null);
+    } else if (searchQuery.trim() && !activeSearch) {
       setActiveSearch(searchQuery.trim());
     }
-  }, [searchQuery]);
+  }, [initialQuery, searchQuery]);
 
   const handleSearchSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -478,7 +482,10 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
 
   const handleCopyShareLink = () => {
     if (typeof window === 'undefined') return;
-    const shareUrl = `${window.location.origin}${window.location.pathname}?vehicle=${encodeURIComponent(activeSearch)}`;
+    const plate = encodeURIComponent(activeSearch);
+    const shareUrl = window.location.hostname.includes('vehicle.makpk.online')
+      ? `https://vehicle.makpk.online?vehicle=${plate}`
+      : `${window.location.origin}/?mode=vehicle&plate=${plate}`;
     navigator.clipboard.writeText(shareUrl).then(() => {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2500);

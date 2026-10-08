@@ -72,6 +72,7 @@ const App: React.FC = () => {
   // Public Standalone Tracking Portals: status.makpk.online (or sttatus.makpk.online) & vehicle.makpk.online
   const [isPublicContainerTrackingOpen, setIsPublicContainerTrackingOpen] = useState<boolean>(() => isContainerTrackingDomainOrRoute());
   const [isPublicVehicleTrackingOpen, setIsPublicVehicleTrackingOpen] = useState<boolean>(() => isVehicleTrackingDomainOrRoute());
+  const [selectedPublicVehiclePlate, setSelectedPublicVehiclePlate] = useState<string>('');
 
   const isDedicatedContainerSubdomain = typeof window !== 'undefined' && (
     window.location.hostname.toLowerCase().includes('status.makpk.online') || 
@@ -458,7 +459,7 @@ const App: React.FC = () => {
         return <Finance initialFilter={navigationFilter} onActionComplete={handleActionComplete} customLogo={customLogo} />;
       }
       case 'vehicles': {
-        const canAccessVehicles = currentRoles.includes(UserRole.ADMIN) || currentRole === UserRole.ADMIN || currentRoles.includes(UserRole.VEHICLE_MANAGER) || currentRole === UserRole.VEHICLE_MANAGER || currentRole === UserRole.TRANSPORTER;
+        const canAccessVehicles = currentRoles.includes(UserRole.ADMIN) || currentRole === UserRole.ADMIN || currentRoles.includes(UserRole.VEHICLE_MANAGER) || currentRole === UserRole.VEHICLE_MANAGER || (currentRole as any) === UserRole.TRANSPORTER;
         if (!canAccessVehicles) {
           return (
             <div className="p-8 text-center bg-slate-900/60 rounded-2xl border border-white/10 m-6 max-w-lg mx-auto">
@@ -470,7 +471,18 @@ const App: React.FC = () => {
             </div>
           );
         }
-        return <VehicleManagement initialFilter={navigationFilter} clearFilter={() => setNavigationFilter(null)} userRole={currentRole} userRoles={currentRoles} />;
+        return (
+          <VehicleManagement 
+            initialFilter={navigationFilter} 
+            clearFilter={() => setNavigationFilter(null)} 
+            userRole={currentRole} 
+            userRoles={currentRoles}
+            onOpenPublicTracker={(plate) => {
+              if (plate) setSelectedPublicVehiclePlate(plate);
+              setIsPublicVehicleTrackingOpen(true);
+            }}
+          />
+        );
       }
       case 'available_vehicles': return <AvailableVehiclesView userRole={currentRole} />;
       case 'users': {
@@ -515,6 +527,7 @@ const App: React.FC = () => {
     return (
       <ErrorBoundary>
         <PublicVehicleTrackingPortal
+          initialQuery={selectedPublicVehiclePlate}
           onExitPortal={!isDedicatedVehicleSubdomain ? () => {
             setIsPublicVehicleTrackingOpen(false);
             setShowModeSelection(true);

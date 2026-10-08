@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Truck, Plus, Search, FileText, User, Settings, Save, MapPin, Calendar, Clock, AlertTriangle, Trash2, CheckCircle, X, ChevronRight, Eye, Activity, CreditCard, Filter, AlertCircle, Download, Loader2, Ban, FileCheck, ShieldCheck, UploadCloud, CheckSquare, Square, Layers, Camera, Building } from 'lucide-react';
+import { Truck, Plus, Search, FileText, User, Settings, Save, MapPin, Calendar, Clock, AlertTriangle, Trash2, CheckCircle, X, ChevronRight, Eye, Activity, CreditCard, Filter, AlertCircle, Download, Loader2, Ban, FileCheck, ShieldCheck, UploadCloud, CheckSquare, Square, Layers, Camera, Building, Globe, ExternalLink, Copy } from 'lucide-react';
 import { Vehicle, Transporter, VehicleCategory, VehicleType, TrackerInfo, VehicleHistory, UserRole } from '../types';
 import { submitVehicleActionApproval } from '../services/approvalService';
 import { autoFillVehicleData } from '../services/geminiService';
@@ -47,13 +47,15 @@ interface VehicleManagementProps {
   clearFilter?: () => void;
   userRole?: UserRole;
   userRoles?: UserRole[];
+  onOpenPublicTracker?: (plate?: string) => void;
 }
 
 const VehicleManagement: React.FC<VehicleManagementProps> = ({ 
   initialFilter, 
   clearFilter,
   userRole: propUserRole,
-  userRoles: propUserRoles 
+  userRoles: propUserRoles,
+  onOpenPublicTracker
 }) => {
   const { activeCompany } = useActiveCompany();
   const [activeTab, setActiveTab] = useState<'transporters' | 'vehicles' | 'ready_vehicles'>(() => {
@@ -228,17 +230,34 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   const [transporters, setTransporters] = useState<Transporter[]>(() => {
     return safeAppStorage.getJSON<Transporter[]>('dpl_live_transporters', INITIAL_TRANSPORTERS);
   });
+  const sanitizeFleetVehicle = (v: Vehicle): Vehicle => {
+    const dName = (v.driverName || '').trim();
+    const tName = (v.transporterName || '').trim();
+    const bName = (v.brokerName || '').trim();
+    // If driverName is identical to transporter or broker or 'N/A', clean it up
+    if (dName && (dName.toLowerCase() === tName.toLowerCase() || dName.toLowerCase() === bName.toLowerCase() || dName.toLowerCase() === 'n/a' || dName.toLowerCase() === 'none')) {
+      return { ...v, driverName: '', driverCnic: '', driverContact: '' };
+    }
+    return v;
+  };
+
   const [vehicles, setVehicles] = useState<Vehicle[]>(() => {
     const stored = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', INITIAL_VEHICLES);
-    return Array.isArray(stored) ? stored.filter(v => !isCorruptedVehicleRecord(v)) : INITIAL_VEHICLES;
+    return Array.isArray(stored) 
+      ? stored.filter(v => !isCorruptedVehicleRecord(v)).map(sanitizeFleetVehicle)
+      : INITIAL_VEHICLES;
   });
+
+  const [copiedStatusPlate, setCopiedStatusPlate] = useState<string | null>(null);
 
   // Real-time synchronization with Firestore
   useEffect(() => {
     const unsub = subscribeToVehicles(
       (firestoreVehicles) => {
         if (firestoreVehicles) {
-          const cleanVehicles = firestoreVehicles.filter(v => !isCorruptedVehicleRecord(v));
+          const cleanVehicles = firestoreVehicles
+            .filter(v => !isCorruptedVehicleRecord(v))
+            .map(sanitizeFleetVehicle);
           setVehicles(cleanVehicles);
           safeAppStorage.setJSON('dpl_live_vehicles', cleanVehicles);
         }
@@ -717,20 +736,31 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     const tempVehiclesList = [...vehicles];
     const newVehicles: Vehicle[] = cleanList.map((item, idx) => {
       const serial = generateDPLSerial(tempVehiclesList);
+      const transporter = item.transporterName || 'Direct Broker';
+      const broker = item.brokerName || item.transporterName || 'Direct Broker';
+      const rawDriver = (item.driverName || '').trim();
+      const isVendorDriver = !rawDriver || 
+        rawDriver.toLowerCase() === broker.toLowerCase() || 
+        rawDriver.toLowerCase() === transporter.toLowerCase() || 
+        rawDriver.toLowerCase() === 'n/a' ||
+        rawDriver.toLowerCase() === 'none';
+      const cleanDriver = isVendorDriver ? '' : rawDriver;
+
       const vehicleRecord: Vehicle = {
         id: Date.now() + idx,
         registrationNumber: item.registrationNumber || `REG-${Date.now() + idx}`,
         category: (item.category as VehicleCategory) || VehicleCategory.BONDED_CARRIER,
         type: (item.type as VehicleType) || VehicleType.FLATBED,
         size: (item.size as '20ft' | '40ft' | '45ft' | 'Loose') || '40ft',
+        weightCapacity: item.weightCapacity || '',
         engineNo: item.engineNo || 'N/A',
         chassisNo: item.chassisNo || 'N/A',
         transporterId: 0,
-        transporterName: item.transporterName || 'Direct Broker',
-        brokerName: item.brokerName || item.transporterName || 'Direct Broker',
-        driverName: item.driverName || 'N/A',
-        driverCnic: item.driverCnic || 'N/A',
-        driverContact: item.driverContact || 'N/A',
+        transporterName: transporter,
+        brokerName: broker,
+        driverName: cleanDriver,
+        driverCnic: cleanDriver ? (item.driverCnic || '') : '',
+        driverContact: cleanDriver ? (item.driverContact || '') : '',
         validationExpiryDate: item.validationExpiryDate || new Date(Date.now() + 180 * 24 * 3600 * 1000).toISOString().slice(0, 10),
         registrationDate: item.registrationDate,
         dplSerial: serial,
@@ -912,6 +942,15 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
             title="Import multiple vehicles using Excel (.xlsx), Word (.docx), or CSV files"
           >
             <UploadCloud size={16} /> Bulk Upload (.xlsx, .docx, .csv)
+          </button>
+          <button 
+            type="button"
+            onClick={() => onOpenPublicTracker ? onOpenPublicTracker() : window.open('/?mode=vehicle', '_blank')}
+            className="bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 hover:text-white px-3.5 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-all"
+            title="Open Live Public Vehicle Status Portal (vehicle.makpk.online)"
+          >
+            <Globe size={16} className="text-amber-400" />
+            <span>Vehicle Status Portal</span>
           </button>
         </div>
 
@@ -1275,7 +1314,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
               { header: 'Vehicle Registration No', width: '22%' },
               { header: 'Category & Type', width: '16%' },
               { header: 'Broker / Transporter', width: '16%' },
-              { header: 'Driver Info', width: '14%' },
+              { header: 'Assigned Driver', width: '14%' },
               { header: 'Status (Validity)', width: '14%' },
               { header: 'Action', width: '18%', className: 'text-right' }
             ]}
@@ -1286,6 +1325,12 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
             }
             renderRow={(v) => {
               const validity = getVehicleValidity(v);
+              const hasAssignedDriver = v.driverName && 
+                v.driverName !== v.transporterName && 
+                v.driverName !== v.brokerName && 
+                v.driverName.toLowerCase() !== 'n/a' &&
+                v.driverName.toLowerCase() !== 'none';
+
               return (
                 <>
                   <div className="p-3.5 text-center" style={{ width: 48, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
@@ -1321,8 +1366,18 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                     {v.brokerName || v.transporterName || 'Direct Broker'}
                   </div>
                   <div className="p-3.5 text-xs truncate" style={{ width: '14%', flexShrink: 0 }}>
-                    <span className="text-gray-200 font-medium block truncate">{v.driverName || 'N/A'}</span>
-                    <span className="text-gray-400 font-mono text-[11px] block truncate">{v.driverContact || ''}</span>
+                    {hasAssignedDriver ? (
+                      <>
+                        <span className="text-gray-200 font-medium block truncate">{v.driverName}</span>
+                        {v.driverContact && v.driverContact !== 'N/A' && (
+                          <span className="text-gray-400 font-mono text-[11px] block truncate">{v.driverContact}</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-gray-500 italic text-[11px] block" title="Driver is dynamically assigned when this vehicle is dispatched in Case Workflow (Vehicle Assign step)">
+                        Workflow Assigned
+                      </span>
+                    )}
                   </div>
                   <div className="p-3.5" style={{ width: '14%', flexShrink: 0 }}>
                     <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold inline-block ${validity.badgeClass}`}>
@@ -1333,6 +1388,26 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                     )}
                   </div>
                   <div className="p-3.5 text-right flex justify-end items-center gap-1.5 flex-wrap" style={{ width: '18%', flexShrink: 0 }}>
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        const plate = encodeURIComponent(v.registrationNumber);
+                        const directUrl = `${window.location.origin}/?mode=vehicle&plate=${plate}`;
+                        navigator.clipboard.writeText(directUrl).then(() => {
+                          setCopiedStatusPlate(v.registrationNumber);
+                          setTimeout(() => setCopiedStatusPlate(null), 3000);
+                        }).catch(() => {});
+                        if (onOpenPublicTracker) {
+                          onOpenPublicTracker(v.registrationNumber);
+                        } else {
+                          window.open(directUrl, '_blank');
+                        }
+                      }}
+                      className="bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 hover:text-white transition-colors p-1.5 rounded-lg text-xs" 
+                      title={copiedStatusPlate === v.registrationNumber ? "Status Link Copied!" : "Open / Copy Vehicle Verification Status (vehicle.makpk.online)"}
+                    >
+                      <Globe size={13} className={copiedStatusPlate === v.registrationNumber ? "text-emerald-400" : "text-amber-400"} />
+                    </button>
                     {v.status === 'CANCELLED' ? (
                       <>
                         <button
@@ -2402,34 +2477,29 @@ const VehicleProfileModal = ({
       
       const matchedCases = casesList.filter(c => {
         const cReg = (c.vehicleNumber || c.extractedData?.vehicleNumber || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        return cReg && cReg === cleanReg;
+        const hasContainerMatch = Array.isArray(c.containers) && c.containers.some((cntr: any) => (cntr.vehicleNo || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanReg);
+        return (cReg && cReg === cleanReg) || hasContainerMatch;
       });
 
-      const mapped = matchedCases.map((c, idx) => ({
-        id: c.id || `TRP-${idx + 1}`,
-        caseNo: c.caseNo,
-        containerNumber: c.containerNumber || c.extractedData?.containerNumber || 'CON-49102-DPL',
-        driverName: c.driverName || c.extractedData?.driverName || vehicle.driverName || 'Verified Driver',
-        importerName: c.extractedData?.cargoOwner || c.clientName || 'N/A',
-        clientName: c.clientName || 'N/A',
-        route: `${c.pol} to ${c.pod}`,
-        date: c.registrationDate || c.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
-        status: c.status || 'Completed'
-      }));
+      const mapped = matchedCases.map((c, idx) => {
+        const matchingContainer = Array.isArray(c.containers) 
+          ? c.containers.find((cntr: any) => (cntr.vehicleNo || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanReg)
+          : null;
+        const resolvedDriver = matchingContainer?.driverName || c.driverName || c.extractedData?.driverName || 'Designated Driver';
+        return {
+          id: c.id || `TRP-${idx + 1}`,
+          caseNo: c.caseNo,
+          containerNumber: matchingContainer?.number || c.containerNumber || c.extractedData?.containerNumber || '-',
+          driverName: resolvedDriver,
+          importerName: c.extractedData?.cargoOwner || c.clientName || 'N/A',
+          clientName: c.clientName || 'N/A',
+          route: `${c.pol || 'Port'} to ${c.pod || 'Destination'}`,
+          date: c.registrationDate || c.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+          status: c.status || 'Completed'
+        };
+      });
 
-      return mapped.length > 0 ? mapped : [
-        {
-          id: 'TRP-MOCK',
-          caseNo: `DPL-MOCK-${vehicle.dplSerial || '0001'}`,
-          containerNumber: 'CON-49102-DPL',
-          driverName: vehicle.driverName || 'Primary Driver',
-          importerName: 'Rafiullah & Sons Importers',
-          clientName: 'Direct Client Group',
-          route: 'Karachi - Inland Corridor',
-          date: vehicle.registrationDate || vehicle.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
-          status: 'Completed'
-        }
-      ];
+      return mapped;
     } catch (e) {
       console.error("Error reading cases for trip mapping:", e);
       return [];
@@ -2632,8 +2702,12 @@ const VehicleProfileModal = ({
                <div className="space-y-3">
                  <h4 className="text-xs font-bold text-brand-400 uppercase tracking-wider border-b border-white/5 pb-1">Driver & Tracker</h4>
                  <div className="flex justify-between text-sm">
-                   <span className="text-gray-400">Driver Name</span>
-                   <span className="text-white font-medium">{vehicle.driverName || '-'}</span>
+                   <span className="text-gray-400">Driver Assignment</span>
+                   <span className="text-white font-medium">
+                     {vehicle.driverName && vehicle.driverName !== vehicle.brokerName && vehicle.driverName !== vehicle.transporterName && vehicle.driverName.toLowerCase() !== 'n/a'
+                       ? vehicle.driverName
+                       : 'Dynamic (Assigned per-trip on Case Workflow)'}
+                   </span>
                  </div>
                  <div className="flex justify-between text-sm">
                    <span className="text-gray-400">Driver CNIC</span>
@@ -2793,30 +2867,39 @@ const VehicleProfileModal = ({
                </button>
              </div>
 
-             <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/20">
-               <table className="w-full text-left text-xs">
-                 <thead className="bg-white/5 text-gray-400 uppercase font-semibold border-b border-white/10">
-                   <tr>
-                     <th className="p-3">Trip Date</th>
-                     <th className="p-3">Container Number</th>
-                     <th className="p-3">Driver Name</th>
-                     <th className="p-3">Importer Name</th>
-                     <th className="p-3">Client Name</th>
-                   </tr>
-                 </thead>
-                 <tbody className="divide-y divide-white/5 text-gray-300">
-                   {trips.map((trip, idx) => (
-                     <tr key={idx} className="hover:bg-white/5">
-                       <td className="p-3 font-mono text-gray-400">{trip.date}</td>
-                       <td className="p-3 font-mono font-medium text-white">{trip.containerNumber || '-'}</td>
-                       <td className="p-3 text-gray-200">{trip.driverName || vehicle.driverName || '-'}</td>
-                       <td className="p-3 text-gray-300">{trip.importerName || 'N/A'}</td>
-                       <td className="p-3 text-gray-200 font-semibold">{trip.clientName}</td>
+             {trips.length === 0 ? (
+               <div className="p-6 text-center text-gray-500 text-xs bg-black/20 rounded-xl border border-white/5 space-y-1">
+                 <p className="font-semibold text-gray-400">No Dispatched Trips Recorded Yet</p>
+                 <p className="text-[11px] text-gray-500">
+                   Trip history and assigned drivers are logged automatically when this vehicle is dispatched in Case Workflow (under Vehicle Assign step).
+                 </p>
+               </div>
+             ) : (
+               <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/20">
+                 <table className="w-full text-left text-xs">
+                   <thead className="bg-white/5 text-gray-400 uppercase font-semibold border-b border-white/10">
+                     <tr>
+                       <th className="p-3">Trip Date</th>
+                       <th className="p-3">Container Number</th>
+                       <th className="p-3">Driver Name</th>
+                       <th className="p-3">Importer Name</th>
+                       <th className="p-3">Client Name</th>
                      </tr>
-                   ))}
-                 </tbody>
-               </table>
-             </div>
+                   </thead>
+                   <tbody className="divide-y divide-white/5 text-gray-300">
+                     {trips.map((trip, idx) => (
+                       <tr key={idx} className="hover:bg-white/5">
+                         <td className="p-3 font-mono text-gray-400">{trip.date}</td>
+                         <td className="p-3 font-mono font-medium text-white">{trip.containerNumber || '-'}</td>
+                         <td className="p-3 text-gray-200">{trip.driverName || vehicle.driverName || '-'}</td>
+                         <td className="p-3 text-gray-300">{trip.importerName || 'N/A'}</td>
+                         <td className="p-3 text-gray-200 font-semibold">{trip.clientName}</td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+             )}
            </div>
         </div>
       </div>

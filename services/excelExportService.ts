@@ -288,34 +288,17 @@ export function exportVehiclesToExcel(vehicles: Vehicle[]) {
 export function downloadBulkVehicleExcelTemplate() {
   const wb = XLSX.utils.book_new();
 
-  const headers = [
-    'Vehicle Registration Number',
-    'Category',
-    'Vehicle Type',
-    'Vehicle Size',
-    'Engine Number',
-    'Chassis Number',
-    'Transporter / Company Name',
-    'Broker Name',
-    'Driver Full Name',
-    'Driver CNIC',
-    'Driver Mobile Contact',
-    'Validity Expiry Date (YYYY-MM-DD)'
-  ];
-
   const sampleRows: any[][] = [
     [
       'Vehicle Registration Number',
       'Category (Bonded Carrier / Afghan Transit / TIR / Local Fleet)',
       'Vehicle Type (Flatbed / Lowbed / Container Carrier / Box Truck)',
       'Vehicle Size (20ft / 40ft / 45ft / Loose)',
+      'Weight Capacity (e.g. 35 Ton / 40 Ton)',
       'Engine Number',
       'Chassis Number',
       'Transporter / Company Name',
       'Broker Name',
-      'Driver Full Name',
-      'Driver CNIC',
-      'Driver Mobile Contact',
       'Validity Expiry Date (YYYY-MM-DD)'
     ],
     [
@@ -323,13 +306,11 @@ export function downloadBulkVehicleExcelTemplate() {
       'Bonded Carrier',
       'Flatbed',
       '40ft',
+      '40 Ton',
       'ENG-99881',
       'CHS-44332',
-      'Naveed Goods Forwarding',
-      'Naveed Goods Forwarding',
-      'Mohammad Tariq',
-      '42101-1234567-1',
-      '0300-1122334',
+      'Al-Madina Goods Transport',
+      'Haji Aslam Broker',
       '2026-12-31'
     ],
     [
@@ -337,13 +318,11 @@ export function downloadBulkVehicleExcelTemplate() {
       'Afghan Transit',
       'Lowbed',
       '45ft',
+      '45 Ton',
       'ENG-55443',
       'CHS-88771',
       'Khyber Logistics',
       'Khyber Logistics',
-      'Gul Khan',
-      '17301-7654321-3',
-      '0333-9988776',
       '2026-11-30'
     ],
     [
@@ -351,13 +330,11 @@ export function downloadBulkVehicleExcelTemplate() {
       'TIR',
       'Container Carrier',
       '40ft',
+      '38 Ton',
       'ENG-11223',
       'CHS-99001',
       'Indus International',
-      'Indus International',
-      'Rashid Ali',
-      '35201-9988776-5',
-      '0321-4455667',
+      'Direct Fleet',
       '2027-01-15'
     ]
   ];
@@ -370,12 +347,10 @@ export function downloadBulkVehicleExcelTemplate() {
     { wch: 16 },
     { wch: 18 },
     { wch: 18 },
+    { wch: 20 },
     { wch: 30 },
     { wch: 26 },
-    { wch: 22 },
-    { wch: 20 },
-    { wch: 20 },
-    { wch: 22 }
+    { wch: 24 }
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Vehicle Import Template');

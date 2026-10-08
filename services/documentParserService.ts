@@ -167,14 +167,20 @@ export function parseExcelVehicles(arrayBuffer: ArrayBuffer): ParsedVehicleRow[]
 
   // Find header row or assume row 0
   let headerRowIndex = 0;
-  for (let i = 0; i < Math.min(jsonData.length, 6); i++) {
+  for (let i = 0; i < Math.min(jsonData.length, 10); i++) {
     const row = jsonData[i];
     if (Array.isArray(row)) {
       const rowText = row.map(c => String(c).toLowerCase()).join(' ');
       if (
         rowText.includes('registration') ||
         rowText.includes('vehicle') ||
+        rowText.includes('truck') ||
+        rowText.includes('trailer') ||
+        rowText.includes('plate') ||
         rowText.includes('gadi') ||
+        rowText.includes('gari') ||
+        rowText.includes('fleet') ||
+        rowText.includes('chassis') ||
         rowText.includes('reg')
       ) {
         headerRowIndex = i;
@@ -193,7 +199,7 @@ export function parseExcelVehicles(arrayBuffer: ArrayBuffer): ParsedVehicleRow[]
       const matchesExclusion = exclusions.some(ex => h.includes(ex));
       if (matchesExclusion) continue;
 
-      const isExact = keywords.some(kw => h === kw || h.startsWith(kw + ' ') || h.endsWith(' ' + kw));
+      const isExact = keywords.some(kw => h === kw || h.startsWith(kw + ' ') || h.endsWith(' ' + kw) || h.startsWith(kw + ':') || h.startsWith(kw + '-'));
       if (isExact) return i;
     }
 
@@ -209,22 +215,44 @@ export function parseExcelVehicles(arrayBuffer: ArrayBuffer): ParsedVehicleRow[]
     return -1;
   };
 
-  // Exclude date/expiry words from registration number to avoid capturing registration date/serial number columns
-  const regCol = findCol(['vehicle number', 'vehicle no', 'plate number', 'plate no', 'gadi number', 'gadi no', 'veh no', 'reg no', 'registration no', 'reg', 'gadi', 'vehicle', 'plate', 'number'], ['date', 'expiry', 'valid', 'time', 'issue', 'day']);
+  // Exclude date/expiry/sr/serial words from registration number to avoid capturing registration date or serial number columns
+  const regCol = findCol(
+    [
+      'vehicle number', 'vehicle no', 'vehicle no.', 'vehicle #',
+      'veh no', 'veh no.', 'veh #', 'veh number',
+      'reg no', 'reg no.', 'reg #', 'registration no', 'registration no.', 'registration number', 'registration #',
+      'truck no', 'truck no.', 'truck number', 'truck #', 'truck',
+      'trailer no', 'trailer #', 'trailer', 'prime mover', 'fleet no', 'fleet #',
+      'plate number', 'plate no', 'plate no.', 'plate #',
+      'gadi number', 'gadi no', 'gadi no.', 'gari no', 'gari number', 'gari #',
+      'reg', 'gadi', 'gari', 'vehicle', 'plate'
+    ],
+    ['date', 'expiry', 'valid', 'time', 'issue', 'day', 'driver', 'sr no', 's.no', 'sr.', 'serial', 'chassis', 'engine']
+  );
   const regDateCol = findCol(['registration date', 'reg date', 'issue date', 'reg_date', 'registered date'], []);
-  const catCol = findCol(['category', 'carrier', 'transit']);
+  const catCol = findCol(['category', 'carrier', 'transit', 'bound']);
   const typeCol = findCol(['type', 'body']);
   const sizeCol = findCol(['size', 'length', 'feet', 'ft']);
-  const engCol = findCol(['engine']);
-  const chassisKeywordIdx = findCol(['chassis']);
+  const engCol = findCol(['engine', 'eng no', 'engine no']);
+  const chassisKeywordIdx = findCol(['chassis', 'chs no', 'chassis no']);
   const chsCol = chassisKeywordIdx >= 0 ? chassisKeywordIdx : findCol(['chasis', 'chass']);
-  const transpCol = findCol(['transporter', 'company', 'fleet']);
-  const brokerCol = findCol(['broker', 'vendor']);
-  const driverCol = findCol(['driver', 'name']);
-  const cnicCol = findCol(['cnic', 'nic', 'id card', 'cnic no']);
-  const contactCol = findCol(['contact', 'phone', 'mobile', 'cell', 'phone no']);
+  const transpCol = findCol(['transporter', 'transporter name', 'company', 'fleet']);
+  const brokerCol = findCol(['broker', 'broker name', 'vendor']);
+  // Driver column: Strictly match explicit driver keywords. NEVER match 'name' alone (which matches transporter/broker/company)
+  const driverCol = findCol(
+    ['driver name', 'driver_name', 'driver fullname', 'driver full name', 'driver', 'chalak'],
+    ['transporter', 'broker', 'company', 'owner', 'father', 'vendor', 'client', 'customer', 'agent', 'contact', 'firm', 'group']
+  );
+  const cnicCol = findCol(
+    ['driver cnic', 'driver nic', 'driver id', 'driver_cnic'],
+    ['owner', 'broker', 'transporter', 'father']
+  );
+  const contactCol = findCol(
+    ['driver contact', 'driver phone', 'driver mobile', 'driver cell', 'driver_phone'],
+    ['broker', 'transporter', 'company', 'owner', 'office']
+  );
   const expiryCol = findCol(['expiry', 'valid', 'expire', 'exp', 'expiry date', 'validity'], ['registration', 'reg', 'start', 'issue']);
-  const weightCol = findCol(['weight', 'capacity', 'ton']);
+  const weightCol = findCol(['weight', 'capacity', 'ton', 'payload']);
 
   const results: ParsedVehicleRow[] = [];
 
@@ -232,11 +260,40 @@ export function parseExcelVehicles(arrayBuffer: ArrayBuffer): ParsedVehicleRow[]
     const row = jsonData[r];
     if (!Array.isArray(row) || row.length === 0) continue;
 
-    const rawReg = regCol >= 0 ? row[regCol] : row[0];
+    // Pick registration: use matched regCol or intelligent detection
+    let rawReg = regCol >= 0 ? row[regCol] : '';
+    if (!rawReg || String(rawReg).trim() === '' || /^\d{1,3}$/.test(String(rawReg).trim())) {
+      // Auto-scan row cells to find candidate registration number (avoid serial numbers like 1, 2, 3)
+      for (let ci = 0; ci < Math.min(row.length, 6); ci++) {
+        if (ci === regCol) continue;
+        const cellVal = String(row[ci] || '').trim();
+        // Skip pure 1-3 digit serial numbers
+        if (/^\d{1,3}$/.test(cellVal)) continue;
+        // Skip headers or labels
+        if (cellVal.toLowerCase().includes('date') || cellVal.toLowerCase().includes('exp')) continue;
+        // Check if string looks like vehicle plate/number
+        if (cellVal.length >= 3 && /[A-Za-z0-9]/.test(cellVal)) {
+          rawReg = cellVal;
+          break;
+        }
+      }
+    }
+    if (!rawReg && row.length > 0) {
+      rawReg = row[0];
+    }
     const cleanReg = String(rawReg || '').trim().toUpperCase();
 
-    // Skip empty rows or headers
-    if (!cleanReg || cleanReg.toLowerCase().includes('vehicle registration') || cleanReg.toLowerCase() === 'sr no' || cleanReg.toLowerCase() === 'serial') {
+    // Skip empty rows or header echoes
+    if (
+      !cleanReg ||
+      cleanReg.toLowerCase().includes('vehicle registration') ||
+      cleanReg.toLowerCase().includes('registration no') ||
+      cleanReg.toLowerCase().includes('truck no') ||
+      cleanReg.toLowerCase() === 'sr no' ||
+      cleanReg.toLowerCase() === 's.no' ||
+      cleanReg.toLowerCase() === 'serial' ||
+      /^\d{1,3}$/.test(cleanReg) // Skip pure serial number lines
+    ) {
       continue;
     }
 
@@ -254,9 +311,25 @@ export function parseExcelVehicles(arrayBuffer: ArrayBuffer): ParsedVehicleRow[]
     const transporter = transpCol >= 0 ? String(row[transpCol] || '').trim() : (row[6] ? String(row[6]).trim() : 'Direct Fleet');
     const broker = brokerCol >= 0 ? String(row[brokerCol] || '').trim() : transporter;
 
-    const driverName = driverCol >= 0 ? String(row[driverCol] || '').trim() : (row[8] ? String(row[8]).trim() : 'N/A');
-    const driverCnic = cnicCol >= 0 ? String(row[cnicCol] || '').trim() : (row[9] ? String(row[9]).trim() : 'N/A');
-    const driverContact = contactCol >= 0 ? String(row[contactCol] || '').trim() : (row[10] ? String(row[10]).trim() : 'N/A');
+    // Driver details are optional during fleet registration; do not guess from unrelated columns
+    let rawDriver = driverCol >= 0 ? String(row[driverCol] || '').trim() : '';
+    // Guard against accidental identical match to transporter or broker
+    if (
+      !rawDriver ||
+      rawDriver.toLowerCase() === transporter.toLowerCase() ||
+      rawDriver.toLowerCase() === broker.toLowerCase() ||
+      rawDriver.toLowerCase() === 'n/a' ||
+      rawDriver.toLowerCase() === 'none' ||
+      rawDriver.toLowerCase() === 'direct fleet'
+    ) {
+      rawDriver = '';
+    }
+
+    let rawCnic = cnicCol >= 0 ? String(row[cnicCol] || '').trim() : '';
+    if (rawCnic.toLowerCase() === 'n/a' || rawCnic.toLowerCase() === 'none') rawCnic = '';
+
+    let rawContact = contactCol >= 0 ? String(row[contactCol] || '').trim() : '';
+    if (rawContact.toLowerCase() === 'n/a' || rawContact.toLowerCase() === 'none') rawContact = '';
 
     let expiry = expiryCol >= 0 ? parseRobustDate(row[expiryCol]) : null;
     if (!expiry) {
@@ -276,9 +349,9 @@ export function parseExcelVehicles(arrayBuffer: ArrayBuffer): ParsedVehicleRow[]
       chassisNo: chassisNo || 'N/A',
       transporterName: transporter || 'Direct Fleet',
       brokerName: broker || transporter || 'Direct Fleet',
-      driverName: driverName || 'N/A',
-      driverCnic: driverCnic || 'N/A',
-      driverContact: driverContact || 'N/A',
+      driverName: rawDriver,
+      driverCnic: rawCnic,
+      driverContact: rawContact,
       validationExpiryDate: expiry,
       registrationDate: regDate,
       weightCapacity
@@ -386,9 +459,19 @@ export function parseTextOrCsvVehicles(text: string): ParsedVehicleRow[] {
     const chassisNo = cols[5] || 'N/A';
     const transporter = cols[6] || 'Direct Fleet';
     const broker = cols[7] || transporter;
-    const driverName = cols[8] || 'N/A';
-    const driverCnic = cols[9] || 'N/A';
-    const driverContact = cols[10] || 'N/A';
+    let driverName = cols[8] || '';
+    if (
+      driverName.toLowerCase() === 'n/a' ||
+      driverName.toLowerCase() === 'none' ||
+      driverName.toLowerCase() === transporter.toLowerCase() ||
+      driverName.toLowerCase() === broker.toLowerCase()
+    ) {
+      driverName = '';
+    }
+    let driverCnic = cols[9] || '';
+    if (driverCnic.toLowerCase() === 'n/a' || driverCnic.toLowerCase() === 'none') driverCnic = '';
+    let driverContact = cols[10] || '';
+    if (driverContact.toLowerCase() === 'n/a' || driverContact.toLowerCase() === 'none') driverContact = '';
     let expiry = cols[11] || '';
 
     if (!expiry || !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) {

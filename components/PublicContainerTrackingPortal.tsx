@@ -455,7 +455,10 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
 
   const handleCopyShareLink = () => {
     if (typeof window === 'undefined') return;
-    const shareUrl = `${window.location.origin}${window.location.pathname}?q=${encodeURIComponent(activeSearch)}`;
+    const query = encodeURIComponent(activeSearch);
+    const shareUrl = window.location.hostname.includes('status.makpk.online')
+      ? `https://status.makpk.online?q=${query}`
+      : `${window.location.origin}/?mode=status&q=${query}`;
     navigator.clipboard.writeText(shareUrl).then(() => {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2500);

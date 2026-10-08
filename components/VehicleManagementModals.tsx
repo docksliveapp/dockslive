@@ -49,12 +49,12 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
   };
 
   const handleDownloadSample = () => {
-    const sampleHeaders = 'RegistrationNumber,Category,Type,Size,EngineNo,ChassisNo,TransporterBrokerName,DriverName,DriverCnic,DriverContact,ExpiryDate';
+    const sampleHeaders = 'RegistrationNumber,Category,Type,Size,Capacity,EngineNo,ChassisNo,TransporterBrokerName,ExpiryDate';
     const sampleData = [
       sampleHeaders,
-      'TLP-101,Bonded Carrier,Flatbed,40ft,ENG-99881,CHS-44332,Naveed Goods Forwarding,Mohammad Tariq,42101-1234567-1,0300-1122334,2026-12-31',
-      'KBL-505,Afghan Transit,Lowbed,45ft,ENG-55443,CHS-88771,Khyber Logistics,Gul Khan,17301-7654321-3,0333-9988776,2026-11-30',
-      'TIR-808,TIR,Container Carrier,40ft,ENG-11223,CHS-99001,Indus International,Rashid Ali,35201-9988776-5,0321-4455667,2027-01-15'
+      'TLP-101,Bonded Carrier,Flatbed,40ft,40 Ton,ENG-99881,CHS-44332,Al-Madina Goods Transport,2026-12-31',
+      'KBL-505,Afghan Transit,Lowbed,45ft,45 Ton,ENG-55443,CHS-88771,Khyber Logistics,2026-11-30',
+      'TIR-808,TIR,Container Carrier,40ft,38 Ton,ENG-11223,CHS-99001,Indus International,2027-01-15'
     ].join('\n');
 
     const blob = new Blob([sampleData], { type: 'text/csv;charset=utf-8;' });
@@ -95,7 +95,7 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
         setError(result.error);
         setParsedRows([]);
       } else if (result.rows.length === 0) {
-        setError(`No vehicle records could be identified in "${file.name}". Please ensure your file has columns like Registration Number, Category, Type, Driver, etc.`);
+        setError(`No vehicle records could be identified in "${file.name}". Please ensure the file contains vehicle registration numbers (e.g. Registration No, Truck No, Plate No) or download our sample template.`);
         setParsedRows([]);
       } else {
         setDetectedFormat(result.fileType);
@@ -150,7 +150,7 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
             <div className="space-y-0.5">
               <span className="text-xs font-bold text-emerald-300 block">Download Official Fleet Import Templates</span>
               <p className="text-[11px] text-emerald-200/80">
-                Prepared with standard fields: Registration No, Category, Type, Size, Engine, Chassis, Driver, CNIC, Expiry Date
+                Standard fleet fields: Reg No, Category, Type, Size, Capacity, Engine, Chassis, Transporter/Broker, Expiry. (Drivers are assigned dynamically per case workflow).
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -219,7 +219,7 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
                   parseCsvContent(e.target.value);
                 }
               }}
-              placeholder="TLP-101,Bonded Carrier,Flatbed,40ft,ENG-99881,CHS-44332,Naveed Goods,Tariq,42101-1234567-1,0300-1122334,2026-12-31"
+              placeholder="TLP-101,Bonded Carrier,Flatbed,40ft,ENG-99881,CHS-44332,Naveed Goods,Al-Madina Goods,2026-12-31"
               className="w-full glass-input rounded-xl p-3 text-xs font-mono outline-none border border-white/10"
             />
           </div>
@@ -245,8 +245,8 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
                     <tr>
                       <th className="p-2.5">Vehicle Reg No</th>
                       <th className="p-2.5">Category</th>
+                      <th className="p-2.5">Capacity / Specs</th>
                       <th className="p-2.5">Transporter / Broker</th>
-                      <th className="p-2.5">Driver</th>
                       <th className="p-2.5">Expiry</th>
                     </tr>
                   </thead>
@@ -255,14 +255,17 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
                       <tr key={idx} className="hover:bg-white/5">
                         <td className="p-2.5 font-mono font-bold text-white">{row.registrationNumber}</td>
                         <td className="p-2.5">{row.category} ({row.size})</td>
+                        <td className="p-2.5 text-gray-300">{row.weightCapacity || row.type || 'Standard'}</td>
                         <td className="p-2.5">{row.brokerName || row.transporterName}</td>
-                        <td className="p-2.5">{row.driverName}</td>
                         <td className="p-2.5 font-mono text-gray-400">{row.validationExpiryDate}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              <p className="text-[11px] text-gray-400 text-center italic">
+                * Note: Driver details are not required during fleet registration; drivers are dynamically assigned when a case reaches Vehicle Assign workflow.
+              </p>
               {parsedRows.length > 15 && (
                 <p className="text-[11px] text-gray-500 text-center">+ {parsedRows.length - 15} more records</p>
               )}
