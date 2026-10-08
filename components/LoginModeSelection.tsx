@@ -11,7 +11,9 @@ import {
   CheckCircle2,
   ArrowRight,
   HelpCircle,
-  Crown
+  Crown,
+  Package,
+  Truck
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { useParentGroup, isUploadedLogo } from '../services/companyService';
@@ -26,26 +28,33 @@ export interface SelectedModePayload {
   clientName?: string;
   targetView: string;
   displayName: string;
+  allowedCompanies?: string[];
+  isGlobalAdmin?: boolean;
 }
 
 interface LoginModeSelectionProps {
   onSelectMode: (payload: SelectedModePayload) => void;
+  onOpenPublicTracker?: () => void;
+  onOpenVehicleTracker?: () => void;
 }
 
 // Clean discrete demo role helper for quick testing (collapsed by default)
 const DEMO_TESTING_ACCOUNTS = [
-  { id: 'admin', userId: 'admin', password: 'dpl01234', name: 'System Administrator', role: UserRole.ADMIN, designation: 'System Administrator' },
-  { id: 'loadingstaff', userId: 'loadingstaff', password: 'dpl01234', name: 'Loading Port Staff', role: UserRole.LOADING_PORT_STAFF, designation: 'Loading Port Customs Inspector' },
-  { id: 'destinationstaff', userId: 'destinationstaff', password: 'dpl01234', name: 'Destination Port Staff', role: UserRole.DESTINATION_PORT_STAFF, designation: 'Border Terminal Officer' },
-  { id: 'unloadingstaff', userId: 'unloadingstaff', password: 'dpl01234', name: 'Unloading Port Staff', role: UserRole.UNLOADING_PORT_STAFF, designation: 'Unloading Port Clearance Staff' },
-  { id: 'finance', userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, designation: 'Finance Manager' },
-  { id: 'casemanager', userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, designation: 'Operations Manager' },
-  { id: 'vehiclemanager', userId: 'vehiclemanager', password: 'dpl01234', name: 'Fleet Manager', role: UserRole.VEHICLE_MANAGER, designation: 'Fleet & Vehicle Manager' },
-  { id: 'transporter', userId: 'transporter', password: 'dpl01234', name: 'Transporter Portal', role: UserRole.TRANSPORTER, designation: 'Goods Transporter' },
-  { id: 'client', userId: 'client', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, designation: 'Corporate Importer' }
+  { id: 'admin', userId: 'admin', password: 'dpl01234', name: 'Main Group Administrator', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'Main Group Admin (All 4 Companies)', isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'] },
+  { id: 'admin_docks', userId: 'admin_docks', password: 'dpl01234', name: 'Docks Company Admin', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'Company Admin (Docks Only)', isGlobalAdmin: false, allowedCompanies: ['docks'] },
+  { id: 'fin_fleet', userId: 'fin_fleet', password: 'dpl01234', name: 'Finance & Vehicle Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER, UserRole.VEHICLE_MANAGER], designation: 'Multi-Role: Finance + Fleet', isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'] },
+  { id: 'ops_fleet', userId: 'ops_fleet', password: 'dpl01234', name: 'Operations & Fleet Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER, UserRole.VEHICLE_MANAGER], designation: 'Multi-Role: Ops + Fleet', isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'] },
+  { id: 'loadingstaff', userId: 'loadingstaff', password: 'dpl01234', name: 'Loading Port Staff', role: UserRole.LOADING_PORT_STAFF, roles: [UserRole.LOADING_PORT_STAFF], designation: 'Loading Port Customs Inspector', isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'] },
+  { id: 'destinationstaff', userId: 'destinationstaff', password: 'dpl01234', name: 'Destination Port Staff', role: UserRole.DESTINATION_PORT_STAFF, roles: [UserRole.DESTINATION_PORT_STAFF], designation: 'Border Terminal Officer', isGlobalAdmin: false, allowedCompanies: ['docks'] },
+  { id: 'transporter', userId: 'transporter', password: 'dpl01234', name: 'Transporter Portal', role: UserRole.TRANSPORTER, roles: [UserRole.TRANSPORTER], designation: 'Goods Transporter' },
+  { id: 'client', userId: 'client', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer' }
 ];
 
-export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelectMode }) => {
+export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ 
+  onSelectMode,
+  onOpenPublicTracker,
+  onOpenVehicleTracker
+}) => {
   const { parentGroup } = useParentGroup();
 
   // Credentials Form State
@@ -106,6 +115,12 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
         safeAppStorage.setItem('dpl_current_user_station', (user as any).station);
       }
 
+      const userAllowedCompanies: string[] = (user as any).allowedCompanies || (user.isGlobalAdmin ? ['docks', 'truckit', 'muhib', 'vantage'] : ['docks']);
+      const isUserGlobalAdmin: boolean = Boolean(user.isGlobalAdmin);
+
+      safeAppStorage.setItem('dpl_allowed_companies', JSON.stringify(userAllowedCompanies));
+      safeAppStorage.setItem('dpl_is_global_admin', isUserGlobalAdmin ? 'true' : 'false');
+
       let targetView = 'dashboard';
 
       if (userRole === UserRole.CLIENT) {
@@ -130,7 +145,9 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
         designation: user.designation,
         clientName: user.clientName || (userRole === UserRole.CLIENT ? user.name : 'Client Portal'),
         targetView: targetView,
-        displayName: user.name || user.userId || 'Staff User'
+        displayName: user.name || user.userId || 'Staff User',
+        allowedCompanies: userAllowedCompanies,
+        isGlobalAdmin: isUserGlobalAdmin
       });
     } catch (err: any) {
       console.error('Login failure:', err);
@@ -152,7 +169,12 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
       const userRole = (authUser.role as UserRole) || user.role || UserRole.ADMIN;
       const userRoles = (authUser.roles && authUser.roles.length > 0) ? authUser.roles : [userRole];
 
+      const userAllowedCompanies: string[] = (authUser as any).allowedCompanies || (user as any).allowedCompanies || (authUser.isGlobalAdmin || (user as any).isGlobalAdmin ? ['docks', 'truckit', 'muhib', 'vantage'] : ['docks']);
+      const isUserGlobalAdmin: boolean = Boolean(authUser.isGlobalAdmin ?? (user as any).isGlobalAdmin);
+
       safeAppStorage.setItem('dpl_user_roles', JSON.stringify(userRoles));
+      safeAppStorage.setItem('dpl_allowed_companies', JSON.stringify(userAllowedCompanies));
+      safeAppStorage.setItem('dpl_is_global_admin', isUserGlobalAdmin ? 'true' : 'false');
       if (authUser.designation) {
         safeAppStorage.setItem('dpl_user_designation', authUser.designation);
       }
@@ -176,7 +198,9 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ onSelect
         designation: authUser.designation || user.designation,
         clientName: authUser.clientName || (userRole === UserRole.CLIENT ? authUser.name : 'Client Portal'),
         targetView: targetView,
-        displayName: authUser.name || user.name || authUser.userId || 'Staff User'
+        displayName: authUser.name || user.name || authUser.userId || 'Staff User',
+        allowedCompanies: userAllowedCompanies,
+        isGlobalAdmin: isUserGlobalAdmin
       });
     } catch (err: any) {
       console.error('Quick login error:', err);

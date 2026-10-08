@@ -133,7 +133,12 @@ export function subscribeToCases(
     // Persist merged cases to storage and IndexedDB
     safeAppStorage.setJSON('dpl_live_cases', finalCases);
     backupCasesToIndexedDB(finalCases).catch(() => {});
-    onData(finalCases);
+    
+    const active = getActiveCompanyId();
+    const emittedCases = options?.allCompanies
+      ? finalCases
+      : finalCases.filter(c => matchesActiveCompany(c.companyId, active));
+    onData(emittedCases);
   };
 
   const unsubCompany = subscribeToActiveCompany(() => {
@@ -1067,20 +1072,26 @@ export async function updateNotificationInFirestore(notif: AppNotification): Pro
 // ==========================================
 
 export const DEFAULT_DATABASE_USERS: AppUser[] = [
-  { id: 1, userId: 'admin', password: 'dpl01234', name: 'System Administrator', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'System Administrator', contact: '0300-1234567', email: 'admin@docks.com', status: 'ACTIVE', isAdmin: true, baseSalary: 0 },
-  { id: 2, userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER], designation: 'Finance Manager', contact: '0333-5554444', email: 'finance@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 0 },
-  { id: 3, userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER], designation: 'Operations Manager', contact: '0321-9876543', email: 'casemanager@docks.com', status: 'ACTIVE', isAdmin: false, baseSalary: 0 },
-  { id: 4, userId: 'vehiclemanager', password: 'dpl01234', name: 'Vehicles Manager', role: UserRole.VEHICLE_MANAGER, roles: [UserRole.VEHICLE_MANAGER], designation: 'Fleet & Vehicle Manager', contact: '0301-2233445', email: 'transport@docks.com', status: 'ACTIVE', baseSalary: 0 },
-  { id: 5, userId: 'officestaff', password: 'dpl01234', name: 'Office Staff', role: UserRole.OFFICE_STAFF, roles: [UserRole.OFFICE_STAFF], designation: 'Office Staff Coordinator', contact: '0312-7788990', email: 'office@docks.com', status: 'ACTIVE', baseSalary: 0 },
+  { id: 1, userId: 'admin', password: 'dpl01234', name: 'System Administrator (Main Group)', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'admin@docks.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
+  { id: 2, userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER], designation: 'Finance Manager', contact: '0333-5554444', email: 'finance@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage'], baseSalary: 0 },
+  { id: 3, userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER], designation: 'Operations Manager', contact: '0321-9876543', email: 'casemanager@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'], baseSalary: 0 },
+  { id: 4, userId: 'vehiclemanager', password: 'dpl01234', name: 'Vehicles Manager', role: UserRole.VEHICLE_MANAGER, roles: [UserRole.VEHICLE_MANAGER], designation: 'Fleet & Vehicle Manager', contact: '0301-2233445', email: 'transport@docks.com', status: 'ACTIVE', isGlobalAdmin: false, allowedCompanies: ['truckit', 'docks'], baseSalary: 0 },
+  { id: 5, userId: 'officestaff', password: 'dpl01234', name: 'Office Staff', role: UserRole.OFFICE_STAFF, roles: [UserRole.OFFICE_STAFF], designation: 'Office Staff Coordinator', contact: '0312-7788990', email: 'office@docks.com', status: 'ACTIVE', isGlobalAdmin: false, allowedCompanies: ['docks'], baseSalary: 0 },
   { id: 6, userId: 'transporter', password: 'dpl01234', name: 'Transporter Portal', role: UserRole.TRANSPORTER, roles: [UserRole.TRANSPORTER], designation: 'Goods Transporter / Fleet Partner', contact: '0300-8889999', email: 'transporter@docks.com', status: 'ACTIVE', baseSalary: 0 },
   { id: 7, userId: 'client', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines', baseSalary: 0 },
   { id: 8, userId: 'vendor', password: 'dpl01234', name: 'Vendor Portal', role: UserRole.VENDOR, roles: [UserRole.VENDOR], designation: 'Supplier / Service Vendor', contact: '0300-5556677', email: 'vendor@docks.com', status: 'ACTIVE', clientName: 'Al-Makkah Logistics & Equipment Services', baseSalary: 0 },
   // Compatibility aliases
   { id: 9, userId: 'client01', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client01@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines', baseSalary: 0 },
   // Port Staff Operational Accounts
-  { id: 10, userId: 'loadingstaff', password: 'dpl01234', name: 'Loading Port Staff', role: UserRole.LOADING_PORT_STAFF, roles: [UserRole.LOADING_PORT_STAFF], designation: 'Loading Port Customs Inspector', contact: '0300-4455667', email: 'loading@docks.com', status: 'ACTIVE', baseSalary: 0 },
-  { id: 11, userId: 'destinationstaff', password: 'dpl01234', name: 'Destination Port Staff', role: UserRole.DESTINATION_PORT_STAFF, roles: [UserRole.DESTINATION_PORT_STAFF], designation: 'Border Terminal Customs Officer', contact: '0300-7788991', email: 'destination@docks.com', status: 'ACTIVE', baseSalary: 0 },
-  { id: 12, userId: 'unloadingstaff', password: 'dpl01234', name: 'Unloading Port Staff', role: UserRole.UNLOADING_PORT_STAFF, roles: [UserRole.UNLOADING_PORT_STAFF], designation: 'Unloading Port Clearance Staff', contact: '0300-1122334', email: 'unloading@docks.com', status: 'ACTIVE', baseSalary: 0 }
+  { id: 10, userId: 'loadingstaff', password: 'dpl01234', name: 'Loading Port Staff', role: UserRole.LOADING_PORT_STAFF, roles: [UserRole.LOADING_PORT_STAFF], designation: 'Loading Port Customs Inspector', contact: '0300-4455667', email: 'loading@docks.com', status: 'ACTIVE', isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'], baseSalary: 0 },
+  { id: 11, userId: 'destinationstaff', password: 'dpl01234', name: 'Destination Port Staff', role: UserRole.DESTINATION_PORT_STAFF, roles: [UserRole.DESTINATION_PORT_STAFF], designation: 'Border Terminal Customs Officer', contact: '0300-7788991', email: 'destination@docks.com', status: 'ACTIVE', isGlobalAdmin: false, allowedCompanies: ['docks'], baseSalary: 0 },
+  { id: 12, userId: 'unloadingstaff', password: 'dpl01234', name: 'Unloading Port Staff', role: UserRole.UNLOADING_PORT_STAFF, roles: [UserRole.UNLOADING_PORT_STAFF], designation: 'Unloading Port Clearance Staff', contact: '0300-1122334', email: 'unloading@docks.com', status: 'ACTIVE', isGlobalAdmin: false, allowedCompanies: ['docks'], baseSalary: 0 },
+  // Company Admin example: Single Company Admin (e.g. Docks only)
+  { id: 13, userId: 'admin_docks', password: 'dpl01234', name: 'Docks Company Admin', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'Docks Admin (Single Company)', contact: '0300-9988776', email: 'admindocks@docks.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: false, allowedCompanies: ['docks'], baseSalary: 0 },
+  // Multi-role example: Operations + Vehicle Management
+  { id: 14, userId: 'ops_fleet', password: 'dpl01234', name: 'Operations & Fleet Coordinator', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER, UserRole.VEHICLE_MANAGER], designation: 'Ops & Fleet Manager', contact: '0300-4433221', email: 'opsfleet@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'], baseSalary: 0 },
+  // Multi-role example: Finance + Vehicle Management
+  { id: 15, userId: 'fin_fleet', password: 'dpl01234', name: 'Finance & Transport Billing', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER, UserRole.VEHICLE_MANAGER], designation: 'Finance & Vehicle Manager', contact: '0300-5544332', email: 'finfleet@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'], baseSalary: 0 }
 ];
 
 let hasSeededInitialUsers = false;

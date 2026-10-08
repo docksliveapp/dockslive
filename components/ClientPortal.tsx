@@ -198,13 +198,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     return a === b || a.includes(b) || b.includes(a);
   };
 
-  // Filtered Client Cases
+  // Filtered Client Cases - strictly isolated to current client
   const clientCases = useMemo(() => {
-    const list = casesList.filter(c => {
+    if (!selectedClientName || selectedClientName === 'All Clients' || selectedClientName === 'Client Portal') {
+      return casesList;
+    }
+    return casesList.filter(c => {
       const cClient = c.clientName || c.client || (c.extractedData as any)?.cargoOwner || (c.extractedData as any)?.consigneeName || '';
       return isMatchClient(cClient);
     });
-    return list.length > 0 ? list : casesList;
   }, [casesList, selectedClientName]);
 
   // Partition cases into Pending and Complete

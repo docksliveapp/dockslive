@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   LayoutDashboard, FolderKanban, Users, Truck, Settings, FileText, Bell, LogOut, Menu,
   X, Check, AlertCircle, AlertTriangle, Info, Trash2, Loader2, Maximize2, Minimize2, Upload,
-  ShieldCheck, UserCircle, RefreshCw, HardDrive, MapPin, FolderArchive, Building2, ChevronDown
+  ShieldCheck, UserCircle, RefreshCw, HardDrive, MapPin, FolderArchive, Building2, ChevronDown, Package, ShieldAlert
 } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import CaseManagement from './components/CaseManagement';
@@ -16,7 +16,7 @@ import GoogleDriveManager from './components/GoogleDriveManager';
 import SplashScreen from './components/SplashScreen';
 import LoginModeSelection, { SelectedModePayload } from './components/LoginModeSelection';
 import CompanyWorkspaceSelector from './components/CompanyWorkspaceSelector';
-import { useActiveCompany, setActiveCompany, isUploadedLogo, getCompanyUploadedLogo } from './services/companyService';
+import { useActiveCompany, setActiveCompany, isUploadedLogo, getCompanyUploadedLogo, CompanyId } from './services/companyService';
 import GoldenAmountWidget from './components/GoldenAmountWidget';
 import ClientPortal from './components/ClientPortal';
 import { LoadingPortStaffPortal } from './components/LoadingPortStaffPortal';
@@ -37,8 +37,48 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { appLifecycle } from './services/lifecycle';
 import { useBranding } from './services/brandingService';
 import { VirtualizedList } from './components/VirtualizedList';
+import PublicContainerTrackingPortal from './components/PublicContainerTrackingPortal';
+import PublicVehicleTrackingPortal from './components/PublicVehicleTrackingPortal';
+
+const isContainerTrackingDomainOrRoute = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  try {
+    const host = window.location.hostname.toLowerCase();
+    const path = window.location.pathname.toLowerCase();
+    if (host.includes('status.makpk.online') || host.includes('sttatus.makpk.online') || (host.startsWith('status.') && !host.includes('vehicle')) || host.startsWith('sttatus.')) return true;
+    if (path.startsWith('/status') || path.startsWith('/sttatus') || path.startsWith('/container') || path.startsWith('/tracking') || path.startsWith('/track')) return true;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') === 'status' || params.get('mode') === 'sttatus' || params.get('mode') === 'tracking' || params.get('status') === '1' || params.get('portal') === 'status' || params.get('portal') === 'sttatus' || params.get('portal') === 'container') return true;
+    if (params.has('container') || params.has('bl') || params.has('caseno')) return true;
+  } catch (_) {}
+  return false;
+};
+
+const isVehicleTrackingDomainOrRoute = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  try {
+    const host = window.location.hostname.toLowerCase();
+    const path = window.location.pathname.toLowerCase();
+    if (host.includes('vehicle.makpk.online') || host.startsWith('vehicle.')) return true;
+    if (path.startsWith('/vehicle') || path.startsWith('/vehicles') || path.startsWith('/fleet-status')) return true;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') === 'vehicle' || params.get('mode') === 'fleet' || params.get('vehicle') === '1' || params.get('portal') === 'vehicle') return true;
+    if (params.has('plate') || params.has('reg') || (params.has('vehicle') && params.get('vehicle') !== '1')) return true;
+  } catch (_) {}
+  return false;
+};
 
 const App: React.FC = () => {
+  // Public Standalone Tracking Portals: status.makpk.online (or sttatus.makpk.online) & vehicle.makpk.online
+  const [isPublicContainerTrackingOpen, setIsPublicContainerTrackingOpen] = useState<boolean>(() => isContainerTrackingDomainOrRoute());
+  const [isPublicVehicleTrackingOpen, setIsPublicVehicleTrackingOpen] = useState<boolean>(() => isVehicleTrackingDomainOrRoute());
+
+  const isDedicatedContainerSubdomain = typeof window !== 'undefined' && (
+    window.location.hostname.toLowerCase().includes('status.makpk.online') || 
+    window.location.hostname.toLowerCase().includes('sttatus.makpk.online')
+  );
+  const isDedicatedVehicleSubdomain = typeof window !== 'undefined' && window.location.hostname.toLowerCase().includes('vehicle.makpk.online');
+
   // Splash Screen & Login Area State:
   // On every app start, reload, or browser refresh:
   // 1. Splash screen ALWAYS displays first
@@ -90,6 +130,21 @@ const App: React.FC = () => {
   });
   const [currentClientName, setCurrentClientName] = useState(() => {
     return safeAppStorage.getItem('dpl_client_name') || '';
+  });
+
+  // Company Rights & Group Admin State
+  const [isGlobalAdmin, setIsGlobalAdmin] = useState<boolean>(() => {
+    return safeAppStorage.getItem('dpl_is_global_admin') === 'true';
+  });
+  const [allowedCompanies, setAllowedCompanies] = useState<string[]>(() => {
+    const saved = safeAppStorage.getItem('dpl_allowed_companies');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (_) {}
+    }
+    return ['docks', 'muhib', 'vantage', 'truckit'];
   });
 
   // Session Toast for workflow restoration feedback
@@ -387,14 +442,91 @@ const App: React.FC = () => {
       case 'company_documents': return <CompanyDocuments />;
       case 'cases': return <CaseManagement initialFilter={navigationFilter} clearFilter={() => setNavigationFilter(null)} onActionComplete={handleActionComplete} customLogo={customLogo} userRole={currentRole} userRoles={currentRoles} currentClientName={currentClientName} />;
       case 'drive': return <GoogleDriveManager />;
-      case 'finance': return <Finance initialFilter={navigationFilter} onActionComplete={handleActionComplete} customLogo={customLogo} />;
-      case 'vehicles': return <VehicleManagement initialFilter={navigationFilter} clearFilter={() => setNavigationFilter(null)} userRole={currentRole} userRoles={currentRoles} />;
+      case 'finance': {
+        const canAccessFinance = currentRoles.includes(UserRole.ADMIN) || currentRoles.includes(UserRole.FINANCE_MANAGER) || currentRole === UserRole.ADMIN || currentRole === UserRole.FINANCE_MANAGER;
+        if (!canAccessFinance) {
+          return (
+            <div className="p-8 text-center bg-slate-900/60 rounded-2xl border border-white/10 m-6 max-w-lg mx-auto">
+              <ShieldAlert className="w-12 h-12 text-amber-400 mx-auto mb-3" />
+              <h3 className="text-lg font-bold text-white mb-1">Access Restricted</h3>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                You do not have authorization to view Company Financials. Company financials are strictly accessible to Finance Managers and Group Administrators.
+              </p>
+            </div>
+          );
+        }
+        return <Finance initialFilter={navigationFilter} onActionComplete={handleActionComplete} customLogo={customLogo} />;
+      }
+      case 'vehicles': {
+        const canAccessVehicles = currentRoles.includes(UserRole.ADMIN) || currentRole === UserRole.ADMIN || currentRoles.includes(UserRole.VEHICLE_MANAGER) || currentRole === UserRole.VEHICLE_MANAGER || currentRole === UserRole.TRANSPORTER;
+        if (!canAccessVehicles) {
+          return (
+            <div className="p-8 text-center bg-slate-900/60 rounded-2xl border border-white/10 m-6 max-w-lg mx-auto">
+              <ShieldAlert className="w-12 h-12 text-rose-400 mx-auto mb-3" />
+              <h3 className="text-lg font-bold text-white mb-1">Access Restricted</h3>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                Fleet management is restricted to Vehicle Managers and Fleet Coordinators.
+              </p>
+            </div>
+          );
+        }
+        return <VehicleManagement initialFilter={navigationFilter} clearFilter={() => setNavigationFilter(null)} userRole={currentRole} userRoles={currentRoles} />;
+      }
       case 'available_vehicles': return <AvailableVehiclesView userRole={currentRole} />;
-      case 'users': return <UserManagement />;
+      case 'users': {
+        const canAccessUsers = currentRoles.includes(UserRole.ADMIN) || currentRole === UserRole.ADMIN;
+        if (!canAccessUsers) {
+          return (
+            <div className="p-8 text-center bg-slate-900/60 rounded-2xl border border-white/10 m-6 max-w-lg mx-auto">
+              <ShieldAlert className="w-12 h-12 text-purple-400 mx-auto mb-3" />
+              <h3 className="text-lg font-bold text-white mb-1">Access Restricted</h3>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                User Management is restricted to Administrators only.
+              </p>
+            </div>
+          );
+        }
+        return <UserManagement />;
+      }
       case 'settings': return <AppSettings onReplaySplash={() => { setIsReplaySplashOnly(true); setShowSplash(true); }} />;
       default: return <Dashboard onNavigate={handleNavigate} />;
     }
   };
+
+  // Dedicated Public Tracking Portals (status.makpk.online & vehicle.makpk.online)
+  if (isPublicContainerTrackingOpen) {
+    return (
+      <ErrorBoundary>
+        <PublicContainerTrackingPortal
+          onExitPortal={!isDedicatedContainerSubdomain ? () => {
+            setIsPublicContainerTrackingOpen(false);
+            setShowModeSelection(true);
+          } : undefined}
+          onSwitchToVehicleTracker={() => {
+            setIsPublicContainerTrackingOpen(false);
+            setIsPublicVehicleTrackingOpen(true);
+          }}
+        />
+      </ErrorBoundary>
+    );
+  }
+
+  if (isPublicVehicleTrackingOpen) {
+    return (
+      <ErrorBoundary>
+        <PublicVehicleTrackingPortal
+          onExitPortal={!isDedicatedVehicleSubdomain ? () => {
+            setIsPublicVehicleTrackingOpen(false);
+            setShowModeSelection(true);
+          } : undefined}
+          onSwitchToContainerTracker={() => {
+            setIsPublicVehicleTrackingOpen(false);
+            setIsPublicContainerTrackingOpen(true);
+          }}
+        />
+      </ErrorBoundary>
+    );
+  }
 
   if (showSplash) {
     return (
@@ -417,6 +549,8 @@ const App: React.FC = () => {
     return (
       <ErrorBoundary>
         <LoginModeSelection 
+          onOpenPublicTracker={() => setIsPublicContainerTrackingOpen(true)}
+          onOpenVehicleTracker={() => setIsPublicVehicleTrackingOpen(true)}
           onSelectMode={(payload: SelectedModePayload) => {
             setCurrentRole(payload.role);
             const roles = payload.roles && payload.roles.length > 0 ? payload.roles : [payload.role];
@@ -447,15 +581,31 @@ const App: React.FC = () => {
             safeAppStorage.setItem('dpl_last_location_role', payload.role);
             safeAppStorage.setItem('dpl_session_active', 'true');
             setShowModeSelection(false);
-            const shouldPickCompany = !(
-              payload.role === UserRole.TRANSPORTER || 
-              payload.role === UserRole.CLIENT || 
-              payload.role === UserRole.VENDOR ||
-              payload.role === UserRole.LOADING_PORT_STAFF || 
-              payload.role === UserRole.DESTINATION_PORT_STAFF || 
-              payload.role === UserRole.UNLOADING_PORT_STAFF
-            );
-            setShowCompanySelection(shouldPickCompany);
+
+            const userAllowed = payload.allowedCompanies && payload.allowedCompanies.length > 0 
+              ? payload.allowedCompanies 
+              : (payload.isGlobalAdmin ? ['docks', 'truckit', 'muhib', 'vantage'] : ['docks']);
+            const userIsGlobal = Boolean(payload.isGlobalAdmin);
+
+            setAllowedCompanies(userAllowed);
+            setIsGlobalAdmin(userIsGlobal);
+
+            // If user has only 1 company assigned (e.g. Single Company Admin),
+            // auto-set active company to that single company and skip selection!
+            if (!userIsGlobal && userAllowed.length === 1) {
+              setActiveCompany(userAllowed[0] as CompanyId);
+              setShowCompanySelection(false);
+            } else {
+              const shouldPickCompany = !(
+                payload.role === UserRole.TRANSPORTER || 
+                payload.role === UserRole.CLIENT || 
+                payload.role === UserRole.VENDOR ||
+                payload.role === UserRole.LOADING_PORT_STAFF || 
+                payload.role === UserRole.DESTINATION_PORT_STAFF || 
+                payload.role === UserRole.UNLOADING_PORT_STAFF
+              );
+              setShowCompanySelection(shouldPickCompany);
+            }
           }}
         />
       </ErrorBoundary>
@@ -469,6 +619,8 @@ const App: React.FC = () => {
           userName={safeAppStorage.getItem('dpl_current_user_name') || 'Staff User'}
           userRoleTitle={currentDesignation || (currentRole as string)}
           onSignOut={handleSignOut}
+          allowedCompanies={allowedCompanies}
+          isGlobalAdmin={isGlobalAdmin}
           onSelectCompany={(selectedId) => {
             setActiveCompany(selectedId);
             setShowCompanySelection(false);
@@ -524,6 +676,8 @@ const App: React.FC = () => {
               onClose={() => setIsCompanyModalOpen(false)}
               userName={safeAppStorage.getItem('dpl_current_user_name') || 'Staff User'}
               userRoleTitle={currentDesignation || (currentRole as string)}
+              allowedCompanies={allowedCompanies}
+              isGlobalAdmin={isGlobalAdmin}
               onSelectCompany={(selectedId) => {
                 setActiveCompany(selectedId);
                 setIsCompanyModalOpen(false);
@@ -821,6 +975,28 @@ const App: React.FC = () => {
 
           {/* Right: Notifications & LogOut (Amount Counter moved to Sidebar next to Finance) */}
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 justify-end shrink-0">
+            {/* Quick Public Trackers Preview Buttons for Staff */}
+            <div className="hidden xl:flex items-center gap-1.5 mr-1">
+              <button
+                type="button"
+                onClick={() => setIsPublicContainerTrackingOpen(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-amber-300 hover:text-white border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                title="Preview Public Container Tracker (status.makpk.online)"
+              >
+                <Package size={13} className="text-amber-400" />
+                <span>status.</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsPublicVehicleTrackingOpen(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-cyan-300 hover:text-white border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                title="Preview Public Vehicle Tracker (vehicle.makpk.online)"
+              >
+                <Truck size={13} className="text-cyan-400" />
+                <span>vehicle.</span>
+              </button>
+            </div>
+
             {/* Live Real-time Notification Center */}
             <LiveNotificationCenter
               currentRole={currentRole}
@@ -894,6 +1070,8 @@ const App: React.FC = () => {
             onClose={() => setIsCompanyModalOpen(false)}
             userName={safeAppStorage.getItem('dpl_current_user_name') || 'Staff User'}
             userRoleTitle={currentDesignation || (currentRole as string)}
+            allowedCompanies={allowedCompanies}
+            isGlobalAdmin={isGlobalAdmin}
             onSelectCompany={(selectedId) => {
               setActiveCompany(selectedId);
               setIsCompanyModalOpen(false);

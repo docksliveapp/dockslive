@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Building2, 
   CheckCircle2, 
@@ -10,7 +10,9 @@ import {
   Anchor,
   Crown,
   LogOut,
-  ArrowRight
+  ArrowRight,
+  Lock,
+  ShieldCheck
 } from 'lucide-react';
 import { 
   CompanyId, 
@@ -21,6 +23,7 @@ import {
   isUploadedLogo,
   getCompanyUploadedLogo
 } from '../services/companyService';
+import { safeAppStorage } from '../services/storage';
 import { GroupAdminManagementModal, AdminSettingsTab } from './GroupAdminManagementModal';
 
 interface CompanyWorkspaceSelectorProps {
@@ -30,6 +33,8 @@ interface CompanyWorkspaceSelectorProps {
   userName?: string;
   userRoleTitle?: string;
   onSignOut?: () => void;
+  allowedCompanies?: string[];
+  isGlobalAdmin?: boolean;
 }
 
 export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> = ({
@@ -38,13 +43,32 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   onClose,
   userName,
   userRoleTitle,
-  onSignOut
+  onSignOut,
+  allowedCompanies,
+  isGlobalAdmin
 }) => {
   const { companyId: currentActiveId } = useActiveCompany();
   const { parentGroup } = useParentGroup();
   const [isAdminManagementOpen, setIsAdminManagementOpen] = useState(false);
   const [adminInitialTab, setAdminInitialTab] = useState<AdminSettingsTab>('users');
   const [, setBrandingVersion] = useState(0);
+
+  const userAllowed = useMemo<string[]>(() => {
+    if (allowedCompanies && allowedCompanies.length > 0) return allowedCompanies;
+    try {
+      const stored = safeAppStorage.getItem('dpl_allowed_companies');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return ['docks', 'muhib', 'vantage', 'truckit'];
+  }, [allowedCompanies]);
+
+  const effectiveIsGlobalAdmin = useMemo<boolean>(() => {
+    if (typeof isGlobalAdmin === 'boolean') return isGlobalAdmin;
+    return safeAppStorage.getItem('dpl_is_global_admin') === 'true';
+  }, [isGlobalAdmin]);
 
   useEffect(() => {
     const handleBrandingChange = () => setBrandingVersion(v => v + 1);
@@ -126,16 +150,23 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 
         {/* Right side: strictly Admin Settings & Logout only */}
         <div className="flex items-center gap-2">
-          {/* Main Admin Settings Button */}
-          <button
-            type="button"
-            onClick={() => openAdminModal('users')}
-            className="group relative px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold tracking-wide transition-all duration-300 cursor-pointer overflow-hidden border border-amber-400/50 bg-gradient-to-r from-amber-500/25 via-yellow-500/35 to-amber-500/25 hover:from-amber-500 hover:via-yellow-400 hover:to-amber-500 text-amber-200 hover:text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.25)] hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] transform hover:scale-105 active:scale-95 flex items-center gap-2"
-            title="Open Admin Settings (Users, Logo Branding & Backup)"
-          >
-            <Crown size={14} className="text-amber-400 group-hover:text-slate-950 animate-pulse shrink-0" />
-            <span className="font-sans font-extrabold">Admin Settings</span>
-          </button>
+          {/* Main Admin Settings Button - Visible ONLY to Main Group Admin */}
+          {effectiveIsGlobalAdmin ? (
+            <button
+              type="button"
+              onClick={() => openAdminModal('users')}
+              className="group relative px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold tracking-wide transition-all duration-300 cursor-pointer overflow-hidden border border-amber-400/50 bg-gradient-to-r from-amber-500/25 via-yellow-500/35 to-amber-500/25 hover:from-amber-500 hover:via-yellow-400 hover:to-amber-500 text-amber-200 hover:text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.25)] hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] transform hover:scale-105 active:scale-95 flex items-center gap-2"
+              title="Open Group Admin Settings (Users, Logo Branding & Backup)"
+            >
+              <Crown size={14} className="text-amber-400 group-hover:text-slate-950 animate-pulse shrink-0" />
+              <span className="font-sans font-extrabold">Group Main Settings</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[11px] text-gray-300">
+              <ShieldCheck size={13} className="text-emerald-400" />
+              <span>Assigned Scope: {userAllowed.length} Company</span>
+            </div>
+          )}
 
           {/* Sign Out Button */}
           {onSignOut && (
@@ -191,8 +222,36 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
         {COMPANIES_LIST.map((comp) => {
           const isCurrentActive = comp.id === currentActiveId;
+          const isAllowed = effectiveIsGlobalAdmin || userAllowed.includes(comp.id);
           const uploadedLogo = getCompanyUploadedLogo(comp.id);
           const styles = getCompanyCardStyles(comp.id, isCurrentActive);
+
+          if (!isAllowed) {
+            return (
+              <div
+                key={comp.id}
+                className="relative rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center opacity-45 bg-slate-950/60 border border-white/5 shadow-inner min-h-[190px] sm:min-h-[220px] select-none"
+              >
+                <div className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-[10px] font-bold">
+                  <Lock size={11} className="text-red-400" />
+                  <span>Restricted</span>
+                </div>
+
+                <div className="h-20 sm:h-24 w-full flex items-center justify-center p-2 mb-3 grayscale opacity-60">
+                  <div className="w-14 h-14 rounded-2xl bg-black/40 border border-white/5 flex items-center justify-center">
+                    <Lock className="w-6 h-6 text-gray-500" />
+                  </div>
+                </div>
+
+                <h3 className="text-base sm:text-lg font-bold text-gray-400 tracking-wide max-w-xs leading-tight">
+                  {comp.name}
+                </h3>
+                <p className="text-[11px] text-gray-500 mt-2 font-mono">
+                  Not authorized for this user account
+                </p>
+              </div>
+            );
+          }
 
           return (
             <button
