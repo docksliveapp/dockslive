@@ -493,34 +493,34 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-200">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-200">
       
       {/* Top Header Strip (Clean, Standalone, No Sidebar) */}
-      <header className="border-b border-white/10 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40 shadow-xl">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between gap-4">
+      <header className="border-b border-white/10 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40 shadow-xl w-full max-w-full overflow-hidden">
+        <div className="max-w-6xl w-full mx-auto px-3 sm:px-6 min-h-16 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
           
           {/* Brand Logo & Title */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-brand-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
-              <Truck size={22} />
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-brand-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
+              <Truck size={20} className="sm:w-[22px] sm:h-[22px]" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-sm sm:text-base font-bold text-white tracking-wide">
-                  MAK GROUP OF COMPANIES
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <h1 className="text-xs sm:text-base font-bold text-white tracking-wide truncate max-w-[130px] sm:max-w-none">
+                  MAK GROUP
                 </h1>
-                <span className="text-[10px] font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Vehicle Verification
+                <span className="text-[9px] sm:text-[10px] font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-1.5 sm:px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+                  Vehicle Status
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">
+              <p className="text-[10px] sm:text-[11px] text-slate-400 hidden sm:block truncate">
                 Fleet Status, Renewal Cycles, Completed Trips & NOC Verification
               </p>
             </div>
           </div>
 
           {/* Subdomain & Switcher to Container Status */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             <div className="text-right hidden md:block">
               <span className="text-xs text-amber-400 font-mono font-bold block">
                 vehicle.makpk.online
@@ -534,11 +534,11 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
             <button
               type="button"
               onClick={onSwitchToContainerTracker || (() => { window.location.href = 'https://status.makpk.online'; })}
-              className="text-xs text-amber-300 hover:text-white px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+              className="text-[11px] sm:text-xs text-amber-300 hover:text-white px-2.5 sm:px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition-colors flex items-center gap-1 sm:gap-1.5 cursor-pointer shadow-sm shrink-0"
               title="Open Container & Shipment Status Tracking (status.makpk.online)"
             >
-              <Package size={14} className="text-amber-400" />
-              <span>Container Tracker</span>
+              <Package size={13} className="text-amber-400 shrink-0" />
+              <span>Container Status</span>
             </button>
 
             {/* Exit / Close Button (Only if invoked from inside the workspace) */}
@@ -546,7 +546,7 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
               <button
                 type="button"
                 onClick={onExitPortal}
-                className="text-xs text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                className="text-[11px] sm:text-xs text-slate-300 hover:text-white px-2.5 sm:px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer shrink-0"
                 title="Close and return to Internal Workspace"
               >
                 Close
@@ -557,7 +557,7 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
       </header>
 
       {/* Main Vehicle Verification Portal View */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-8">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-6 sm:space-y-8 min-w-0">
         
         {/* Hero Search Section */}
         <section className="text-center space-y-4 max-w-3xl mx-auto pt-2">
@@ -862,44 +862,44 @@ const VehicleDossierCard: React.FC<VehicleDossierCardProps> = ({
     <div className="rounded-3xl border border-white/20 bg-slate-900/95 shadow-2xl overflow-hidden ring-1 ring-white/10">
       
       {/* Top Banner Strip */}
-      <div className="p-6 border-b border-white/10 bg-slate-950/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className={`px-2.5 py-0.5 rounded-md text-xs font-bold border ${opComp.border}`}>
+      <div className="p-4 sm:p-6 border-b border-white/10 bg-slate-950/80 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 min-w-0">
+        <div className="space-y-1.5 min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <span className={`px-2.5 py-0.5 rounded-md text-xs font-bold border ${opComp.border} shrink-0`}>
               {opComp.badge}
             </span>
-            <span className="font-mono text-2xl sm:text-3xl font-extrabold text-white tracking-wider">
+            <span className="font-mono text-xl sm:text-3xl font-extrabold text-white tracking-wider truncate">
               {vehicle.registrationNumber}
             </span>
-            <span className="text-xs font-semibold text-slate-300 bg-white/5 border border-white/10 px-2.5 py-0.5 rounded">
+            <span className="text-xs font-semibold text-slate-300 bg-white/5 border border-white/10 px-2.5 py-0.5 rounded shrink-0">
               {vehicle.category || 'Bonded Carrier'}
             </span>
 
             {/* Status Pills */}
             {isCancelled ? (
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-red-500/20 text-red-300 border border-red-500/40 flex items-center gap-1.5 animate-pulse">
+              <span className="text-xs font-bold px-3 py-1 rounded-full bg-red-500/20 text-red-300 border border-red-500/40 flex items-center gap-1.5 animate-pulse shrink-0">
                 <AlertTriangle size={13} />
                 <span>NOC Issued / Cancelled</span>
               </span>
             ) : isExpired ? (
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-red-500/20 text-red-300 border border-red-500/40 flex items-center gap-1.5">
+              <span className="text-xs font-bold px-3 py-1 rounded-full bg-red-500/20 text-red-300 border border-red-500/40 flex items-center gap-1.5 shrink-0">
                 <Clock size={13} />
                 <span>Expired</span>
               </span>
             ) : vehicle.status === 'ON_TRIP' ? (
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/40 flex items-center gap-1.5">
+              <span className="text-xs font-bold px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/40 flex items-center gap-1.5 shrink-0">
                 <Truck size={13} />
                 <span>On Active Trip</span>
               </span>
             ) : (
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
+              <span className="text-xs font-bold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5 shrink-0">
                 <CheckCircle2 size={13} />
                 <span>Active &amp; Valid</span>
               </span>
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs text-slate-400">
             <span>DPL Serial: <strong className="text-white font-mono">{vehicle.dplSerial || 'N/A'}</strong></span>
             <span>·</span>
             <span>Registered On: <strong className="text-slate-200">{vehicle.registrationDate || 'N/A'}</strong></span>
@@ -908,14 +908,14 @@ const VehicleDossierCard: React.FC<VehicleDossierCardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0 pt-1 md:pt-0">
           <button
             type="button"
             onClick={onDownloadPdf}
-            className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer active:scale-95"
+            className="w-full sm:w-auto px-3.5 sm:px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer active:scale-95"
             title="Download official PDF vehicle status certificate"
           >
-            <Download size={15} />
+            <Download size={14} />
             <span>Download Certificate (PDF)</span>
           </button>
         </div>
@@ -1158,8 +1158,8 @@ const VehicleDossierCard: React.FC<VehicleDossierCardProps> = ({
               No cargo trip history recorded yet for this vehicle registration.
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-white/10">
-              <table className="w-full text-left text-xs text-slate-300">
+            <div className="w-full max-w-full overflow-x-auto custom-scrollbar rounded-xl border border-white/10 bg-slate-950/60">
+              <table className="w-full text-left text-xs text-slate-300 min-w-[620px]">
                 <thead className="bg-slate-950 text-slate-400 font-bold uppercase text-[10px] border-b border-white/10">
                   <tr>
                     <th className="py-2.5 px-3">Date</th>

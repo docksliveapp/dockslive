@@ -19,17 +19,28 @@ export interface CategoryWorkflowConfig {
 export function normalizeCategoryName(category?: string): string {
   if (!category) return 'Bonded Carrier';
   const c = category.toLowerCase().trim();
-  if (c.includes('import') || c.includes('export')) return 'Import & Export Services';
+  // 1. Bonded Carrier - Highest priority for core fleet & logistics operations
   if (c.includes('bonded')) return 'Bonded Carrier';
-  if (c.includes('customs')) return 'Customs Clearance';
-  if (c.includes('afghan') || c.includes('att')) return 'Afghan Transit';
+  // 2. Afghan Transit / ATT
+  if (c.includes('afghan') || c.includes('att') || (c.includes('transit') && !c.includes('private'))) return 'Afghan Transit';
+  // 3. Customs Clearance
+  if (c.includes('customs') || c.includes('clearance')) return 'Customs Clearance';
+  // 4. TIR
   if (c.includes('tir')) return 'TIR';
-  if (c.includes('private') || c.includes('cargo')) return 'Transportation of Private Cargo';
+  // 5. Transportation of Private Cargo
+  if (c.includes('private') || (c.includes('cargo') && !c.includes('general'))) return 'Transportation of Private Cargo';
+  // 6. Car Carrier
   if (c.includes('car')) return 'Car Carrier';
+  // 7. ISO Tank Service
   if (c.includes('iso') || c.includes('tank')) return 'ISO Tank Service';
+  // 8. Liner & NVOCC
   if (c.includes('liner') || c.includes('nvocc')) return 'Liner & NVOCC';
+  // 9. Breakbulk / Chartering
   if (c.includes('breakbulk') || c.includes('charter')) return 'Breakbulk / Chartering Services';
+  // 10. Warehousing & Distribution
   if (c.includes('warehouse') || c.includes('distribution')) return 'Warehousing & Distribution';
+  // 11. Import & Export Freight Forwarding Services
+  if (c.includes('import') || c.includes('export') || c.includes('ocean freight') || c.includes('air freight')) return 'Import & Export Services';
   return category;
 }
 

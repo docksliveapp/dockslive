@@ -46,10 +46,10 @@ export const SEED_TRACKING_CASES: Case[] = [
     caseNo: 'DPL-26-0001',
     companyId: 'docks',
     clientName: 'ALFA TEXTILE MILLS (PVT) LTD',
-    category: 'Ocean Freight Import',
+    category: 'Bonded Carrier',
     pol: 'QINGDAO, CHINA',
     pod: 'PORT MUHAMMAD BIN QASIM, KARACHI',
-    status: 'In Transit to Dry Port',
+    status: CaseStatus.IN_TRANSIT,
     registrationDate: '2026-03-24',
     createdAt: '2026-03-24T08:30:00.000Z',
     updatedAt: '2026-03-28T14:15:00.000Z',
@@ -90,10 +90,12 @@ export const SEED_TRACKING_CASES: Case[] = [
       }
     ],
     workflowDetails: {
-      ie_container_booking: { status: 'Completed', completed: true, date: '2026-03-24', remarks: 'CRO allocated' },
-      ie_vessel_booking: { status: 'Completed', completed: true, date: '2026-03-25', remarks: 'Ocean freight confirmed' },
-      ie_transport_arrangement: { status: 'Completed', completed: true, date: '2026-03-26', remarks: 'Vehicle TLB-892 assigned' },
-      ie_cargo_stuffing: { status: 'Completed', completed: true, date: '2026-03-27', remarks: '225 rolls stuffed' }
+      [CaseStatus.SHIPPING_LINE_DO]: { status: 'Completed', completed: true, date: '2026-03-24', remarks: 'Shipping Line DO released & verified' },
+      [CaseStatus.TP_FILING]: { status: 'Completed', completed: true, date: '2026-03-25', remarks: 'Transit Permit (TP/GD) filed via WeBOC/PSW' },
+      [CaseStatus.EXCISE_PAYMENT]: { status: 'Completed', completed: true, date: '2026-03-25', remarks: 'Provincial Excise duty paid & receipt uploaded' },
+      [CaseStatus.VEHICLE_ASSIGNMENT]: { status: 'Completed', completed: true, date: '2026-03-26', remarks: 'Bonded Trailer TLB-892 assigned with driver Muhammad Aslam' },
+      [CaseStatus.LOADING_PORT_PROCESSING]: { status: 'Completed', completed: true, date: '2026-03-27', remarks: 'Port Qasim gate out with Customs satellite tracking seal' },
+      [CaseStatus.IN_TRANSIT]: { status: 'In Progress', completed: false, date: '2026-03-28', remarks: 'Live highway transit monitoring via satellite GPS' }
     }
   },
 
@@ -104,7 +106,7 @@ export const SEED_TRACKING_CASES: Case[] = [
     caseNo: 'DPL-25-0142',
     companyId: 'docks',
     clientName: 'ALFA TEXTILE MILLS (PVT) LTD',
-    category: 'Ocean Freight Import',
+    category: 'Bonded Carrier',
     pol: 'NINGBO, CHINA',
     pod: 'KARACHI PORT TRUST (KPT)',
     status: CaseStatus.COMPLETED,

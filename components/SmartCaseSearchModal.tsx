@@ -405,7 +405,7 @@ export const SmartCaseSearchModal: React.FC<SmartCaseSearchModalProps> = ({
                           : 'bg-slate-900 text-gray-400 border-white/10 hover:text-white'
                       }`}
                     >
-                      All Data (Shuru se Aaj Tak)
+                      All Records (All-Time History)
                     </button>
                     <button
                       type="button"

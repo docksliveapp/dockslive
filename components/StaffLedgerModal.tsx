@@ -317,8 +317,12 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
             <span className="text-[11px] text-gray-400 block mb-1">
               {ledgerType === 'SALARY' ? 'Net Outstanding / Advance Balance' : 'Net Cash Currently in Staff Hand'}
             </span>
-            <span className={`text-base font-bold font-mono ${netBalance > 0 ? 'text-amber-400' : 'text-gray-300'}`}>
-              PKR {netBalance.toLocaleString()}
+            <span className={`text-base font-bold font-mono ${netBalance === 0 ? 'text-emerald-400' : netBalance > 0 ? 'text-amber-400' : 'text-blue-400'}`}>
+              {netBalance === 0 
+                ? 'Nil' 
+                : netBalance < 0 
+                ? `-PKR ${Math.abs(netBalance).toLocaleString()} (Company Payable to Staff)` 
+                : `PKR ${netBalance.toLocaleString()}`}
             </span>
           </div>
         </div>
@@ -517,7 +521,7 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
                   ) : (
                     <>
                       <option value="Petty Cash Advance">Petty Cash Advance</option>
-                      <option value="Staff Meals / Chai">Staff Meals / Tea / Ration</option>
+                      <option value="Staff Meals / Refreshments">Staff Meals / Office Refreshments</option>
                       <option value="Stationery / Office Supply">Stationery / Office Supply</option>
                       <option value="Vehicle Fuel / Errand">Vehicle Fuel / Travel Errand</option>
                       <option value="Change / Balance Returned">Remaining Change / Cash Returned</option>
@@ -531,7 +535,7 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
                 <label className="text-gray-300 font-medium block mb-1">Description / Details *</label>
                 <input 
                   type="text"
-                  placeholder="e.g. Chai & lunch bill for 5 staff members"
+                  placeholder="e.g. Catering & refreshments invoice for 5 team members"
                   value={entryDescription}
                   onChange={(e) => setEntryDescription(e.target.value)}
                   className="w-full glass-input rounded-xl p-2 bg-black/40 border border-white/15 text-white outline-none"

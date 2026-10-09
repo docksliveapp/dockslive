@@ -39,6 +39,7 @@ import {
 import { analyzeCompanyDocumentWithAI } from '../services/geminiService';
 import { useBranding } from '../services/brandingService';
 import { useActiveCompany } from '../services/companyService';
+import { sendAppNotification } from '../services/notificationService';
 import { jsPDF } from 'jspdf';
 import {
   Building2,
@@ -296,6 +297,8 @@ export const CompanyDocuments: React.FC = () => {
   const [hearingDate, setHearingDate] = useState('');
   const [hearingTime, setHearingTime] = useState('');
   const [hearingNotes, setHearingNotes] = useState('');
+  const [hasExpiry, setHasExpiry] = useState(false);
+  const [expiryDate, setExpiryDate] = useState('');
 
   // Uploaded Files for Add Modal (Supports Multiple!)
   interface UploadItem {
@@ -485,6 +488,8 @@ export const CompanyDocuments: React.FC = () => {
       hearingDate: hearingRequired ? hearingDate : undefined,
       hearingTime: hearingRequired ? hearingTime : undefined,
       hearingNotes: hearingRequired ? hearingNotes.trim() : undefined,
+      hasExpiry,
+      expiryDate: hasExpiry ? expiryDate : undefined,
       fileUrl: primaryFile?.dataUrl || undefined,
       fileName: primaryFile?.name || (uploadedFiles.length > 1 ? `${uploadedFiles.length} files attached` : undefined),
       fileType: primaryFile?.type || undefined,
@@ -494,6 +499,35 @@ export const CompanyDocuments: React.FC = () => {
     };
 
     await saveCompanyDocumentToFirestore(newDoc);
+
+    // If document has expiry, check if expiring soon (<= 10 days) or expired, and notify Admin, Finance Manager, Operations Manager
+    if (hasExpiry && expiryDate) {
+      const today = new Date().toISOString().split('T')[0];
+      const diffDays = Math.ceil((new Date(expiryDate).getTime() - new Date(today).getTime()) / (24 * 60 * 60 * 1000));
+      if (diffDays <= 0) {
+        await sendAppNotification({
+          title: `Document Expired: ${docTitle.trim()}`,
+          description: `Company document "${docTitle.trim()}" expired on ${expiryDate}.`,
+          details: `Document: ${docTitle.trim()}\nCategory: ${docCategory}\nExpired On: ${expiryDate}\nAction: Please upload renewal certificate.`,
+          targetRole: 'ADMIN,FINANCE_MANAGER,OPERATIONS_MANAGER',
+          type: 'ALERT',
+          notificationSubType: 'DOC_EXPIRY_ALERT',
+          category: 'GENERAL',
+          priority: 'HIGH'
+        });
+      } else if (diffDays <= 10) {
+        await sendAppNotification({
+          title: `Document Expiring Soon (${diffDays} Days): ${docTitle.trim()}`,
+          description: `Company document "${docTitle.trim()}" will expire in ${diffDays} days on ${expiryDate}.`,
+          details: `Document: ${docTitle.trim()}\nCategory: ${docCategory}\nExpiry Date: ${expiryDate}\nDays Remaining: ${diffDays} days\nPrepare renewal paperwork.`,
+          targetRole: 'ADMIN,FINANCE_MANAGER,OPERATIONS_MANAGER',
+          type: 'INFO',
+          notificationSubType: 'DOC_EXPIRY_ALERT',
+          category: 'GENERAL',
+          priority: 'HIGH'
+        });
+      }
+    }
 
     // Reset Form
     setShowAddModal(false);
@@ -506,6 +540,8 @@ export const CompanyDocuments: React.FC = () => {
     setHearingDate('');
     setHearingTime('');
     setHearingNotes('');
+    setHasExpiry(false);
+    setExpiryDate('');
     setUploadedFiles([]);
     setAiNotice(null);
   };
@@ -963,6 +999,31 @@ export const CompanyDocuments: React.FC = () => {
                       </div>
                     )}
 
+                    {/* Expiry Badge if applicable */}
+                    {doc.hasExpiry && doc.expiryDate && (() => {
+                      const today = new Date().toISOString().split('T')[0];
+                      const diffDays = Math.ceil((new Date(doc.expiryDate).getTime() - new Date(today).getTime()) / (24 * 60 * 60 * 1000));
+                      const isExpired = diffDays <= 0;
+                      const isExpiringSoon = diffDays > 0 && diffDays <= 10;
+                      return (
+                        <div className={`p-2 rounded-xl border flex items-center justify-between text-xs ${
+                          isExpired 
+                            ? 'bg-red-500/10 border-red-500/30 text-red-300' 
+                            : isExpiringSoon 
+                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' 
+                            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                        }`}>
+                          <div className="flex items-center gap-1.5 font-bold">
+                            <Clock size={13} />
+                            <span>{isExpired ? 'Expired:' : isExpiringSoon ? 'Expiring Soon:' : 'Valid Until:'}</span>
+                          </div>
+                          <span className="font-mono font-bold text-[11px]">
+                            {doc.expiryDate} {isExpiringSoon ? `(${diffDays}d left)` : ''}
+                          </span>
+                        </div>
+                      );
+                    })()}
+
                     {/* Bottom Meta Info (From, To, Date) */}
                     <div className="pt-2 border-t border-white/5 text-[11px] text-gray-400 space-y-1">
                       <div className="flex items-center justify-between">
@@ -1405,11 +1466,11 @@ export const CompanyDocuments: React.FC = () => {
                 />
               </div>
 
-              {/* Hearing Required Option (Haan / Nahin) */}
+              {/* Official Hearing Scheduled Option */}
               <div className="p-3.5 rounded-xl bg-black/30 border border-white/10 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <label className="text-xs font-bold text-white block">Kya is document ki hearing honi hai?</label>
+                    <label className="text-xs font-bold text-white block">Official Hearing / Appearance Scheduled?</label>
                     <p className="text-[11px] text-gray-400">Select whether personal appearance or hearing date is scheduled.</p>
                   </div>
 
@@ -1423,7 +1484,7 @@ export const CompanyDocuments: React.FC = () => {
                           : 'bg-white/5 text-gray-400 hover:text-white'
                       }`}
                     >
-                      Haan (Yes)
+                      Yes
                     </button>
                     <button
                       type="button"
@@ -1434,7 +1495,7 @@ export const CompanyDocuments: React.FC = () => {
                           : 'bg-white/5 text-gray-400 hover:text-white'
                       }`}
                     >
-                      Nahin (No)
+                      No
                     </button>
                   </div>
                 </div>
@@ -1471,6 +1532,54 @@ export const CompanyDocuments: React.FC = () => {
                         className="w-full rounded-xl bg-black/50 border border-white/10 p-2 text-xs text-white"
                       />
                     </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Document Expiry Option */}
+              <div className="p-3.5 rounded-xl bg-black/30 border border-white/10 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-bold text-white block">Does this document have an expiry date?</label>
+                    <p className="text-[11px] text-gray-400">If enabled, automated expiration notices are dispatched 10 days prior to expiry to Admin, Finance, and Operations.</p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setHasExpiry(true)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        hasExpiry 
+                          ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' 
+                          : 'bg-white/5 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setHasExpiry(false); setExpiryDate(''); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        !hasExpiry 
+                          ? 'bg-slate-700 text-white' 
+                          : 'bg-white/5 text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      No
+                    </button>
+                  </div>
+                </div>
+
+                {hasExpiry && (
+                  <div className="pt-2 border-t border-white/10 animate-fade-in">
+                    <label className="text-[11px] text-amber-300 font-semibold block mb-1">Document Expiry Date *</label>
+                    <input
+                      type="date"
+                      required={hasExpiry}
+                      value={expiryDate}
+                      onChange={(e) => setExpiryDate(e.target.value)}
+                      className="w-full rounded-xl bg-black/50 border border-amber-500/30 p-2 text-xs text-white font-mono focus:border-amber-400"
+                    />
                   </div>
                 )}
               </div>
@@ -1578,9 +1687,9 @@ export const CompanyDocuments: React.FC = () => {
                 />
               </div>
 
-              {/* To (Kisko Bheja Gaya) */}
+              {/* Recipient / Addressee Filter */}
               <div>
-                <label className="text-gray-300 font-semibold block mb-1">To (Kisko bheja gaya list)</label>
+                <label className="text-gray-300 font-semibold block mb-1">Recipient / Addressee</label>
                 <div className="flex gap-2">
                   <input
                     type="text"

@@ -1639,3 +1639,161 @@ export async function generateVehicleNocDocx(
 
   return doc;
 }
+
+// ============================================================================
+// 7. AFFIDAVIT (LEGAL STAMP PAPER / CUSTOMS REGISTRATION)
+// Matches official template for Customs SRO 450(I)/2001
+// ============================================================================
+export interface AffidavitOptions {
+  letterDate?: string | Date;
+  leaveStampPaperSpace?: boolean;
+}
+
+export async function generateAffidavitDocx(
+  vehicles: Vehicle | Vehicle[],
+  options: AffidavitOptions = {}
+): Promise<Document> {
+  const vList = Array.isArray(vehicles) ? vehicles : [vehicles];
+  const activeDetails = getActiveCompanyDocxDetails();
+  const topMargin = options.leaveStampPaperSpace !== false ? convertInchesToTwip(3.5) : convertInchesToTwip(1.0);
+
+  const tableHeaderRow = new TableRow({
+    tableHeader: true,
+    children: [
+      new TableCell({
+        children: [new Paragraph({ text: 'Vehicles No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 20 } })],
+        width: { size: 34, type: WidthType.PERCENTAGE },
+        borders: tableBorders
+      }),
+      new TableCell({
+        children: [new Paragraph({ text: 'Chassis No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 20 } })],
+        width: { size: 33, type: WidthType.PERCENTAGE },
+        borders: tableBorders
+      }),
+      new TableCell({
+        children: [new Paragraph({ text: 'Engine No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 20 } })],
+        width: { size: 33, type: WidthType.PERCENTAGE },
+        borders: tableBorders
+      })
+    ]
+  });
+
+  const tableDataRows = vList.map((v) => {
+    return new TableRow({
+      children: [
+        new TableCell({
+          children: [new Paragraph({ text: v.registrationNumber || '-', alignment: AlignmentType.CENTER, run: { size: 19 } })],
+          borders: tableBorders
+        }),
+        new TableCell({
+          children: [new Paragraph({ text: v.chassisNo || '-', alignment: AlignmentType.CENTER, run: { size: 19 } })],
+          borders: tableBorders
+        }),
+        new TableCell({
+          children: [new Paragraph({ text: v.engineNo || '-', alignment: AlignmentType.CENTER, run: { size: 19 } })],
+          borders: tableBorders
+        })
+      ]
+    });
+  });
+
+  const companyHeading = activeDetails.fullLegalName.toUpperCase().replace('M/S. ', '');
+
+  const doc = new Document({
+    sections: [
+      {
+        properties: {
+          page: {
+            margin: {
+              top: topMargin,
+              bottom: convertInchesToTwip(0.8),
+              left: convertInchesToTwip(0.9),
+              right: convertInchesToTwip(0.9)
+            }
+          }
+        },
+        children: [
+          // Title
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 120, after: 260 },
+            children: [
+              new TextRun({
+                text: 'AFFIDAVIT',
+                bold: true,
+                underline: {},
+                size: 26
+              })
+            ]
+          }),
+
+          // Paragraph 1
+          new Paragraph({
+            spacing: { line: 280, after: 200 },
+            alignment: AlignmentType.JUSTIFIED,
+            children: [
+              new TextRun({
+                text: `In consideration of your allowing registration of vehicles for carrying transshipment of import bonded cargo to up country dry port as prescribe vide chapter XIV of SRO 450 (I) 201 dated 18.06.2011 as provided under sub-rule (5) of rule 329 read with Sub –rule (7) of Rule 328 of Customs Rule 2001. We M/S ${companyHeading}, and do hereby undertake that vehicles registered in our name will not be used by another bonded carrier during registration period 5 Years and that all vehicles (Trailer not prime mover) leased, owned shall be indelibly painted from four sides with color and clearly indicating name of the carrier and further that We shall be responsible for any discrepancy which arises subsequently in this regard.`,
+                size: 20
+              })
+            ]
+          }),
+
+          // Paragraph 2
+          new Paragraph({
+            spacing: { line: 280, after: 240 },
+            alignment: AlignmentType.JUSTIFIED,
+            children: [
+              new TextRun({
+                text: `Further more, it is also added that after dispatch of vehicle loaded with cargo from port, however the driver of vehicle is custodian of the loaded cargo as well as his employer i.e. owner of the vehicle will be responsible destined for delivery.`,
+                size: 20
+              })
+            ]
+          }),
+
+          // Table
+          new Table({
+            rows: [tableHeaderRow, ...tableDataRows],
+            width: { size: 100, type: WidthType.PERCENTAGE }
+          }),
+
+          // For Company
+          new Paragraph({
+            alignment: AlignmentType.RIGHT,
+            spacing: { before: 300, after: 360 },
+            children: [
+              new TextRun({
+                text: `FOR. ${companyHeading}`,
+                bold: true,
+                size: 22
+              })
+            ]
+          }),
+
+          // Signatures & Witnesses
+          new Paragraph({
+            spacing: { before: 200, line: 280 },
+            children: [
+              new TextRun({
+                text: 'LESSOR\t\t\t\t\t\t\tLESSEES\n\n',
+                bold: true,
+                underline: {},
+                size: 20
+              }),
+              new TextRun({
+                text: '1.Witness______________\t\t\t\t______________________\n\n',
+                size: 20
+              }),
+              new TextRun({
+                text: '2.Witness______________',
+                size: 20
+              })
+            ]
+          })
+        ]
+      }
+    ]
+  });
+
+  return doc;
+}

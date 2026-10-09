@@ -378,7 +378,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in pb-10">
+    <div className="space-y-6 animate-fade-in pb-10 w-full max-w-full min-w-0 overflow-x-hidden">
       
       {/* 1. Main Action Hero Section */}
       <div className="glass-card rounded-2xl p-8 border border-white/10 bg-[#0f172a] shadow-xl flex flex-col items-center justify-center text-center">
@@ -1058,7 +1058,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
                      {/* 5. Tab 2: Visual Timeline Chart (Maintains full backward compatibility) */}
                      {activeReportTab === 'graph' && (
-                       <div className="bg-[#0f172a] border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4">
+                       <div className="bg-[#0f172a] border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4 max-w-full min-w-0 overflow-hidden">
                           
                           <div className="flex items-center justify-between">
                              <div>

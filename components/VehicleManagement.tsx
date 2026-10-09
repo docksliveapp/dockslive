@@ -1500,7 +1500,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   // --- Main Render ---
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="space-y-6 pb-12 w-full max-w-full min-w-0 overflow-x-hidden">
       {/* Header & Tabs */}
       <div className="flex flex-col gap-4">
         <h2 className="text-2xl font-bold text-white flex items-center gap-2 drop-shadow-md">

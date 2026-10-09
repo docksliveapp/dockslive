@@ -39,6 +39,7 @@ import { useBranding } from './services/brandingService';
 import { VirtualizedList } from './components/VirtualizedList';
 import PublicContainerTrackingPortal from './components/PublicContainerTrackingPortal';
 import PublicVehicleTrackingPortal from './components/PublicVehicleTrackingPortal';
+import { initAuditSchedulerService } from './services/auditSchedulerService';
 
 const isContainerTrackingDomainOrRoute = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -311,6 +312,9 @@ const App: React.FC = () => {
     const unsubNotifs = subscribeToNotifications((items) => {
       setNotifications(items || []);
     });
+
+    // Initialize corporate compliance and midnight auditing scheduler
+    initAuditSchedulerService();
 
     // Prevent accidental browser page navigation / app reload when dragging files into window
     const preventFileDropNavigation = (e: DragEvent) => {

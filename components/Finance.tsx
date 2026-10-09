@@ -37,6 +37,8 @@ import {
 import { exportCSVFile, compressAndPrepareFile, convertImageToPdf } from '../services/fileUtils';
 import { safeAppStorage } from '../services/storage';
 import { useBranding } from '../services/brandingService';
+import { sendAppNotification } from '../services/notificationService';
+import { notifyLiveFinanceTransaction } from '../services/auditSchedulerService';
 import { 
   downloadPaymentReceiptPdf, 
   downloadReceivableInvoicePdf, 
@@ -1799,7 +1801,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       transactionId: newTransaction.transactionId?.trim() || undefined,
       slipUrl: newTransaction.slipUrl,
       documentUrl: newTransaction.documentUrl,
-      documentName: newTransaction.documentName
+      documentName: newTransaction.documentName,
+      createdAt: new Date().toISOString()
     };
 
     if (transactionType === 'PAYABLE') setPayables(prev => dedupeArrayById([entry, ...prev]));
@@ -1808,6 +1811,9 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
     saveFinanceToFirestore(entry).catch((e) => console.warn("Firestore saveFinance error:", e));
     logActivity(`${entry.type}: ${entry.reference} - PKR ${entry.amount.toLocaleString()} for ${entry.party}`, 'FINANCE');
+    
+    // Live finance notification dispatch
+    notifyLiveFinanceTransaction(entry).catch(() => {});
 
     setShowAddModal(false);
     setIsOtherClient(false);
@@ -4989,14 +4995,76 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                           </td>
                           <td className="p-3 text-center">
                             {isPosted && !isPaid && matchingSalaryPayable ? (
-                              <button
-                                type="button"
-                                onClick={() => handleStatusChange(matchingSalaryPayable.id, payables, setPayables)}
-                                className="px-2.5 py-1 rounded bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 text-[10px] font-semibold transition-colors inline-flex items-center gap-1 active:scale-95"
-                              >
-                                <CheckCircle2 size={11} />
-                                <span>Pay Salary</span>
-                              </button>
+                              matchingSalaryPayable.salaryStatus === 'READY_FOR_PAYMENT' ? (
+                                <div className="inline-flex items-center gap-1.5">
+                                  <span className="px-2 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold inline-flex items-center gap-1">
+                                    <Clock size={11} className="animate-spin" />
+                                    <span>Notified (Ready)</span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStatusChange(matchingSalaryPayable.id, payables, setPayables)}
+                                    className="px-2 py-1 rounded bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 text-[10px] font-semibold transition-colors inline-flex items-center gap-1 active:scale-95"
+                                    title="Disburse / Confirm Paid"
+                                  >
+                                    <CheckCircle2 size={11} />
+                                    <span>Disburse</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      try {
+                                        const updatedPayable: FinanceEntry = {
+                                          ...matchingSalaryPayable,
+                                          salaryStatus: 'READY_FOR_PAYMENT'
+                                        };
+                                        setPayables(prev => prev.map(p => p.id === matchingSalaryPayable.id ? updatedPayable : p));
+                                        await updateFinanceInFirestore(updatedPayable);
+
+                                        await sendAppNotification({
+                                          title: `Salary Ready: PKR ${(Number(user.baseSalary) || matchingSalaryPayable.amount).toLocaleString()} for ${user.name}`,
+                                          description: `Monthly salary for ${user.name} (${user.role}) has been prepared by Finance and is ready for collection.`,
+                                          details: `Staff Member: ${user.name}\nRole: ${user.role}\nAmount: PKR ${(Number(user.baseSalary) || matchingSalaryPayable.amount).toLocaleString()}\nMethod: Bank Transfer / Cash\nPlease acknowledge collection in your portal.`,
+                                          targetClientName: user.name,
+                                          targetRole: user.role,
+                                          type: 'ACTION',
+                                          notificationSubType: 'SALARY_READY',
+                                          category: 'FINANCE',
+                                          priority: 'HIGH',
+                                          actionLabel: 'Collect Salary',
+                                          approvalData: {
+                                            entityType: 'finance',
+                                            entityId: matchingSalaryPayable.id,
+                                            entityName: user.name,
+                                            actionType: 'COLLECT_SALARY',
+                                            requestedBy: user.name,
+                                            requestedByRole: user.role,
+                                            amount: Number(user.baseSalary) || matchingSalaryPayable.amount,
+                                            staffUserId: user.id
+                                          }
+                                        });
+                                        alert(`Salary for ${user.name} marked Ready for Payment. Real-time collection notification dispatched.`);
+                                      } catch (err) {
+                                        console.warn("Could not mark salary ready:", err);
+                                      }
+                                    }}
+                                    className="px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[10px] transition-colors inline-flex items-center gap-1 shadow-sm active:scale-95"
+                                  >
+                                    <CheckCircle2 size={11} />
+                                    <span>Ready for Payment</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStatusChange(matchingSalaryPayable.id, payables, setPayables)}
+                                    className="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-gray-300 text-[10px] transition-colors inline-flex items-center gap-1 active:scale-95"
+                                  >
+                                    <span>Direct Settle</span>
+                                  </button>
+                                </div>
+                              )
                             ) : isPaid ? (
                               <span className="text-[10px] text-emerald-400 font-semibold">Cleared ✓</span>
                             ) : (
@@ -5967,7 +6035,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
   };
 
   return (
-    <div className="space-y-6 animate-fade-in pb-12 printable-content">
+    <div className="space-y-6 animate-fade-in pb-12 printable-content w-full max-w-full min-w-0 overflow-x-hidden">
       {/* Print Header */}
       <div className="hidden print:block mb-8 border-b-2 border-black pb-4">
         <div className="flex justify-between items-center">

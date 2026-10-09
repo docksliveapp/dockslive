@@ -34,9 +34,19 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
     notification.notificationSubType === 'PAYMENT_APPROVAL' ||
     notification.approvalData?.actionType === 'VERIFY_PAYMENT';
 
+  const isSalaryCollection = 
+    notification.notificationSubType === 'SALARY_READY' || 
+    notification.approvalData?.actionType === 'COLLECT_SALARY';
+
+  const isNocApproval = 
+    notification.notificationSubType === 'NOC_REQUEST' || 
+    notification.approvalData?.actionType === 'APPROVE_NOC';
+
   const isApprovalAction = 
     !isMonthlyExpense && (
       isPaymentApproval ||
+      isSalaryCollection ||
+      isNocApproval ||
       notification.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
       notification.notificationSubType === 'CASE_APPROVAL' ||
       notification.notificationSubType === 'DELETION_APPROVAL' ||
@@ -228,6 +238,66 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
             </div>
           )}
 
+          {/* Financial Breakdown Data for Midnight Summary / Audit */}
+          {approval?.breakdownData && (
+            <div className="bg-slate-950/90 rounded-2xl p-4 border border-white/10 space-y-3.5">
+              <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <DollarSign size={14} className="text-amber-400" />
+                  Daily Financial Itemized Breakdown
+                </span>
+                <span className="text-xs font-mono font-bold text-gray-400">
+                  {approval.breakdownData.date}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-center">
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                  <span className="text-[10px] text-emerald-300 font-semibold uppercase block">Total Collections</span>
+                  <span className="text-base font-bold font-mono text-emerald-400 mt-0.5 block">
+                    PKR {Number(approval.breakdownData.totalIncome || 0).toLocaleString()}
+                  </span>
+                </div>
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
+                  <span className="text-[10px] text-red-300 font-semibold uppercase block">Total Disbursements</span>
+                  <span className="text-base font-bold font-mono text-red-400 mt-0.5 block">
+                    PKR {Number(approval.breakdownData.totalExpense || 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Income List */}
+              {approval.breakdownData.incomeEntries?.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-bold text-emerald-300 block">Collections Inflow Details:</span>
+                  <div className="max-h-32 overflow-y-auto custom-scrollbar space-y-1 bg-black/30 p-2 rounded-xl text-xs font-mono">
+                    {approval.breakdownData.incomeEntries.map((item: any, idx: number) => (
+                      <div key={idx} className="flex justify-between py-1 border-b border-white/5 text-[11px]">
+                        <span className="text-gray-300 truncate max-w-[180px]">{item.party || item.category}</span>
+                        <span className="text-emerald-400 font-bold shrink-0">PKR {Number(item.amount || 0).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Expense List */}
+              {approval.breakdownData.expenseEntries?.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-bold text-red-300 block">Disbursements Outflow Details:</span>
+                  <div className="max-h-32 overflow-y-auto custom-scrollbar space-y-1 bg-black/30 p-2 rounded-xl text-xs font-mono">
+                    {approval.breakdownData.expenseEntries.map((item: any, idx: number) => (
+                      <div key={idx} className="flex justify-between py-1 border-b border-white/5 text-[11px]">
+                        <span className="text-gray-300 truncate max-w-[180px]">{item.party || item.category}</span>
+                        <span className="text-red-400 font-bold shrink-0">PKR {Number(item.amount || 0).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Additional Details */}
           {notification.details && !approval && (
             <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
@@ -333,6 +403,10 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
                 <span>
                   {isPaymentApproval 
                     ? 'Confirm Receipt & Credit Ledger' 
+                    : isSalaryCollection
+                    ? 'Confirm Collection & Update Ledger'
+                    : isNocApproval
+                    ? 'Approve Cancellation & Issue NOC'
                     : notification.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' 
                     ? 'Approve Client Registration' 
                     : 'Approve & Execute'}

@@ -466,34 +466,34 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-200">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-200">
       
       {/* Top Header Strip */}
-      <header className="border-b border-white/10 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40 shadow-xl">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between gap-4">
+      <header className="border-b border-white/10 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40 shadow-xl w-full max-w-full overflow-hidden">
+        <div className="max-w-6xl w-full mx-auto px-3 sm:px-6 min-h-16 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
           
           {/* Brand Logo & Title */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-brand-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
-              <Package size={22} />
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-brand-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
+              <Package size={20} className="sm:w-[22px] sm:h-[22px]" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-sm sm:text-base font-bold text-white tracking-wide">
-                  MAK GROUP OF COMPANIES
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <h1 className="text-xs sm:text-base font-bold text-white tracking-wide truncate max-w-[130px] sm:max-w-none">
+                  MAK GROUP
                 </h1>
-                <span className="text-[10px] font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Public Tracker
+                <span className="text-[9px] sm:text-[10px] font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-1.5 sm:px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0">
+                  Container Status
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">
+              <p className="text-[10px] sm:text-[11px] text-slate-400 hidden sm:block truncate">
                 Docks (Pvt.) Ltd. • Truckit • Muhib International • Vantage Shipping Line
               </p>
             </div>
           </div>
 
           {/* Subdomain & Controls */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             <div className="text-right hidden md:block">
               <span className="text-xs text-amber-400 font-mono font-bold block">
                 status.makpk.online
@@ -508,11 +508,11 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
               <button
                 type="button"
                 onClick={onSwitchToVehicleTracker}
-                className="text-xs text-cyan-300 hover:text-white px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors flex items-center gap-1.5 cursor-pointer"
+                className="text-[11px] sm:text-xs text-cyan-300 hover:text-white px-2.5 sm:px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors flex items-center gap-1 sm:gap-1.5 cursor-pointer shrink-0 shadow-sm"
                 title="Switch to Fleet & Vehicle Verification (vehicle.makpk.online)"
               >
-                <Truck size={14} className="text-cyan-400" />
-                <span>Vehicle Tracker</span>
+                <Truck size={13} className="text-cyan-400 shrink-0" />
+                <span>Vehicle Status</span>
               </button>
             )}
 
@@ -521,7 +521,7 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
               <button
                 type="button"
                 onClick={onExitPortal}
-                className="text-xs text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                className="text-[11px] sm:text-xs text-slate-300 hover:text-white px-2.5 sm:px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer shrink-0"
                 title="Return to Internal Workspace"
               >
                 Staff Portal
@@ -532,7 +532,7 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
       </header>
 
       {/* Main Container Tracking Body */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-8">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-6 sm:space-y-8 min-w-0">
         
         {/* Hero Search Section */}
         <section className="text-center space-y-4 max-w-3xl mx-auto pt-2">
@@ -983,40 +983,46 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
     } overflow-hidden`}>
       
       {/* Consignment Header Strip */}
-      <div className="p-5 sm:p-6 border-b border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-950/60">
-        <div className="space-y-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`px-2.5 py-0.5 rounded-md text-xs font-bold border ${opComp.border}`}>
+      <div className="p-4 sm:p-6 border-b border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 bg-slate-950/60 min-w-0">
+        <div className="space-y-1.5 min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <span className={`px-2.5 py-0.5 rounded-md text-xs font-bold border ${opComp.border} shrink-0`}>
               {opComp.badge}
             </span>
-            <span className="font-mono text-lg sm:text-xl font-bold text-white tracking-wide">
+            <span className="font-mono text-base sm:text-xl font-bold text-white tracking-wide truncate">
               {primaryContainer.number || searchedQuery}
             </span>
-            <span className="text-xs font-semibold text-slate-400 bg-white/5 border border-white/10 px-2 py-0.5 rounded">
+            <span className="text-xs font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 rounded-md flex items-center gap-1 shrink-0">
+              <ShieldCheck size={12} className="text-amber-400" />
+              <span>Category: {workflowConfig.category}</span>
+            </span>
+            <span className="text-xs font-semibold text-slate-400 bg-white/5 border border-white/10 px-2 py-0.5 rounded shrink-0">
               {primaryContainer.size || '40ft'} Equipment
             </span>
             {primaryContainer.sealNo && (
-              <span className="text-xs text-slate-400 bg-white/5 border border-white/10 px-2 py-0.5 rounded font-mono">
+              <span className="text-xs text-slate-400 bg-white/5 border border-white/10 px-2 py-0.5 rounded font-mono shrink-0">
                 Seal: {primaryContainer.sealNo}
               </span>
             )}
             {isLatest ? (
-              <span className="text-xs font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+              <span className="text-xs font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-0.5 rounded-full flex items-center gap-1 shrink-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                 <span>Current Consignment</span>
               </span>
             ) : (
-              <span className="text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+              <span className="text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1 shrink-0">
                 <Clock size={11} />
                 <span>Previous Voyage (Historical Record)</span>
               </span>
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs text-slate-400">
             <span>Case Ref: <strong className="text-white font-mono">{caseItem.caseNo || caseItem.id}</strong></span>
             <span>·</span>
             <span>B/L No: <strong className="text-white font-mono">{caseItem.blNumber || caseItem.extractedData?.blNumber || 'N/A'}</strong></span>
+            <span>·</span>
+            <span>Category: <strong className="text-amber-300">{workflowConfig.category}</strong></span>
             <span>·</span>
             <span>Date: <strong className="text-slate-300">{registrationDate}</strong></span>
             <span>·</span>
@@ -1024,11 +1030,11 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0 pt-1 md:pt-0">
           <button
             type="button"
             onClick={onDownloadPdf}
-            className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-amber-500/20 to-amber-600/20 hover:from-amber-500/30 hover:to-amber-600/30 text-amber-300 hover:text-amber-200 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-amber-500/30 transition-all cursor-pointer shadow-sm"
+            className="w-full sm:w-auto px-3.5 sm:px-4 py-2 bg-gradient-to-r from-amber-500/20 to-amber-600/20 hover:from-amber-500/30 hover:to-amber-600/30 text-amber-300 hover:text-amber-200 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-amber-500/30 transition-all cursor-pointer shadow-sm"
           >
             <Download size={14} />
             <span>Download Status Slip (PDF)</span>
@@ -1037,14 +1043,14 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
       </div>
 
       {/* Consignment Body */}
-      <div className="p-5 sm:p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-5 sm:space-y-6 min-w-0">
         
         {/* Overall Progress Gauge */}
-        <div className="p-4 rounded-xl bg-slate-950/70 border border-white/10 space-y-2">
-          <div className="flex items-center justify-between text-xs">
+        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-950/70 border border-white/10 space-y-2 min-w-0">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-1">
             <span className="font-semibold text-slate-300 flex items-center gap-2">
               <Layers size={14} className="text-amber-400" />
-              <span>Overall Milestone Progress</span>
+              <span>{workflowConfig.category} Milestone Progress</span>
             </span>
             <span className="font-mono font-bold text-amber-300">
               {progressPercent}% Completed ({completedSteps.length} of {workflowConfig.totalSteps} Milestones)
@@ -1059,18 +1065,18 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
         </div>
 
         {/* Core Shipment Metrics Grid (Strictly Operational - Zero Financials) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 min-w-0">
           
           {/* POL & POD Routing */}
-          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1">
+          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1 min-w-0">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Anchor size={12} className="text-brand-400" />
-              <span>Routing (Origin → Destination)</span>
+              <Anchor size={12} className="text-brand-400 shrink-0" />
+              <span className="truncate">Routing (Origin → Destination)</span>
             </span>
             <p className="text-xs font-bold text-white truncate" title={caseItem.pol}>
               {caseItem.pol || 'Port of Loading'}
             </p>
-            <div className="flex items-center gap-1 text-[11px] text-slate-400">
+            <div className="flex items-center gap-1 text-[11px] text-slate-400 min-w-0">
               <ArrowRight size={11} className="text-amber-400 shrink-0" />
               <span className="truncate text-slate-300 font-medium" title={caseItem.pod}>
                 {caseItem.pod || 'Port of Discharge'}
@@ -1079,24 +1085,24 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
           </div>
 
           {/* Current Milestone / Status */}
-          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1">
+          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1 min-w-0">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <CheckCircle2 size={12} className="text-amber-400" />
-              <span>Current Status Stage</span>
+              <CheckCircle2 size={12} className="text-amber-400 shrink-0" />
+              <span className="truncate">Current Status Stage</span>
             </span>
             <p className="text-xs font-bold text-amber-300 truncate" title={String(caseItem.status)}>
               {caseItem.status || 'Active Operations'}
             </p>
-            <p className="text-[11px] text-slate-400">
-              {isCompletedCase ? 'Shipment Completed & Delivered' : `Active Milestone: ${currentStep?.shortTitle || activeStepIdx + 1}`}
+            <p className="text-[11px] text-slate-400 truncate">
+              {isCompletedCase ? 'Shipment Completed & Delivered' : `Active: ${currentStep?.shortTitle || activeStepIdx + 1}`}
             </p>
           </div>
 
           {/* Shipping Line & Vessel */}
-          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1">
+          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1 min-w-0">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Ship size={12} className="text-cyan-400" />
-              <span>Ocean Line & Vessel</span>
+              <Ship size={12} className="text-cyan-400 shrink-0" />
+              <span className="truncate">Ocean Line & Vessel</span>
             </span>
             <p className="text-xs font-bold text-white truncate" title={caseItem.extractedData?.shippingLine || caseItem.shippingLine}>
               {caseItem.extractedData?.shippingLine || caseItem.shippingLine || 'Carrier Assigned'}
@@ -1108,16 +1114,16 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
           </div>
 
           {/* Cargo Classification */}
-          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1">
+          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1 min-w-0">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Box size={12} className="text-purple-400" />
-              <span>Cargo & Commodity</span>
+              <Box size={12} className="text-purple-400 shrink-0" />
+              <span className="truncate">Category & Cargo</span>
             </span>
-            <p className="text-xs font-bold text-white truncate" title={caseItem.extractedData?.itemName || caseItem.category}>
-              {caseItem.extractedData?.itemName || caseItem.category || 'General Cargo'}
+            <p className="text-xs font-bold text-amber-300 truncate" title={workflowConfig.category}>
+              {workflowConfig.category}
             </p>
-            <p className="text-[11px] text-slate-400">
-              {caseItem.extractedData?.grossWeight ? `${caseItem.extractedData.grossWeight.toLocaleString()} KG Gross` : `${primaryContainer.size || '40ft'} Containerized`}
+            <p className="text-[11px] text-slate-400 truncate" title={caseItem.extractedData?.itemName || 'General Cargo'}>
+              {caseItem.extractedData?.itemName || (caseItem.extractedData?.grossWeight ? `${caseItem.extractedData.grossWeight.toLocaleString()} KG Gross` : `${primaryContainer.size || '40ft'} Equipment`)}
             </p>
           </div>
 
@@ -1222,7 +1228,7 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
           </div>
 
           {/* Stepper Timeline Visualizer */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-2.5 min-w-0">
             {workflowConfig.steps.map((step, idx) => {
               const isCompleted = idx < activeStepIdx || isCompletedCase;
               const isActive = idx === activeStepIdx && !isCompletedCase;
@@ -1231,7 +1237,7 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
               return (
                 <div 
                   key={step.id || idx}
-                  className={`p-3 rounded-xl border text-xs transition-all relative ${
+                  className={`p-3 rounded-xl border text-xs transition-all relative min-w-0 break-words ${
                     isCompleted
                       ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-200'
                       : isActive

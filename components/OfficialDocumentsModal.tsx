@@ -13,6 +13,7 @@ import {
   generateLeaseTerminationAgreementDocx,
   generateCancellationLetterLetterheadDocx,
   generateVehicleNocDocx,
+  generateAffidavitDocx,
   downloadDocxBlob,
   formatSlashDate,
   formatDotDate,
@@ -26,6 +27,7 @@ import { downloadCustomsVehicleListPdf } from '../services/pdfExportService';
 import { useActiveCompany } from '../services/companyService';
 
 export type DocumentType = 
+  | 'AFFIDAVIT'         // Affidavit (Stamp Paper) - SRO 450(I)/2001
   | 'REG_LETTER'        // Letter 10 Vehicles registration letter (Company Letterhead)
   | 'CUSTOMS_PERMIT'    // Custom Vehicle List (Customs Office Format)
   | 'LEASE_AGREEMENT'   // Lease Agreement TAS-582 (Stamp Paper)

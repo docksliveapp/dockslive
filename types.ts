@@ -92,11 +92,31 @@ export interface PortItem {
   containerInquiryLink?: string;
 }
 
+export interface Driver {
+  id: string;
+  transporterId?: string | number;
+  transporterName?: string;
+  name: string;
+  contact: string;
+  cnic: string;
+  licenseNumber: string;
+  licenseExpiryDate?: string;
+  assignedVehicleNo?: string;
+  status: 'AVAILABLE' | 'ON_TRIP' | 'INACTIVE';
+  licenseDocUrl?: string;
+  licenseDocName?: string;
+  cnicDocUrl?: string;
+  cnicDocName?: string;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface TransporterRequest {
   id: string;
   transporterId: string | number;
   transporterName: string;
-  type: 'NEW_REGISTRATION' | 'RENEWAL' | 'CANCELLATION';
+  type: 'NEW_REGISTRATION' | 'RENEWAL' | 'CANCELLATION' | 'NOC';
   vehicleNo?: string;
   vehicleData?: Partial<Vehicle>;
   reason?: string;
@@ -334,6 +354,7 @@ export interface CompanyDocument {
   tags?: string[];
   notes?: string;
   unlimitedValidity?: boolean;
+  hasExpiry?: boolean;
   expiryDate?: string;
   isExpired?: boolean;
 }
@@ -1013,6 +1034,10 @@ export interface FinanceEntry {
   slipUrl?: string;
   documentUrl?: string;
   documentName?: string;
+  createdAt?: string;
+  createdBy?: string;
+  salaryStatus?: 'READY_FOR_PAYMENT' | 'COLLECTED' | 'PENDING';
+  staffUserId?: string | number;
 }
 
 export interface RecurringFinanceTemplate {
@@ -1283,7 +1308,15 @@ export interface AppNotification {
     | 'PAYMENT_APPROVAL'
     | 'CLIENT_REGISTRATION_APPROVAL'
     | 'WORKFLOW_TASK'
-    | 'FINANCE_RECORDED';
+    | 'FINANCE_RECORDED'
+    | 'DOC_EXPIRY_ALERT'
+    | 'VEHICLE_EXPIRY_ALERT'
+    | 'IDLE_VEHICLE_ALERT'
+    | 'TRANSIT_EMERGENCY'
+    | 'TRANSIT_DELAY_ALERT'
+    | 'SALARY_READY'
+    | 'MIDNIGHT_SUMMARY'
+    | 'NOC_REQUEST';
   status: 'PENDING' | 'RESOLVED' | 'REJECTED';
   actionLabel?: string;
   priority?: 'HIGH' | 'MEDIUM' | 'LOW';
@@ -1294,10 +1327,10 @@ export interface AppNotification {
   category?: 'CASE' | 'FINANCE' | 'APPROVAL' | 'TRANSPORTER' | 'GENERAL';
   read?: boolean;
   approvalData?: {
-    entityType: 'case' | 'vehicle' | 'finance' | 'client' | 'transporter';
+    entityType: 'case' | 'vehicle' | 'finance' | 'client' | 'transporter' | 'document' | 'staff';
     entityId: number | string;
     entityName?: string;
-    actionType: 'DELETE' | 'CANCEL' | 'EDIT' | 'VERIFY_PAYMENT' | 'APPROVE_CLIENT' | 'APPROVE_TRANSPORTER' | 'WORKFLOW_ACTION';
+    actionType: 'DELETE' | 'CANCEL' | 'EDIT' | 'VERIFY_PAYMENT' | 'APPROVE_CLIENT' | 'APPROVE_TRANSPORTER' | 'WORKFLOW_ACTION' | 'COLLECT_SALARY' | 'APPROVE_NOC';
     requestedBy: string;
     requestedByRole?: string;
     reason?: string;
@@ -1307,6 +1340,8 @@ export interface AppNotification {
     slipUrl?: string;
     bankName?: string;
     caseNo?: string;
+    breakdownData?: any;
+    staffUserId?: string | number;
   };
 }
 

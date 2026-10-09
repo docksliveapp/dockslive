@@ -1199,7 +1199,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         </header>
 
         {/* Mobile Sticky Header Bar */}
-        <header className="lg:hidden -mx-3.5 -mt-3.5 mb-3 sm:-mx-6 sm:-mt-6 h-14 bg-slate-900/95 backdrop-blur-md border-b border-white/10 px-3 sm:px-4 flex items-center justify-between shrink-0 z-20 sticky top-0">
+        <header className="lg:hidden w-full max-w-full mb-3 h-14 bg-slate-900/95 backdrop-blur-md border border-white/10 rounded-2xl px-3 sm:px-4 flex items-center justify-between shrink-0 z-20 sticky top-0 shadow-lg">
           <div className="flex items-center gap-2.5 min-w-0">
             <button
               type="button"

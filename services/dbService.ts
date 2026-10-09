@@ -19,7 +19,7 @@ import {
   getActiveDbUserSession,
   clearActiveDbUserSession
 } from './firebase';
-import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry } from '../types';
+import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver } from '../types';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
 import { getActiveCompanyId, subscribeToActiveCompany, CompanyId, PARENT_GROUP, GROUP_COMPANIES } from './companyService';
@@ -792,6 +792,52 @@ export async function deleteAvailableVehicleFromFirestore(id: string): Promise<v
     await deleteDoc(doc(db, path, String(id)));
   } catch (error) {
     console.warn(`Firestore deleteAvailableVehicle warning:`, error);
+  }
+}
+
+// TRANSPORTER DRIVERS MANAGEMENT
+export function subscribeToDrivers(
+  onData: (items: Driver[]) => void,
+  onError?: (err: any) => void
+) {
+  const path = 'drivers';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const items: Driver[] = [];
+      snapshot.forEach((docSnap) => {
+        items.push({ ...docSnap.data(), id: docSnap.id } as Driver);
+      });
+      onData(dedupeArrayById(items));
+    },
+    (error) => {
+      console.warn(`Firestore subscription notice on ${path}:`, error);
+      if (onError) onError(error);
+    }
+  );
+}
+
+export async function saveDriverToFirestore(item: Driver): Promise<void> {
+  const path = 'drivers';
+  const docId = String(item.id || `drv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`);
+  try {
+    const payload = sanitizeForFirestore({
+      ...item,
+      id: docId,
+      updatedAt: new Date().toISOString()
+    });
+    await setDoc(doc(db, path, docId), payload);
+  } catch (error) {
+    console.warn(`Firestore saveDriver warning:`, error);
+  }
+}
+
+export async function deleteDriverFromFirestore(id: string): Promise<void> {
+  const path = 'drivers';
+  try {
+    await deleteDoc(doc(db, path, String(id)));
+  } catch (error) {
+    console.warn(`Firestore deleteDriver warning:`, error);
   }
 }
 

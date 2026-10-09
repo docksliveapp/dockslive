@@ -1,13 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   X, Ship, FileText, Download, ShieldCheck, Truck, User, 
-  Phone, CreditCard, Lock, Calendar, MapPin, CheckCircle2, AlertCircle, FileCheck
+  Phone, CreditCard, Lock, Calendar, MapPin, CheckCircle2, AlertCircle, FileCheck,
+  Receipt, ArrowRight
 } from 'lucide-react';
 import { Case, Container, CaseStatus } from '../types';
 import { downloadCustomsDeliveryOrderPdf } from '../services/pdfExportService';
 import { saveCaseToFirestore } from '../services/dbService';
 import { useBranding } from '../services/brandingService';
 import { useActiveCompany } from '../services/companyService';
+import { sendAppNotification } from '../services/notificationService';
+import { PortMakeBillModal } from './PortMakeBillModal';
 
 interface PortCaseDetailModalProps {
   isOpen: boolean;
@@ -85,6 +88,9 @@ export const PortCaseDetailModal: React.FC<PortCaseDetailModalProps> = ({
   const hasSealPhoto = !!(container?.sealPhoto || loadingStep.sealPhoto);
   const sealPhotoUrl = container?.sealPhoto || loadingStep.sealPhoto;
 
+  const [showDoActionsPrompt, setShowDoActionsPrompt] = useState(false);
+  const [showMakeBillModal, setShowMakeBillModal] = useState(false);
+
   const handleDownloadDoc = (url: string, name: string) => {
     if (!url) return;
     const a = document.createElement('a');
@@ -93,6 +99,35 @@ export const PortCaseDetailModal: React.FC<PortCaseDetailModalProps> = ({
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  };
+
+  const handleFinishCase = async () => {
+    try {
+      const updatedCase: Case = {
+        ...targetCase,
+        status: CaseStatus.COMPLETED,
+        completed: true,
+        deliveredAt: new Date().toISOString()
+      };
+      await saveCaseToFirestore(updatedCase);
+      await sendAppNotification({
+        title: `Consignment Delivered & Finished: #${targetCase.caseNo}`,
+        description: `Shipment #${targetCase.caseNo} (${targetCase.clientName}) has reached destination port and been officially finalized.`,
+        details: `Case: #${targetCase.caseNo}\nClient: ${targetCase.clientName}\nDestination: ${targetCase.pod}\nStatus: Officially Completed\nDelivery Order Released.`,
+        targetRole: 'ADMIN, OPERATIONS_MANAGER',
+        targetClientName: targetCase.clientName,
+        type: 'INFO',
+        notificationSubType: 'GENERAL',
+        category: 'CASE',
+        priority: 'MEDIUM',
+        targetView: 'cases'
+      });
+      setShowDoActionsPrompt(false);
+      onClose();
+      alert(`Case #${targetCase.caseNo} successfully finished and marked as Delivered.`);
+    } catch (err) {
+      console.warn("Could not finish case:", err);
+    }
   };
 
   const handleGenerateDO = async () => {
@@ -125,6 +160,9 @@ export const PortCaseDetailModal: React.FC<PortCaseDetailModalProps> = ({
           documents: updatedDocs
         });
       }
+
+      // Prompt next actions: Finish Case OR Make Bill / Unloading Invoice
+      setShowDoActionsPrompt(true);
     } catch (err) {
       console.error('Failed to generate Delivery Order PDF', err);
       alert('Error generating Delivery Order PDF');
@@ -374,6 +412,72 @@ export const PortCaseDetailModal: React.FC<PortCaseDetailModalProps> = ({
         </div>
 
       </div>
+
+      {/* Delivery Order Post-Download Prompt Modal */}
+      {showDoActionsPrompt && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-white/20 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto">
+              <CheckCircle2 size={32} />
+            </div>
+
+            <div>
+              <h3 className="text-base font-bold text-white">Delivery Order (DO) Generated</h3>
+              <p className="text-xs text-gray-300 mt-1">
+                Customs Delivery Order for Case #{targetCase.caseNo} is saved & downloaded. Choose next action:
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleFinishCase}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-3 rounded-2xl text-xs flex flex-col items-center justify-center gap-1.5 shadow-lg shadow-emerald-600/20 active:scale-95 transition"
+              >
+                <CheckCircle2 size={18} />
+                <span>Finish Case</span>
+                <span className="text-[10px] text-emerald-200 font-normal">Mark Delivered</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDoActionsPrompt(false);
+                  setShowMakeBillModal(true);
+                }}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold p-3 rounded-2xl text-xs flex flex-col items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 active:scale-95 transition"
+              >
+                <Receipt size={18} />
+                <span>Generate Unloading Bill</span>
+                <span className="text-[10px] text-slate-800 font-normal">Add Terminal Charges</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowDoActionsPrompt(false)}
+              className="text-xs text-gray-400 hover:text-white pt-2 block mx-auto"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Port Make Bill Modal for Destination / Unloading charges */}
+      {showMakeBillModal && (
+        <PortMakeBillModal
+          isOpen={showMakeBillModal}
+          onClose={() => setShowMakeBillModal(false)}
+          targetCase={targetCase}
+          staffUserId={staffName}
+          staffName={staffName}
+          onBillGenerated={() => {
+            setShowMakeBillModal(false);
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 };

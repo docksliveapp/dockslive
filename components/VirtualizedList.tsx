@@ -251,7 +251,7 @@ export function VirtualizedTable<T>({
   ) : null);
 
   return (
-    <div className={`w-full overflow-x-auto custom-scrollbar border border-white/5 rounded-2xl bg-slate-900/60 backdrop-blur-md ${className}`}>
+    <div className={`w-full max-w-full min-w-0 overflow-x-auto custom-scrollbar border border-white/5 rounded-2xl bg-slate-900/60 backdrop-blur-md ${className}`}>
       <div style={{ minWidth: minTableWidth || '100%' }}>
         {/* Sticky Table Header */}
         {renderedHeader && (

@@ -1020,7 +1020,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
               Company Official Logo & Branding
             </h3>
             <p className="text-xs sm:text-sm text-gray-300 mt-1 max-w-2xl leading-relaxed">
-              Har company ka <strong className="text-amber-300">sirf ek hi official logo</strong> hoga jo unke tamam documents (Invoices, Gate Passes, Delivery Orders, B/L summaries, Ledgers) aur app screens per aayega.
+              Each company maintains a <strong className="text-amber-300">single official primary corporate logo</strong> uniformly rendered across all official documentation (Invoices, Gate Passes, Delivery Orders, B/L Summaries, Ledgers) and application screens.
             </p>
           </div>
           
@@ -1072,12 +1072,12 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
                 </span>
               </div>
               <p className="text-xs text-gray-300 mt-1 leading-relaxed">
-                Jab aap is option per tick laga denge to is company ka alag logo upload karne ki zaroorat nahi hogi, balki hamari app ka <strong className="text-amber-300">Main Admin Group Logo</strong> hi is company ke tamam documents aur screens per implement ho jayega.
+                When enabled, this company will automatically inherit the <strong className="text-amber-300">Main Corporate Conglomerate Logo</strong> across all commercial invoices, customs documentation, and dashboard portals, without needing an individual upload.
               </p>
               {useMainLogoAsOfficial && (
                 <div className="mt-2.5 p-2 rounded-xl bg-black/40 border border-white/10 flex items-center gap-2 text-xs text-amber-200">
                   <CheckCircle2 size={14} className="text-amber-400 shrink-0" />
-                  <span>Main Logo ko badalne ke liye Main Admin Settings me jakar logo tabdeel karein.</span>
+                  <span>To modify or update the primary conglomerate insignia, navigate to Corporate Admin Settings.</span>
                 </div>
               )}
             </div>

@@ -2,12 +2,13 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Truck, DollarSign, Plus, RefreshCw, X, CheckCircle2, Clock, AlertCircle, 
   MapPin, Phone, User, FileText, Upload, ChevronRight, LogOut, ShieldCheck, 
-  ArrowRight, Search, Filter, Calendar, Building, Eye, Camera, Check, Menu
+  ArrowRight, Search, Filter, Calendar, Building, Eye, Camera, Check, Menu,
+  Users, UserCheck, PhoneCall, Edit2, Trash2
 } from 'lucide-react';
 import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
 import { useActiveCompany } from '../services/companyService';
-import { Vehicle, Case, FinanceEntry, AvailableVehicle, TransporterRequest, Container } from '../types';
+import { Vehicle, Case, FinanceEntry, AvailableVehicle, TransporterRequest, Container, Driver } from '../types';
 import { 
   subscribeToVehicles, 
   subscribeToCases, 
@@ -20,7 +21,10 @@ import {
   deleteAvailableVehicleFromFirestore,
   saveTransporterRequestToFirestore,
   subscribeToTransporterRequests,
-  saveCaseToFirestore
+  saveCaseToFirestore,
+  subscribeToDrivers,
+  saveDriverToFirestore,
+  deleteDriverFromFirestore
 } from '../services/dbService';
 import { safeAppStorage } from '../services/storage';
 import { compressAndPrepareFile } from '../services/fileUtils';
@@ -48,7 +52,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
   const { activeCompany } = useActiveCompany();
 
   // Navigation
-  const [activeTab, setActiveTab] = useState<'vehicles' | 'ready_vehicles' | 'finance' | 'assigned_cases'>('vehicles');
+  const [activeTab, setActiveTab] = useState<'vehicles' | 'drivers' | 'ready_vehicles' | 'finance' | 'assigned_cases'>('vehicles');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Transporter Identity State
@@ -61,6 +65,24 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
   const [financesList, setFinancesList] = useState<FinanceEntry[]>([]);
   const [availableVehicles, setAvailableVehicles] = useState<AvailableVehicle[]>([]);
   const [transporterRequests, setTransporterRequests] = useState<TransporterRequest[]>([]);
+  const [driversList, setDriversList] = useState<Driver[]>([]);
+
+  // Driver Management State
+  const [showDriverModal, setShowDriverModal] = useState(false);
+  const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
+  const [driverSearch, setDriverSearch] = useState('');
+  const [driverForm, setDriverForm] = useState({
+    name: '',
+    contact: '',
+    cnic: '',
+    licenseNumber: '',
+    licenseExpiryDate: '',
+    assignedVehicleNo: '',
+    status: 'AVAILABLE' as 'AVAILABLE' | 'ON_TRIP' | 'INACTIVE',
+    licenseDocUrl: '',
+    cnicDocUrl: '',
+    notes: ''
+  });
 
   // Modals
   const [showReadyModal, setShowReadyModal] = useState(false);
@@ -120,12 +142,14 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     const unsubF = subscribeToFinances((items) => setFinancesList(items || []));
     const unsubA = subscribeToAvailableVehicles((items) => setAvailableVehicles(items || []));
     const unsubR = subscribeToTransporterRequests((items) => setTransporterRequests(items || []));
+    const unsubD = subscribeToDrivers((items) => setDriversList(items || []));
     return () => {
       unsubV();
       unsubC();
       unsubF();
       unsubA();
       unsubR();
+      unsubD();
     };
   }, []);
 
@@ -137,6 +161,95 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
       return vTrans === myTrans || vTrans.includes(myTrans) || myTrans.includes(vTrans);
     });
   }, [vehiclesList, selectedTransporterName]);
+
+  // Transporter Registered Drivers
+  const myDrivers = useMemo(() => {
+    const myTrans = selectedTransporterName.toLowerCase().trim();
+    return driversList.filter(d => {
+      const dTrans = (d.transporterName || '').toLowerCase().trim();
+      return !dTrans || dTrans === myTrans || dTrans.includes(myTrans) || myTrans.includes(dTrans);
+    });
+  }, [driversList, selectedTransporterName]);
+
+  const filteredDrivers = useMemo(() => {
+    if (!driverSearch.trim()) return myDrivers;
+    const q = driverSearch.toLowerCase().trim();
+    return myDrivers.filter(d => 
+      d.name?.toLowerCase().includes(q) ||
+      d.contact?.includes(q) ||
+      d.cnic?.includes(q) ||
+      d.licenseNumber?.toLowerCase().includes(q) ||
+      d.assignedVehicleNo?.toLowerCase().includes(q)
+    );
+  }, [myDrivers, driverSearch]);
+
+  const handleOpenAddDriver = () => {
+    setEditingDriver(null);
+    setDriverForm({
+      name: '',
+      contact: '',
+      cnic: '',
+      licenseNumber: '',
+      licenseExpiryDate: '',
+      assignedVehicleNo: '',
+      status: 'AVAILABLE',
+      licenseDocUrl: '',
+      cnicDocUrl: '',
+      notes: ''
+    });
+    setShowDriverModal(true);
+  };
+
+  const handleOpenEditDriver = (driver: Driver) => {
+    setEditingDriver(driver);
+    setDriverForm({
+      name: driver.name || '',
+      contact: driver.contact || '',
+      cnic: driver.cnic || '',
+      licenseNumber: driver.licenseNumber || '',
+      licenseExpiryDate: driver.licenseExpiryDate || '',
+      assignedVehicleNo: driver.assignedVehicleNo || '',
+      status: driver.status || 'AVAILABLE',
+      licenseDocUrl: driver.licenseDocUrl || '',
+      cnicDocUrl: driver.cnicDocUrl || '',
+      notes: driver.notes || ''
+    });
+    setShowDriverModal(true);
+  };
+
+  const handleSaveDriver = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!driverForm.name.trim() || !driverForm.contact.trim()) {
+      alert('Driver name and contact number are required.');
+      return;
+    }
+
+    const payload: Driver = {
+      id: editingDriver?.id || `drv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      transporterId: initialId || 1,
+      transporterName: selectedTransporterName,
+      name: driverForm.name.trim(),
+      contact: driverForm.contact.trim(),
+      cnic: driverForm.cnic.trim(),
+      licenseNumber: driverForm.licenseNumber.trim(),
+      licenseExpiryDate: driverForm.licenseExpiryDate || undefined,
+      assignedVehicleNo: driverForm.assignedVehicleNo.trim() || undefined,
+      status: driverForm.status,
+      licenseDocUrl: driverForm.licenseDocUrl || undefined,
+      cnicDocUrl: driverForm.cnicDocUrl || undefined,
+      notes: driverForm.notes.trim() || undefined,
+      updatedAt: new Date().toISOString(),
+      createdAt: editingDriver?.createdAt || new Date().toISOString()
+    };
+
+    await saveDriverToFirestore(payload);
+    setShowDriverModal(false);
+  };
+
+  const handleDeleteDriver = async (id: string, name: string) => {
+    if (!window.confirm(`Are you sure you want to remove driver "${name}"?`)) return;
+    await deleteDriverFromFirestore(id);
+  };
 
   // Transporter's Assigned Cases
   const myAssignedCases = useMemo(() => {
@@ -506,6 +619,24 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
 
             <button
               onClick={() => {
+                setActiveTab('drivers');
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'drivers'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Users size={17} />
+              <span>Registered Drivers</span>
+              <span className="ml-auto text-[11px] font-mono font-bold bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full">
+                {myDrivers.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
                 setActiveTab('ready_vehicles');
                 setMobileMenuOpen(false);
               }}
@@ -839,6 +970,172 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
               )}
             </div>
 
+          </div>
+        )}
+
+        {/* ======================================================================= */}
+        {/* VIEW 1.5: REGISTERED DRIVERS DIRECTORY */}
+        {/* ======================================================================= */}
+        {activeTab === 'drivers' && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Header with Search and Add Button */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-950/60 border border-white/10 rounded-2xl p-4 sm:p-5">
+              <div>
+                <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                  <Users className="text-amber-400" size={22} />
+                  Driver Fleet Directory
+                </h2>
+                <p className="text-xs text-gray-400 mt-1">
+                  Manage certified road drivers, CNIC & driving licenses under <strong className="text-gray-200">{selectedTransporterName}</strong>
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOpenAddDriver}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/20 transition active:scale-95"
+              >
+                <Plus size={16} />
+                <span>Add New Driver</span>
+              </button>
+            </div>
+
+            {/* Metric Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-slate-900/80 border border-white/10 rounded-2xl p-4">
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block mb-1">
+                  Total Registered Drivers
+                </span>
+                <span className="text-2xl font-bold font-mono text-white">
+                  {myDrivers.length}
+                </span>
+              </div>
+              <div className="bg-slate-900/80 border border-white/10 rounded-2xl p-4">
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block mb-1">
+                  Available for Consignments
+                </span>
+                <span className="text-2xl font-bold font-mono text-emerald-400">
+                  {myDrivers.filter(d => d.status === 'AVAILABLE').length}
+                </span>
+              </div>
+              <div className="bg-slate-900/80 border border-white/10 rounded-2xl p-4">
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block mb-1">
+                  Currently On Active Trips
+                </span>
+                <span className="text-2xl font-bold font-mono text-blue-400">
+                  {myDrivers.filter(d => d.status === 'ON_TRIP').length}
+                </span>
+              </div>
+            </div>
+
+            {/* Filter Search */}
+            <div className="relative">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <input
+                type="text"
+                value={driverSearch}
+                onChange={(e) => setDriverSearch(e.target.value)}
+                placeholder="Search drivers by name, CNIC, license number, or assigned vehicle..."
+                className="w-full bg-slate-900/90 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            {/* Drivers List Grid */}
+            {filteredDrivers.length === 0 ? (
+              <div className="p-12 text-center text-gray-400 bg-slate-900/40 rounded-2xl border border-white/5">
+                <Users size={36} className="mx-auto mb-2 text-gray-600 opacity-60" />
+                <p className="font-semibold text-sm text-gray-300">No registered drivers found</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Click &quot;Add New Driver&quot; above to register drivers for your transport fleet.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredDrivers.map((drv) => (
+                  <div
+                    key={drv.id}
+                    className="bg-slate-900/90 border border-white/10 rounded-2xl p-4 space-y-3 hover:border-amber-500/30 transition-all flex flex-col justify-between"
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 font-bold">
+                            <User size={18} />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="text-sm font-bold text-white truncate">
+                              {drv.name}
+                            </h3>
+                            <span className="text-[10px] font-mono text-gray-400 block">
+                              CNIC: {drv.cnic || 'N/A'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
+                          drv.status === 'AVAILABLE'
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                            : drv.status === 'ON_TRIP'
+                            ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                            : 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                        }`}>
+                          {drv.status === 'AVAILABLE' ? 'Available' : drv.status === 'ON_TRIP' ? 'On Trip' : 'Inactive'}
+                        </span>
+                      </div>
+
+                      <div className="bg-black/30 border border-white/5 rounded-xl p-2.5 space-y-1.5 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-400 text-[11px]">Contact Phone:</span>
+                          <a
+                            href={`tel:${drv.contact}`}
+                            className="font-mono text-amber-300 hover:underline flex items-center gap-1 font-semibold"
+                          >
+                            <Phone size={11} /> {drv.contact}
+                          </a>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-400 text-[11px]">License No:</span>
+                          <span className="font-mono text-white font-bold">{drv.licenseNumber || 'N/A'}</span>
+                        </div>
+                        {drv.licenseExpiryDate && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-400 text-[11px]">License Expiry:</span>
+                            <span className="font-mono text-gray-300">{drv.licenseExpiryDate}</span>
+                          </div>
+                        )}
+                        {drv.assignedVehicleNo && (
+                          <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                            <span className="text-gray-400 text-[11px]">Assigned Unit:</span>
+                            <span className="font-mono font-bold text-amber-400 flex items-center gap-1">
+                              <Truck size={12} /> {drv.assignedVehicleNo}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-white/10 flex items-center justify-end gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditDriver(drv)}
+                        className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition flex items-center gap-1"
+                      >
+                        <Edit2 size={13} />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteDriver(drv.id, drv.name)}
+                        className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition flex items-center gap-1"
+                      >
+                        <Trash2 size={13} />
+                        <span>Remove</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -1453,6 +1750,152 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
               <div className="flex justify-end gap-2 pt-2 border-t border-white/10">
                 <button type="button" onClick={() => setShowDriverUpdateModal(false)} className="px-3 py-1.5 text-gray-400">Cancel</button>
                 <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded-lg font-semibold">Save Driver</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Driver Add / Edit Modal */}
+      {showDriverModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto custom-scrollbar">
+          <div className="bg-slate-900 border border-white/15 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl p-5 sm:p-6 space-y-4 my-auto">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+                  <UserCheck size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white">
+                    {editingDriver ? 'Edit Registered Driver' : 'Register New Fleet Driver'}
+                  </h3>
+                  <p className="text-[11px] text-gray-400">
+                    Transporter: <span className="text-gray-200">{selectedTransporterName}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDriverModal(false)}
+                className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/5"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveDriver} className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="text-gray-300 font-semibold mb-1 block">Driver Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={driverForm.name}
+                    onChange={(e) => setDriverForm(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="e.g. Muhammad Ramzan Baloch"
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-gray-300 font-semibold mb-1 block">Mobile Phone / WhatsApp *</label>
+                  <input
+                    type="text"
+                    required
+                    value={driverForm.contact}
+                    onChange={(e) => setDriverForm(prev => ({ ...prev, contact: e.target.value }))}
+                    placeholder="e.g. 0300-1234567"
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-gray-300 font-semibold mb-1 block">CNIC Number</label>
+                  <input
+                    type="text"
+                    value={driverForm.cnic}
+                    onChange={(e) => setDriverForm(prev => ({ ...prev, cnic: e.target.value }))}
+                    placeholder="e.g. 42101-1234567-1"
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-gray-300 font-semibold mb-1 block">Driving License Number</label>
+                  <input
+                    type="text"
+                    value={driverForm.licenseNumber}
+                    onChange={(e) => setDriverForm(prev => ({ ...prev, licenseNumber: e.target.value }))}
+                    placeholder="e.g. LTV-KHI-98211"
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-gray-300 font-semibold mb-1 block">License Expiry Date</label>
+                  <input
+                    type="date"
+                    value={driverForm.licenseExpiryDate}
+                    onChange={(e) => setDriverForm(prev => ({ ...prev, licenseExpiryDate: e.target.value }))}
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-gray-300 font-semibold mb-1 block">Assign to Vehicle (Optional)</label>
+                  <select
+                    value={driverForm.assignedVehicleNo}
+                    onChange={(e) => setDriverForm(prev => ({ ...prev, assignedVehicleNo: e.target.value }))}
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="">No Vehicle Assigned</option>
+                    {myVehicles.map(v => (
+                      <option key={v.id} value={v.registrationNumber}>
+                        {v.registrationNumber} ({v.type || 'Trailer'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-gray-300 font-semibold mb-1 block">Duty / Shift Status</label>
+                  <select
+                    value={driverForm.status}
+                    onChange={(e) => setDriverForm(prev => ({ ...prev, status: e.target.value as any }))}
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="AVAILABLE">Available for Trips</option>
+                    <option value="ON_TRIP">Currently On Trip</option>
+                    <option value="INACTIVE">Off Duty / Inactive</option>
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="text-gray-300 font-semibold mb-1 block">Notes / Emergency Contact</label>
+                  <input
+                    type="text"
+                    value={driverForm.notes}
+                    onChange={(e) => setDriverForm(prev => ({ ...prev, notes: e.target.value }))}
+                    placeholder="e.g. Next of kin phone, home city, blood group..."
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setShowDriverModal(false)}
+                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shadow-lg shadow-amber-500/20 active:scale-95"
+                >
+                  {editingDriver ? 'Save Changes' : 'Register Driver'}
+                </button>
               </div>
             </form>
           </div>

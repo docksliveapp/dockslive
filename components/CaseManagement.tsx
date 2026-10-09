@@ -1861,7 +1861,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           status: requiresApproval ? 'Pending Approval' : initialStepStatus, 
           approvalStatus: requiresApproval ? 'PENDING' : 'APPROVED',
           registeredByRole: String(effectiveRole),
-          createdAt: new Date().toISOString().split('T')[0],
+          createdAt: new Date().toISOString(),
           pol: formData.pol,
           pod: formData.pod,
           containers: formData.containers,
@@ -1882,7 +1882,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         sendAppNotification({
           title: `Client Case Approval Required: #${newCase.caseNo}`,
           description: `Client "${newCase.clientName}" registered new case #${newCase.caseNo}. Needs Admin / Authorized approval to activate.`,
-          targetRole: 'ADMIN, OPERATIONS_MANAGER',
+          targetRole: 'ADMIN, OPERATIONS_MANAGER, CASE_MANAGER',
           targetView: 'cases',
           targetFilter: { caseNo: newCase.caseNo },
           type: 'ACTION',
@@ -1897,8 +1897,8 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         // Office staff case: Direct registration without approval requirement
         sendAppNotification({
           title: `Case Registered: #${newCase.caseNo}`,
-          description: `Yeh case register ho gaya hai: #${newCase.caseNo} (${newCase.clientName}).`,
-          targetRole: UserRole.OPERATIONS_MANAGER,
+          description: `Consignment Case #${newCase.caseNo} (${newCase.clientName}) has been registered and activated in operational workflow.`,
+          targetRole: 'OPERATIONS_MANAGER, CASE_MANAGER',
           targetClientName: newCase.clientName,
           targetView: 'cases',
           targetFilter: { caseNo: newCase.caseNo },
@@ -2010,17 +2010,60 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   };
 
   const handleSaveEditedCase = () => {
+      if (!selectedCase || !editedCase) return;
+
+      const isOverOneHour = (() => {
+        const createdTime = new Date(selectedCase.createdAt || selectedCase.registrationDate || 0).getTime();
+        if (isNaN(createdTime) || createdTime === 0) return false;
+        return (Date.now() - createdTime) > 60 * 60 * 1000;
+      })();
+
+      let finalToSave = editedCase;
+
+      // 1-Hour Compliance Lock: Non-admin can only fill in empty fields, cannot overwrite or delete previously entered data
+      if (isOverOneHour && !hasAdminRole) {
+        const merged: any = { ...editedCase };
+        const coreKeys: (keyof Case)[] = ['clientName', 'category', 'pol', 'pod', 'blNumber', 'containerNumber', 'igmNo'];
+        for (const k of coreKeys) {
+          if (selectedCase[k] && selectedCase[k] !== editedCase[k]) {
+            merged[k] = selectedCase[k]; // Revert populated field
+          }
+        }
+        if (selectedCase.documents && selectedCase.documents.length > 0) {
+          const currentDocNames = new Set((editedCase.documents || []).map((d: any) => d.name || d.id));
+          const missingDocs = selectedCase.documents.filter((d: any) => !currentDocNames.has(d.name || d.id));
+          if (missingDocs.length > 0) {
+            merged.documents = [...(editedCase.documents || []), ...missingDocs];
+          }
+        }
+        finalToSave = merged;
+      }
+
       // Update local state and Firestore
-      const updatedCases = cases.map(c => c.id === editedCase.id ? editedCase : c);
+      const updatedCases = cases.map(c => c.id === finalToSave.id ? finalToSave : c);
       setCases(updatedCases);
-      setSelectedCase(editedCase);
+      setSelectedCase(finalToSave);
       setIsEditingCase(false);
-      updateCaseInFirestore(editedCase).catch((e) => console.warn("Firestore updateCase error:", e));
+      updateCaseInFirestore(finalToSave).catch((e) => console.warn("Firestore updateCase error:", e));
   };
 
   const handleInitiateFinishedCaseAction = (action: 'DELETE' | 'CANCEL' | 'EDIT') => {
     const target = isEditingCase ? editedCase : selectedCase;
     if (!target) return;
+
+    const isOverOneHour = (() => {
+      const createdTime = new Date(target.createdAt || target.registrationDate || 0).getTime();
+      if (isNaN(createdTime) || createdTime === 0) return false;
+      return (Date.now() - createdTime) > 60 * 60 * 1000;
+    })();
+
+    // 1-Hour Compliance Lock: Only Admin can delete or cancel after 1 hour
+    if (isOverOneHour && !hasAdminRole) {
+      if (action === 'DELETE' || action === 'CANCEL') {
+        alert("Compliance Policy: This consignment was registered more than 1 hour ago and is locked. Only Corporate Administrators have authorization to delete or cancel locked records.");
+        return;
+      }
+    }
 
     const isCaseFinished = target.status === CaseStatus.COMPLETED || target.status === ('Delivered' as any) || target.status === ('Completed' as any);
 
@@ -3047,7 +3090,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   // --- Views ---
 
   const renderCaseList = () => (
-    <div className={`space-y-6 animate-fade-in ${showReportModal ? 'print:hidden' : ''}`}>
+    <div className={`space-y-6 animate-fade-in ${showReportModal ? 'print:hidden' : ''} w-full max-w-full min-w-0 overflow-x-hidden`}>
        {/* Incomplete Case Draft Alert Banner */}
        {hasDraft && draftInfo && (
          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-950/50 via-slate-900/95 to-amber-950/50 border border-amber-500/40 shadow-xl shadow-amber-950/20 space-y-3 animate-in fade-in slide-in-from-top-2">

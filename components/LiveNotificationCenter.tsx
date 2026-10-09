@@ -111,6 +111,20 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       currentNorm.includes('OPERATIONS') ||
       userRolesNorm.some(r => r.includes('OPERATIONS'));
 
+    const isFinanceManager = 
+      currentNorm === 'FINANCEMANAGER' ||
+      currentNorm === 'FINANCE' ||
+      userRolesNorm.includes('FINANCEMANAGER') ||
+      userRolesNorm.includes('FINANCE') ||
+      currentNorm.includes('FINANCE') ||
+      userRolesNorm.some(r => r.includes('FINANCE'));
+
+    const isCaseManager = 
+      currentNorm === 'CASEMANAGER' ||
+      userRolesNorm.includes('CASEMANAGER') ||
+      currentNorm.includes('CASE') ||
+      userRolesNorm.some(r => r.includes('CASE'));
+
     return notifications.filter(n => {
       // 1. ADMIN & SUPER ADMIN: Must receive and see ALL activities & notifications across the system!
       if (isAdmin) {
@@ -161,6 +175,30 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
           n.category === 'CASE' ||
           declaredTargetRoles.some(tr => tr.includes('OPERATION') || tr.includes('CASE')) ||
           (n.targetView && n.targetView.includes('case'))
+        ) {
+          return true;
+        }
+      }
+
+      // Finance Manager handles client payments, ledger downloads, invoice alerts, custom DPL charges
+      if (isFinanceManager) {
+        if (
+          n.category === 'FINANCE' ||
+          declaredTargetRoles.some(tr => tr.includes('FINANCE')) ||
+          (n.targetView && n.targetView.includes('finance')) ||
+          (n.title && (n.title.includes('Finance') || n.title.includes('Invoice') || n.title.includes('Payment') || n.title.includes('Salary') || n.title.includes('Ledger') || n.title.includes('Bill') || n.title.includes('Expense') || n.title.includes('Charges')))
+        ) {
+          return true;
+        }
+      }
+
+      // Case Manager handles case registrations, workflow tracking, approvals
+      if (isCaseManager) {
+        if (
+          n.category === 'CASE' ||
+          declaredTargetRoles.some(tr => tr.includes('CASE') || tr.includes('OPERATION')) ||
+          (n.targetView && n.targetView.includes('case')) ||
+          (n.title && (n.title.includes('Case') || n.title.includes('Workflow') || n.title.includes('Registration') || n.title.includes('Shipment') || n.title.includes('Transit')))
         ) {
           return true;
         }

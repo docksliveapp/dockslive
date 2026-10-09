@@ -7,7 +7,9 @@ import {
   updateVehicleInFirestore,
   deleteVehicleFromFirestore,
   updateFinanceInFirestore,
-  updateClientInFirestore
+  updateClientInFirestore,
+  saveFinanceToFirestore,
+  saveStaffLedgerEntryToFirestore
 } from './dbService';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
@@ -252,6 +254,116 @@ export async function approveActionRequest(notification: AppNotification): Promi
       );
     } catch (err) {
       console.warn("Could not approve client registration:", err);
+    }
+  } else if (actionType === 'COLLECT_SALARY') {
+    const numId = Number(entityId);
+    const amount = Number(notification.approvalData.amount || 0);
+    const staffName = notification.approvalData.requestedBy || 'Staff Member';
+    const staffUserId = (notification.approvalData as any).staffUserId || '';
+
+    try {
+      // 1. Update payable status to PAID
+      await updateFinanceInFirestore({
+        id: numId,
+        status: 'PAID',
+        salaryStatus: 'COLLECTED',
+        remarks: `Salary collected and acknowledged by ${staffName} on ${new Date().toLocaleDateString()}`
+      } as any);
+
+      // 2. Add EXPENSE entry to company Cash / Bank Book
+      const expenseEntry: FinanceEntry = {
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        date: new Date().toISOString().split('T')[0],
+        description: `Disbursement: Monthly Salary paid to ${staffName}`,
+        amount,
+        type: 'EXPENSE',
+        status: 'PAID',
+        party: staffName,
+        category: 'Staff Payroll & Salaries',
+        paymentMethod: 'BANK',
+        bankName: 'HBL Corporate Payroll',
+        reference: `SAL-COLLECTED-${numId}`
+      };
+      await saveFinanceToFirestore(expenseEntry);
+
+      // 3. Record in staff salary ledger
+      await saveStaffLedgerEntryToFirestore({
+        id: `sal_leg_${Date.now()}`,
+        staffId: staffUserId || numId,
+        staffName,
+        type: 'SALARY',
+        date: new Date().toISOString().split('T')[0],
+        description: `Salary Received & Acknowledged via Bank / Cash`,
+        category: 'Salary Disbursement',
+        debit: amount,
+        credit: 0,
+        balance: 0,
+        notes: `Acknowledged via System Action Center`
+      });
+
+      logActivity(
+        `Staff Salary Collected: PKR ${amount.toLocaleString()}`,
+        `Staff member "${staffName}" confirmed receipt of monthly salary. Expense recorded and ledger updated.`,
+        'FINANCE_MANAGER',
+        staffName
+      );
+    } catch (err) {
+      console.warn("Could not process salary collection:", err);
+    }
+  } else if (actionType === 'APPROVE_NOC') {
+    const numId = Number(entityId);
+    const vehicleNo = notification.approvalData.entityName || `Vehicle #${numId}`;
+    const transporter = notification.approvalData.requestedBy || 'Transporter';
+
+    try {
+      // Admin approves cancellation & NOC
+      await updateVehicleInFirestore({
+        id: numId,
+        status: 'CANCELLED',
+        cancellationApproved: true,
+        cancellationDate: new Date().toISOString().split('T')[0],
+        pendingApproval: undefined
+      } as any);
+
+      // If NOC fee of PKR 6,000 applies to payable ledger
+      const nocFee = 6000;
+      const payableEntry: FinanceEntry = {
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        date: new Date().toISOString().split('T')[0],
+        description: `Vehicle De-Registration NOC Processing Fee for ${vehicleNo}`,
+        amount: nocFee,
+        type: 'PAYABLE',
+        status: 'APPROVED',
+        party: transporter,
+        category: 'Vehicle NOC & De-Registration Fees',
+        reference: `NOC-FEE-${numId}`
+      };
+      await saveFinanceToFirestore(payableEntry);
+
+      // Notify Transporter
+      await saveNotificationToFirestore({
+        id: Date.now() + 10,
+        title: `Vehicle NOC Approved: ${vehicleNo}`,
+        description: `Your de-registration NOC request for vehicle ${vehicleNo} has been approved by Administrator. NOC certificate is now generated.`,
+        details: `Fleet Unit: ${vehicleNo}\nTransporter: ${transporter}\nStatus: Officially De-Registered / NOC Granted\nNOC Standard Fee (PKR 6,000) posted to account ledger.`,
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'INFO',
+        notificationSubType: 'GENERAL',
+        status: 'RESOLVED',
+        targetClientName: transporter,
+        targetRole: 'TRANSPORTER',
+        category: 'TRANSPORTER',
+        priority: 'HIGH'
+      });
+
+      logActivity(
+        `Vehicle NOC Approved: ${vehicleNo}`,
+        `Administrator approved cancellation NOC for ${vehicleNo} (${transporter}). Vehicle cancelled in customs fleet.`,
+        'ADMIN',
+        'Administrator'
+      );
+    } catch (err) {
+      console.warn("Could not execute NOC approval:", err);
     }
   }
 
