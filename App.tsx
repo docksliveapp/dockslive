@@ -211,7 +211,7 @@ const App: React.FC = () => {
   // Luxury Business Class Theme: Pearl White vs Charcoal (matching MAK Logo)
   const [appTheme, setAppTheme] = useState<'pearl' | 'charcoal'>(() => {
     const saved = safeAppStorage.getItem('dpl_app_theme');
-    return (saved === 'charcoal' || saved === 'pearl') ? saved : 'pearl';
+    return (saved === 'charcoal' || saved === 'pearl') ? saved : 'charcoal';
   });
 
   useEffect(() => {
@@ -875,10 +875,9 @@ const App: React.FC = () => {
       <aside className={`fixed top-0 left-0 h-full bg-slate-950/98 backdrop-blur-2xl border-r border-white/10 transition-all duration-300 flex flex-col z-40 shadow-2xl ${mobileSidebarOpen ? 'w-72 sm:w-80 translate-x-0' : 'w-72 sm:w-80 -translate-x-full'} lg:static lg:translate-x-0 lg:h-auto ${desktopSidebarExpanded ? 'lg:w-64' : 'lg:w-20'} overflow-hidden select-none`}>
         
         {/* Mobile Safe-Area Header with Close Button */}
-        <div className="pt-3 pb-2.5 px-4 border-b border-white/10 flex items-center justify-between lg:hidden bg-slate-900/80 shrink-0">
+        <div className="pt-3 pb-2.5 px-4 border-b border-white/10 flex items-center justify-between lg:hidden bg-slate-900/90 shrink-0">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-amber-300">
+            <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-300">
               MAK Enterprise Menu
             </span>
           </div>
@@ -899,17 +898,17 @@ const App: React.FC = () => {
             setNavigationFilter(null);
             setMobileSidebarOpen(false);
           }}
-          className="p-3 mx-3 my-2.5 rounded-2xl bg-gradient-to-br from-amber-500/10 via-slate-900 to-black border border-amber-500/25 flex items-center gap-2.5 cursor-pointer hover:border-amber-400/50 transition-all group shadow-md shrink-0"
+          className="p-3 mx-3 my-2.5 rounded-2xl bg-slate-900/90 border border-white/10 flex items-center gap-2.5 cursor-pointer hover:border-slate-300/40 transition-all group shadow-md shrink-0"
           title={`${activeCompany.name} Dashboard`}
         >
-          <div className="w-9 h-9 rounded-xl bg-black/60 border border-amber-500/30 flex items-center justify-center p-1.5 shrink-0 group-hover:scale-105 transition-transform">
+          <div className="w-9 h-9 rounded-xl bg-black/60 border border-white/15 flex items-center justify-center p-1.5 shrink-0 group-hover:scale-105 transition-transform">
             <Logo variant="icon" className="max-h-full max-w-full object-contain" />
           </div>
           <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} min-w-0 flex-1`}>
-            <h3 className="font-extrabold text-xs text-white group-hover:text-amber-300 transition-colors uppercase leading-tight truncate">
+            <h3 className="font-extrabold text-xs text-white group-hover:text-slate-100 transition-colors uppercase leading-tight truncate">
               {activeCompany.name}
             </h3>
-            <p className="text-[9px] font-mono text-amber-400/90 tracking-wider uppercase truncate mt-0.5">
+            <p className="text-[9px] font-mono text-slate-400 tracking-wider uppercase truncate mt-0.5">
               {activeCompany.shortName} • {activeCompany.prefix}
             </p>
           </div>
@@ -923,16 +922,16 @@ const App: React.FC = () => {
               setMobileSidebarOpen(false);
               setIsCompanyModalOpen(true);
             }}
-            className="w-full flex items-center justify-between gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all text-xs font-bold cursor-pointer group shadow-sm active:scale-95"
+            className="w-full flex items-center justify-between gap-1.5 px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-white/15 text-slate-200 transition-all text-xs font-bold cursor-pointer group shadow-sm active:scale-95"
             title="Switch Subsidiary / Company Workspace"
           >
             <div className="flex items-center gap-2 truncate">
-              <Building2 size={14} className="text-amber-400 shrink-0" />
+              <Building2 size={14} className="text-slate-300 shrink-0" />
               <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} truncate text-[11px]`}>
                 Switch Company
               </span>
             </div>
-            <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[9px] px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-bold uppercase font-mono`}>
+            <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[9px] px-1.5 py-0.5 rounded bg-white/10 text-slate-300 font-bold uppercase font-mono`}>
               4 Entities
             </span>
           </button>
@@ -1023,18 +1022,18 @@ const App: React.FC = () => {
             <button 
               type="button"
               onClick={() => window.innerWidth < 1024 ? setMobileSidebarOpen(!mobileSidebarOpen) : setDesktopSidebarExpanded(!desktopSidebarExpanded)} 
-              className="p-2 sm:p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-gray-300 hover:text-white border border-white/10 hover:border-amber-400/40 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
+              className="p-2 sm:p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-gray-300 hover:text-white border border-white/10 hover:border-white/30 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
               title="Toggle Sidebar Menu"
             >
-              <Menu size={19} className="text-amber-400" />
+              <Menu size={19} className="text-slate-200" />
             </button>
 
-            <span className="hidden sm:inline-flex px-2 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono font-black text-xs shrink-0 shadow-sm">
+            <span className="hidden sm:inline-flex px-2 py-0.5 rounded-lg bg-white/10 border border-white/20 text-slate-200 font-mono font-bold text-xs shrink-0 shadow-sm">
               {activeCompany.prefix || activeCompany.shortName}
             </span>
 
             <div className="hidden md:flex items-center gap-2 min-w-0">
-              <span className="text-xs font-bold text-gray-300 uppercase tracking-wider truncate">
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider truncate">
                 {activeView === 'dashboard' ? 'Overview' : activeView.replace('-', ' ')}
               </span>
             </div>
@@ -1056,12 +1055,12 @@ const App: React.FC = () => {
                   className="h-8 sm:h-10 w-auto max-w-[140px] sm:max-w-[220px] object-contain drop-shadow-[0_2px_10px_rgba(0,0,0,0.6)] group-hover:scale-105 transition-transform duration-200" 
                 />
               ) : (
-                <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-slate-800/90 border border-amber-500/30 group-hover:border-amber-400 text-amber-200 group-hover:text-white transition-all shadow-sm">
-                  <Building2 size={15} className="text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
-                  <span className="font-extrabold text-xs sm:text-sm tracking-wide text-white group-hover:text-amber-300 transition-colors truncate max-w-[120px] sm:max-w-[180px]">
+                <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-slate-800/90 border border-white/15 group-hover:border-white/30 text-slate-200 group-hover:text-white transition-all shadow-sm">
+                  <Building2 size={15} className="text-slate-300 group-hover:scale-110 transition-transform shrink-0" />
+                  <span className="font-extrabold text-xs sm:text-sm tracking-wide text-white group-hover:text-slate-100 transition-colors truncate max-w-[120px] sm:max-w-[180px]">
                     {activeCompany.name}
                   </span>
-                  <ChevronDown size={13} className="text-amber-400/80 group-hover:translate-y-0.5 transition-transform shrink-0" />
+                  <ChevronDown size={13} className="text-slate-400 group-hover:translate-y-0.5 transition-transform shrink-0" />
                 </div>
               )}
             </button>
@@ -1074,19 +1073,19 @@ const App: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsPublicContainerTrackingOpen(true)}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-amber-300 hover:text-white border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
                 title="Preview Public Container Tracker (Status.makpk.online)"
               >
-                <Package size={13} className="text-amber-400" />
+                <Package size={13} className="text-slate-300" />
                 <span>status.</span>
               </button>
               <button
                 type="button"
                 onClick={() => setIsPublicVehicleTrackingOpen(true)}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-cyan-300 hover:text-white border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
                 title="Preview Public Vehicle Tracker (Vehicle.makpk.online)"
               >
-                <Truck size={13} className="text-cyan-400" />
+                <Truck size={13} className="text-slate-300" />
                 <span>vehicle.</span>
               </button>
             </div>
@@ -1095,14 +1094,14 @@ const App: React.FC = () => {
             <button
               type="button"
               onClick={() => setAppTheme(prev => prev === 'pearl' ? 'charcoal' : 'pearl')}
-              className={`btn-animated-luxury px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 ${
+              className={`btn-animated-luxury px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 ${
                 appTheme === 'pearl'
-                  ? 'bg-slate-800/90 hover:bg-slate-700/90 text-amber-300 border-amber-500/30 shadow-amber-500/10'
-                  : 'bg-white/15 hover:bg-white/25 text-white border-white/20 shadow-black/20'
+                  ? 'bg-slate-800/90 hover:bg-slate-700/90 text-slate-100 border-white/15 shadow-sm'
+                  : 'bg-white/15 hover:bg-white/25 text-white border-white/25 shadow-black/20'
               }`}
               title={appTheme === 'pearl' ? "Switch to Charcoal Luxury (Executive Night)" : "Switch to Pearl White (Business Class)"}
             >
-              <Sparkles size={13} className={appTheme === 'pearl' ? 'text-amber-400' : 'text-amber-300 animate-pulse'} />
+              <Sparkles size={13} className="text-slate-300" />
               <span className="hidden sm:inline font-mono text-[11px] uppercase tracking-wider">
                 {appTheme === 'pearl' ? 'Pearl White' : 'Charcoal'}
               </span>

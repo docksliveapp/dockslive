@@ -1001,23 +1001,23 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               </div>
               <div>
                 <h1 className="text-sm font-bold text-white tracking-wide">Client Portal</h1>
-                <p className="text-[10px] text-amber-400 font-medium">Importer & Logistics Desk</p>
+                <p className="text-[10px] text-slate-300 font-medium">Importer & Logistics Desk</p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setMobileMenuOpen(false)}
-              className="lg:hidden text-gray-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition"
+              className="lg:hidden text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition"
               title="Close Menu"
             >
               <X size={18} />
             </button>
           </div>
 
-          {/* Client Identity Display */}
-          <div className="p-3.5 mx-3 my-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-1.5">
+          {/* Client Identity Display - Charcoal & Pearl White */}
+          <div className="p-3.5 mx-3 my-3 bg-slate-900/90 border border-white/10 rounded-xl space-y-1.5">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-amber-600/20 text-amber-300 font-bold text-xs flex items-center justify-center border border-amber-500/30 uppercase">
+              <div className="w-8 h-8 rounded-lg bg-white/10 text-white font-bold text-xs flex items-center justify-center border border-white/15 uppercase">
                 {selectedClientName.slice(0, 2)}
               </div>
               <div className="min-w-0 flex-1">
@@ -1036,10 +1036,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   setIsClientRegModalOpen(true);
                   setMobileMenuOpen(false);
                 }}
-                className="text-purple-300 hover:text-white flex items-center gap-1.5 text-[11px] font-semibold cursor-pointer hover:underline transition-colors"
+                className="text-slate-300 hover:text-white flex items-center gap-1.5 text-[11px] font-semibold cursor-pointer hover:underline transition-colors"
                 title="View locked corporate profile and manage portal password"
               >
-                <User size={13} className="text-purple-400" /> 
+                <User size={13} className="text-slate-400" /> 
                 <span>View Profile</span>
               </button>
             </div>
@@ -1056,13 +1056,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               }}
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'cases'
-                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  ? 'bg-slate-800 text-white border border-white/20 shadow-md font-bold'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
               <FolderKanban size={17} />
               <span>Cases</span>
-              <span className="ml-auto text-[11px] font-mono font-bold bg-black/30 px-2 py-0.5 rounded-full">
+              <span className="ml-auto text-[11px] font-mono font-bold bg-black/40 px-2 py-0.5 rounded-full text-slate-200">
                 {clientCases.length}
               </span>
             </button>
@@ -1075,14 +1075,14 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               }}
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all relative ${
                 activeTab === 'case_status'
-                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  ? 'bg-slate-800 text-white border border-white/20 shadow-md font-bold'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
               <Clock size={17} />
               <span>Check Case Status</span>
               {clientActionNeededCount > 0 && (
-                <span className="ml-auto bg-amber-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded-full animate-pulse">
+                <span className="ml-auto bg-amber-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                   Action Req
                 </span>
               )}
@@ -1096,8 +1096,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               }}
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'finance'
-                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  ? 'bg-slate-800 text-white border border-white/20 shadow-md font-bold'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
               <DollarSign size={17} />
@@ -1117,8 +1117,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               }}
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'available_vehicles'
-                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  ? 'bg-slate-800 text-white border border-white/20 shadow-md font-bold'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
               <Truck size={17} />
@@ -1215,7 +1215,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 <span className="text-xs font-bold text-white block truncate">
                   Client Portal
                 </span>
-                <span className="text-[10px] text-amber-400 block font-medium truncate max-w-[150px]">
+                <span className="text-[10px] text-slate-300 block font-medium truncate max-w-[150px]">
                   {selectedClientName}
                 </span>
               </div>
@@ -1230,7 +1230,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               onNavigateToTab={(tab) => setActiveTab(tab as any)}
             />
 
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white/10 text-slate-200 border border-white/20 uppercase">
               {activeTab.replace('_', ' ')}
             </span>
             <button

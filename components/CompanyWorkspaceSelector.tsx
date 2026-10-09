@@ -84,70 +84,32 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   const getCompanyIcon = (id: CompanyId) => {
     switch (id) {
       case 'docks':
-        return <Anchor className="w-8 h-8 text-amber-400" />;
+        return <Anchor className="w-8 h-8 text-slate-200" />;
       case 'muhib':
-        return <Globe className="w-8 h-8 text-blue-400" />;
+        return <Globe className="w-8 h-8 text-slate-200" />;
       case 'vantage':
-        return <Ship className="w-8 h-8 text-cyan-400" />;
+        return <Ship className="w-8 h-8 text-slate-200" />;
       case 'truckit':
-        return <Truck className="w-8 h-8 text-rose-400" />;
+        return <Truck className="w-8 h-8 text-slate-200" />;
     }
   };
 
   const getCompanyCardStyles = (id: CompanyId, isCurrentActive: boolean) => {
-    switch (id) {
-      case 'docks':
-        return {
-          cardBorder: isCurrentActive ? 'border-amber-400 ring-2 ring-amber-400/50 shadow-[0_0_35px_rgba(245,158,11,0.35)]' : 'border-amber-500/30 hover:border-amber-400/80 hover:shadow-[0_0_30px_rgba(245,158,11,0.25)]',
-          bgGradient: 'from-amber-950/30 via-slate-900/90 to-black',
-          accentText: 'text-amber-300',
-          badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-          glowPulse: 'group-hover:border-amber-400',
-        };
-      case 'muhib':
-        return {
-          cardBorder: isCurrentActive ? 'border-blue-400 ring-2 ring-blue-400/50 shadow-[0_0_35px_rgba(59,130,246,0.35)]' : 'border-blue-500/30 hover:border-blue-400/80 hover:shadow-[0_0_30px_rgba(59,130,246,0.25)]',
-          bgGradient: 'from-blue-950/30 via-slate-900/90 to-black',
-          accentText: 'text-blue-300',
-          badgeBg: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
-          glowPulse: 'group-hover:border-blue-400',
-        };
-      case 'vantage':
-        return {
-          cardBorder: isCurrentActive ? 'border-cyan-400 ring-2 ring-cyan-400/50 shadow-[0_0_35px_rgba(6,182,212,0.35)]' : 'border-cyan-500/30 hover:border-cyan-400/80 hover:shadow-[0_0_30px_rgba(6,182,212,0.25)]',
-          bgGradient: 'from-cyan-950/30 via-slate-900/90 to-black',
-          accentText: 'text-cyan-300',
-          badgeBg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40',
-          glowPulse: 'group-hover:border-cyan-400',
-        };
-      case 'truckit':
-        return {
-          cardBorder: isCurrentActive ? 'border-rose-400 ring-2 ring-rose-400/50 shadow-[0_0_35px_rgba(244,63,94,0.35)]' : 'border-rose-500/30 hover:border-rose-400/80 hover:shadow-[0_0_30px_rgba(244,63,94,0.25)]',
-          bgGradient: 'from-rose-950/30 via-slate-900/90 to-black',
-          accentText: 'text-rose-300',
-          badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
-          glowPulse: 'group-hover:border-rose-400',
-        };
-    }
+    return {
+      cardBorder: isCurrentActive 
+        ? 'border-slate-200 ring-2 ring-slate-300/50 shadow-[0_0_30px_rgba(255,255,255,0.08)] bg-slate-800/95' 
+        : 'border-white/10 hover:border-slate-300/50 hover:shadow-[0_0_25px_rgba(255,255,255,0.05)] bg-[#151922]',
+      bgGradient: 'from-slate-900/95 via-[#161A24] to-[#10141D]',
+      accentText: isCurrentActive ? 'text-white' : 'text-slate-200',
+      badgeBg: 'bg-white/10 text-slate-200 border-white/20',
+      glowPulse: 'group-hover:border-slate-300',
+    };
   };
 
   const content = (
     <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-4 sm:py-6 flex flex-col justify-start">
-      {/* 1. TOP EXECUTIVE ACTION BAR (ONLY Admin Settings & Logout as requested) */}
-      <div className="flex items-center justify-between gap-3 pb-3 mb-4 sm:mb-6 border-b border-white/10 shrink-0">
-        <div className="flex items-center gap-2.5">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
-          </span>
-          <div>
-            <span className="text-xs sm:text-sm font-mono uppercase tracking-wider text-amber-300 font-bold">
-              {parentGroup.name || 'MAK Group of Companies'}
-            </span>
-            <span className="text-gray-500 text-[10px] hidden md:inline ml-2">• Enterprise Central Gateway</span>
-          </div>
-        </div>
-
+      {/* 1. TOP EXECUTIVE ACTION BAR (Clean Business-Class: Settings & Logout) */}
+      <div className="flex items-center justify-end gap-3 pb-3 mb-4 sm:mb-6 border-b border-white/10 shrink-0">
         {/* Right side: strictly Admin Settings & Logout only */}
         <div className="flex items-center gap-2">
           {/* Main Admin Settings Button - Visible ONLY to Main Group Admin */}
@@ -155,11 +117,11 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
             <button
               type="button"
               onClick={() => openAdminModal('users')}
-              className="group relative px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold tracking-wide transition-all duration-300 cursor-pointer overflow-hidden border border-amber-400/50 bg-gradient-to-r from-amber-500/25 via-yellow-500/35 to-amber-500/25 hover:from-amber-500 hover:via-yellow-400 hover:to-amber-500 text-amber-200 hover:text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.25)] hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] transform hover:scale-105 active:scale-95 flex items-center gap-2"
+              className="group relative px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold tracking-wide transition-all duration-300 cursor-pointer overflow-hidden border border-white/20 bg-slate-800/90 hover:bg-slate-700/90 text-slate-100 shadow-md hover:shadow-lg transform hover:scale-105 active:scale-95 flex items-center gap-2"
               title="Open Group Admin Settings (Users, Logo Branding & Backup)"
             >
-              <Crown size={14} className="text-amber-400 group-hover:text-slate-950 animate-pulse shrink-0" />
-              <span className="font-sans font-extrabold">Group Main Settings</span>
+              <Crown size={14} className="text-slate-300 group-hover:text-white shrink-0" />
+              <span className="font-sans font-semibold">Group Admin Settings</span>
             </button>
           ) : (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[11px] text-gray-300">
@@ -173,10 +135,10 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
             <button
               type="button"
               onClick={onSignOut}
-              className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-bold text-gray-300 hover:text-rose-200 bg-slate-900/90 hover:bg-rose-500/20 border border-white/10 hover:border-rose-500/40 transition-all flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95"
+              className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-slate-900/90 hover:bg-slate-800 border border-white/10 hover:border-white/20 transition-all flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95"
               title="Sign Out / Switch Account"
             >
-              <LogOut size={13} className="text-rose-400" />
+              <LogOut size={13} className="text-slate-400" />
               <span>Logout</span>
             </button>
           )}
@@ -201,19 +163,19 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
             <img 
               src={parentGroup.logo} 
               alt={parentGroup.name} 
-              className="h-12 sm:h-16 w-auto max-w-[240px] object-contain drop-shadow-[0_6px_20px_rgba(245,158,11,0.35)]"
+              className="h-12 sm:h-16 w-auto max-w-[240px] object-contain drop-shadow-[0_6px_20px_rgba(0,0,0,0.7)]"
             />
           ) : (
-            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-br from-amber-500/25 via-slate-900 to-amber-600/30 border border-amber-400/50 flex items-center justify-center shadow-lg shadow-amber-500/20">
-              <Crown className="w-6 h-6 sm:w-7 sm:h-7 text-amber-400 animate-pulse" />
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-slate-800 border border-white/15 flex items-center justify-center shadow-lg">
+              <Crown className="w-6 h-6 sm:w-7 sm:h-7 text-slate-200" />
             </div>
           )}
         </div>
 
-        <h1 className="text-xl sm:text-2xl font-black text-white tracking-wide font-serif mb-1 drop-shadow-md">
+        <h1 className="text-xl sm:text-2xl font-bold text-white tracking-wide font-sans mb-1 drop-shadow-md">
           {parentGroup.title || 'MAK GROUP OF COMPANIES'}
         </h1>
-        <p className="text-[11px] sm:text-xs text-amber-400/90 font-mono tracking-widest uppercase">
+        <p className="text-[11px] sm:text-xs text-slate-400 font-mono tracking-widest uppercase">
           Select Company Workspace
         </p>
       </div>
@@ -289,12 +251,12 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
               </div>
 
               {/* Only Company Name (Clean & Prominent) */}
-              <h3 className="text-base sm:text-lg font-extrabold text-white group-hover:text-amber-300 transition-colors tracking-wide max-w-xs leading-tight">
+              <h3 className="text-base sm:text-lg font-bold text-white group-hover:text-slate-100 transition-colors tracking-wide max-w-xs leading-tight">
                 {comp.name}
               </h3>
 
               {/* Subtle Animated Indicator */}
-              <div className="mt-3 flex items-center gap-1 text-[11px] font-bold text-gray-400 group-hover:text-white transition-colors">
+              <div className="mt-3 flex items-center gap-1 text-[11px] font-semibold text-slate-400 group-hover:text-white transition-colors">
                 <span>Enter Workspace</span>
                 <ArrowRight size={13} className="transform group-hover:translate-x-1 transition-transform" />
               </div>
@@ -304,7 +266,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
       </div>
 
       {/* 4. FOOTER NOTE */}
-      <div className="text-center pt-2 pb-4 text-xs text-gray-500 font-sans shrink-0">
+      <div className="text-center pt-2 pb-4 text-xs text-slate-500 font-sans shrink-0">
         MAK Group of Companies • Cross-entity user authentication enabled. Subsidiaries can be switched at any time.
       </div>
 
@@ -321,7 +283,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   if (isModal) {
     return (
       <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
-        <div className="relative w-full max-w-4xl bg-slate-950/95 border border-white/10 rounded-3xl shadow-2xl my-6 flex flex-col overflow-visible">
+        <div className="relative w-full max-w-4xl bg-[#11141D] border border-white/10 rounded-3xl shadow-2xl my-6 flex flex-col overflow-visible">
           {content}
         </div>
       </div>
@@ -329,17 +291,15 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   }
 
   return (
-    <div className="min-h-screen w-full bg-[#030712] text-gray-100 flex flex-col overflow-y-auto relative touch-pan-y">
-      {/* Background cyber ambient glow */}
+    <div className="min-h-screen w-full bg-[#0B0E14] text-slate-100 flex flex-col overflow-y-auto relative touch-pan-y">
+      {/* Background pearl charcoal ambience */}
       <div 
-        className="absolute inset-0 pointer-events-none opacity-20"
+        className="absolute inset-0 pointer-events-none opacity-25"
         style={{
           backgroundImage: `
-            radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.08) 0%, transparent 60%),
-            linear-gradient(to right, rgba(56, 189, 248, 0.06) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(56, 189, 248, 0.06) 1px, transparent 1px)
-          `,
-          backgroundSize: '100% 100%, 48px 48px, 48px 48px'
+            radial-gradient(circle at 50% 15%, rgba(255, 255, 255, 0.05) 0%, transparent 60%),
+            radial-gradient(circle at 50% 85%, rgba(30, 41, 59, 0.5) 0%, transparent 60%)
+          `
         }}
       />
       {content}

@@ -41,6 +41,7 @@ import { useBranding } from '../services/brandingService';
 import { useActiveCompany } from '../services/companyService';
 import { sendAppNotification } from '../services/notificationService';
 import { jsPDF } from 'jspdf';
+import { drawPdfCorporateHeader, drawPdfCorporateFooter, drawOfficialCompanyStampOnly, cleanPdfText } from '../services/pdfExportService';
 import {
   Building2,
   Landmark,
@@ -569,7 +570,7 @@ export const CompanyDocuments: React.FC = () => {
   };
 
   // Download PDF Handler (Downloads original attachment or creates official generated PDF)
-  const handleDownloadPdf = (docItem: CompanyDocument) => {
+  const handleDownloadPdf = async (docItem: CompanyDocument) => {
     if (docItem.fileUrl && docItem.fileUrl.startsWith('data:')) {
       const link = document.createElement('a');
       link.href = docItem.fileUrl;
@@ -580,46 +581,40 @@ export const CompanyDocuments: React.FC = () => {
       return;
     }
 
-    // Generate formatted official PDF with jsPDF
+    // Generate formatted official PDF with jsPDF using MAK Group official letterhead
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const primaryColor = [22, 36, 71]; // Navy Blue
-    const goldColor = [217, 119, 6];   // Amber
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const margin = 14;
 
-    // Header Band
-    pdf.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-    pdf.rect(0, 0, 210, 32, 'F');
+    // 1. Draw unified MAK GROUP OF COMPANIES letterhead
+    let currentY = await drawPdfCorporateHeader(pdf, {
+      title: 'LEGAL & COMPLIANCE RECORD',
+      refNo: docItem.referenceNo || `DOC-${docItem.id}`,
+      date: docItem.documentDate || new Date().toISOString().split('T')[0],
+      subject: docItem.subject || docItem.title
+    });
 
-    // Title
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(16);
-    pdf.text(companyName || activeCompany?.name || 'Company', 15, 14);
-
-    pdf.setFontSize(9);
-    pdf.setTextColor(245, 158, 11);
-    pdf.text('CORPORATE LEGAL & COMPLIANCE DOCUMENT RECORD', 15, 22);
-
-    // Document Meta Box
-    pdf.setTextColor(30, 41, 59);
-    pdf.setFontSize(14);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text(docItem.title, 15, 46);
-
+    // 2. Document Title Box
+    pdf.setFillColor(248, 250, 252);
     pdf.setDrawColor(226, 232, 240);
-    pdf.line(15, 50, 195, 50);
+    pdf.roundedRect(margin, currentY, pageWidth - (margin * 2), 10, 1.5, 1.5, 'FD');
+    pdf.setTextColor(15, 23, 42);
+    pdf.setFontSize(11);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text(cleanPdfText(docItem.title), margin + 4, currentY + 6.5, { maxWidth: pageWidth - (margin * 2) - 8 });
+    currentY += 14;
 
-    let y = 60;
     const addRow = (label: string, val: string, isAlert = false) => {
       pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(10);
+      pdf.setFontSize(8.5);
       pdf.setTextColor(100, 116, 139);
-      pdf.text(label, 15, y);
+      pdf.text(label, margin + 4, currentY);
 
       pdf.setFont('helvetica', isAlert ? 'bold' : 'normal');
-      pdf.setFontSize(10);
+      pdf.setFontSize(8.5);
       pdf.setTextColor(isAlert ? 180 : 15, isAlert ? 83 : 23, isAlert ? 9 : 42);
-      pdf.text(val || 'N/A', 65, y);
-      y += 9;
+      pdf.text(cleanPdfText(val) || 'N/A', margin + 45, currentY, { maxWidth: pageWidth - margin - 50 });
+      currentY += 6.5;
     };
 
     addRow('Category:', docItem.category);
@@ -630,27 +625,43 @@ export const CompanyDocuments: React.FC = () => {
     addRow('Subject:', docItem.subject);
 
     if (docItem.hearingRequired) {
-      y += 4;
+      currentY += 3;
       pdf.setFillColor(254, 243, 199);
-      pdf.rect(15, y - 5, 180, 20, 'F');
+      pdf.rect(margin, currentY - 4, pageWidth - (margin * 2), 16, 'F');
       pdf.setDrawColor(245, 158, 11);
-      pdf.rect(15, y - 5, 180, 20, 'S');
+      pdf.rect(margin, currentY - 4, pageWidth - (margin * 2), 16, 'S');
 
       pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(8);
       pdf.setTextColor(180, 83, 9);
-      pdf.text(`LEGAL HEARING SCHEDULED: ${docItem.hearingDate || 'TBD'} ${docItem.hearingTime ? 'at ' + docItem.hearingTime : ''}`, 20, y + 4);
+      pdf.text(`LEGAL HEARING SCHEDULED: ${docItem.hearingDate || 'TBD'} ${docItem.hearingTime ? 'at ' + docItem.hearingTime : ''}`, margin + 4, currentY + 3);
       if (docItem.hearingNotes) {
         pdf.setFont('helvetica', 'normal');
-        pdf.setFontSize(9);
-        pdf.text(`Notes: ${docItem.hearingNotes}`, 20, y + 10);
+        pdf.setFontSize(7.5);
+        pdf.text(`Notes: ${cleanPdfText(docItem.hearingNotes)}`, margin + 4, currentY + 9);
       }
-      y += 24;
+      currentY += 18;
     }
 
-    // Footer
-    pdf.setFontSize(8);
-    pdf.setTextColor(148, 163, 184);
-    pdf.text(`Generated on ${new Date().toLocaleString()} by ${activeCompany?.shortName || 'MAK'} Digital Record System. Confidential.`, 15, 285);
+    // 3. Issuing Company Signature & Official Seal at bottom
+    const stampY = Math.max(currentY + 5, 230);
+    drawOfficialCompanyStampOnly(pdf, pageWidth - margin - 60, stampY, 'COMPLIANCE RECORD SEAL', activeCompany?.id);
+
+    // Left signature line
+    pdf.setDrawColor(148, 163, 184);
+    pdf.setLineWidth(0.3);
+    pdf.line(margin, stampY + 12, margin + 55, stampY + 12);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(7);
+    pdf.setTextColor(51, 65, 85);
+    pdf.text('AUTHORIZED COMPLIANCE OFFICER', margin, stampY + 16);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(6.2);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text(activeCompany?.legalTitle || activeCompany?.name || 'Operating Entity', margin, stampY + 19.5);
+
+    // 4. Draw unified corporate footer
+    drawPdfCorporateFooter(pdf, 'Page 1 of 1');
 
     pdf.save(`${docItem.title.replace(/\s+/g, '_')}_record.pdf`);
   };

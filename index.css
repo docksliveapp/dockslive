@@ -40,95 +40,100 @@
 }
 
 /* ==========================================================================
-   LUXURY BUSINESS CLASS THEME: PEARL WHITE + CHARCOAL + GLASSY + ANIMATED
+   LUXURY BUSINESS CLASS THEME: GREY CHARCOAL & PEARL WHITE
    ========================================================================== */
 
-/* 1. Satin Pearl White & Charcoal Canvas (Inspired by charcoal_gladiator_big.jpg) */
-body.theme-pearl,
-.theme-pearl {
-  background-color: #F1F5F9;
-  background-image: 
-    radial-gradient(ellipse 90% 45% at 50% 0%, rgba(255, 255, 255, 0.95) 0%, rgba(241, 245, 249, 0.8) 60%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(241, 245, 249, 0.95) 30%, rgba(226, 232, 240, 0.85) 70%, rgba(248, 250, 252, 0.95) 100%),
-    radial-gradient(circle at 100% 100%, rgba(30, 41, 59, 0.05) 0%, transparent 50%),
-    radial-gradient(circle at 0% 100%, rgba(30, 41, 59, 0.05) 0%, transparent 50%);
-  background-attachment: fixed;
-  background-size: cover;
-  color: #0F172A;
-}
-
+/* 1. Deep Executive Charcoal Canvas with Pearl White Sheen */
+body,
 body.theme-charcoal,
 .theme-charcoal {
-  background-color: #090D16;
+  background-color: #0B0F17;
   background-image: 
-    radial-gradient(ellipse 90% 45% at 50% 0%, rgba(241, 245, 249, 0.08) 0%, transparent 60%),
+    radial-gradient(ellipse 90% 45% at 50% 0%, rgba(241, 245, 249, 0.07) 0%, transparent 60%),
     radial-gradient(ellipse 70% 50% at 50% 50%, rgba(248, 250, 252, 0.03) 0%, transparent 70%),
-    linear-gradient(180deg, #090D16 0%, #111827 35%, #1E293B 70%, #0A0E17 100%);
+    linear-gradient(180deg, #0B0F17 0%, #111827 40%, #1A2234 75%, #0B0E17 100%);
   background-attachment: fixed;
   background-size: cover;
   color: #F8FAFC;
 }
 
-/* 2. High-Performance Frosted Glass ("Glassi") Utilities */
+body.theme-pearl,
+.theme-pearl {
+  background-color: #0E1420;
+  background-image: 
+    radial-gradient(ellipse 90% 50% at 50% 0%, rgba(255, 255, 255, 0.10) 0%, transparent 65%),
+    radial-gradient(ellipse 70% 50% at 50% 45%, rgba(241, 245, 249, 0.05) 0%, transparent 70%),
+    linear-gradient(180deg, #0E1420 0%, #161F30 40%, #1E293B 75%, #0F1622 100%);
+  background-attachment: fixed;
+  background-size: cover;
+  color: #F8FAFC;
+}
+
+/* 2. Executive Frosted Glass ("Glassi") Utilities - Deep Charcoal with Pearl Rim */
 .glass-card {
-  background: rgba(255, 255, 255, 0.76);
+  background: rgba(17, 24, 39, 0.88);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  border: 1px solid rgba(255, 255, 255, 0.85);
-  box-shadow: 0 20px 45px -15px rgba(15, 23, 42, 0.07), 0 0 1px 1px rgba(255, 255, 255, 0.9) inset;
+  border: 1px solid rgba(241, 245, 249, 0.14);
+  box-shadow: 0 20px 45px -15px rgba(0, 0, 0, 0.6), 0 0 1px 1px rgba(255, 255, 255, 0.05) inset;
+  color: #F8FAFC;
 }
 
 .theme-charcoal .glass-card,
 .glass-card-charcoal {
-  background: rgba(30, 41, 59, 0.85);
+  background: rgba(15, 23, 42, 0.90);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 25px 50px -15px rgba(0, 0, 0, 0.55), 0 0 1px 1px rgba(255, 255, 255, 0.05) inset;
+  box-shadow: 0 25px 50px -15px rgba(0, 0, 0, 0.65), 0 0 1px 1px rgba(255, 255, 255, 0.05) inset;
+  color: #F8FAFC;
 }
 
 .glass-panel {
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(15, 23, 42, 0.82);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  box-shadow: 0 8px 24px -10px rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.45);
+  color: #F8FAFC;
 }
 
 .theme-charcoal .glass-panel {
-  background: rgba(15, 23, 42, 0.65);
+  background: rgba(11, 16, 27, 0.85);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.5);
+  color: #F8FAFC;
 }
 
 .glass-input {
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(15, 23, 42, 0.85);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(203, 213, 225, 0.8);
-  color: #0F172A;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #F8FAFC;
   transition: all 0.2s ease;
 }
 
 .glass-input:focus {
-  background: #FFFFFF;
-  border-color: #334155;
-  box-shadow: 0 0 0 2px rgba(51, 65, 85, 0.15);
+  background: rgba(15, 23, 42, 0.98);
+  border-color: rgba(241, 245, 249, 0.4);
+  box-shadow: 0 0 0 2px rgba(241, 245, 249, 0.12);
   outline: none;
+  color: #FFFFFF;
 }
 
 .theme-charcoal .glass-input {
-  background: rgba(15, 23, 42, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(11, 16, 27, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   color: #FFFFFF;
 }
 
 .theme-charcoal .glass-input:focus {
-  background: rgba(15, 23, 42, 0.95);
-  border-color: #94A3B8;
-  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.98);
+  border-color: rgba(255, 255, 255, 0.45);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
 }
 
 /* 3. Luxury Animated Buttons ("Animiated Buttons") */

@@ -210,55 +210,47 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-between overflow-y-auto bg-slate-950 text-gray-100 p-4 sm:p-8 custom-scrollbar">
-      {/* Background Ambience */}
+      {/* Background Ambience: Luxury Charcoal & Pearl White Sheen */}
       <div 
-        className="fixed inset-0 pointer-events-none opacity-20"
+        className="fixed inset-0 pointer-events-none opacity-25"
         style={{
           backgroundImage: `
-            radial-gradient(circle at 50% 15%, rgba(245, 158, 11, 0.18) 0%, transparent 55%),
-            radial-gradient(circle at 10% 85%, rgba(37, 99, 235, 0.12) 0%, transparent 50%),
-            radial-gradient(circle at 90% 85%, rgba(16, 185, 129, 0.12) 0%, transparent 50%)
+            radial-gradient(ellipse 90% 45% at 50% 0%, rgba(241, 245, 249, 0.08) 0%, transparent 60%),
+            radial-gradient(ellipse 70% 50% at 50% 50%, rgba(248, 250, 252, 0.04) 0%, transparent 70%),
+            linear-gradient(180deg, #0B0F17 0%, #111827 40%, #1A2234 75%, #0B0E17 100%)
           `
         }}
       />
 
-      {/* Top Header: Exact MAK Group Corporate Identity */}
-      <div className="w-full max-w-md mx-auto flex flex-col items-center text-center pt-4 pb-2 relative z-10">
-        <div className="inline-flex items-center justify-center mb-3 transform hover:scale-105 transition-transform duration-300">
+      {/* Top Header: Exact MAK Group Corporate Identity (Logo Only) */}
+      <div className="w-full max-w-md mx-auto flex flex-col items-center text-center pt-5 pb-2 relative z-10">
+        <div className="inline-flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
           {parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? (
             <img 
               src={parentGroup.logo} 
-              alt={parentGroup.name || "MAK Group of Companies"} 
-              className="w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-[0_8px_30px_rgba(245,158,11,0.35)]" 
+              alt={parentGroup.name || "MAK Group"} 
+              className="w-28 h-28 sm:w-32 sm:h-32 object-contain drop-shadow-[0_8px_30px_rgba(0,0,0,0.6)]" 
             />
           ) : (
             <img 
               src="/logos/mak_group_logo.svg" 
-              alt={parentGroup.name || "MAK Group of Companies"} 
-              className="w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-[0_8px_30px_rgba(245,158,11,0.35)]" 
+              alt={parentGroup.name || "MAK Group"} 
+              className="w-28 h-28 sm:w-32 sm:h-32 object-contain drop-shadow-[0_8px_30px_rgba(0,0,0,0.6)]" 
             />
           )}
         </div>
-
-        {/* Corporate Title */}
-        <h1 className="text-xl sm:text-2xl font-black tracking-wider text-amber-300 uppercase font-serif px-2">
-          {parentGroup.title || 'MAK GROUP OF COMPANIES'}
-        </h1>
-        <p className="text-xs font-semibold text-amber-400/80 tracking-widest uppercase mt-1">
-          Docks • Muhib • Vintage • Truckit
-        </p>
       </div>
 
       {/* Clean Single Enterprise Sign In Card */}
       <div className="w-full max-w-md mx-auto my-auto py-3 relative z-10 animate-fade-in">
-        <div className="bg-slate-900/90 border border-white/10 rounded-3xl p-6 sm:p-7 shadow-2xl backdrop-blur-xl">
+        <div className="bg-slate-900/95 border border-white/15 rounded-3xl p-6 sm:p-7 shadow-2xl backdrop-blur-xl">
           
           {/* Card Title */}
           <div className="text-center mb-5">
             <h2 className="text-xl font-bold text-white tracking-wide">
               Enterprise Sign In
             </h2>
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-slate-400 mt-1">
               Enter your credentials to access your company workspace
             </p>
           </div>
@@ -281,8 +273,8 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
 
           {/* In-Progress Draft Resumption Notice */}
           {hasActiveDraft && (
-            <div className="mb-4 px-3.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
-              <Clock size={14} className="shrink-0 text-amber-400" />
+            <div className="mb-4 px-3.5 py-2 rounded-xl bg-white/5 border border-white/20 text-slate-200 text-xs flex items-center gap-2">
+              <Clock size={14} className="shrink-0 text-slate-300" />
               <span className="truncate">Active case registration draft ({draftCaseNo || `Step ${draftStep}`}) ready to resume.</span>
             </div>
           )}
@@ -290,8 +282,8 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
           {/* Sign In Form */}
           <form onSubmit={handleCredentialsLogin} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-                <User size={13} className="text-amber-400" />
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                <User size={13} className="text-slate-400" />
                 <span>User ID / Phone Number</span>
               </label>
               <div className="relative">
@@ -301,7 +293,7 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
                   placeholder="e.g. admin, finance, or phone number"
-                  className="w-full px-4 py-2.5 bg-slate-950 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400/40 transition placeholder-gray-500"
+                  className="w-full px-4 py-2.5 bg-slate-950 border border-white/15 rounded-xl text-white text-sm focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/20 transition placeholder-gray-500"
                   autoComplete="username"
                   required
                 />
@@ -310,14 +302,14 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <KeyRound size={13} className="text-amber-400" />
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <KeyRound size={13} className="text-slate-400" />
                   <span>Password</span>
                 </label>
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer"
+                  className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
                 >
                   {showPassword ? <EyeOff size={13} /> : <Eye size={13} />}
                   <span>{showPassword ? 'Hide' : 'Show'}</span>
@@ -330,60 +322,57 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
-                  className="w-full px-4 py-2.5 bg-slate-950 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400/40 transition placeholder-gray-500"
+                  className="w-full px-4 py-2.5 bg-slate-950 border border-white/15 rounded-xl text-white text-sm focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/20 transition placeholder-gray-500"
                   autoComplete="current-password"
                   required
                 />
               </div>
             </div>
 
-            {/* Submit Sign In Button */}
+            {/* Submit Sign In Button (Animated Luxury Button) */}
             <button
               type="submit"
               id="btn-submit-credentials"
               disabled={isLoading}
-              className="w-full mt-2 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 active:scale-[0.99] text-slate-950 font-bold text-sm tracking-wide shadow-lg shadow-amber-500/25 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 select-none border border-amber-400/40"
+              className="w-full mt-2 py-3 px-4 rounded-xl btn-animated-luxury bg-slate-800 hover:bg-slate-700 active:scale-[0.99] text-white font-bold text-sm tracking-wide shadow-xl flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 select-none border border-white/20"
             >
               {isLoading ? (
                 <>
-                  <Loader2 size={17} className="animate-spin text-slate-950 shrink-0" />
-                  <span className="font-extrabold text-slate-950">Verifying Credentials...</span>
+                  <Loader2 size={17} className="animate-spin text-white shrink-0" />
+                  <span className="font-extrabold text-white">Verifying Credentials...</span>
                 </>
               ) : (
                 <>
-                  <LogIn size={17} className="text-slate-950 shrink-0" />
-                  <span className="font-extrabold text-slate-950 text-sm tracking-wide">Sign In</span>
+                  <LogIn size={17} className="text-white shrink-0" />
+                  <span className="font-extrabold text-white text-sm tracking-wide">Sign In</span>
                 </>
               )}
             </button>
 
-            {/* Single Clean Professional New Registration Line at Bottom */}
-            <div className="pt-4 border-t border-white/10 text-center">
-              <p className="text-xs text-gray-400">
-                Don't have an enterprise account?{' '}
-                <button
-                  type="button"
-                  onClick={() => setIsRegistrationModalOpen(true)}
-                  className="text-amber-400 hover:text-amber-300 font-bold hover:underline transition cursor-pointer inline-flex items-center gap-1.5 ml-1"
-                >
-                  <span>New Registration</span>
-                  <ArrowRight size={13} />
-                </button>
-              </p>
+            {/* Clean Professional New Registration Action */}
+            <div className="pt-3 border-t border-white/10 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setIsRegistrationModalOpen(true)}
+                className="w-full py-2.5 px-4 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 hover:text-white border border-white/15 hover:border-white/30 text-xs font-semibold tracking-wide transition cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+              >
+                <span>New Registration</span>
+                <ArrowRight size={14} className="text-slate-400 group-hover:text-white" />
+              </button>
             </div>
           </form>
 
           {/* Quick Demo Test Accounts Panel */}
           <div className="mt-4 pt-3 border-t border-white/10">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                <HelpCircle size={13} className="text-amber-400" />
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <HelpCircle size={13} className="text-slate-400" />
                 <span>Quick Demo Accounts</span>
               </span>
               <button
                 type="button"
                 onClick={() => setShowDemoGuide(!showDemoGuide)}
-                className="text-[10px] text-gray-400 hover:text-amber-300 font-semibold underline cursor-pointer"
+                className="text-[10px] text-slate-400 hover:text-white font-semibold underline cursor-pointer"
               >
                 {showDemoGuide ? 'Collapse All' : 'View All Accounts'}
               </button>
@@ -394,27 +383,27 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
               <button
                 type="button"
                 onClick={() => handleQuickLogin(DEMO_TESTING_ACCOUNTS[1])}
-                className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 transition text-left flex items-center justify-between gap-1 cursor-pointer group"
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 hover:text-white transition text-left flex items-center justify-between gap-1 cursor-pointer group"
                 title="Sign in as Loading Port Staff (loadingstaff)"
               >
                 <div className="min-w-0">
-                  <span className="text-[11px] font-bold block truncate text-white group-hover:text-amber-200">Loading Port Staff</span>
-                  <span className="text-[9px] font-mono text-amber-400/80 block">loadingstaff</span>
+                  <span className="text-[11px] font-bold block truncate text-slate-100 group-hover:text-white">Loading Port Staff</span>
+                  <span className="text-[9px] font-mono text-slate-400 block">loadingstaff</span>
                 </div>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 shrink-0">1-Tap</span>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/10 text-slate-300 shrink-0">1-Tap</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleQuickLogin(DEMO_TESTING_ACCOUNTS[2])}
-                className="p-2 rounded-xl bg-sky-500/10 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 transition text-left flex items-center justify-between gap-1 cursor-pointer group"
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 hover:text-white transition text-left flex items-center justify-between gap-1 cursor-pointer group"
                 title="Sign in as Destination Port Staff (destinationstaff)"
               >
                 <div className="min-w-0">
-                  <span className="text-[11px] font-bold block truncate text-white group-hover:text-sky-200">Destination Staff</span>
-                  <span className="text-[9px] font-mono text-sky-400/80 block">destinationstaff</span>
+                  <span className="text-[11px] font-bold block truncate text-slate-100 group-hover:text-white">Destination Staff</span>
+                  <span className="text-[9px] font-mono text-slate-400 block">destinationstaff</span>
                 </div>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 shrink-0">1-Tap</span>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/10 text-slate-300 shrink-0">1-Tap</span>
               </button>
             </div>
 
@@ -425,10 +414,10 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
                     key={acc.id}
                     type="button"
                     onClick={() => handleQuickLogin(acc)}
-                    className="p-1.5 rounded-lg bg-white/5 hover:bg-amber-500/20 text-gray-300 hover:text-amber-300 transition text-center truncate border border-white/5 cursor-pointer"
+                    className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition text-center truncate border border-white/5 cursor-pointer"
                   >
                     <span className="font-bold block truncate">{acc.name}</span>
-                    <span className="text-gray-500 text-[9px] font-mono">{acc.userId}</span>
+                    <span className="text-gray-400 text-[9px] font-mono">{acc.userId}</span>
                   </button>
                 ))}
               </div>
