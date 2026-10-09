@@ -3,7 +3,7 @@ import {
   X, FileText, Download, CheckCircle2, AlertTriangle, ShieldCheck, 
   Calendar, Building, User, Filter, Search, CheckSquare, Square, 
   Sparkles, Layers, RefreshCw, FileSpreadsheet, Printer, ChevronRight,
-  ExternalLink, FileCheck
+  ExternalLink, FileCheck, Eye
 } from 'lucide-react';
 import { Vehicle } from '../types';
 import { 
@@ -14,6 +14,7 @@ import {
   generateCancellationLetterLetterheadDocx,
   generateVehicleNocDocx,
   generateAffidavitDocx,
+  generateDocxBlob,
   downloadDocxBlob,
   formatSlashDate,
   formatDotDate,
@@ -25,6 +26,7 @@ import {
 } from '../services/vehicleDocxService';
 import { downloadCustomsVehicleListPdf } from '../services/pdfExportService';
 import { useActiveCompany } from '../services/companyService';
+import { UniversalDocumentPreviewModal, DataMappingCheckItem } from './UniversalDocumentPreviewModal';
 
 export type DocumentType = 
   | 'AFFIDAVIT'         // Affidavit (Stamp Paper) - SRO 450(I)/2001
@@ -209,6 +211,15 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
         await downloadDocxBlob(doc, filename);
         setLastGeneratedMsg(`Downloaded Lease Agreement for Stamp Paper (${selectedVehicles.length} vehicles).`);
       } 
+      else if (activeTab === 'AFFIDAVIT') {
+        const doc = await generateAffidavitDocx(selectedVehicles, {
+          leaveStampPaperSpace: leaveHeaderMargin
+        });
+        const regStr = selectedVehicles.length === 1 ? selectedVehicles[0].registrationNumber : `${selectedVehicles.length}_Vehicles`;
+        const filename = `Affidavit_SRO_450_${regStr}_Stamp_Paper_${formatDashDate(dateObj)}.docx`;
+        await downloadDocxBlob(doc, filename);
+        setLastGeneratedMsg(`Downloaded Affidavit (SRO 450(I)/2001) for Stamp Paper (${selectedVehicles.length} vehicles).`);
+      }
       else if (activeTab === 'LEASE_TERMINATION') {
         // Generate termination for selected vehicles (first or loop)
         for (let i = 0; i < selectedVehicles.length; i++) {
@@ -254,6 +265,144 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
     } catch (err) {
       console.error('Document generation error:', err);
       alert('Failed to generate document: ' + (err as Error).message);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // State for universal read-only document preview modal
+  const [previewDocState, setPreviewDocState] = useState<{
+    isOpen: boolean;
+    file: Blob | string | null;
+    filename: string;
+    title: string;
+    fileType?: 'docx' | 'pdf' | 'xlsx' | 'image' | 'auto';
+    verificationItems: DataMappingCheckItem[];
+  }>({
+    isOpen: false,
+    file: null,
+    filename: '',
+    title: '',
+    fileType: 'docx',
+    verificationItems: []
+  });
+
+  const handlePreviewCustomsPdf = async () => {
+    if (selectedVehicles.length === 0) return;
+    setIsGenerating(true);
+    try {
+      const dateObj = new Date(letterDate || todayStr);
+      const res = await downloadCustomsVehicleListPdf({
+        vehicles: selectedVehicles,
+        letterDate: formatDotDate(dateObj),
+        permitNo: permitRefNo
+      });
+      const verificationItems: DataMappingCheckItem[] = [
+        { label: 'Issuing Authority', value: 'Directorate General of Transit Trade, Custom House Karachi', status: 'verified' },
+        { label: 'Licensed Carrier', value: activeCompany?.legalTitle || activeCompany?.name || 'Docks (Pvt) Ltd', status: 'verified' },
+        { label: 'Carrier Customs NTN', value: activeCompany?.id === 'docks' ? '5064083-8 / 3997968' : '3997968', status: 'verified' },
+        { label: 'Customs Permit Reference', value: permitRefNo, status: 'verified' },
+        { label: 'Official Issue Date', value: formatDotDate(dateObj), status: 'verified' },
+        { label: 'Fleet Count Permitted', value: `${selectedVehicles.length} Registered Vehicle(s)`, status: 'verified' },
+        { label: 'All Permitted Vehicles', value: selectedVehicles.map(v => `${v.registrationNumber} (Eng: ${v.engineNo || 'Verified'})`).join(', '), status: 'verified' }
+      ];
+
+      setPreviewDocState({
+        isOpen: true,
+        file: res.blobUrl,
+        filename: res.filename,
+        title: `Customs Directorate Transit Fleet List (${selectedVehicles.length} vehicles)`,
+        fileType: 'pdf',
+        verificationItems
+      });
+    } catch (err: any) {
+      console.error('Customs PDF preview error:', err);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handlePreviewCurrentDoc = async () => {
+    if (selectedVehicles.length === 0) return;
+    setIsGenerating(true);
+    try {
+      const dateObj = new Date(letterDate || todayStr);
+      let doc: any = null;
+      let filename = 'Document.docx';
+      let title = 'Document Preview';
+
+      const regStr = selectedVehicles.length === 1 ? selectedVehicles[0].registrationNumber : `${selectedVehicles.length}_Vehicles`;
+
+      if (activeTab === 'REG_LETTER') {
+        doc = await generateRegistrationRenewalLetterDocx(selectedVehicles, {
+          letterDate: dateObj,
+          leaveLetterheadSpace: leaveHeaderMargin
+        });
+        filename = `Registration_Letter_${regStr}.docx`;
+        title = `Registration Application Letter (${regStr})`;
+      } else if (activeTab === 'CUSTOMS_PERMIT') {
+        doc = await generateCustomsPermitLetterDocx(selectedVehicles, {
+          letterDate: dateObj,
+          permitNo: permitRefNo,
+          leaveGovernmentHeaderSpace: leaveHeaderMargin
+        });
+        filename = `Custom_Vehicle_List_${regStr}.docx`;
+        title = `Customs Vehicle Permit List (${regStr})`;
+      } else if (activeTab === 'LEASE_AGREEMENT') {
+        doc = await generateLeaseAgreementDocx(selectedVehicles, {
+          agreementDate: dateObj,
+          leaveStampPaperSpace: leaveHeaderMargin,
+          witness1Name,
+          witness1Cnic,
+          witness2Name,
+          witness2Cnic
+        });
+        filename = `Lease_Agreement_${regStr}_TAS_582.docx`;
+        title = `Vehicle Lease Agreement TAS-582 (${regStr})`;
+      } else if (activeTab === 'AFFIDAVIT') {
+        doc = await generateAffidavitDocx(selectedVehicles, {
+          leaveStampPaperSpace: leaveHeaderMargin
+        });
+        filename = `Affidavit_SRO_450_${regStr}.docx`;
+        title = `Affidavit SRO 450(I)/2001 (${regStr})`;
+      } else if (activeTab === 'LEASE_TERMINATION') {
+        doc = await generateLeaseTerminationAgreementDocx(selectedVehicles[0], {
+          terminationDate: dateObj,
+          leaveStampPaperSpace: leaveHeaderMargin
+        });
+        filename = `Lease_Termination_${selectedVehicles[0].registrationNumber}.docx`;
+        title = `Lease Termination Agreement (${selectedVehicles[0].registrationNumber})`;
+      } else if (activeTab === 'CANCELLATION_NOC') {
+        doc = await generateCancellationLetterLetterheadDocx(selectedVehicles, {
+          letterDate: dateObj,
+          leaveLetterheadSpace: leaveHeaderMargin
+        });
+        filename = `Customs_Cancellation_Letter_${regStr}.docx`;
+        title = `Customs De-registration NOC Letter (${regStr})`;
+      }
+
+      if (doc) {
+        const blob = await generateDocxBlob(doc);
+        const verificationItems: DataMappingCheckItem[] = [
+          { label: 'Company Entity', value: activeCompany?.legalTitle || activeCompany?.name || 'Docks (Pvt) Ltd', status: 'verified' },
+          { label: 'Customs License NTN', value: activeCompany?.id === 'docks' ? '5064083-8 / 3997968' : '3997968', status: 'verified' },
+          { label: 'Document Date', value: formatDashDate(dateObj), status: 'verified' },
+          { label: 'Selected Fleet Count', value: `${selectedVehicles.length} Vehicle(s)`, status: 'verified' },
+          { label: 'Vehicles Included', value: selectedVehicles.map(v => v.registrationNumber).join(', '), status: 'verified' },
+          { label: 'Pre-printed Header Space', value: leaveHeaderMargin ? 'Reserved (100mm Top Space)' : 'Standard Margin', status: 'info' }
+        ];
+
+        setPreviewDocState({
+          isOpen: true,
+          file: blob,
+          filename,
+          title,
+          verificationItems
+        });
+      }
+    } catch (err: any) {
+      console.error('Preview generation error:', err);
+      alert('Preview generation error: ' + err.message);
     } finally {
       setIsGenerating(false);
     }
@@ -313,7 +462,13 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
       });
       await downloadDocxBlob(doc3, `3_Lease_Agreement_Stamp_Paper_${formatDashDate(dateObj)}.docx`);
 
-      setLastGeneratedMsg(`Successfully downloaded all 3 official Word documents (.docx) for the ${selectedVehicles.length} vehicles!`);
+      // 4. Affidavit (SRO 450(I)/2001)
+      const doc4 = await generateAffidavitDocx(selectedVehicles, {
+        leaveStampPaperSpace: leaveHeaderMargin
+      });
+      await downloadDocxBlob(doc4, `4_Affidavit_SRO_450_Stamp_Paper_${formatDashDate(dateObj)}.docx`);
+
+      setLastGeneratedMsg(`Successfully downloaded all 4 official Word documents (.docx) for the ${selectedVehicles.length} vehicles!`);
     } catch (err) {
       console.error('Batch download error:', err);
       alert('Batch generation error: ' + (err as Error).message);
@@ -322,7 +477,56 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
     }
   };
 
-  // Batch download both Cancellation documents
+  // Batch download all Renewal documents in Word (.docx) format for Customs
+  const handleDownloadAllRenewalDocs = async () => {
+    if (selectedVehicles.length === 0) return;
+    setIsGenerating(true);
+    setLastGeneratedMsg(null);
+    try {
+      const dateObj = new Date(letterDate || todayStr);
+
+      // 1. Renewal Request Letter on Letterhead
+      const doc1 = await generateRegistrationRenewalLetterDocx(selectedVehicles, {
+        letterDate: dateObj,
+        leaveLetterheadSpace: leaveHeaderMargin
+      });
+      await downloadDocxBlob(doc1, `1_Renewal_Request_Letter_${formatDashDate(dateObj)}.docx`);
+
+      // 2. Customs Vehicle List with Renewed 6-month validity
+      const doc2 = await generateCustomsPermitLetterDocx(selectedVehicles, {
+        letterDate: dateObj,
+        permitNo: permitRefNo,
+        leaveGovernmentHeaderSpace: leaveHeaderMargin
+      });
+      await downloadDocxBlob(doc2, `2_Renewal_Customs_Permit_List_${formatDashDate(dateObj)}.docx`);
+
+      // 3. Lease Agreement / Extension on Stamp Paper
+      const doc3 = await generateLeaseAgreementDocx(selectedVehicles, {
+        agreementDate: dateObj,
+        leaveStampPaperSpace: leaveHeaderMargin,
+        witness1Name,
+        witness1Cnic,
+        witness2Name,
+        witness2Cnic
+      });
+      await downloadDocxBlob(doc3, `3_Lease_Agreement_Stamp_Paper_${formatDashDate(dateObj)}.docx`);
+
+      // 4. Renewal Affidavit (SRO 450(I)/2001) on Stamp Paper
+      const doc4 = await generateAffidavitDocx(selectedVehicles, {
+        leaveStampPaperSpace: leaveHeaderMargin
+      });
+      await downloadDocxBlob(doc4, `4_Renewal_Affidavit_SRO_450_${formatDashDate(dateObj)}.docx`);
+
+      setLastGeneratedMsg(`Successfully downloaded all 4 official Renewal Word documents (.docx) for Customs!`);
+    } catch (err) {
+      console.error('Renewal batch download error:', err);
+      alert('Renewal batch generation error: ' + (err as Error).message);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // Batch download all Cancellation & NOC documents in Word (.docx) format
   const handleDownloadAllCancellationDocs = async () => {
     if (selectedVehicles.length === 0) return;
     setIsGenerating(true);
@@ -330,23 +534,32 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
     try {
       const dateObj = new Date(letterDate || todayStr);
 
-      // 1. Stamp paper lease termination
+      // 1. Stamp paper lease termination for each vehicle
       for (const v of selectedVehicles) {
         const doc1 = await generateLeaseTerminationAgreementDocx(v, {
           terminationDate: dateObj,
           leaveStampPaperSpace: leaveHeaderMargin
         });
-        await downloadDocxBlob(doc1, `Lease_Termination_${v.registrationNumber}_Stamp_Paper.docx`);
+        await downloadDocxBlob(doc1, `1_Lease_Termination_${v.registrationNumber.replace(/\s+/g, '_')}_Stamp_Paper.docx`);
       }
 
-      // 2. Letterhead Cancellation Letter
+      // 2. Letterhead Cancellation Letter to Customs
       const doc2 = await generateCancellationLetterLetterheadDocx(selectedVehicles, {
         letterDate: dateObj,
         leaveLetterheadSpace: leaveHeaderMargin
       });
-      await downloadDocxBlob(doc2, `Customs_Cancellation_Letterhead_${formatDashDate(dateObj)}.docx`);
+      await downloadDocxBlob(doc2, `2_Customs_DeRegistration_Letterhead_${formatDashDate(dateObj)}.docx`);
 
-      setLastGeneratedMsg(`Downloaded both Stamp Paper Termination and Letterhead Cancellation documents in Word format.`);
+      // 3. Vehicle NOC in Word (.docx) for each vehicle
+      for (const v of selectedVehicles) {
+        const doc3 = await generateVehicleNocDocx(v, {
+          nocDate: letterDate || todayStr,
+          leaveLetterheadSpace: leaveHeaderMargin
+        });
+        await downloadDocxBlob(doc3, `3_Vehicle_NOC_${v.registrationNumber.replace(/\s+/g, '_')}.docx`);
+      }
+
+      setLastGeneratedMsg(`Downloaded all 3 Cancellation, Stamp Paper Termination, and NOC documents in Word (.docx) format!`);
     } catch (err) {
       console.error('Cancellation docs error:', err);
       alert('Cancellation docs generation error: ' + (err as Error).message);
@@ -385,66 +598,84 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
           </button>
         </div>
 
-        {/* Tab Navigation for 5 Document Formats - Compact Wrap with Zero Horizontal Scroll */}
+        {/* Tab Navigation for 6 Document Formats - Matching exact uploaded documents */}
         <div className="border-b border-white/10 bg-slate-950/60 px-4 flex flex-wrap items-center gap-1.5 sm:gap-2 py-2.5">
           <button
             onClick={() => setActiveTab('REG_LETTER')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 whitespace-nowrap transition-all ${
+            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
               activeTab === 'REG_LETTER'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
                 : 'text-gray-300 hover:text-white hover:bg-white/5'
             }`}
+            title="Letter 10 Vehicles registration letter (Company Letterhead)"
           >
-            <FileText size={15} />
-            <span>1. Registration / Renewal Letter (Letterhead)</span>
+            <FileText size={14} />
+            <span>1. Letter 10 Vehicles registration letter</span>
           </button>
 
           <button
             onClick={() => setActiveTab('CUSTOMS_PERMIT')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 whitespace-nowrap transition-all ${
+            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
               activeTab === 'CUSTOMS_PERMIT'
                 ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
                 : 'text-gray-300 hover:text-white hover:bg-white/5'
             }`}
+            title="Custom Vehicle List (Customs Directorate Format)"
           >
-            <ShieldCheck size={15} />
-            <span>2. Customs Permit Format (Office Copy)</span>
+            <ShieldCheck size={14} />
+            <span>2. Custom Vehicle List</span>
           </button>
 
           <button
             onClick={() => setActiveTab('LEASE_AGREEMENT')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 whitespace-nowrap transition-all ${
+            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
               activeTab === 'LEASE_AGREEMENT'
                 ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
                 : 'text-gray-300 hover:text-white hover:bg-white/5'
             }`}
+            title="Lease Agreement TAS-582 on Legal Stamp Paper"
           >
-            <FileCheck size={15} />
-            <span>3. Lease Agreement (Stamp Paper)</span>
+            <FileCheck size={14} />
+            <span>3. Lease Agreement TAS-582</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('AFFIDAVIT')}
+            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
+              activeTab === 'AFFIDAVIT'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                : 'text-gray-300 hover:text-white hover:bg-white/5'
+            }`}
+            title="Affidavit (Stamp Paper) - SRO 450(I)/2001"
+          >
+            <FileSpreadsheet size={14} />
+            <span>4. Affidavit (Stamp Paper)</span>
           </button>
 
           <button
             onClick={() => setActiveTab('LEASE_TERMINATION')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 whitespace-nowrap transition-all ${
+            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
               activeTab === 'LEASE_TERMINATION'
                 ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
                 : 'text-gray-300 hover:text-white hover:bg-white/5'
             }`}
+            title="LEASE TERMINATION OF NOC on Stamp Paper"
           >
-            <AlertTriangle size={15} />
-            <span>4. Lease Termination (Stamp Paper)</span>
+            <AlertTriangle size={14} />
+            <span>5. LEASE TERMINATION OF NOC</span>
           </button>
 
           <button
             onClick={() => setActiveTab('CANCELLATION_NOC')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 whitespace-nowrap transition-all ${
+            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-all ${
               activeTab === 'CANCELLATION_NOC'
                 ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
                 : 'text-gray-300 hover:text-white hover:bg-white/5'
             }`}
+            title="NOC on letter head (Panel De-registration)"
           >
-            <Building size={15} />
-            <span>5. Panel Cancellation (Letterhead)</span>
+            <Building size={14} />
+            <span>6. NOC on letter head</span>
           </button>
         </div>
 
@@ -458,6 +689,7 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
                 {activeTab === 'REG_LETTER' && 'Company Letterhead Document (Rule 329(5) of Customs Rules, 2001)'}
                 {activeTab === 'CUSTOMS_PERMIT' && 'Customs Directorate General Transit Trade Official Format'}
                 {activeTab === 'LEASE_AGREEMENT' && 'Stamp Paper Legal Format (Six Months Bonded Carrier Lease)'}
+                {activeTab === 'AFFIDAVIT' && 'Affidavit on Stamp Paper (SRO 450(I)/2001 - Sub-Rule (5) of Rule 329)'}
                 {activeTab === 'LEASE_TERMINATION' && 'Stamp Paper Legal Format (Mutual Lease Cancellation Agreement)'}
                 {activeTab === 'CANCELLATION_NOC' && 'Customs Directorate Panel De-registration Letter'}
               </span>
@@ -465,23 +697,37 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
                 {activeTab === 'REG_LETTER' && 'Generates official application letter addressed to The Deputy / Assistant Director, Licensing of Bonded Carrier, Custom House Karachi.'}
                 {activeTab === 'CUSTOMS_PERMIT' && `Customs officers ask ${activeCompany?.legalTitle || activeCompany?.name || 'Company'} to bring this pre-printed permit letter so they can review and endorse signatures.`}
                 {activeTab === 'LEASE_AGREEMENT' && 'Mandatory legal agreement executed with vehicle owners on official Stamp Paper with clauses (a) to (h).'}
+                {activeTab === 'AFFIDAVIT' && 'Legal undertaking on official Stamp Paper confirming vehicles will carry bonded cargo and comply with Customs rules.'}
                 {activeTab === 'LEASE_TERMINATION' && 'Mutual covenant agreement on Stamp Paper between Lessor and Lessee concluding operational lease.'}
                 {activeTab === 'CANCELLATION_NOC' && `Formal notice printed on ${activeCompany?.legalTitle || activeCompany?.name || 'Company'} letterhead notifying Customs of vehicle contract conclusion.`}
               </p>
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              {(activeTab === 'REG_LETTER' || activeTab === 'CUSTOMS_PERMIT' || activeTab === 'LEASE_AGREEMENT') && (
-                <button
-                  type="button"
-                  onClick={handleDownloadAllRegistrationDocs}
-                  disabled={selectedVehicles.length === 0 || isGenerating}
-                  className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-all"
-                  title="Generates and downloads all 3 registration documents (.docx) at once"
-                >
-                  <Layers size={15} />
-                  <span>Download All 3 Renewal Docs (.docx)</span>
-                </button>
+              {(activeTab === 'REG_LETTER' || activeTab === 'CUSTOMS_PERMIT' || activeTab === 'LEASE_AGREEMENT' || activeTab === 'AFFIDAVIT') && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleDownloadAllRegistrationDocs}
+                    disabled={selectedVehicles.length === 0 || isGenerating}
+                    className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-lg shadow-blue-600/30 transition-all hover:scale-102"
+                    title="Generates and downloads all 4 new registration Word documents (.docx) at once"
+                  >
+                    <Layers size={14} />
+                    <span>Download All Registration Docs (.docx)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDownloadAllRenewalDocs}
+                    disabled={selectedVehicles.length === 0 || isGenerating}
+                    className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 transition-all hover:scale-102"
+                    title="Generates and downloads all 4 renewal documents (.docx) with updated validity dates for Customs"
+                  >
+                    <ShieldCheck size={14} />
+                    <span>Download All Renewal Docs (.docx)</span>
+                  </button>
+                </>
               )}
 
               {(activeTab === 'LEASE_TERMINATION' || activeTab === 'CANCELLATION_NOC') && (
@@ -489,11 +735,11 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
                   type="button"
                   onClick={handleDownloadAllCancellationDocs}
                   disabled={selectedVehicles.length === 0 || isGenerating}
-                  className="bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2 shadow-lg shadow-rose-600/30 transition-all"
-                  title="Generates both Stamp Paper Termination and Letterhead Notice"
+                  className="bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2 shadow-lg shadow-rose-600/30 transition-all hover:scale-102"
+                  title="Generates Stamp Paper Termination, Letterhead Cancellation, and Vehicle NOCs in Word (.docx)"
                 >
                   <Layers size={15} />
-                  <span>Download Both Cancellation Docs (.docx)</span>
+                  <span>Download All Cancellation & NOC Docs (.docx)</span>
                 </button>
               )}
 
@@ -512,13 +758,24 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
 
               <button
                 type="button"
+                onClick={handlePreviewCurrentDoc}
+                disabled={selectedVehicles.length === 0 || isGenerating}
+                className="bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all hover:scale-102"
+                title="Preview read-only document content in UI before downloading to verify all mapped fields"
+              >
+                <Eye size={15} />
+                <span>Preview & Verify (.docx)</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handleDownloadCurrentDoc}
                 disabled={selectedVehicles.length === 0 || isGenerating}
                 className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-600/30 transition-all"
               >
                 <Download size={15} />
                 <span>
-                  {isGenerating ? 'Generating...' : `Download ${activeTab === 'REG_LETTER' ? 'Reg Letter' : activeTab === 'CUSTOMS_PERMIT' ? 'Customs Permit' : activeTab === 'LEASE_AGREEMENT' ? 'Lease Agreement' : activeTab === 'LEASE_TERMINATION' ? 'Termination Doc' : 'Cancellation Notice'} (.docx)`}
+                  {isGenerating ? 'Generating...' : `Download ${activeTab === 'REG_LETTER' ? 'Reg Letter' : activeTab === 'CUSTOMS_PERMIT' ? 'Customs Permit' : activeTab === 'LEASE_AGREEMENT' ? 'Lease Agreement' : activeTab === 'AFFIDAVIT' ? 'Affidavit' : activeTab === 'LEASE_TERMINATION' ? 'Termination Doc' : 'Cancellation Notice'} (.docx)`}
                 </span>
               </button>
             </div>
@@ -958,16 +1215,38 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
               Close
             </button>
             {activeTab === 'CUSTOMS_PERMIT' && (
-              <button
-                type="button"
-                onClick={handleDownloadCustomsPdf}
-                disabled={selectedVehicles.length === 0 || isGenerating}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white flex items-center gap-2 transition-colors shadow-lg shadow-red-600/30"
-              >
-                <FileCheck size={14} />
-                <span>Download Customs List (PDF)</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handlePreviewCustomsPdf}
+                  disabled={selectedVehicles.length === 0 || isGenerating}
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-700/80 hover:bg-rose-600 disabled:opacity-50 text-white flex items-center gap-1.5 transition-colors border border-rose-500/30"
+                  title="Preview official Customs Directorate Vehicle List PDF before downloading"
+                >
+                  <Eye size={14} className="text-amber-300" />
+                  <span>Preview Customs List (PDF)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadCustomsPdf}
+                  disabled={selectedVehicles.length === 0 || isGenerating}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white flex items-center gap-2 transition-colors shadow-lg shadow-red-600/30"
+                >
+                  <FileCheck size={14} />
+                  <span>Download Customs List (PDF)</span>
+                </button>
+              </>
             )}
+            <button
+              type="button"
+              onClick={handlePreviewCurrentDoc}
+              disabled={selectedVehicles.length === 0 || isGenerating}
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 text-white flex items-center gap-2 transition-colors shadow-lg shadow-indigo-600/30"
+              title="Preview read-only document content before downloading"
+            >
+              <Eye size={14} />
+              <span>Preview & Verify (.docx)</span>
+            </button>
             <button
               type="button"
               onClick={handleDownloadCurrentDoc}
@@ -976,13 +1255,25 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
             >
               <Download size={14} />
               <span>
-                {isGenerating ? 'Generating Word Doc...' : `Download ${activeTab === 'REG_LETTER' ? 'Registration Letter' : activeTab === 'CUSTOMS_PERMIT' ? 'Customs Permit' : activeTab === 'LEASE_AGREEMENT' ? 'Lease Agreement' : activeTab === 'LEASE_TERMINATION' ? 'Lease Termination' : 'Cancellation Letter'} (.docx)`}
+                {isGenerating ? 'Generating Word Doc...' : `Download ${activeTab === 'REG_LETTER' ? 'Registration Letter' : activeTab === 'CUSTOMS_PERMIT' ? 'Customs Permit' : activeTab === 'LEASE_AGREEMENT' ? 'Lease Agreement' : activeTab === 'AFFIDAVIT' ? 'Affidavit' : activeTab === 'LEASE_TERMINATION' ? 'Lease Termination' : 'Cancellation Letter'} (.docx)`}
               </span>
             </button>
           </div>
         </div>
 
       </div>
+
+      {/* Read-Only Universal Document Preview Modal (.docx / .pdf / .xlsx / .image) */}
+      <UniversalDocumentPreviewModal
+        isOpen={previewDocState.isOpen}
+        onClose={() => setPreviewDocState(prev => ({ ...prev, isOpen: false }))}
+        file={previewDocState.file}
+        filename={previewDocState.filename}
+        title={previewDocState.title}
+        fileType={previewDocState.fileType || "docx"}
+        verificationItems={previewDocState.verificationItems}
+        onDownload={previewDocState.fileType === 'pdf' ? handleDownloadCustomsPdf : handleDownloadCurrentDoc}
+      />
     </div>
   );
 };

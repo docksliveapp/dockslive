@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>MAK Group of Companies • Enterprise Portal</title>
+    <title>Docks (Pvt.) Ltd</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="shortcut icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-v2.png" />
@@ -30,11 +30,11 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="MAK Group" />
-    <meta name="application-name" content="MAK Group of Companies" />
-    <meta name="description" content="MAK Group of Companies - Docks (Pvt.) Ltd., Muhib International, Vantage Shipping Line, Truckit (Pvt.) Ltd." />
-    <meta property="og:title" content="MAK Group of Companies • Multi-Entity Enterprise Portal" />
-    <meta property="og:description" content="Premier Multi-Entity Logistics, Customs Clearance & Shipping Suite: Docks, Muhib, Vantage, Truckit" />
+    <meta name="apple-mobile-web-app-title" content="Docks (Pvt.) Ltd" />
+    <meta name="application-name" content="Docks (Pvt.) Ltd" />
+    <meta name="description" content="One Window Logistics Solution - Afghan Transit, Customs Clearance, Freight & Client Portal" />
+    <meta property="og:title" content="Docks (Pvt.) Ltd" />
+    <meta property="og:description" content="One Window Logistics Solution - Afghan Transit, Customs Clearance, Freight & Client Portal" />
     <script>
       // Suppress harmless Vite HMR WebSocket connection warnings in iframes
       window.addEventListener('error', function(e) {
@@ -48,27 +48,28 @@
         }
       });
     </script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Montserrat:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
-      /* Custom Scrollbar for Glass Theme */
+      /* Luxury Business Class Custom Scrollbars */
       ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
+        width: 7px;
+        height: 7px;
       }
       ::-webkit-scrollbar-track {
-        background: rgba(0, 0, 0, 0.2); 
+        background: rgba(226, 232, 240, 0.4); 
       }
       ::-webkit-scrollbar-thumb {
-        background: rgba(255, 255, 255, 0.1); 
-        border-radius: 4px;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        background: rgba(51, 65, 85, 0.35); 
+        border-radius: 9999px;
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        transition: background 0.2s ease;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: rgba(255, 255, 255, 0.2); 
+        background: rgba(30, 41, 59, 0.65); 
       }
 
-      /* Deep Animated Gradient Background */
+      /* Base Layout Constraints */
       html, body {
         min-height: 100%;
         width: 100%;
@@ -78,6 +79,7 @@
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         touch-action: pan-y;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       }
       #root {
         min-height: 100%;
@@ -86,58 +88,10 @@
         display: flex;
         flex-direction: column;
       }
-      body {
-        background-color: #0f172a;
-        background-image: 
-          radial-gradient(at 0% 0%, rgba(37, 99, 235, 0.15) 0px, transparent 50%), 
-          radial-gradient(at 100% 0%, rgba(6, 182, 212, 0.15) 0px, transparent 50%), 
-          radial-gradient(at 100% 100%, rgba(37, 99, 235, 0.1) 0px, transparent 50%), 
-          radial-gradient(at 0% 100%, rgba(15, 23, 42, 1) 0px, transparent 50%);
-        background-attachment: fixed;
-        background-size: cover;
-        color: #f3f4f6;
-      }
-
-      /* Glass Utility Classes */
-      .glass-card {
-        background: rgba(17, 24, 39, 0.4); /* brand-950 with opacity */
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-      }
-
-      .glass-panel {
-        background: rgba(255, 255, 255, 0.03);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-      }
-
-      .glass-input {
-        background: rgba(0, 0, 0, 0.3);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        color: white;
-        transition: all 0.2s;
-      }
-      .glass-input:focus {
-        background: rgba(0, 0, 0, 0.5);
-        border-color: #3b82f6; /* brand-500 */
-        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
-      }
-      
-      /* Progress Bar Animation */
-      @keyframes progress {
-        0% { width: 0%; }
-        100% { width: 100%; }
-      }
-      .animate-progress {
-        animation: progress 3s ease-out forwards;
-      }
     </style>
     <link rel="stylesheet" href="/index.css">
   </head>
-  <body>
+  <body class="theme-pearl">
     <div id="root"></div>
   <script type="module" src="/index.tsx"></script>
 </body>

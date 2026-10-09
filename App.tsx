@@ -3,7 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   LayoutDashboard, FolderKanban, Users, Truck, Settings, FileText, Bell, LogOut, Menu,
   X, Check, AlertCircle, AlertTriangle, Info, Trash2, Loader2, Maximize2, Minimize2, Upload,
-  ShieldCheck, UserCircle, RefreshCw, HardDrive, MapPin, FolderArchive, Building2, ChevronDown, Package, ShieldAlert
+  ShieldCheck, UserCircle, RefreshCw, HardDrive, MapPin, FolderArchive, Building2, ChevronDown, Package, ShieldAlert,
+  Sparkles
 } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import CaseManagement from './components/CaseManagement';
@@ -46,11 +47,36 @@ const isContainerTrackingDomainOrRoute = (): boolean => {
   try {
     const host = window.location.hostname.toLowerCase();
     const path = window.location.pathname.toLowerCase();
-    if (host.includes('status.makpk.online') || host.includes('sttatus.makpk.online') || (host.startsWith('status.') && !host.includes('vehicle')) || host.startsWith('sttatus.')) return true;
+    // Exclude vehicle domains explicitly so Vehicle.mak-group.com always routes to Vehicle Status
+    if (
+      host.includes('vehicle.mak-group.com') ||
+      host.includes('vehicles.mak-group.com') ||
+      host.includes('vehicle.mak-group.com.pk') ||
+      host.includes('vehicle.makpk.online') ||
+      host.startsWith('vehicle.') ||
+      host.startsWith('vehicles.') ||
+      host.includes('fleet.mak-group.com')
+    ) {
+      return false;
+    }
+    // Connect Status.mak-group.com.pk and all container tracking hostnames
+    if (
+      host.includes('status.mak-group.com.pk') ||
+      host.includes('status.mak-group.com') ||
+      host.includes('status.makpk.online') ||
+      host.includes('sttatus.makpk.online') ||
+      host.includes('container.mak-group.com') ||
+      host.includes('tracking.mak-group.com') ||
+      (host.startsWith('status.') && !host.includes('vehicle')) ||
+      host.startsWith('sttatus.') ||
+      host.startsWith('container.') ||
+      host.startsWith('track.') ||
+      host.startsWith('tracking.')
+    ) return true;
     if (path.startsWith('/status') || path.startsWith('/sttatus') || path.startsWith('/container') || path.startsWith('/tracking') || path.startsWith('/track')) return true;
     const params = new URLSearchParams(window.location.search);
     if (params.get('mode') === 'status' || params.get('mode') === 'sttatus' || params.get('mode') === 'tracking' || params.get('status') === '1' || params.get('portal') === 'status' || params.get('portal') === 'sttatus' || params.get('portal') === 'container') return true;
-    if (params.has('container') || params.has('bl') || params.has('caseno')) return true;
+    if (params.has('container') || params.has('bl') || params.has('caseno') || params.has('case')) return true;
   } catch (_) {}
   return false;
 };
@@ -60,27 +86,59 @@ const isVehicleTrackingDomainOrRoute = (): boolean => {
   try {
     const host = window.location.hostname.toLowerCase();
     const path = window.location.pathname.toLowerCase();
-    if (host.includes('vehicle.makpk.online') || host.startsWith('vehicle.')) return true;
-    if (path.startsWith('/vehicle') || path.startsWith('/vehicles') || path.startsWith('/fleet-status')) return true;
+    // Connect Vehicle.mak-group.com and all vehicle tracking hostnames
+    if (
+      host.includes('vehicle.mak-group.com') ||
+      host.includes('vehicles.mak-group.com') ||
+      host.includes('vehicle.mak-group.com.pk') ||
+      host.includes('fleet.mak-group.com') ||
+      host.includes('vehicle.makpk.online') ||
+      host.startsWith('vehicle.') ||
+      host.startsWith('vehicles.') ||
+      host.startsWith('fleet.')
+    ) return true;
+    if (path.startsWith('/vehicle') || path.startsWith('/vehicles') || path.startsWith('/fleet-status') || path.startsWith('/fleet')) return true;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('mode') === 'vehicle' || params.get('mode') === 'fleet' || params.get('vehicle') === '1' || params.get('portal') === 'vehicle') return true;
+    if (params.get('mode') === 'vehicle' || params.get('mode') === 'fleet' || params.get('vehicle') === '1' || params.get('portal') === 'vehicle' || params.get('portal') === 'fleet') return true;
     if (params.has('plate') || params.has('reg') || (params.has('vehicle') && params.get('vehicle') !== '1')) return true;
   } catch (_) {}
   return false;
 };
 
 const App: React.FC = () => {
-  // Public Standalone Tracking Portals: status.makpk.online (or sttatus.makpk.online) & vehicle.makpk.online
-  const [isPublicContainerTrackingOpen, setIsPublicContainerTrackingOpen] = useState<boolean>(() => isContainerTrackingDomainOrRoute());
+  // Public Standalone Tracking Portals (No login required for general public):
+  // Vehicle.makpk.online -> Vehicle Status Portal
+  // Status.makpk.online -> Container Status Portal
   const [isPublicVehicleTrackingOpen, setIsPublicVehicleTrackingOpen] = useState<boolean>(() => isVehicleTrackingDomainOrRoute());
-  const [selectedPublicVehiclePlate, setSelectedPublicVehiclePlate] = useState<string>('');
+  const [isPublicContainerTrackingOpen, setIsPublicContainerTrackingOpen] = useState<boolean>(() => {
+    if (isVehicleTrackingDomainOrRoute()) return false;
+    return isContainerTrackingDomainOrRoute();
+  });
+  const [selectedPublicVehiclePlate, setSelectedPublicVehiclePlate] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('plate') || params.get('reg') || (params.get('vehicle') !== '1' ? (params.get('vehicle') || '') : '') || '';
+    } catch (_) {
+      return '';
+    }
+  });
   const [openedFromInternalWorkspace, setOpenedFromInternalWorkspace] = useState<boolean>(false);
 
   const isDedicatedContainerSubdomain = typeof window !== 'undefined' && (
-    window.location.hostname.toLowerCase().includes('status.makpk.online') || 
-    window.location.hostname.toLowerCase().includes('sttatus.makpk.online')
+    window.location.hostname.toLowerCase().includes('status.makpk.online') ||
+    window.location.hostname.toLowerCase().includes('sttatus.makpk.online') ||
+    window.location.hostname.toLowerCase().includes('status.mak-group.com.pk') ||
+    window.location.hostname.toLowerCase().includes('status.mak-group.com') ||
+    window.location.hostname.toLowerCase().startsWith('status.')
   );
-  const isDedicatedVehicleSubdomain = typeof window !== 'undefined' && window.location.hostname.toLowerCase().includes('vehicle.makpk.online');
+  const isDedicatedVehicleSubdomain = typeof window !== 'undefined' && (
+    window.location.hostname.toLowerCase().includes('vehicle.makpk.online') ||
+    window.location.hostname.toLowerCase().includes('vehicle.mak-group.com') ||
+    window.location.hostname.toLowerCase().includes('vehicles.mak-group.com') ||
+    window.location.hostname.toLowerCase().includes('vehicle.mak-group.com.pk') ||
+    window.location.hostname.toLowerCase().startsWith('vehicle.')
+  );
 
   // Splash Screen & Login Area State:
   // On every app start, reload, or browser refresh:
@@ -149,6 +207,23 @@ const App: React.FC = () => {
     }
     return ['docks', 'muhib', 'vantage', 'truckit'];
   });
+
+  // Luxury Business Class Theme: Pearl White vs Charcoal (matching MAK Logo)
+  const [appTheme, setAppTheme] = useState<'pearl' | 'charcoal'>(() => {
+    const saved = safeAppStorage.getItem('dpl_app_theme');
+    return (saved === 'charcoal' || saved === 'pearl') ? saved : 'pearl';
+  });
+
+  useEffect(() => {
+    if (appTheme === 'charcoal') {
+      document.body.classList.remove('theme-pearl');
+      document.body.classList.add('theme-charcoal');
+    } else {
+      document.body.classList.remove('theme-charcoal');
+      document.body.classList.add('theme-pearl');
+    }
+    safeAppStorage.setItem('dpl_app_theme', appTheme);
+  }, [appTheme]);
 
   // Session Toast for workflow restoration feedback
   const [sessionToast, setSessionToast] = useState<string | null>(null);
@@ -511,24 +586,7 @@ const App: React.FC = () => {
     }
   };
 
-  // Dedicated Public Tracking Portals (status.makpk.online & vehicle.makpk.online)
-  if (isPublicContainerTrackingOpen) {
-    return (
-      <ErrorBoundary>
-        <PublicContainerTrackingPortal
-          onExitPortal={openedFromInternalWorkspace ? () => {
-            setIsPublicContainerTrackingOpen(false);
-            setOpenedFromInternalWorkspace(false);
-          } : undefined}
-          onSwitchToVehicleTracker={() => {
-            setIsPublicContainerTrackingOpen(false);
-            setIsPublicVehicleTrackingOpen(true);
-          }}
-        />
-      </ErrorBoundary>
-    );
-  }
-
+  // Dedicated Public Tracking Portals (Vehicle.makpk.online & Status.makpk.online - No Login Required)
   if (isPublicVehicleTrackingOpen) {
     return (
       <ErrorBoundary>
@@ -541,6 +599,23 @@ const App: React.FC = () => {
           onSwitchToContainerTracker={() => {
             setIsPublicVehicleTrackingOpen(false);
             setIsPublicContainerTrackingOpen(true);
+          }}
+        />
+      </ErrorBoundary>
+    );
+  }
+
+  if (isPublicContainerTrackingOpen) {
+    return (
+      <ErrorBoundary>
+        <PublicContainerTrackingPortal
+          onExitPortal={openedFromInternalWorkspace ? () => {
+            setIsPublicContainerTrackingOpen(false);
+            setOpenedFromInternalWorkspace(false);
+          } : undefined}
+          onSwitchToVehicleTracker={() => {
+            setIsPublicContainerTrackingOpen(false);
+            setIsPublicVehicleTrackingOpen(true);
           }}
         />
       </ErrorBoundary>
@@ -1000,7 +1075,7 @@ const App: React.FC = () => {
                 type="button"
                 onClick={() => setIsPublicContainerTrackingOpen(true)}
                 className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-amber-300 hover:text-white border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
-                title="Preview Public Container Tracker (status.makpk.online)"
+                title="Preview Public Container Tracker (Status.makpk.online)"
               >
                 <Package size={13} className="text-amber-400" />
                 <span>status.</span>
@@ -1009,12 +1084,29 @@ const App: React.FC = () => {
                 type="button"
                 onClick={() => setIsPublicVehicleTrackingOpen(true)}
                 className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-cyan-300 hover:text-white border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
-                title="Preview Public Vehicle Tracker (vehicle.makpk.online)"
+                title="Preview Public Vehicle Tracker (Vehicle.makpk.online)"
               >
                 <Truck size={13} className="text-cyan-400" />
                 <span>vehicle.</span>
               </button>
             </div>
+
+            {/* Luxury Business Class Theme Toggle Button (Pearl White vs Charcoal Luxury) */}
+            <button
+              type="button"
+              onClick={() => setAppTheme(prev => prev === 'pearl' ? 'charcoal' : 'pearl')}
+              className={`btn-animated-luxury px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 ${
+                appTheme === 'pearl'
+                  ? 'bg-slate-800/90 hover:bg-slate-700/90 text-amber-300 border-amber-500/30 shadow-amber-500/10'
+                  : 'bg-white/15 hover:bg-white/25 text-white border-white/20 shadow-black/20'
+              }`}
+              title={appTheme === 'pearl' ? "Switch to Charcoal Luxury (Executive Night)" : "Switch to Pearl White (Business Class)"}
+            >
+              <Sparkles size={13} className={appTheme === 'pearl' ? 'text-amber-400' : 'text-amber-300 animate-pulse'} />
+              <span className="hidden sm:inline font-mono text-[11px] uppercase tracking-wider">
+                {appTheme === 'pearl' ? 'Pearl White' : 'Charcoal'}
+              </span>
+            </button>
 
             {/* Live Real-time Notification Center */}
             <LiveNotificationCenter

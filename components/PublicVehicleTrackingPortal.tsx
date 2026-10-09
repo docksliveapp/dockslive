@@ -483,7 +483,9 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
   const handleCopyShareLink = () => {
     if (typeof window === 'undefined') return;
     const plate = encodeURIComponent(activeSearch);
-    const shareUrl = window.location.hostname.includes('vehicle.makpk.online')
+    const host = window.location.hostname.toLowerCase();
+    const isCustom = host.includes('vehicle.makpk.online') || host.includes('vehicle.mak-group.com');
+    const shareUrl = isCustom
       ? `https://vehicle.makpk.online?vehicle=${plate}`
       : `${window.location.origin}/?mode=vehicle&plate=${plate}`;
     navigator.clipboard.writeText(shareUrl).then(() => {
@@ -530,12 +532,12 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
               </span>
             </div>
 
-            {/* Link to Container Tracking (status.makpk.online) */}
+            {/* Link to Container Tracking (Status.makpk.online) */}
             <button
               type="button"
               onClick={onSwitchToContainerTracker || (() => { window.location.href = 'https://status.makpk.online'; })}
               className="text-[11px] sm:text-xs text-amber-300 hover:text-white px-2.5 sm:px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition-colors flex items-center gap-1 sm:gap-1.5 cursor-pointer shadow-sm shrink-0"
-              title="Open Container & Shipment Status Tracking (status.makpk.online)"
+              title="Open Container & Shipment Status Tracking (Status.makpk.online)"
             >
               <Package size={13} className="text-amber-400 shrink-0" />
               <span>Container Status</span>

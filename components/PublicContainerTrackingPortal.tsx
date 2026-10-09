@@ -456,7 +456,9 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
   const handleCopyShareLink = () => {
     if (typeof window === 'undefined') return;
     const query = encodeURIComponent(activeSearch);
-    const shareUrl = window.location.hostname.includes('status.makpk.online')
+    const host = window.location.hostname.toLowerCase();
+    const isCustom = host.includes('status.makpk.online') || host.includes('status.mak-group.com.pk') || host.includes('status.mak-group.com');
+    const shareUrl = isCustom
       ? `https://status.makpk.online?q=${query}`
       : `${window.location.origin}/?mode=status&q=${query}`;
     navigator.clipboard.writeText(shareUrl).then(() => {
@@ -503,18 +505,16 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
               </span>
             </div>
 
-            {/* Switch to Vehicle Tracker (vehicle.makpk.online) */}
-            {onSwitchToVehicleTracker && (
-              <button
-                type="button"
-                onClick={onSwitchToVehicleTracker}
-                className="text-[11px] sm:text-xs text-cyan-300 hover:text-white px-2.5 sm:px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors flex items-center gap-1 sm:gap-1.5 cursor-pointer shrink-0 shadow-sm"
-                title="Switch to Fleet & Vehicle Verification (vehicle.makpk.online)"
-              >
-                <Truck size={13} className="text-cyan-400 shrink-0" />
-                <span>Vehicle Status</span>
-              </button>
-            )}
+            {/* Switch to Vehicle Tracker (Vehicle.makpk.online) */}
+            <button
+              type="button"
+              onClick={onSwitchToVehicleTracker || (() => { window.location.href = 'https://vehicle.makpk.online'; })}
+              className="text-[11px] sm:text-xs text-cyan-300 hover:text-white px-2.5 sm:px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors flex items-center gap-1 sm:gap-1.5 cursor-pointer shrink-0 shadow-sm"
+              title="Switch to Fleet & Vehicle Verification (Vehicle.makpk.online)"
+            >
+              <Truck size={13} className="text-cyan-400 shrink-0" />
+              <span>Vehicle Status</span>
+            </button>
 
             {/* Exit to Internal Workspace (Only if accessed from internal app) */}
             {onExitPortal && (

@@ -14,22 +14,202 @@
   --color-brand-950: #172554;
   
   --color-brand-accent: #06b6d4;
+
+  /* Luxury Charcoal & Pearl Tokens matching MAK Logo */
+  --color-charcoal-50: #f8fafc;
+  --color-charcoal-100: #f1f5f9;
+  --color-charcoal-200: #e2e8f0;
+  --color-charcoal-300: #cbd5e1;
+  --color-charcoal-400: #94a3b8;
+  --color-charcoal-500: #64748b;
+  --color-charcoal-600: #475569;
+  --color-charcoal-700: #334155;
+  --color-charcoal-800: #1e293b;
+  --color-charcoal-900: #0f172a;
+  --color-charcoal-950: #090d16;
+
+  --color-pearl-50: #ffffff;
+  --color-pearl-100: #fafbfc;
+  --color-pearl-200: #f4f6f8;
+  --color-pearl-300: #edf1f5;
+  --color-pearl-400: #e2e7ec;
+  --color-pearl-500: #cbd3dc;
   
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", "Montserrat", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
-/* High Performance Glass Utilities (Lag-free GPU rendering without clipping borders) */
+/* ==========================================================================
+   LUXURY BUSINESS CLASS THEME: PEARL WHITE + CHARCOAL + GLASSY + ANIMATED
+   ========================================================================== */
+
+/* 1. Satin Pearl White & Charcoal Canvas (Inspired by charcoal_gladiator_big.jpg) */
+body.theme-pearl,
+.theme-pearl {
+  background-color: #F1F5F9;
+  background-image: 
+    radial-gradient(ellipse 90% 45% at 50% 0%, rgba(255, 255, 255, 0.95) 0%, rgba(241, 245, 249, 0.8) 60%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(241, 245, 249, 0.95) 30%, rgba(226, 232, 240, 0.85) 70%, rgba(248, 250, 252, 0.95) 100%),
+    radial-gradient(circle at 100% 100%, rgba(30, 41, 59, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 0% 100%, rgba(30, 41, 59, 0.05) 0%, transparent 50%);
+  background-attachment: fixed;
+  background-size: cover;
+  color: #0F172A;
+}
+
+body.theme-charcoal,
+.theme-charcoal {
+  background-color: #090D16;
+  background-image: 
+    radial-gradient(ellipse 90% 45% at 50% 0%, rgba(241, 245, 249, 0.08) 0%, transparent 60%),
+    radial-gradient(ellipse 70% 50% at 50% 50%, rgba(248, 250, 252, 0.03) 0%, transparent 70%),
+    linear-gradient(180deg, #090D16 0%, #111827 35%, #1E293B 70%, #0A0E17 100%);
+  background-attachment: fixed;
+  background-size: cover;
+  color: #F8FAFC;
+}
+
+/* 2. High-Performance Frosted Glass ("Glassi") Utilities */
 .glass-card {
-  @apply bg-slate-900/85 border border-white/10 shadow-xl;
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 20px 45px -15px rgba(15, 23, 42, 0.07), 0 0 1px 1px rgba(255, 255, 255, 0.9) inset;
+}
+
+.theme-charcoal .glass-card,
+.glass-card-charcoal {
+  background: rgba(30, 41, 59, 0.85);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 25px 50px -15px rgba(0, 0, 0, 0.55), 0 0 1px 1px rgba(255, 255, 255, 0.05) inset;
 }
 
 .glass-panel {
-  @apply bg-slate-800/60 border border-white/10 shadow-lg;
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 8px 24px -10px rgba(15, 23, 42, 0.05);
+}
+
+.theme-charcoal .glass-panel {
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4);
 }
 
 .glass-input {
-  @apply bg-black/40 border border-white/10 text-white placeholder-gray-500 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  color: #0F172A;
+  transition: all 0.2s ease;
+}
+
+.glass-input:focus {
+  background: #FFFFFF;
+  border-color: #334155;
+  box-shadow: 0 0 0 2px rgba(51, 65, 85, 0.15);
+  outline: none;
+}
+
+.theme-charcoal .glass-input {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #FFFFFF;
+}
+
+.theme-charcoal .glass-input:focus {
+  background: rgba(15, 23, 42, 0.95);
+  border-color: #94A3B8;
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
+}
+
+/* 3. Luxury Animated Buttons ("Animiated Buttons") */
+@keyframes luxuryShimmerSweep {
+  0% { transform: translateX(-160%) skewX(-20deg); }
+  50% { transform: translateX(260%) skewX(-20deg); }
+  100% { transform: translateX(260%) skewX(-20deg); }
+}
+
+@keyframes pearlRimGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(226, 232, 240, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(226, 232, 240, 0); }
+}
+
+.btn-animated-luxury,
+.btn-luxury {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateY(0);
+}
+
+.btn-animated-luxury:hover,
+.btn-luxury:hover {
+  transform: translateY(-2px);
+}
+
+.btn-animated-luxury:active,
+.btn-luxury:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.btn-animated-luxury::after,
+.btn-luxury::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 100%
+  );
+  transform: translateX(-160%) skewX(-20deg);
+  pointer-events: none;
+}
+
+.btn-animated-luxury:hover::after,
+.btn-luxury:hover::after {
+  animation: luxuryShimmerSweep 1.6s infinite ease-in-out;
+}
+
+/* Charcoal Primary Button matching MAK Logo */
+.btn-charcoal-primary {
+  background: linear-gradient(135deg, #2D3748 0%, #1A202C 100%);
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 24px -5px rgba(15, 23, 42, 0.3), 0 0 1px 1px rgba(255, 255, 255, 0.1) inset;
+}
+
+.btn-charcoal-primary:hover {
+  background: linear-gradient(135deg, #3C4858 0%, #222B38 100%);
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 14px 28px -5px rgba(15, 23, 42, 0.45);
+}
+
+/* Pearl White Satin Light Button */
+.btn-pearl-light {
+  background: linear-gradient(135deg, #FFFFFF 0%, #F1F5F9 100%);
+  color: #1E293B;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  box-shadow: 0 8px 20px -6px rgba(15, 23, 42, 0.08), 0 0 1px 1px rgba(255, 255, 255, 0.95) inset;
+}
+
+.btn-pearl-light:hover {
+  background: linear-gradient(135deg, #FFFFFF 0%, #FFFFFF 100%);
+  border-color: #CBD5E1;
+  box-shadow: 0 14px 28px -6px rgba(15, 23, 42, 0.12);
 }
 
 /* Fluid Scrollbar & High-Performance Touch/Wheel Scrolling */

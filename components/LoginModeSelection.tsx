@@ -11,9 +11,7 @@ import {
   CheckCircle2,
   ArrowRight,
   HelpCircle,
-  Crown,
-  Package,
-  Truck
+  Crown
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { useParentGroup, isUploadedLogo } from '../services/companyService';

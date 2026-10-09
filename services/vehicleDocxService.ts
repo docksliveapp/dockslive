@@ -169,7 +169,11 @@ export function extractVehicleFields(v: Vehicle) {
   return { maker, model, mra, tare, owner, ownerFather, ownerCnic, ownerAddress };
 }
 
-// Download utility
+// Download & Blob utility
+export async function generateDocxBlob(doc: Document): Promise<Blob> {
+  return await Packer.toBlob(doc);
+}
+
 export async function downloadDocxBlob(doc: Document, filename: string): Promise<void> {
   const blob = await Packer.toBlob(doc);
   const url = URL.createObjectURL(blob);

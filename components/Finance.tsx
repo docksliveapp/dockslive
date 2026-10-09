@@ -35,6 +35,7 @@ import {
   autoPostMonthlyRecurringAndSalaries
 } from '../services/dbService';
 import { exportCSVFile, compressAndPrepareFile, convertImageToPdf } from '../services/fileUtils';
+import { analyzeReceiptWithAI } from '../services/geminiService';
 import { safeAppStorage } from '../services/storage';
 import { useBranding } from '../services/brandingService';
 import { sendAppNotification } from '../services/notificationService';
@@ -1498,6 +1499,18 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
           if (processed.dataUrl || processed.base64) {
             setNewTransaction(prev => ({ ...prev, slipUrl: processed.dataUrl || `data:application/pdf;base64,${processed.base64}` }));
           }
+        }
+
+        // Auto-extract details from receipt/slip
+        const analysis = await analyzeReceiptWithAI(file);
+        if (analysis && analysis.success) {
+          setNewTransaction(prev => ({
+            ...prev,
+            amount: (!prev.amount || prev.amount === 0) ? (analysis.amount || prev.amount) : prev.amount,
+            description: !prev.description ? (analysis.description || prev.description) : prev.description,
+            reference: !prev.reference ? (analysis.voucherNo || prev.reference) : prev.reference,
+            date: analysis.date || prev.date
+          }));
         }
       } catch (err) {
         console.warn("Slip processing notice:", err);

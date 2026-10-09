@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
-import { autoFillCaseData, downloadFile, docDataCache, detectShippingDocumentType } from '../services/geminiService';
+import { autoFillCaseData, downloadFile, docDataCache, detectShippingDocumentType, analyzeReceiptWithAI } from '../services/geminiService';
 import { downloadCasePdf, sharePdfFile, downloadCustomsDeliveryOrderPdf, downloadLoadingBillPdf } from '../services/pdfExportService';
 import { exportTableToExcel } from '../services/excelExportService';
 import { PdfViewerModal } from './PdfViewerModal';
@@ -7401,6 +7401,17 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                           const proc = await compressAndPrepareFile(file);
                           const dataUrl = proc?.dataUrl || proc?.base64 || '';
                           setNewChargeReceipt({ url: dataUrl, name: file.name });
+
+                          // High-precision intelligent receipt OCR
+                          const receiptData = await analyzeReceiptWithAI(file);
+                          if (receiptData && receiptData.success) {
+                            if (receiptData.amount && (!newChargeAmount || Number(newChargeAmount) === 0)) {
+                              setNewChargeAmount(String(receiptData.amount));
+                            }
+                            if (receiptData.description && !newChargeDesc) {
+                              setNewChargeDesc(receiptData.description);
+                            }
+                          }
                         } catch (err) {
                           console.warn("Failed compression, fallback to FileReader:", err);
                           const reader = new FileReader();

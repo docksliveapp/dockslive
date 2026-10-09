@@ -38,11 +38,16 @@ export function exportGeneralLedgerToExcel(
   const prefix = getActiveCompanyPrefix();
   const compTitle = (activeComp.legalTitle || activeComp.name).toUpperCase();
 
-  // Title and metadata block
+  // Title and metadata block with luxury business-class executive layout
   const sheetData: any[][] = [
-    [`${prefix} LOGISTICS & SUPPLY CHAIN - ${compTitle}`],
-    ['GENERAL LEDGER STATEMENT (AUDIT RECORD)'],
-    [`Generated On: ${today}`, `Filter / Account: ${accountFilter}`, `Status: Active Official Book`],
+    [`${compTitle}`],
+    [activeComp.tagline || 'Customs Bonded Carrier • Afghan Transit Trade • International Freight Forwarding'],
+    [`Head Office: ${activeComp.address || 'Office No. 14-B, 1st Floor, State Life Bldg No. 7, G-Allana Road Tower, Karachi'}`],
+    [`Tel: ${activeComp.phone || '+92-21-32330103, +92-21-32330104'} | Email: ${activeComp.email || 'info@dockspk.com'} | Web: ${activeComp.web || 'www.dockspk.com'}`],
+    [`Customs NTN: ${activeComp.id === 'docks' ? '5064083-8' : '3997968'} | Customs Bonded License: Karachi Custom House`],
+    [],
+    ['OFFICIAL GENERAL LEDGER STATEMENT (AUDIT RECORD)'],
+    [`Generated Date: ${today}`, `Filter Scope: ${accountFilter}`, `Classification: Official Reconciled Record`],
     [], // Blank separator
     [
       'Date',
@@ -139,9 +144,13 @@ export function exportClientLedgerToExcel(
   const compTitle = (activeComp.legalTitle || activeComp.name).toUpperCase();
 
   const sheetData: any[][] = [
-    [`${compTitle} - CLIENT STATEMENT OF ACCOUNT`],
-    [`Client Name: ${clientName}`],
-    [`Statement Date: ${today}`, `Financial Status: Reconciled Official Statement`],
+    [`${compTitle}`],
+    [activeComp.tagline || 'Customs Bonded Carrier • Afghan Transit Trade • International Freight Forwarding'],
+    [`Registered Office: ${activeComp.address || 'Office No. 14-B, 1st Floor, State Life Bldg No. 7, G-Allana Road Tower, Karachi'}`],
+    [`Contact: ${activeComp.phone || '+92-21-32330103'} | Web: ${activeComp.web || 'www.dockspk.com'} | Email: ${activeComp.email || 'info@dockspk.com'}`],
+    [],
+    [`OFFICIAL CLIENT STATEMENT OF ACCOUNT - ${clientName.toUpperCase()}`],
+    [`Client / Account Name: ${clientName}`, `Statement Date: ${today}`, `Verification: Official Reconciled Balance`],
     [],
     [
       'Date',
@@ -227,8 +236,13 @@ export function exportVehiclesToExcel(vehicles: Vehicle[]) {
   ];
 
   const sheetData: any[][] = [
-    [`${compTitle} - MASTER FLEET & VEHICLE REGISTRY`],
-    [`Export Date: ${today}`, `Total Vehicles Registered: ${vehicles.length}`],
+    [`${compTitle}`],
+    [activeComp.tagline || 'Customs Bonded Carrier • Bonded Fleet Registry • Directorate General of Transit Trade'],
+    [`Operations: ${activeComp.address || 'Office No. 14-B, 1st Floor, State Life Bldg No. 7, G-Allana Road Tower, Karachi'}`],
+    [`Contact: ${activeComp.phone || '+92-21-32330103'} | Web: ${activeComp.web || 'www.dockspk.com'}`],
+    [],
+    ['PAKISTAN CUSTOMS BONDED FLEET - MASTER VEHICLE REGISTRY'],
+    [`Export Date: ${today}`, `Total Vehicles Active: ${vehicles.length}`, `Status: Customs Transit Approved Fleet`],
     [],
     headers
   ];
@@ -280,6 +294,101 @@ export function exportVehiclesToExcel(vehicles: Vehicle[]) {
 
   XLSX.utils.book_append_sheet(wb, ws, 'Fleet Master');
   XLSX.writeFile(wb, `${prefix}_Master_Vehicles_Fleet_${today}.xlsx`);
+}
+
+/**
+ * Generates the raw Excel (.xlsx) buffer and filename for read-only preview before downloading
+ */
+export function generateVehiclesExcelBuffer(vehicles: Vehicle[]): { buffer: ArrayBuffer; filename: string } {
+  const wb = XLSX.utils.book_new();
+  const today = new Date().toISOString().split('T')[0];
+  const activeComp = getActiveCompany();
+  const prefix = getActiveCompanyPrefix();
+  const compTitle = (activeComp.legalTitle || activeComp.name).toUpperCase();
+
+  const headers = [
+    'Sr No',
+    'Vehicle Registration Number',
+    `${prefix} Serial No`,
+    'Category',
+    'Type',
+    'Size',
+    'Weight Capacity',
+    'Engine Number',
+    'Chassis Number',
+    'Transporter / Fleet Owner',
+    'Broker Name',
+    'Driver Name',
+    'Driver CNIC',
+    'Driver Contact',
+    'Registration Date',
+    'Validity Expiry Date',
+    'Tracking Status',
+    'Current Trip Status'
+  ];
+
+  const sheetData: any[][] = [
+    [`${compTitle}`],
+    [activeComp.tagline || 'Customs Bonded Carrier • Bonded Fleet Registry • Directorate General of Transit Trade'],
+    [`Operations: ${activeComp.address || 'Office No. 14-B, 1st Floor, State Life Bldg No. 7, G-Allana Road Tower, Karachi'}`],
+    [`Contact: ${activeComp.phone || '+92-21-32330103'} | Web: ${activeComp.web || 'www.dockspk.com'}`],
+    [],
+    ['PAKISTAN CUSTOMS BONDED FLEET - MASTER VEHICLE REGISTRY'],
+    [`Export Date: ${today}`, `Total Vehicles Active: ${vehicles.length}`, `Status: Customs Transit Approved Fleet`],
+    [],
+    headers
+  ];
+
+  vehicles.forEach((v, idx) => {
+    sheetData.push([
+      idx + 1,
+      v.registrationNumber || '',
+      v.dplSerial || '',
+      v.category || '',
+      v.type || '',
+      v.size || '',
+      v.weightCapacity || '',
+      v.engineNo || '',
+      v.chassisNo || '',
+      v.transporterName || '',
+      v.brokerName || '',
+      v.driverName || '',
+      v.driverCnic || '',
+      v.driverContact || '',
+      v.registrationDate || '',
+      v.validationExpiryDate || '',
+      v.tracker ? `${v.tracker.provider} (${v.tracker.paymentStatus})` : 'Unassigned',
+      v.status || ''
+    ]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(sheetData);
+  ws['!cols'] = [
+    { wch: 8 },  // Sr
+    { wch: 22 }, // Reg No
+    { wch: 22 }, // DPL Serial
+    { wch: 18 }, // Category
+    { wch: 16 }, // Type
+    { wch: 12 }, // Size
+    { wch: 18 }, // Weight
+    { wch: 20 }, // Engine
+    { wch: 20 }, // Chassis
+    { wch: 30 }, // Transporter
+    { wch: 26 }, // Broker
+    { wch: 24 }, // Driver
+    { wch: 20 }, // Driver CNIC
+    { wch: 18 }, // Driver Contact
+    { wch: 16 }, // Reg Date
+    { wch: 18 }, // Expiry Date
+    { wch: 18 }, // Tracking
+    { wch: 18 }  // Status
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Fleet Master');
+  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
+  const filename = `${prefix}_Master_Vehicles_Fleet_${today}.xlsx`;
+
+  return { buffer, filename };
 }
 
 /**

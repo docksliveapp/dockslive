@@ -27,6 +27,7 @@ import {
 import Logo from './Logo';
 import GoogleDriveManager from './GoogleDriveManager';
 import { convertImageToPdf } from '../services/fileUtils';
+import { safeAppStorage } from '../services/storage';
 
 interface AppSettingsProps {
   onReplaySplash?: () => void;
@@ -469,6 +470,59 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
           onChange={(e) => setAdminPassword(e.target.value)} 
           type="password"
         />
+
+        {/* Executive Theme Selection */}
+        <div className="mt-6 pt-6 border-t border-white/10">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Sparkles size={16} className="text-amber-400" />
+                Luxury Business Class Theme
+              </h4>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Select your preferred visual atmosphere, matched to the official MAK Group corporate identity.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+            <button
+              type="button"
+              onClick={() => {
+                document.body.classList.remove('theme-charcoal');
+                document.body.classList.add('theme-pearl');
+                safeAppStorage.setItem('dpl_app_theme', 'pearl');
+              }}
+              className="btn-animated-luxury p-3.5 rounded-xl border flex items-center gap-3 text-left transition-all bg-white/90 hover:bg-white text-slate-800 border-slate-200 shadow-md cursor-pointer"
+            >
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-white to-slate-200 border border-slate-300 flex items-center justify-center shrink-0 shadow-sm">
+                <Sparkles size={16} className="text-amber-500" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-900">Pearl White (Business Class)</p>
+                <p className="text-[10px] text-slate-500">Satin pearl tones, high-contrast crisp text</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                document.body.classList.remove('theme-pearl');
+                document.body.classList.add('theme-charcoal');
+                safeAppStorage.setItem('dpl_app_theme', 'charcoal');
+              }}
+              className="btn-animated-luxury p-3.5 rounded-xl border flex items-center gap-3 text-left transition-all bg-slate-900/90 hover:bg-slate-800 text-white border-amber-500/30 shadow-md cursor-pointer"
+            >
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-slate-950 to-slate-800 border border-amber-500/40 flex items-center justify-center shrink-0 shadow-sm">
+                <Sparkles size={16} className="text-amber-400" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-amber-200">Charcoal Luxury (Executive Night)</p>
+                <p className="text-[10px] text-gray-400">Deep obsidian & charcoal with gold accents</p>
+              </div>
+            </button>
+          </div>
+        </div>
 
         <div className="mt-8 flex justify-end">
           <button 

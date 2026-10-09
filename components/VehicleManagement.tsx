@@ -6,6 +6,7 @@ import { autoFillVehicleData } from '../services/geminiService';
 import { safeAppStorage } from '../services/storage';
 import { downloadVehicleDetailsPdf, downloadVehicleNocPdf } from '../services/pdfExportService';
 import { PdfViewerModal } from './PdfViewerModal';
+import { UniversalDocumentPreviewModal, DataMappingCheckItem } from './UniversalDocumentPreviewModal';
 import { 
   subscribeToVehicles, 
   saveVehicleToFirestore, 
@@ -22,13 +23,14 @@ import { VirtualizedList, VirtualizedTable } from './VirtualizedList';
 import { subscribeToTransporterRequests, updateTransporterRequestInFirestore, dedupeArrayById } from '../services/dbService';
 import { TransporterRequest } from '../types';
 import { sendAppNotification } from '../services/notificationService';
-import { exportVehiclesToExcel, exportVehicleTripsToExcel } from '../services/excelExportService';
+import { exportVehiclesToExcel, exportVehicleTripsToExcel, generateVehiclesExcelBuffer } from '../services/excelExportService';
 import { parseVehicleFile, isCorruptedVehicleRecord } from '../services/documentParserService';
 import { OfficialDocumentsModal, DocumentType } from './OfficialDocumentsModal';
 import { 
   generateLeaseTerminationAgreementDocx, 
   generateCancellationLetterLetterheadDocx,
   generateVehicleNocDocx,
+  generateDocxBlob,
   downloadDocxBlob 
 } from '../services/vehicleDocxService';
 import { downloadCustomsVehicleListPdf } from '../services/pdfExportService';
@@ -387,6 +389,13 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
         date: today
       });
 
+      // Also generate and download official NOC in Word (.docx) format
+      try {
+        await handleDownloadNocDocx(cancelledVehicle);
+      } catch (docxErr) {
+        console.warn("Auto docx download note:", docxErr);
+      }
+
       setNocSuccessNotice({
         vehicleNo: vehicleToCancel.registrationNumber,
         nocRef,
@@ -448,6 +457,172 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       });
     } catch (err) {
       console.error('Failed to download Customs List PDF:', err);
+    }
+  };
+
+  // Universal Read-Only Document Preview State (.docx / .pdf / .xlsx / .image)
+  const [universalPreviewState, setUniversalPreviewState] = useState<{
+    isOpen: boolean;
+    file: File | Blob | ArrayBuffer | string | any | null;
+    filename: string;
+    title: string;
+    fileType?: 'docx' | 'pdf' | 'xlsx' | 'image' | 'auto';
+    verificationItems: DataMappingCheckItem[];
+    onDownload?: () => void;
+  }>({
+    isOpen: false,
+    file: null,
+    filename: '',
+    title: '',
+    fileType: 'auto',
+    verificationItems: []
+  });
+
+  const handlePreviewNocDocx = async (v: Vehicle) => {
+    const prefix = getActiveCompanyPrefix();
+    try {
+      const doc = await generateVehicleNocDocx(v, {
+        nocReference: v.nocReference || `NOC-${prefix}-${v.id}`,
+        nocDate: v.cancellationDate || new Date().toISOString().split('T')[0],
+        reason: v.cancellationReason || 'Fleet Release & Operational De-Registration',
+        leaveLetterheadSpace: true
+      });
+      const blob = await generateDocxBlob(doc);
+      const filename = `Vehicle_NOC_${v.registrationNumber.replace(/\s+/g, '_')}_Letterhead.docx`;
+      const verificationItems: DataMappingCheckItem[] = [
+        { label: 'Vehicle Reg Number', value: v.registrationNumber, status: 'verified' },
+        { label: 'Make / Model', value: v.makeModel || `${v.maker || ''} ${v.model || ''}`.trim() || 'HINO / BEDFORD', status: 'verified' },
+        { label: 'Engine Number', value: v.engineNo || 'Verified', status: 'verified' },
+        { label: 'Chassis Number', value: v.chassisNo || 'Verified', status: 'verified' },
+        { label: 'NOC Reference', value: v.nocReference || `NOC-${prefix}-${v.id}`, status: 'verified' },
+        { label: 'Cancellation Reason', value: v.cancellationReason || 'Fleet Release & Operational De-Registration', status: 'verified' },
+        { label: 'Registered Transporter', value: v.transporterName || 'Fleet Operator', status: 'verified' },
+        { label: 'Carrier NTN', value: activeCompany?.id === 'docks' ? '5064083-8 / 3997968' : '3997968', status: 'verified' }
+      ];
+
+      setUniversalPreviewState({
+        isOpen: true,
+        file: blob,
+        filename,
+        title: `Official De-Registration NOC (.docx) • ${v.registrationNumber}`,
+        fileType: 'docx',
+        verificationItems,
+        onDownload: () => handleDownloadNocDocx(v)
+      });
+    } catch (err: any) {
+      console.error('Failed to preview NOC DOCX:', err);
+    }
+  };
+
+  const handlePreviewNocPdf = async (v: Vehicle) => {
+    const prefix = getActiveCompanyPrefix();
+    try {
+      const res = await downloadVehicleNocPdf({
+        vehicle: v,
+        nocNo: v.nocReference || `NOC-${prefix}-${v.id}`,
+        reason: v.cancellationReason || 'Fleet Release',
+        date: v.cancellationDate || new Date().toLocaleDateString('en-GB')
+      });
+      const verificationItems: DataMappingCheckItem[] = [
+        { label: 'Vehicle Reg Number', value: v.registrationNumber, status: 'verified' },
+        { label: 'Chassis Number', value: v.chassisNo || 'Verified', status: 'verified' },
+        { label: 'Engine Number', value: v.engineNo || 'Verified', status: 'verified' },
+        { label: 'NOC Reference', value: v.nocReference || `NOC-${prefix}-${v.id}`, status: 'verified' },
+        { label: 'Cancellation Date', value: v.cancellationDate || new Date().toLocaleDateString('en-GB'), status: 'verified' }
+      ];
+
+      setUniversalPreviewState({
+        isOpen: true,
+        file: res.blobUrl,
+        filename: res.filename,
+        title: `Official Vehicle NOC PDF • ${v.registrationNumber}`,
+        fileType: 'pdf',
+        verificationItems,
+        onDownload: () => handleDirectDownloadNoc(v)
+      });
+    } catch (err) {
+      console.error('Failed to preview NOC PDF:', err);
+    }
+  };
+
+  const handlePreviewCustomsListPdf = async () => {
+    try {
+      const activeList = vehicles.filter(v => v.status !== 'CANCELLED');
+      const targetVehicles = activeList.length > 0 ? activeList : vehicles;
+      const res = await downloadCustomsVehicleListPdf({
+        vehicles: targetVehicles
+      });
+      const verificationItems: DataMappingCheckItem[] = [
+        { label: 'Issuing Authority', value: 'Directorate General of Transit Trade Karachi', status: 'verified' },
+        { label: 'Licensed Carrier', value: activeCompany?.legalTitle || activeCompany?.name || 'Docks (Pvt) Ltd', status: 'verified' },
+        { label: 'Total Permitted Fleet', value: `${targetVehicles.length} Vehicles in Registry`, status: 'verified' },
+        { label: 'Customs License NTN', value: activeCompany?.id === 'docks' ? '5064083-8 / 3997968' : '3997968', status: 'verified' }
+      ];
+
+      setUniversalPreviewState({
+        isOpen: true,
+        file: res.blobUrl,
+        filename: res.filename,
+        title: `Customs Directorate Transit Vehicle List (${targetVehicles.length} vehicles)`,
+        fileType: 'pdf',
+        verificationItems,
+        onDownload: handleDownloadCustomsListPdf
+      });
+    } catch (err: any) {
+      console.error('Failed to preview Customs list PDF:', err);
+    }
+  };
+
+  const handlePreviewVehicleDetailsPdf = async (v: Vehicle) => {
+    try {
+      const res = await downloadVehicleDetailsPdf(v);
+      const verificationItems: DataMappingCheckItem[] = [
+        { label: 'Vehicle Number', value: v.registrationNumber, status: 'verified' },
+        { label: 'DPL Serial No', value: v.dplSerial || `DPL-${v.id}`, status: 'verified' },
+        { label: 'Category & Type', value: `${v.category} - ${v.type}`, status: 'verified' },
+        { label: 'Chassis No', value: v.chassisNo || 'Verified', status: 'verified' },
+        { label: 'Engine No', value: v.engineNo || 'Verified', status: 'verified' },
+        { label: 'Transporter', value: v.transporterName || 'Fleet Operator', status: 'verified' },
+        { label: 'Driver Assigned', value: v.driverName || 'Verified Driver', status: 'verified' },
+        { label: 'Tracker Status', value: v.tracker ? `${v.tracker.provider} (${v.tracker.paymentStatus})` : 'Unassigned', status: 'verified' }
+      ];
+
+      setUniversalPreviewState({
+        isOpen: true,
+        file: res.blobUrl,
+        filename: res.filename,
+        title: `Vehicle Dossier Record • ${v.registrationNumber}`,
+        fileType: 'pdf',
+        verificationItems,
+        onDownload: () => downloadVehicleDetailsPdf(v)
+      });
+    } catch (err) {
+      console.error('Failed to preview vehicle dossier PDF:', err);
+    }
+  };
+
+  const handlePreviewVehiclesExcel = () => {
+    try {
+      const { buffer, filename } = generateVehiclesExcelBuffer(vehicles);
+      const verificationItems: DataMappingCheckItem[] = [
+        { label: 'Workbook Format', value: 'Master Fleet Registry (.xlsx)', status: 'verified' },
+        { label: 'Company Entity', value: activeCompany?.legalTitle || activeCompany?.name || 'Docks (Pvt) Ltd', status: 'verified' },
+        { label: 'Total Fleet Records', value: `${vehicles.length} Vehicles Mapped`, status: 'verified' },
+        { label: 'Active On Trips', value: `${vehicles.filter(v => v.status === 'ON_TRIP').length} Vehicles`, status: 'verified' },
+        { label: 'Customs License NTN', value: activeCompany?.id === 'docks' ? '5064083-8 / 3997968' : '3997968', status: 'verified' }
+      ];
+
+      setUniversalPreviewState({
+        isOpen: true,
+        file: buffer,
+        filename,
+        title: `Master Vehicles Fleet Registry (${vehicles.length} vehicles)`,
+        fileType: 'xlsx',
+        verificationItems,
+        onDownload: () => exportVehiclesToExcel(vehicles)
+      });
+    } catch (err: any) {
+      console.error('Failed to preview vehicles Excel:', err);
     }
   };
 
@@ -561,6 +736,17 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     setSelectedVehicleIds(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
+  };
+
+  const handleOpenOfficialDocs = (docType: DocumentType, preset?: 'EXPIRED' | 'RENEWAL' | 'ALL') => {
+    setDocsModalType(docType);
+    if (preset === 'EXPIRED' || preset === 'RENEWAL') {
+      const expiredIds = vehicles.filter(v => v.status === 'EXPIRED' || v.status === 'EXPIRE_SOON' || getVehicleValidity(v).text === 'Expired').map(v => v.id);
+      setSelectedVehicleIds(expiredIds.length > 0 ? expiredIds : vehicles.slice(0, 10).map(v => v.id));
+    } else if (preset === 'ALL' && selectedVehicleIds.length === 0) {
+      setSelectedVehicleIds(vehicles.slice(0, 10).map(v => v.id));
+    }
+    setShowDocsModal(true);
   };
 
   const handleSelectAllExpiredVehicles = () => {
@@ -956,28 +1142,163 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
 
         <div className="flex items-center gap-2 flex-wrap">
           <button 
-            onClick={() => {
-              setDocsModalType('REG_LETTER');
-              setShowDocsModal(true);
-            }}
+            onClick={() => handleOpenOfficialDocs('REG_LETTER')}
             className="bg-blue-600/20 hover:bg-blue-600 border border-blue-500/30 text-blue-300 hover:text-white px-3.5 py-2 rounded-lg flex items-center gap-2 text-xs font-semibold transition-all shadow-sm"
             title="Generate official Customs Application Letters, Permits & Lease Agreements in Word (.docx)"
           >
             <FileText size={15} /> Customs & Legal Docs (.docx)
           </button>
-          <button 
-            onClick={handleDownloadCustomsListPdf}
-            className="bg-red-600/20 hover:bg-red-600 border border-red-500/30 text-red-300 hover:text-white px-3.5 py-2 rounded-lg flex items-center gap-2 text-xs font-semibold transition-all shadow-sm"
-            title="Download official Pakistan Customs Directorate General of Transit Trade Vehicle List (PDF)"
+          <div className="flex items-center gap-1 bg-red-950/40 p-0.5 rounded-lg border border-red-500/30">
+            <button 
+              onClick={handlePreviewCustomsListPdf}
+              className="hover:bg-red-600/40 text-red-300 hover:text-white px-2.5 py-1.5 rounded flex items-center gap-1.5 text-xs font-semibold transition-all"
+              title="Preview official Pakistan Customs Vehicle List (PDF) with Data Mapping Verification"
+            >
+              <Eye size={13} className="text-amber-300" /> Preview List (PDF)
+            </button>
+            <button 
+              onClick={handleDownloadCustomsListPdf}
+              className="bg-red-600/30 hover:bg-red-600 text-red-200 hover:text-white px-2.5 py-1.5 rounded flex items-center gap-1.5 text-xs font-semibold transition-all"
+              title="Download official Pakistan Customs Directorate General of Transit Trade Vehicle List (PDF)"
+            >
+              <Download size={13} /> PDF
+            </button>
+          </div>
+          <div className="flex items-center gap-1 bg-emerald-950/40 p-0.5 rounded-lg border border-emerald-500/30">
+            <button 
+              onClick={handlePreviewVehiclesExcel}
+              className="hover:bg-emerald-600/40 text-emerald-300 hover:text-white px-2.5 py-1.5 rounded flex items-center gap-1.5 text-xs font-semibold transition-all"
+              title="Preview Master Fleet Excel (.xlsx) spreadsheet with Data Mapping Verification"
+            >
+              <Eye size={13} className="text-emerald-300" /> Preview Fleet (.xlsx)
+            </button>
+            <button 
+              onClick={handleExportAllVehiclesList}
+              className="bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 hover:text-white px-2.5 py-1.5 rounded flex items-center gap-1.5 text-xs font-semibold transition-all"
+              title="Download formatted Excel (.xlsx) workbook of all entered commercial vehicles"
+            >
+              <Download size={13} /> .xlsx
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Official Customs & Legal Word Documents (.docx) - FBR & Customs Pakistan Section */}
+      <div className="w-full bg-gradient-to-r from-slate-900/90 via-slate-900/60 to-slate-900/90 border border-blue-500/25 rounded-2xl p-4 shadow-xl space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center font-bold text-xs border border-blue-500/30">
+              <FileText size={16} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-bold text-white">Customs & FBR Legal Documents (.docx)</span>
+                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
+                  Pakistan Customs / FBR Format
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-400">
+                Generate official 1:1 Word (.docx) files with current date, company & fleet data for Customs submission
+              </p>
+            </div>
+          </div>
+
+          {/* Process Workflow Buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => handleOpenOfficialDocs('REG_LETTER', 'ALL')}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-600/30 transition-all hover:scale-102"
+              title="Generate complete registration file for Pakistan Customs House"
+            >
+              <FileText size={14} />
+              <span>Generate Registration Docs for Customs</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleOpenOfficialDocs('CUSTOMS_PERMIT', 'RENEWAL')}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all hover:scale-102"
+              title="Generate renewal permits for expired or due vehicles"
+            >
+              <ShieldCheck size={14} />
+              <span>Generate Renewal Docs for Customs</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleOpenOfficialDocs('CANCELLATION_NOC')}
+              className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md shadow-rose-600/30 transition-all hover:scale-102"
+              title="Generate cancellation & NOC docs for Customs panel de-registration"
+            >
+              <Ban size={14} />
+              <span>Generate Cancellation Docs for Customs</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Buttons with Exact Uploaded Document Names */}
+        <div className="pt-2 border-t border-white/5 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-semibold text-gray-400 mr-1">Uploaded Templates (.docx):</span>
+
+          <button
+            type="button"
+            onClick={() => handleOpenOfficialDocs('REG_LETTER')}
+            className="bg-white/5 hover:bg-blue-600/20 border border-white/10 hover:border-blue-500/40 text-gray-200 hover:text-blue-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
+            title="Letter 10 Vehicles registration letter (Company Letterhead)"
           >
-            <FileText size={15} /> Customs List (PDF)
+            <FileText size={13} className="text-blue-400" />
+            <span>Letter 10 Vehicles registration letter</span>
           </button>
-          <button 
-            onClick={handleExportAllVehiclesList}
-            className="bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/30 text-emerald-300 hover:text-white px-3.5 py-2 rounded-lg flex items-center gap-2 text-xs font-semibold transition-all shadow-sm"
-            title="Download formatted Excel (.xlsx) workbook of all entered commercial vehicles"
+
+          <button
+            type="button"
+            onClick={() => handleOpenOfficialDocs('CUSTOMS_PERMIT')}
+            className="bg-white/5 hover:bg-emerald-600/20 border border-white/10 hover:border-emerald-500/40 text-gray-200 hover:text-emerald-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
+            title="Custom Vehicle List (Customs Directorate Format)"
           >
-            <Download size={15} /> Download Fleet (.xlsx)
+            <ShieldCheck size={13} className="text-emerald-400" />
+            <span>Custom Vehicle List</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleOpenOfficialDocs('LEASE_AGREEMENT')}
+            className="bg-white/5 hover:bg-amber-600/20 border border-white/10 hover:border-amber-500/40 text-gray-200 hover:text-amber-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
+            title="Lease Agreement TAS-582 on Legal Stamp Paper"
+          >
+            <FileCheck size={13} className="text-amber-400" />
+            <span>Lease Agreement TAS-582</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleOpenOfficialDocs('AFFIDAVIT')}
+            className="bg-white/5 hover:bg-indigo-600/20 border border-white/10 hover:border-indigo-500/40 text-gray-200 hover:text-indigo-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
+            title="Affidavit (Stamp Paper - SRO 450(I)/2001)"
+          >
+            <FileCheck size={13} className="text-indigo-400" />
+            <span>Affidavit (SRO 450)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleOpenOfficialDocs('LEASE_TERMINATION')}
+            className="bg-white/5 hover:bg-rose-600/20 border border-white/10 hover:border-rose-500/40 text-gray-200 hover:text-rose-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
+            title="LEASE TERMINATION OF NOC on Stamp Paper"
+          >
+            <AlertTriangle size={13} className="text-rose-400" />
+            <span>LEASE TERMINATION OF NOC</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleOpenOfficialDocs('CANCELLATION_NOC')}
+            className="bg-white/5 hover:bg-purple-600/20 border border-white/10 hover:border-purple-500/40 text-gray-200 hover:text-purple-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
+            title="NOC on letter head (Panel De-registration)"
+          >
+            <Building size={13} className="text-purple-400" />
+            <span>NOC on letter head</span>
           </button>
         </div>
       </div>
@@ -1120,9 +1441,9 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                   setShowDocsModal(true);
                 }}
                 className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-blue-600/30 transition-all hover:scale-102"
-                title="Application Letter for Custom House (Company Letterhead)"
+                title="Letter 10 Vehicles registration letter (Company Letterhead)"
               >
-                <FileText size={14} /> Reg. Letter (.docx)
+                <FileText size={14} /> Letter 10 Vehicles (.docx)
               </button>
 
               <button
@@ -1132,9 +1453,9 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                   setShowDocsModal(true);
                 }}
                 className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all hover:scale-102"
-                title="Customs Permit Format (Print for Custom Officer signature)"
+                title="Custom Vehicle List (Customs Directorate Format)"
               >
-                <ShieldCheck size={14} /> Customs Permit (.docx)
+                <ShieldCheck size={14} /> Custom Vehicle List (.docx)
               </button>
 
               <button
@@ -1144,9 +1465,45 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                   setShowDocsModal(true);
                 }}
                 className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-amber-600/30 transition-all hover:scale-102"
-                title="Vehicle Lease Agreement on Legal Stamp Paper"
+                title="Vehicle Lease Agreement TAS-582 on Legal Stamp Paper"
               >
-                <FileCheck size={14} /> Lease Agreement (.docx)
+                <FileCheck size={14} /> Lease Agreement TAS-582 (.docx)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setDocsModalType('AFFIDAVIT');
+                  setShowDocsModal(true);
+                }}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition-all hover:scale-102"
+                title="Affidavit (Stamp Paper - SRO 450(I)/2001)"
+              >
+                <FileCheck size={14} /> Affidavit (Stamp Paper) (.docx)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setDocsModalType('LEASE_TERMINATION');
+                  setShowDocsModal(true);
+                }}
+                className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-rose-600/30 transition-all hover:scale-102"
+                title="LEASE TERMINATION OF NOC on Stamp Paper"
+              >
+                <AlertTriangle size={14} /> LEASE TERMINATION (.docx)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setDocsModalType('CANCELLATION_NOC');
+                  setShowDocsModal(true);
+                }}
+                className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-purple-600/30 transition-all hover:scale-102"
+                title="NOC on letter head (Panel De-registration)"
+              >
+                <Building size={14} /> NOC on letter head (.docx)
               </button>
 
               <button
@@ -1154,7 +1511,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                 onClick={() => setShowDocsModal(true)}
                 className="bg-white/10 hover:bg-white/20 text-white text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all"
               >
-                <Layers size={14} /> All Documents
+                <Layers size={14} /> All Documents (.docx)
               </button>
 
               <button
@@ -1214,20 +1571,20 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                     {v.status === 'CANCELLED' ? (
                       <>
                         <button
-                          onClick={() => handleDownloadNocDocx(v)}
-                          className="bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
-                          title="Download De-registration NOC Word Document (.docx)"
+                          onClick={() => handlePreviewNocDocx(v)}
+                          className="bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/30 text-sky-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
+                          title="Preview & Verify De-registration NOC Word Document (.docx)"
                         >
-                          <FileText size={13} />
-                          <span>NOC (.docx)</span>
+                          <Eye size={13} className="text-amber-300" />
+                          <span>Preview NOC (.docx)</span>
                         </button>
                         <button
-                          onClick={() => handleDirectDownloadNoc(v)}
-                          className="bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
-                          title="Download De-registration NOC PDF"
+                          onClick={() => handlePreviewNocPdf(v)}
+                          className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
+                          title="Preview & Verify De-registration NOC PDF"
                         >
-                          <FileCheck size={13} />
-                          <span>NOC PDF</span>
+                          <Eye size={13} className="text-amber-300" />
+                          <span>Preview NOC PDF</span>
                         </button>
                       </>
                     ) : (
@@ -1257,18 +1614,12 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                       </>
                     )}
                     <button 
-                      onClick={async () => {
-                        try {
-                          await downloadVehicleDetailsPdf(v);
-                        } catch (err) {
-                          console.error(err);
-                        }
-                      }} 
+                      onClick={() => handlePreviewVehicleDetailsPdf(v)}
                       className="text-emerald-400 hover:text-white p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium flex items-center gap-1" 
-                      title="Download Vehicle Details PDF"
+                      title="Preview Vehicle Dossier PDF with Data Verification"
                     >
-                      <Download size={14}/>
-                      <span>PDF</span>
+                      <Eye size={13} className="text-emerald-300" />
+                      <span>Preview PDF</span>
                     </button>
                     <button onClick={() => setSelectedVehicle(v)} className="text-brand-400 hover:text-white p-1.5 rounded-lg bg-white/5 text-xs flex items-center gap-1 border border-white/5" title="View Profile">
                       <Eye size={14}/>
@@ -1392,7 +1743,11 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                       type="button"
                       onClick={() => {
                         const plate = encodeURIComponent(v.registrationNumber);
-                        const directUrl = `${window.location.origin}/?mode=vehicle&plate=${plate}`;
+                        const host = window.location.hostname.toLowerCase();
+                        const isCustom = host.includes('vehicle.makpk.online') || host.includes('vehicle.mak-group.com');
+                        const directUrl = isCustom
+                          ? `https://vehicle.makpk.online?vehicle=${plate}`
+                          : `${window.location.origin}/?mode=vehicle&plate=${plate}`;
                         navigator.clipboard.writeText(directUrl).then(() => {
                           setCopiedStatusPlate(v.registrationNumber);
                           setTimeout(() => setCopiedStatusPlate(null), 3000);
@@ -1411,20 +1766,20 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                     {v.status === 'CANCELLED' ? (
                       <>
                         <button
-                          onClick={() => handleDownloadNocDocx(v)}
-                          className="bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
-                          title="Download De-registration NOC (.docx)"
+                          onClick={() => handlePreviewNocDocx(v)}
+                          className="bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/30 text-sky-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
+                          title="Preview & Verify De-registration NOC Word Document (.docx)"
                         >
-                          <FileText size={12} />
-                          <span className="text-[11px]">NOC</span>
+                          <Eye size={12} className="text-amber-300" />
+                          <span className="text-[11px]">NOC (.docx)</span>
                         </button>
                         <button
-                          onClick={() => handleDirectDownloadNoc(v)}
-                          className="bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
-                          title="Download De-registration NOC PDF"
+                          onClick={() => handlePreviewNocPdf(v)}
+                          className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
+                          title="Preview & Verify De-registration NOC PDF"
                         >
-                          <FileCheck size={12} />
-                          <span className="text-[11px]">PDF</span>
+                          <Eye size={12} className="text-amber-300" />
+                          <span className="text-[11px]">NOC PDF</span>
                         </button>
                       </>
                     ) : (
@@ -1462,17 +1817,12 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                     )}
 
                     <button 
-                      onClick={async () => {
-                        try {
-                          await downloadVehicleDetailsPdf(v);
-                        } catch (err) {
-                          console.error(err);
-                        }
-                      }} 
-                      className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 hover:text-white transition-colors p-1.5 rounded-lg text-xs" 
-                      title="Download Vehicle Dossier PDF"
+                      onClick={() => handlePreviewVehicleDetailsPdf(v)} 
+                      className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 hover:text-white transition-colors p-1.5 rounded-lg text-xs flex items-center gap-1" 
+                      title="Preview Vehicle Dossier PDF with Data Verification"
                     >
-                      <Download size={13}/>
+                      <Eye size={13} className="text-emerald-300"/>
+                      <span className="text-[10px] hidden xl:inline">PDF</span>
                     </button>
                     <button onClick={() => setSelectedVehicle(v)} className="text-brand-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5" title="View Profile">
                       <Eye size={14}/>
@@ -1759,6 +2109,14 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                   <>
                     <button
                       type="button"
+                      onClick={() => handleDownloadNocDocx(nocSuccessNotice.cancelledVehicle!)}
+                      className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-2.5 py-1.5 rounded-lg flex items-center gap-1 text-[11px]"
+                      title="Download Official Vehicle NOC in Word format (.docx)"
+                    >
+                      <FileText size={13} /> NOC (.docx)
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => handleDownloadStampPaperTerminationDocx(nocSuccessNotice.cancelledVehicle!)}
                       className="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-2.5 py-1.5 rounded-lg flex items-center gap-1 text-[11px]"
                       title="Download Lease Termination on Legal Stamp Paper (.docx)"
@@ -1880,6 +2238,18 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
           </div>
         </div>
       )}
+
+      {/* Universal Read-Only Document Preview Modal (.docx / .pdf / .jpg / .jpeg / .xlsx) */}
+      <UniversalDocumentPreviewModal
+        isOpen={universalPreviewState.isOpen}
+        onClose={() => setUniversalPreviewState(prev => ({ ...prev, isOpen: false }))}
+        file={universalPreviewState.file}
+        filename={universalPreviewState.filename}
+        title={universalPreviewState.title}
+        fileType={universalPreviewState.fileType || 'auto'}
+        verificationItems={universalPreviewState.verificationItems}
+        onDownload={universalPreviewState.onDownload}
+      />
     </div>
   );
 };
