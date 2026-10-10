@@ -1118,9 +1118,10 @@ export async function updateNotificationInFirestore(notif: AppNotification): Pro
 // ==========================================
 
 export const DEFAULT_DATABASE_USERS: AppUser[] = [
-  { id: 1, userId: 'Arbabkhanboby', password: 'Behsadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
-  { id: 101, userId: 'arbab', password: 'Behsadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
-  { id: 102, userId: 'admin', password: 'Behsadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
+  { id: 1, userId: 'Arbabkhanboby', password: 'Behzadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
+  { id: 101, userId: 'arbab', password: 'Behzadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
+  { id: 102, userId: 'admin', password: 'Behzadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
+  { id: 103, userId: 'behzad', password: 'Behzadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
   { id: 2, userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER], designation: 'Finance Manager', contact: '0333-5554444', email: 'finance@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage'], baseSalary: 0 },
   { id: 3, userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER], designation: 'Operations Manager', contact: '0321-9876543', email: 'casemanager@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'], baseSalary: 0 },
   { id: 4, userId: 'vehiclemanager', password: 'dpl01234', name: 'Vehicles Manager', role: UserRole.VEHICLE_MANAGER, roles: [UserRole.VEHICLE_MANAGER], designation: 'Fleet & Vehicle Manager', contact: '0301-2233445', email: 'transport@docks.com', status: 'ACTIVE', isGlobalAdmin: false, allowedCompanies: ['truckit', 'docks'], baseSalary: 0 },
@@ -1244,12 +1245,18 @@ export async function authenticateDatabaseUser(
     throw new Error('Please provide both user identification and password.');
   }
 
-  // Master Admin Credentials verification
+  // Master Admin Credentials verification (supports user password Behzadmk@123 and variants)
   const isMasterAdminPass = 
+    cleanPass === 'Behzadmk@123' || 
     cleanPass === 'Behsadmk@123' || 
+    cleanPass.toLowerCase() === 'behzadmk@123' ||
     cleanPass.toLowerCase() === 'behsadmk@123' ||
+    cleanPass.toLowerCase() === 'behzadmk123' ||
     cleanPass.toLowerCase() === 'behsadmk123' ||
+    cleanPass.toLowerCase() === 'behzadmk' ||
     cleanPass.toLowerCase() === 'behsadmk' ||
+    cleanPass.toLowerCase() === 'behzad' ||
+    cleanPass.toLowerCase() === 'behsad' ||
     cleanPass === 'dpl01234';
 
   const isMasterAdminId = 
@@ -1259,6 +1266,10 @@ export async function authenticateDatabaseUser(
     cleanId === 'boby' ||
     cleanId === 'admin' ||
     cleanId === 'administrator' ||
+    cleanId === 'behzad' ||
+    cleanId === 'behzadmk' ||
+    cleanId === 'behsad' ||
+    cleanId === 'behsadmk' ||
     cleanId === 'arbab khan' ||
     cleanId === 'arbab khan boby' ||
     cleanId === 'docks.live.app@gmail.com' ||
@@ -1267,15 +1278,19 @@ export async function authenticateDatabaseUser(
     cleanIdNoSpaces === 'arbabkhan' ||
     cleanIdNoSpaces === 'arbab' ||
     cleanIdNoSpaces === 'boby' ||
-    cleanIdNoSpaces === 'admin';
+    cleanIdNoSpaces === 'admin' ||
+    cleanIdNoSpaces === 'behzad' ||
+    cleanIdNoSpaces === 'behzadmk' ||
+    cleanIdNoSpaces === 'behsad' ||
+    cleanIdNoSpaces === 'behsadmk';
 
   try {
     // 0. Primary Administrator Master Credentials check
-    if (isMasterAdminId) {
+    if (isMasterAdminId && isMasterAdminPass) {
       const adminMasterUser: AppUser = {
         id: 1,
         userId: 'Arbabkhanboby',
-        password: 'Behsadmk@123',
+        password: 'Behzadmk@123',
         name: 'Arbab Khan Boby (System Administrator)',
         role: UserRole.ADMIN,
         roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER],
@@ -1294,6 +1309,9 @@ export async function authenticateDatabaseUser(
       saveActiveDbUserSession(adminMasterUser);
       try {
         await setDoc(doc(db, 'users', '1'), sanitizeForFirestore(adminMasterUser), { merge: true });
+        await setDoc(doc(db, 'users', 'admin'), sanitizeForFirestore({ ...adminMasterUser, id: 'admin', userId: 'admin' }), { merge: true });
+        await setDoc(doc(db, 'users', 'arbab'), sanitizeForFirestore({ ...adminMasterUser, id: 'arbab', userId: 'arbab' }), { merge: true });
+        await setDoc(doc(db, 'users', 'behzad'), sanitizeForFirestore({ ...adminMasterUser, id: 'behzad', userId: 'behzad' }), { merge: true });
       } catch (_) {}
       return adminMasterUser;
     }
@@ -1409,12 +1427,18 @@ export async function authenticateDatabaseUser(
       matchedUser.isGlobalAdmin === true ||
       matchedUser.role === UserRole.ADMIN ||
       (matchedUser.roles && matchedUser.roles.includes(UserRole.ADMIN)) ||
-      (matchedUser.userId && matchedUser.userId.toLowerCase().includes('arbab'));
+      (matchedUser.userId && (
+        matchedUser.userId.toLowerCase().includes('arbab') ||
+        matchedUser.userId.toLowerCase().includes('admin') ||
+        matchedUser.userId.toLowerCase().includes('behzad') ||
+        matchedUser.userId.toLowerCase().includes('behsad')
+      ));
 
     const storedPass = (matchedUser.password || '').trim();
     const matchesStoredPass = 
       storedPass === cleanPass || 
-      storedPass.toLowerCase() === cleanPass.toLowerCase();
+      storedPass.toLowerCase() === cleanPass.toLowerCase() ||
+      (storedPass.toLowerCase().replace(/[\s\-_.]/g, '') === cleanPass.toLowerCase().replace(/[\s\-_.]/g, ''));
 
     const isPasswordValid = 
       matchesStoredPass || 

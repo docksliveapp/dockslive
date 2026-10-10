@@ -155,29 +155,29 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
         }}
       />
 
-      <div className="min-h-full w-full max-w-md mx-auto flex flex-col justify-between items-center py-4 relative z-10 space-y-4">
-        {/* Top Header: Exact MAK Group Corporate Identity (Logo Only) */}
-        <div className="w-full flex flex-col items-center text-center pt-2 pb-1">
+      <div className="min-h-full w-full max-w-md mx-auto flex flex-col justify-center items-center py-6 sm:py-8 relative z-10">
+        {/* Prominent Large MAK Corporate Logo placed closely above Sign In Card */}
+        <div className="w-full flex flex-col items-center text-center mb-3 sm:mb-4">
           <div className="inline-flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
-          {parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? (
-            <img 
-              src={parentGroup.logo} 
-              alt={parentGroup.name || "MAK Group"} 
-              className="w-28 h-28 sm:w-32 sm:h-32 object-contain drop-shadow-[0_8px_30px_rgba(0,0,0,0.6)]" 
-            />
-          ) : (
-            <img 
-              src="/logos/mak_group_logo.svg" 
-              alt={parentGroup.name || "MAK Group"} 
-              className="w-28 h-28 sm:w-32 sm:h-32 object-contain drop-shadow-[0_8px_30px_rgba(0,0,0,0.6)]" 
-            />
-          )}
+            {parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? (
+              <img 
+                src={parentGroup.logo} 
+                alt={parentGroup.name || "MAK Group"} 
+                className="w-56 sm:w-64 md:w-72 h-auto max-h-24 sm:max-h-28 object-contain drop-shadow-[0_10px_35px_rgba(0,0,0,0.8)] filter contrast-125" 
+              />
+            ) : (
+              <img 
+                src="/logos/mak_group_logo.svg" 
+                alt={parentGroup.name || "MAK Group"} 
+                className="w-56 sm:w-64 md:w-72 h-auto max-h-24 sm:max-h-28 object-contain drop-shadow-[0_10px_35px_rgba(0,0,0,0.8)] filter contrast-125" 
+              />
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Clean Single Enterprise Sign In Card */}
-      <div className="w-full max-w-md mx-auto my-auto py-3 relative z-10 animate-fade-in">
-        <div className="bg-slate-900/95 border border-white/15 rounded-3xl p-6 sm:p-7 shadow-2xl backdrop-blur-xl">
+        {/* Clean Single Enterprise Sign In Card positioned directly underneath logo */}
+        <div className="w-full relative z-10 animate-fade-in">
+          <div className="bg-slate-900/95 border border-white/15 rounded-3xl p-6 sm:p-7 shadow-2xl backdrop-blur-xl">
           
           {/* Card Title */}
           <div className="text-center mb-5">
