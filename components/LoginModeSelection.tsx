@@ -10,7 +10,6 @@ import {
   User,
   CheckCircle2,
   ArrowRight,
-  HelpCircle,
   Crown
 } from 'lucide-react';
 import { UserRole } from '../types';
@@ -36,18 +35,6 @@ interface LoginModeSelectionProps {
   onOpenVehicleTracker?: () => void;
 }
 
-// Clean discrete demo role helper for quick testing (collapsed by default)
-const DEMO_TESTING_ACCOUNTS = [
-  { id: 'admin', userId: 'admin', password: 'dpl01234', name: 'Main Group Administrator', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'Main Group Admin (All 4 Companies)', isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'] },
-  { id: 'admin_docks', userId: 'admin_docks', password: 'dpl01234', name: 'Docks Company Admin', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'Company Admin (Docks Only)', isGlobalAdmin: false, allowedCompanies: ['docks'] },
-  { id: 'fin_fleet', userId: 'fin_fleet', password: 'dpl01234', name: 'Finance & Vehicle Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER, UserRole.VEHICLE_MANAGER], designation: 'Multi-Role: Finance + Fleet', isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'] },
-  { id: 'ops_fleet', userId: 'ops_fleet', password: 'dpl01234', name: 'Operations & Fleet Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER, UserRole.VEHICLE_MANAGER], designation: 'Multi-Role: Ops + Fleet', isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'] },
-  { id: 'loadingstaff', userId: 'loadingstaff', password: 'dpl01234', name: 'Loading Port Staff', role: UserRole.LOADING_PORT_STAFF, roles: [UserRole.LOADING_PORT_STAFF], designation: 'Loading Port Customs Inspector', isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'] },
-  { id: 'destinationstaff', userId: 'destinationstaff', password: 'dpl01234', name: 'Destination Port Staff', role: UserRole.DESTINATION_PORT_STAFF, roles: [UserRole.DESTINATION_PORT_STAFF], designation: 'Border Terminal Officer', isGlobalAdmin: false, allowedCompanies: ['docks'] },
-  { id: 'transporter', userId: 'transporter', password: 'dpl01234', name: 'Transporter Portal', role: UserRole.TRANSPORTER, roles: [UserRole.TRANSPORTER], designation: 'Goods Transporter' },
-  { id: 'client', userId: 'client', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer' }
-];
-
 export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ 
   onSelectMode,
   onOpenPublicTracker,
@@ -63,7 +50,6 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
-  const [showDemoGuide, setShowDemoGuide] = useState(false);
 
   // Workflow & Draft Resumption Detection
   const [hasActiveDraft, setHasActiveDraft] = useState(false);
@@ -155,61 +141,8 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
     }
   };
 
-  // 1-Click login helper for testing
-  const handleQuickLogin = async (user: typeof DEMO_TESTING_ACCOUNTS[0]) => {
-    setIdentifier(user.userId);
-    setPassword(user.password);
-    setIsLoading(true);
-    setErrorMessage(null);
-
-    try {
-      const authUser = await authenticateDatabaseUser(user.userId, user.password);
-      const userRole = (authUser.role as UserRole) || user.role || UserRole.ADMIN;
-      const userRoles = (authUser.roles && authUser.roles.length > 0) ? authUser.roles : [userRole];
-
-      const userAllowedCompanies: string[] = (authUser as any).allowedCompanies || (user as any).allowedCompanies || (authUser.isGlobalAdmin || (user as any).isGlobalAdmin ? ['docks', 'truckit', 'muhib', 'vantage'] : ['docks']);
-      const isUserGlobalAdmin: boolean = Boolean(authUser.isGlobalAdmin ?? (user as any).isGlobalAdmin);
-
-      safeAppStorage.setItem('dpl_user_roles', JSON.stringify(userRoles));
-      safeAppStorage.setItem('dpl_allowed_companies', JSON.stringify(userAllowedCompanies));
-      safeAppStorage.setItem('dpl_is_global_admin', isUserGlobalAdmin ? 'true' : 'false');
-      if (authUser.designation) {
-        safeAppStorage.setItem('dpl_user_designation', authUser.designation);
-      }
-      safeAppStorage.setItem('dpl_current_user_id', authUser.userId || user.userId || '');
-      safeAppStorage.setItem('dpl_current_user_name', authUser.name || user.name || authUser.userId || 'Staff');
-
-      let targetView = 'dashboard';
-      if (userRole === UserRole.CLIENT) {
-        targetView = 'cases';
-      } else if (userRole === UserRole.TRANSPORTER || userRoles.includes(UserRole.VEHICLE_MANAGER)) {
-        targetView = 'vehicles';
-      } else if (userRoles.includes(UserRole.FINANCE_MANAGER)) {
-        targetView = 'finance';
-      } else if (userRoles.includes(UserRole.OPERATIONS_MANAGER) || userRoles.includes(UserRole.OFFICE_STAFF)) {
-        targetView = 'cases';
-      }
-
-      onSelectMode({
-        role: userRole,
-        roles: userRoles,
-        designation: authUser.designation || user.designation,
-        clientName: authUser.clientName || (userRole === UserRole.CLIENT ? authUser.name : 'Client Portal'),
-        targetView: targetView,
-        displayName: authUser.name || user.name || authUser.userId || 'Staff User',
-        allowedCompanies: userAllowedCompanies,
-        isGlobalAdmin: isUserGlobalAdmin
-      });
-    } catch (err: any) {
-      console.error('Quick login error:', err);
-      setErrorMessage(err?.message || 'Quick login failed');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-between overflow-y-auto bg-slate-950 text-gray-100 p-4 sm:p-8 custom-scrollbar">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950 text-gray-100 p-3 sm:p-6 custom-scrollbar overscroll-contain">
       {/* Background Ambience: Luxury Charcoal & Pearl White Sheen */}
       <div 
         className="fixed inset-0 pointer-events-none opacity-25"
@@ -222,9 +155,10 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
         }}
       />
 
-      {/* Top Header: Exact MAK Group Corporate Identity (Logo Only) */}
-      <div className="w-full max-w-md mx-auto flex flex-col items-center text-center pt-5 pb-2 relative z-10">
-        <div className="inline-flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
+      <div className="min-h-full w-full max-w-md mx-auto flex flex-col justify-between items-center py-4 relative z-10 space-y-4">
+        {/* Top Header: Exact MAK Group Corporate Identity (Logo Only) */}
+        <div className="w-full flex flex-col items-center text-center pt-2 pb-1">
+          <div className="inline-flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
           {parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? (
             <img 
               src={parentGroup.logo} 
@@ -361,68 +295,6 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
               </button>
             </div>
           </form>
-
-          {/* Quick Demo Test Accounts Panel */}
-          <div className="mt-4 pt-3 border-t border-white/10">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <HelpCircle size={13} className="text-slate-400" />
-                <span>Quick Demo Accounts</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowDemoGuide(!showDemoGuide)}
-                className="text-[10px] text-slate-400 hover:text-white font-semibold underline cursor-pointer"
-              >
-                {showDemoGuide ? 'Collapse All' : 'View All Accounts'}
-              </button>
-            </div>
-
-            {/* Quick Priority One-Tap Staff Pills */}
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin(DEMO_TESTING_ACCOUNTS[1])}
-                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 hover:text-white transition text-left flex items-center justify-between gap-1 cursor-pointer group"
-                title="Sign in as Loading Port Staff (loadingstaff)"
-              >
-                <div className="min-w-0">
-                  <span className="text-[11px] font-bold block truncate text-slate-100 group-hover:text-white">Loading Port Staff</span>
-                  <span className="text-[9px] font-mono text-slate-400 block">loadingstaff</span>
-                </div>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/10 text-slate-300 shrink-0">1-Tap</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickLogin(DEMO_TESTING_ACCOUNTS[2])}
-                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 hover:text-white transition text-left flex items-center justify-between gap-1 cursor-pointer group"
-                title="Sign in as Destination Port Staff (destinationstaff)"
-              >
-                <div className="min-w-0">
-                  <span className="text-[11px] font-bold block truncate text-slate-100 group-hover:text-white">Destination Staff</span>
-                  <span className="text-[9px] font-mono text-slate-400 block">destinationstaff</span>
-                </div>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/10 text-slate-300 shrink-0">1-Tap</span>
-              </button>
-            </div>
-
-            {showDemoGuide && (
-              <div className="mt-2 p-2 rounded-xl bg-black/50 border border-white/10 grid grid-cols-3 gap-1.5 animate-fade-in text-[10px]">
-                {DEMO_TESTING_ACCOUNTS.map((acc) => (
-                  <button
-                    key={acc.id}
-                    type="button"
-                    onClick={() => handleQuickLogin(acc)}
-                    className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-gray-300 hover:text-white transition text-center truncate border border-white/5 cursor-pointer"
-                  >
-                    <span className="font-bold block truncate">{acc.name}</span>
-                    <span className="text-gray-400 text-[9px] font-mono">{acc.userId}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
@@ -435,6 +307,7 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
         <div className="flex items-center gap-2 text-gray-400">
           <span>MAK Group of Companies • Central Operations Cloud</span>
         </div>
+      </div>
       </div>
 
       {/* New Registration Modal (Client & Transporter) */}

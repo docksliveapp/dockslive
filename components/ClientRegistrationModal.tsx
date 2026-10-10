@@ -4,14 +4,15 @@ import {
   Check, X, Upload, Eye, Search, AlertCircle, Shield, CheckCircle2, ChevronRight, 
   CreditCard, Sparkles, Key, Lock, FileCheck, Download
 } from 'lucide-react';
-import { Client, ClientDefaultCharge, CaseCharge, UNIVERSAL_CHARGE_TYPES } from '../types';
+import { Client, ClientDefaultCharge, CaseCharge, UNIVERSAL_CHARGE_TYPES, UserRole, AppUser } from '../types';
 import { 
   CATEGORY_SERVICE_ARRANGEMENTS, 
   getCategoryArrangements, 
   normalizeCategoryKey 
 } from '../services/categoryTariffService';
-import { saveClientToFirestore } from '../services/dbService';
+import { saveClientToFirestore, saveUserToFirestore } from '../services/dbService';
 import { compressAndPrepareFile } from '../services/fileUtils';
+import { AdminRolesAndPrivilegesTable } from './AdminRolesAndPrivilegesTable';
 
 export const CASE_CATEGORIES_LIST = [
   "Bonded Carrier",
@@ -78,6 +79,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
   const [loginEnabled, setLoginEnabled] = useState(false);
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
+  const [roles, setRoles] = useState<UserRole[]>([UserRole.CLIENT]);
 
   // Secondary Modal: Add Charge Picker
   const [showChargePicker, setShowChargePicker] = useState(false);
@@ -127,6 +129,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
       setLoginEnabled(Boolean(initialClient.loginEnabled));
       setUserId(initialClient.userId || `CLT-${Date.now().toString().slice(-4)}`);
       setPassword(initialClient.password || 'client123');
+      setRoles(initialClient.roles && initialClient.roles.length > 0 ? initialClient.roles : [initialClient.role || UserRole.CLIENT]);
     } else {
       // Fresh client creation
       setName('');
@@ -165,6 +168,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
       setLoginEnabled(true);
       setUserId(`CLT-${Math.floor(1000 + Math.random() * 9000)}`);
       setPassword(`DPL@${Math.floor(100 + Math.random() * 900)}`);
+      setRoles([UserRole.CLIENT]);
     }
   }, [isOpen, initialClient, defaultCategory]);
 
@@ -338,6 +342,8 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
       defaultServiceArrangements: arrangements,
       defaultCharges: validDefaultCharges,
       loginEnabled: loginEnabled,
+      role: roles[0] || UserRole.CLIENT,
+      roles: roles.length > 0 ? roles : [UserRole.CLIENT],
       userId: userId || `CLT-${Math.floor(1000 + Math.random() * 9000)}`,
       password: password || `DPL@${Math.floor(100 + Math.random() * 900)}`,
       createdAt: initialClient?.createdAt || new Date().toISOString()
@@ -345,6 +351,24 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
 
     try {
       await saveClientToFirestore(clientToSave);
+      if (loginEnabled && clientToSave.userId && clientToSave.password) {
+        const clientAppUser: AppUser = {
+          id: Date.now() % 10000000,
+          userId: clientToSave.userId,
+          password: clientToSave.password,
+          name: clientToSave.name,
+          clientName: clientToSave.name,
+          role: clientToSave.role || UserRole.CLIENT,
+          roles: clientToSave.roles || [UserRole.CLIENT],
+          designation: 'Corporate Importer / Client',
+          contact: clientToSave.contact || clientToSave.mobileNumber || '',
+          email: clientToSave.email || '',
+          status: 'ACTIVE',
+          allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage'],
+          baseSalary: 0
+        };
+        await saveUserToFirestore(clientAppUser);
+      }
     } catch (err) {
       console.warn("Could not save client to Firestore:", err);
     }
@@ -424,8 +448,8 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
   const currentCategoryArrangements = getCategoryArrangements(selectedCategory);
 
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-start justify-center pt-3 sm:pt-6 pb-6 px-2 sm:px-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="glass-card rounded-2xl w-full max-w-4xl border border-white/15 shadow-2xl bg-slate-900/95 mb-6 max-h-[94vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-2 sm:p-4 overflow-hidden animate-in fade-in duration-200">
+      <div className="glass-card rounded-2xl w-full max-w-4xl border border-white/15 shadow-2xl bg-slate-900/95 max-h-[92vh] flex flex-col overflow-hidden">
         {/* Modal Header */}
         <div className="p-4 sm:p-5 border-b border-white/10 flex justify-between items-center bg-slate-950/70 rounded-t-2xl shrink-0">
           <div className="flex items-center gap-3">
@@ -444,14 +468,14 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
           <button 
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-white p-2 rounded-xl hover:bg-white/10 transition-colors"
+            className="text-gray-400 hover:text-white p-2 rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
           >
             <X size={20} />
           </button>
         </div>
 
         {/* Modal Scrollable Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-6 custom-scrollbar text-sm">
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-6 custom-scrollbar flex-1 min-h-0 text-sm overscroll-contain">
           
           {/* Client View Locked Banner */}
           {isClientView && (
@@ -1141,6 +1165,19 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                 You can change your portal password whenever you need. If you ever forget your password, contact DPL administration to reset it for you.
               </p>
             </div>
+
+            {!isClientView && (
+              <div className="pt-2 border-t border-white/10">
+                <AdminRolesAndPrivilegesTable
+                  assignedRoles={roles}
+                  userName={name || 'this client'}
+                  allowedCompanies={['docks', 'truckit', 'muhib', 'vantage']}
+                  onRolesChange={(newRoles) => {
+                    setRoles(newRoles.length > 0 ? newRoles : [UserRole.CLIENT]);
+                  }}
+                />
+              </div>
+            )}
           </div>
 
         </div>

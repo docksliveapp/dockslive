@@ -2,6 +2,7 @@
 export enum UserRole {
   ADMIN = 'ADMIN',
   OPERATIONS_MANAGER = 'OPERATIONS_MANAGER',
+  CASE_MANAGER = 'CASE_MANAGER',
   FINANCE_MANAGER = 'FINANCE_MANAGER',
   LOADING_PORT_STAFF = 'LOADING_PORT_STAFF',
   UNLOADING_PORT_STAFF = 'UNLOADING_PORT_STAFF',
@@ -946,6 +947,8 @@ export interface Client {
   password?: string; // Optional portal login password
   loginEnabled?: boolean;
   status?: 'ACTIVE' | 'INACTIVE' | 'PENDING_APPROVAL' | 'REJECTED';
+  role?: UserRole;
+  roles?: UserRole[];
   createdAt?: string;
 }
 
@@ -954,6 +957,10 @@ export interface DestinationStaff {
   name: string;
   station: string; // e.g. Torkham, Chaman, Peshawar, Quetta, Lahore Dryport, Faisalabad, Karachi Port, Kabul
   role: 'Loading Agent' | 'Unloading Agent' | 'Clearing Agent' | 'Station Supervisor' | string;
+  roles?: UserRole[];
+  userId?: string;
+  password?: string;
+  loginEnabled?: boolean;
   contact?: string;
   phone?: string;
   secondaryPhone?: string;

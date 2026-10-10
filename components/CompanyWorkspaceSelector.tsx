@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Building2, 
   CheckCircle2, 
@@ -7,12 +7,20 @@ import {
   Ship, 
   Truck, 
   Globe, 
-  Anchor,
-  Crown,
-  LogOut,
-  ArrowRight,
-  Lock,
-  ShieldCheck
+  Anchor, 
+  Crown, 
+  LogOut, 
+  ArrowRight, 
+  Lock, 
+  ShieldCheck,
+  ChevronDown,
+  LayoutGrid,
+  Check,
+  FolderKanban,
+  DollarSign,
+  Briefcase,
+  FileText,
+  Users
 } from 'lucide-react';
 import { 
   CompanyId, 
@@ -23,11 +31,118 @@ import {
   isUploadedLogo,
   getCompanyUploadedLogo
 } from '../services/companyService';
+import { UserRole } from '../types';
 import { safeAppStorage } from '../services/storage';
 import { GroupAdminManagementModal, AdminSettingsTab } from './GroupAdminManagementModal';
 
+export interface PortalOption {
+  id: string;
+  name: string;
+  role: UserRole;
+  targetView: string;
+  badge: string;
+  description: string;
+  isDedicated?: boolean;
+}
+
+export const PORTAL_OPTIONS: PortalOption[] = [
+  {
+    id: 'admin',
+    name: 'Admin Portal',
+    role: UserRole.ADMIN,
+    targetView: 'dashboard',
+    badge: 'ADMIN',
+    description: 'Executive Control, Real-Time Analytics & System Controls'
+  },
+  {
+    id: 'operations_manager',
+    name: 'Operations Manager Portal',
+    role: UserRole.OPERATIONS_MANAGER,
+    targetView: 'cases',
+    badge: 'OPERATIONS',
+    description: 'Cargo Clearing, Terminal Operations & Container Dispatch'
+  },
+  {
+    id: 'case_manager',
+    name: 'Case Manager Portal',
+    role: UserRole.CASE_MANAGER,
+    targetView: 'cases',
+    badge: 'CASE MGR',
+    description: 'Case Docket, Workflow Auditing & Document Reviews'
+  },
+  {
+    id: 'finance_manager',
+    name: 'Finance Manager Portal',
+    role: UserRole.FINANCE_MANAGER,
+    targetView: 'finance',
+    badge: 'FINANCE',
+    description: 'Treasury, Customer Ledger, Billing & Port Accounts'
+  },
+  {
+    id: 'vehicle_manager',
+    name: 'Fleet & Vehicle Portal',
+    role: UserRole.VEHICLE_MANAGER,
+    targetView: 'vehicles',
+    badge: 'FLEET',
+    description: 'Carrier Fleet, Drivers & Vehicle Tracking'
+  },
+  {
+    id: 'loading_port_staff',
+    name: 'Loading Port Staff Portal',
+    role: UserRole.LOADING_PORT_STAFF,
+    targetView: 'loading_port_portal',
+    badge: 'LOADING PORT',
+    description: 'Port Customs Inspection, Gate In & Terminal Staff',
+    isDedicated: true
+  },
+  {
+    id: 'destination_port_staff',
+    name: 'Destination Port Staff Portal',
+    role: UserRole.DESTINATION_PORT_STAFF,
+    targetView: 'destination_port_portal',
+    badge: 'DESTINATION PORT',
+    description: 'Border Terminal, Unloading & Delivery Port',
+    isDedicated: true
+  },
+  {
+    id: 'office_staff',
+    name: 'Office Staff Portal',
+    role: UserRole.OFFICE_STAFF,
+    targetView: 'cases',
+    badge: 'OFFICE STAFF',
+    description: 'General Case Registration & Documentation'
+  },
+  {
+    id: 'client',
+    name: 'Client Portal',
+    role: UserRole.CLIENT,
+    targetView: 'client_portal',
+    badge: 'CLIENT',
+    description: 'Corporate Importer Tracking & Shipment Dossiers',
+    isDedicated: true
+  },
+  {
+    id: 'transporter',
+    name: 'Transporter Portal',
+    role: UserRole.TRANSPORTER,
+    targetView: 'transporter_portal',
+    badge: 'TRANSPORTER',
+    description: 'Carrier Vehicles, Builty & Goods Transport',
+    isDedicated: true
+  },
+  {
+    id: 'vendor',
+    name: 'Vendor Portal',
+    role: UserRole.VENDOR,
+    targetView: 'vendor_portal',
+    badge: 'VENDOR',
+    description: 'Logistics Suppliers, Invoices & Service Desk',
+    isDedicated: true
+  }
+];
+
 interface CompanyWorkspaceSelectorProps {
-  onSelectCompany: (companyId: CompanyId) => void;
+  onSelectCompany: (companyId: CompanyId, targetRole?: UserRole, targetView?: string) => void;
   isModal?: boolean;
   onClose?: () => void;
   userName?: string;
@@ -35,6 +150,8 @@ interface CompanyWorkspaceSelectorProps {
   onSignOut?: () => void;
   allowedCompanies?: string[];
   isGlobalAdmin?: boolean;
+  currentRole?: UserRole;
+  onSwitchPortal?: (role: UserRole, targetView: string) => void;
 }
 
 export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> = ({
@@ -45,13 +162,50 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   userRoleTitle,
   onSignOut,
   allowedCompanies,
-  isGlobalAdmin
+  isGlobalAdmin,
+  currentRole,
+  onSwitchPortal
 }) => {
   const { companyId: currentActiveId } = useActiveCompany();
   const { parentGroup } = useParentGroup();
   const [isAdminManagementOpen, setIsAdminManagementOpen] = useState(false);
   const [adminInitialTab, setAdminInitialTab] = useState<AdminSettingsTab>('users');
   const [, setBrandingVersion] = useState(0);
+
+  // Portal Dropdown Selection State
+  const [selectedPortalId, setSelectedPortalId] = useState<string>(() => {
+    if (currentRole === UserRole.OPERATIONS_MANAGER) return 'operations_manager';
+    if (currentRole === UserRole.CASE_MANAGER) return 'case_manager';
+    if (currentRole === UserRole.FINANCE_MANAGER) return 'finance_manager';
+    if (currentRole === UserRole.VEHICLE_MANAGER) return 'vehicle_manager';
+    if (currentRole === UserRole.LOADING_PORT_STAFF) return 'loading_port_staff';
+    if (currentRole === UserRole.DESTINATION_PORT_STAFF) return 'destination_port_staff';
+    if (currentRole === UserRole.CLIENT) return 'client';
+    if (currentRole === UserRole.TRANSPORTER) return 'transporter';
+    if (currentRole === UserRole.VENDOR) return 'vendor';
+    return 'admin';
+  });
+  const [isPortalDropdownOpen, setIsPortalDropdownOpen] = useState(false);
+  const portalDropdownRef = useRef<HTMLDivElement>(null);
+
+  const activePortal = useMemo<PortalOption>(() => {
+    return PORTAL_OPTIONS.find(p => p.id === selectedPortalId) || PORTAL_OPTIONS[0];
+  }, [selectedPortalId]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (portalDropdownRef.current && !portalDropdownRef.current.contains(event.target as Node)) {
+        setIsPortalDropdownOpen(false);
+      }
+    };
+    if (isPortalDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isPortalDropdownOpen]);
 
   const userAllowed = useMemo<string[]>(() => {
     if (allowedCompanies && allowedCompanies.length > 0) return allowedCompanies;
@@ -94,6 +248,35 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
     }
   };
 
+  const getPortalIcon = (portalId: string) => {
+    switch (portalId) {
+      case 'admin':
+        return Crown;
+      case 'operations_manager':
+        return Briefcase;
+      case 'case_manager':
+        return FolderKanban;
+      case 'finance_manager':
+        return DollarSign;
+      case 'vehicle_manager':
+        return Truck;
+      case 'loading_port_staff':
+        return Anchor;
+      case 'destination_port_staff':
+        return Ship;
+      case 'office_staff':
+        return Users;
+      case 'client':
+        return Globe;
+      case 'transporter':
+        return Truck;
+      case 'vendor':
+        return FileText;
+      default:
+        return LayoutGrid;
+    }
+  };
+
   const getCompanyCardStyles = (id: CompanyId, isCurrentActive: boolean) => {
     return {
       cardBorder: isCurrentActive 
@@ -106,10 +289,125 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
     };
   };
 
+  const handleSelectPortalOption = (portal: PortalOption) => {
+    setSelectedPortalId(portal.id);
+    setIsPortalDropdownOpen(false);
+  };
+
+  const handleLaunchPortalDirectly = (portal: PortalOption) => {
+    setSelectedPortalId(portal.id);
+    setIsPortalDropdownOpen(false);
+    if (onSwitchPortal) {
+      onSwitchPortal(portal.role, portal.targetView);
+    }
+  };
+
   const content = (
     <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-4 sm:py-6 flex flex-col justify-start">
-      {/* 1. TOP EXECUTIVE ACTION BAR (Clean Business-Class: Settings & Logout) */}
-      <div className="flex items-center justify-end gap-3 pb-3 mb-4 sm:mb-6 border-b border-white/10 shrink-0">
+      {/* 1. TOP EXECUTIVE ACTION BAR (Clean Business-Class: Portal Dropdown, Settings & Logout) */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 mb-4 sm:mb-6 border-b border-white/10 shrink-0">
+        
+        {/* Left Side: Change Portal Dropdown Menu */}
+        <div className="relative" ref={portalDropdownRef}>
+          <button
+            type="button"
+            id="btn-change-portal-dropdown"
+            onClick={() => setIsPortalDropdownOpen(!isPortalDropdownOpen)}
+            className="group px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 border border-white/20 bg-slate-800/95 hover:bg-slate-700 text-white shadow-md flex items-center gap-2 cursor-pointer hover:border-amber-400/50"
+            title="Change Destination Portal (Admin, Operations, Case Manager, Finance, Port Staff, Client, etc.)"
+          >
+            <LayoutGrid size={14} className="text-amber-400 shrink-0" />
+            <span className="text-slate-300 font-normal">Change Portal:</span>
+            <span className="text-white font-semibold">{activePortal.name}</span>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-amber-300 font-bold border border-white/10">
+              {activePortal.badge}
+            </span>
+            <ChevronDown size={14} className={`text-slate-400 transition-transform ${isPortalDropdownOpen ? 'rotate-180 text-white' : ''}`} />
+          </button>
+
+          {/* Dropdown Menu Popover */}
+          {isPortalDropdownOpen && (
+            <div className="absolute left-0 top-full mt-2 w-80 sm:w-96 rounded-2xl bg-slate-900 border border-white/20 shadow-2xl p-2 z-50 backdrop-blur-2xl animate-fade-in max-h-[75vh] overflow-y-auto custom-scrollbar">
+              <div className="p-2 border-b border-white/10 mb-1 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <LayoutGrid size={13} className="text-amber-400" />
+                    <span>Select Portal Workspace</span>
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    Choose which portal role to activate for this session
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPortalDropdownOpen(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                {PORTAL_OPTIONS.map((p) => {
+                  const isSelected = p.id === selectedPortalId;
+                  const IconComp = getPortalIcon(p.id);
+                  return (
+                    <div
+                      key={p.id}
+                      className={`p-2 rounded-xl transition-all flex items-center justify-between gap-2 ${
+                        isSelected 
+                          ? 'bg-amber-400/15 border border-amber-400/40 text-white shadow-md' 
+                          : 'hover:bg-white/5 border border-transparent text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleSelectPortalOption(p)}
+                        className="flex items-start gap-2.5 flex-1 min-w-0 text-left cursor-pointer"
+                      >
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+                          isSelected ? 'bg-amber-400/25 text-amber-300' : 'bg-white/5 text-slate-400'
+                        }`}>
+                          <IconComp size={16} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold truncate text-white">{p.name}</span>
+                            <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold shrink-0 ${
+                              isSelected ? 'bg-amber-400/30 text-amber-200' : 'bg-white/10 text-slate-400'
+                            }`}>
+                              {p.badge}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 truncate mt-0.5 leading-snug">
+                            {p.description}
+                          </p>
+                        </div>
+                      </button>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isSelected && (
+                          <Check size={14} className="text-amber-400 shrink-0 mr-1" />
+                        )}
+                        {onSwitchPortal && (
+                          <button
+                            type="button"
+                            onClick={() => handleLaunchPortalDirectly(p)}
+                            className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white text-[10px] font-semibold transition cursor-pointer border border-white/10"
+                            title="Directly launch this portal immediately"
+                          >
+                            Open
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Right side: strictly Admin Settings & Logout only */}
         <div className="flex items-center gap-2">
           {/* Main Admin Settings Button - Visible ONLY to Main Group Admin */}
@@ -147,7 +445,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
             <button
               type="button"
               onClick={onClose}
-              className="p-2 rounded-xl text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors border border-white/10"
+              className="p-2 rounded-xl text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors border border-white/10 cursor-pointer"
               title="Close Switcher"
             >
               <X size={16} />
@@ -157,13 +455,13 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
       </div>
 
       {/* 2. CENTER CONGLOMERATE HEADER */}
-      <div className="text-center mb-6 sm:mb-8 shrink-0">
+      <div className="text-center mb-5 sm:mb-7 shrink-0">
         <div className="inline-flex items-center justify-center mb-2 transform hover:scale-105 transition-transform duration-300">
           {isUploadedLogo(parentGroup.logo) ? (
             <img 
               src={parentGroup.logo} 
               alt={parentGroup.name} 
-              className="h-12 sm:h-16 w-auto max-w-[240px] object-contain drop-shadow-[0_6px_20px_rgba(0,0,0,0.7)]"
+              className="h-12 sm:h-16 w-auto max-w-[240px] object-contain drop-shadow-[0_6px_20px_rgba(0,0,0,0.7)]" 
             />
           ) : (
             <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-slate-800 border border-white/15 flex items-center justify-center shadow-lg">
@@ -178,6 +476,40 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
         <p className="text-[11px] sm:text-xs text-slate-400 font-mono tracking-widest uppercase">
           Select Company Workspace
         </p>
+
+        {/* Prominent Active Portal Status & Switcher Bar */}
+        <div className="mt-3.5 inline-flex items-center justify-center">
+          <div className="px-4 py-2 rounded-2xl bg-slate-900/90 border border-white/15 flex flex-wrap items-center justify-center gap-2 shadow-lg backdrop-blur-md">
+            <span className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold flex items-center gap-1.5">
+              <LayoutGrid size={13} className="text-amber-400" />
+              <span>Target Portal:</span>
+            </span>
+            <span className="text-xs font-bold text-white px-2.5 py-0.5 rounded-lg bg-white/10 border border-white/10">
+              {activePortal.name}
+            </span>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-bold border border-amber-400/30">
+              {activePortal.badge}
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsPortalDropdownOpen(true)}
+              className="text-[11px] text-amber-400 hover:text-amber-300 underline font-semibold cursor-pointer ml-1.5"
+            >
+              Change Portal ▾
+            </button>
+            {onSwitchPortal && (
+              <button
+                type="button"
+                onClick={() => handleLaunchPortalDirectly(activePortal)}
+                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] shadow transition cursor-pointer flex items-center gap-1 ml-2"
+                title={`Launch into ${activePortal.name} directly`}
+              >
+                <span>Launch Direct</span>
+                <ArrowRight size={12} />
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* 3. FOUR COMPANIES IN 2x2 SQUARE-SHAPED ANIMATED BUTTONS (Only Name & Uploaded Logo) */}
@@ -219,7 +551,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
             <button
               key={comp.id}
               type="button"
-              onClick={() => onSelectCompany(comp.id)}
+              onClick={() => onSelectCompany(comp.id, activePortal.role, activePortal.targetView)}
               className={`group relative rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-300 backdrop-blur-xl bg-gradient-to-b ${styles.bgGradient} border ${styles.cardBorder} transform hover:-translate-y-1 hover:scale-[1.02] active:scale-[0.98] shadow-xl overflow-hidden min-h-[190px] sm:min-h-[220px]`}
             >
               {/* Animated Background Shimmer Effect on Hover */}
@@ -255,10 +587,10 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
                 {comp.name}
               </h3>
 
-              {/* Subtle Animated Indicator */}
-              <div className="mt-3 flex items-center gap-1 text-[11px] font-semibold text-slate-400 group-hover:text-white transition-colors">
-                <span>Enter Workspace</span>
-                <ArrowRight size={13} className="transform group-hover:translate-x-1 transition-transform" />
+              {/* Subtle Animated Indicator displaying target portal */}
+              <div className="mt-3 flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 group-hover:text-white transition-colors">
+                <span>Enter Workspace • {activePortal.name}</span>
+                <ArrowRight size={13} className="transform group-hover:translate-x-1 transition-transform text-amber-400" />
               </div>
             </button>
           );
@@ -308,4 +640,3 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 };
 
 export default CompanyWorkspaceSelector;
-

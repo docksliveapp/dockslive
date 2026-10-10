@@ -32,6 +32,7 @@ import { ClientRegistrationModal } from './ClientRegistrationModal';
 import { StaffLedgerModal } from './StaffLedgerModal';
 import { ClientLedgerModal } from './ClientLedgerModal';
 import { DestinationStaffModal } from './DestinationStaffModal';
+import { AdminRolesAndPrivilegesTable } from './AdminRolesAndPrivilegesTable';
 import { useActiveCompany } from '../services/companyService';
 
 export const CASE_CATEGORIES = [
@@ -308,10 +309,10 @@ const UserManagement: React.FC = () => {
       return;
     }
 
-    const assignedRoles = selectedOnboardingRole === 'TRANSPORTER' 
-      ? [UserRole.TRANSPORTER] 
-      : (formData.roles && formData.roles.length > 0 ? formData.roles : [formData.role || UserRole.OPERATIONS_MANAGER]);
-    const primaryRole = assignedRoles[0] || UserRole.OPERATIONS_MANAGER;
+    const assignedRoles = (formData.roles && formData.roles.length > 0)
+      ? formData.roles 
+      : (selectedOnboardingRole === 'TRANSPORTER' ? [UserRole.TRANSPORTER] : [formData.role || UserRole.OPERATIONS_MANAGER]);
+    const primaryRole = assignedRoles[0] || (selectedOnboardingRole === 'TRANSPORTER' ? UserRole.TRANSPORTER : UserRole.OPERATIONS_MANAGER);
 
     const effectiveAllowedCompanies = formData.allCompaniesAccess
       ? ['docks', 'truckit', 'muhib', 'vantage']
@@ -1845,9 +1846,9 @@ const UserManagement: React.FC = () => {
                   <div className="w-10 h-10 rounded-xl bg-brand-500/20 text-brand-400 flex items-center justify-center">
                     <Briefcase size={20} />
                   </div>
-                  <h4 className="text-sm font-bold text-white">Office Staff Member</h4>
+                  <h4 className="text-sm font-bold text-white">Office Staff & Management</h4>
                   <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Executives, Managers, Accountants, Clerks, Drivers & Office Boys (with Dual Ledgers).
+                    Executives, Operations, Finance, Case Managers, Clerks & Office Staff.
                   </p>
                 </div>
                 <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-brand-300 font-semibold">
@@ -1875,6 +1876,50 @@ const UserManagement: React.FC = () => {
                   <ChevronRight size={14} />
                 </div>
               </button>
+
+              <button
+                type="button"
+                onClick={() => handleSelectRoleType('STAFF', [UserRole.LOADING_PORT_STAFF, UserRole.DESTINATION_PORT_STAFF])}
+                className="group p-4 rounded-2xl bg-cyan-500/5 border border-cyan-500/20 hover:border-cyan-500/50 hover:bg-cyan-500/15 transition-all text-left flex flex-col justify-between hover:scale-102 shadow-lg"
+              >
+                <div className="space-y-2">
+                  <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
+                    <MapPinned size={20} />
+                  </div>
+                  <h4 className="text-sm font-bold text-white">Port & Terminal Staff</h4>
+                  <p className="text-[11px] text-gray-400 leading-relaxed">
+                    Customs Inspectors, Wharfage Officers, Border Agents & Terminal Staff.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-cyan-300 font-semibold">
+                  <span>Setup Port Staff User</span>
+                  <ChevronRight size={14} />
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRoleSelectorModal(false);
+                  setClientToEdit(null);
+                  setShowClientModal(true);
+                }}
+                className="group p-4 rounded-2xl bg-purple-500/5 border border-purple-500/20 hover:border-purple-500/50 hover:bg-purple-500/15 transition-all text-left flex flex-col justify-between hover:scale-102 shadow-lg"
+              >
+                <div className="space-y-2">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
+                    <Building size={20} />
+                  </div>
+                  <h4 className="text-sm font-bold text-white">Corporate Client / Importer</h4>
+                  <p className="text-[11px] text-gray-400 leading-relaxed">
+                    Consignees, Importers & Shipping Lines with dedicated portal credentials.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-purple-300 font-semibold">
+                  <span>Register Client / Importer</span>
+                  <ChevronRight size={14} />
+                </div>
+              </button>
             </div>
           </div>
         </div>
@@ -1884,21 +1929,24 @@ const UserManagement: React.FC = () => {
       {/* STAFF & TRANSPORTER FORM MODAL */}
       {/* ========================================================================= */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-start justify-center z-50 pt-3 sm:pt-6 pb-6 px-3 sm:px-4 overflow-y-auto animate-in fade-in duration-150">
-          <div className="glass-card p-6 rounded-3xl w-full max-w-2xl border border-white/15 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar bg-slate-900 mb-6">
-            <div className="flex justify-between items-center mb-5 pb-3 border-b border-white/10 sticky top-0 bg-slate-900/90 backdrop-blur-md z-10">
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-2 sm:p-4 overflow-hidden animate-in fade-in duration-150">
+          <div className="glass-card rounded-3xl w-full max-w-3xl border border-white/15 shadow-2xl max-h-[92vh] flex flex-col bg-slate-900 overflow-hidden">
+            <div className="flex justify-between items-center p-4 sm:p-5 border-b border-white/10 bg-slate-900/95 backdrop-blur-md shrink-0">
               <div>
                 <span className="text-[10px] font-mono uppercase tracking-widest text-brand-400 font-bold">
                   {selectedOnboardingRole === 'TRANSPORTER' ? 'Transporter / Broker Setup' : 'Staff Employee Profile'}
                 </span>
-                <h3 className="text-lg font-bold text-white">
+                <h3 className="text-base sm:text-lg font-bold text-white">
                   {isEditing ? 'Edit Profile' : 'Register New'} {selectedOnboardingRole === 'TRANSPORTER' ? 'Transporter / Broker' : 'Office Staff'}
                 </h3>
               </div>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-white p-1 rounded-full bg-white/5">
-                <X size={20} />
+              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-white p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors">
+                <X size={18} />
               </button>
             </div>
+
+            {/* Scrollable Form Body */}
+            <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0 space-y-4 overscroll-contain">
 
             {/* Form Body */}
             {selectedOnboardingRole === 'STAFF' ? (
@@ -1945,336 +1993,23 @@ const UserManagement: React.FC = () => {
                     />
                   </div>
 
-                  {/* Multi-Role Assignment Section */}
-                  <div className="sm:col-span-2 bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                      <div>
-                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                          <ShieldCheck size={16} className="text-brand-400" />
-                          System Role Rights & Multi-Role Assignment *
-                        </h4>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          Admin has universal access (exclusive). For non-admin staff, you can select multiple roles to grant combined rights across modules.
-                        </p>
-                      </div>
-                      <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-300 shrink-0">
-                        {formData.roles.includes(UserRole.ADMIN) 
-                          ? 'Super Admin (All Rights)' 
-                          : `${formData.roles.length} Role(s) Selected`}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
-                      {/* ADMIN - Exclusive */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData(prev => ({
-                            ...prev,
-                            role: UserRole.ADMIN,
-                            roles: [UserRole.ADMIN]
-                          }));
-                        }}
-                        className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                          formData.roles.includes(UserRole.ADMIN)
-                            ? 'bg-purple-600/25 border-purple-500 shadow-md shadow-purple-500/20 ring-1 ring-purple-400'
-                            : 'bg-black/30 border-white/10 hover:border-purple-500/40 text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-purple-400 shadow-[0_0_8px_currentColor]"></span>
-                            Administrator
-                          </span>
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-purple-500/30 text-purple-200">
-                            Super Access
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-400 mt-1 leading-tight">
-                          Full system control, approval rights, and unrestricted access across all modules.
-                        </p>
-                      </button>
-
-                      {/* OPERATIONS MANAGER */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData(prev => {
-                            let r = prev.roles.filter(x => x !== UserRole.ADMIN);
-                            if (r.includes(UserRole.OPERATIONS_MANAGER)) {
-                              r = r.filter(x => x !== UserRole.OPERATIONS_MANAGER);
-                              if (r.length === 0) r = [UserRole.OPERATIONS_MANAGER];
-                            } else {
-                              r = [...r, UserRole.OPERATIONS_MANAGER];
-                            }
-                            return { ...prev, role: r[0] || UserRole.OPERATIONS_MANAGER, roles: r };
-                          });
-                        }}
-                        className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                          !formData.roles.includes(UserRole.ADMIN) && formData.roles.includes(UserRole.OPERATIONS_MANAGER)
-                            ? 'bg-blue-600/25 border-blue-500 shadow-md shadow-blue-500/20 ring-1 ring-blue-400'
-                            : 'bg-black/30 border-white/10 hover:border-blue-500/40 text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_8px_currentColor]"></span>
-                            Operations Manager
-                          </span>
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-blue-500/30 text-blue-200">
-                            Cases
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-400 mt-1 leading-tight">
-                          Case registration and operational workflow execution up to vehicle assignment.
-                        </p>
-                      </button>
-
-                      {/* FINANCE MANAGER */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData(prev => {
-                            let r = prev.roles.filter(x => x !== UserRole.ADMIN);
-                            if (r.includes(UserRole.FINANCE_MANAGER)) {
-                              r = r.filter(x => x !== UserRole.FINANCE_MANAGER);
-                              if (r.length === 0) r = [UserRole.FINANCE_MANAGER];
-                            } else {
-                              r = [...r, UserRole.FINANCE_MANAGER];
-                            }
-                            return { ...prev, role: r[0] || UserRole.FINANCE_MANAGER, roles: r };
-                          });
-                        }}
-                        className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                          !formData.roles.includes(UserRole.ADMIN) && formData.roles.includes(UserRole.FINANCE_MANAGER)
-                            ? 'bg-emerald-600/25 border-emerald-500 shadow-md shadow-emerald-500/20 ring-1 ring-emerald-400'
-                            : 'bg-black/30 border-white/10 hover:border-emerald-500/40 text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_currentColor]"></span>
-                            Finance Manager
-                          </span>
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-emerald-500/30 text-emerald-200">
-                            Finance
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-400 mt-1 leading-tight">
-                          Manages entire finance suite: cashbook, bank accounts, ledgers, and billing.
-                        </p>
-                      </button>
-
-                      {/* LOADING PORT STAFF */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData(prev => {
-                            let r = prev.roles.filter(x => x !== UserRole.ADMIN);
-                            if (r.includes(UserRole.LOADING_PORT_STAFF)) {
-                              r = r.filter(x => x !== UserRole.LOADING_PORT_STAFF);
-                              if (r.length === 0) r = [UserRole.LOADING_PORT_STAFF];
-                            } else {
-                              r = [...r, UserRole.LOADING_PORT_STAFF];
-                            }
-                            return { ...prev, role: r[0] || UserRole.LOADING_PORT_STAFF, roles: r };
-                          });
-                        }}
-                        className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                          !formData.roles.includes(UserRole.ADMIN) && formData.roles.includes(UserRole.LOADING_PORT_STAFF)
-                            ? 'bg-amber-600/25 border-amber-500 shadow-md shadow-amber-500/20 ring-1 ring-amber-400'
-                            : 'bg-black/30 border-white/10 hover:border-amber-500/40 text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_currentColor]"></span>
-                            Loading Port Staff
-                          </span>
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200">
-                            Loading Port
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-400 mt-1 leading-tight">
-                          Completes loading port workflow, wharfage, stuffing, container seals, and dispatch.
-                        </p>
-                      </button>
-
-                      {/* UNLOADING PORT STAFF */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData(prev => {
-                            let r = prev.roles.filter(x => x !== UserRole.ADMIN);
-                            if (r.includes(UserRole.UNLOADING_PORT_STAFF)) {
-                              r = r.filter(x => x !== UserRole.UNLOADING_PORT_STAFF);
-                              if (r.length === 0) r = [UserRole.UNLOADING_PORT_STAFF];
-                            } else {
-                              r = [...r, UserRole.UNLOADING_PORT_STAFF];
-                            }
-                            return { ...prev, role: r[0] || UserRole.UNLOADING_PORT_STAFF, roles: r };
-                          });
-                        }}
-                        className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                          !formData.roles.includes(UserRole.ADMIN) && formData.roles.includes(UserRole.UNLOADING_PORT_STAFF)
-                            ? 'bg-teal-600/25 border-teal-500 shadow-md shadow-teal-500/20 ring-1 ring-teal-400'
-                            : 'bg-black/30 border-white/10 hover:border-teal-500/40 text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-teal-400 shadow-[0_0_8px_currentColor]"></span>
-                            Destination Staff
-                          </span>
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-teal-500/30 text-teal-200">
-                            Unloading & DO
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-400 mt-1 leading-tight">
-                          Manages unloading, destination workflow, arrival, delivery orders (DO), and empty container return.
-                        </p>
-                      </button>
-
-                      {/* DESTINATION PORT STAFF */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData(prev => {
-                            let r = prev.roles.filter(x => x !== UserRole.ADMIN);
-                            if (r.includes(UserRole.DESTINATION_PORT_STAFF)) {
-                              r = r.filter(x => x !== UserRole.DESTINATION_PORT_STAFF);
-                              if (r.length === 0) r = [UserRole.DESTINATION_PORT_STAFF];
-                            } else {
-                              r = [...r, UserRole.DESTINATION_PORT_STAFF];
-                            }
-                            return { ...prev, role: r[0] || UserRole.DESTINATION_PORT_STAFF, roles: r };
-                          });
-                        }}
-                        className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                          !formData.roles.includes(UserRole.ADMIN) && formData.roles.includes(UserRole.DESTINATION_PORT_STAFF)
-                            ? 'bg-cyan-600/25 border-cyan-500 shadow-md shadow-cyan-500/20 ring-1 ring-cyan-400'
-                            : 'bg-black/30 border-white/10 hover:border-cyan-500/40 text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_currentColor]"></span>
-                            Destination Port Staff
-                          </span>
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-cyan-500/30 text-cyan-200">
-                            Customs DO
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-400 mt-1 leading-tight">
-                          Handles port destination workflows, clearing agent coordination, and container returns.
-                        </p>
-                      </button>
-
-                      {/* VEHICLE MANAGER */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData(prev => {
-                            let r = prev.roles.filter(x => x !== UserRole.ADMIN);
-                            if (r.includes(UserRole.VEHICLE_MANAGER)) {
-                              r = r.filter(x => x !== UserRole.VEHICLE_MANAGER);
-                              if (r.length === 0) r = [UserRole.VEHICLE_MANAGER];
-                            } else {
-                              r = [...r, UserRole.VEHICLE_MANAGER];
-                            }
-                            return { ...prev, role: r[0] || UserRole.VEHICLE_MANAGER, roles: r };
-                          });
-                        }}
-                        className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                          !formData.roles.includes(UserRole.ADMIN) && formData.roles.includes(UserRole.VEHICLE_MANAGER)
-                            ? 'bg-rose-600/25 border-rose-500 shadow-md shadow-rose-500/20 ring-1 ring-rose-400'
-                            : 'bg-black/30 border-white/10 hover:border-rose-500/40 text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-rose-400 shadow-[0_0_8px_currentColor]"></span>
-                            Vehicle Manager
-                          </span>
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-rose-500/30 text-rose-200">
-                            Fleet
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-400 mt-1 leading-tight">
-                          Manages vehicle registrations, vehicle maintenance, carriers, and fleet management.
-                        </p>
-                      </button>
-
-                      {/* OFFICE STAFF */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData(prev => {
-                            let r = prev.roles.filter(x => x !== UserRole.ADMIN);
-                            if (r.includes(UserRole.OFFICE_STAFF)) {
-                              r = r.filter(x => x !== UserRole.OFFICE_STAFF);
-                              if (r.length === 0) r = [UserRole.OFFICE_STAFF];
-                            } else {
-                              r = [...r, UserRole.OFFICE_STAFF];
-                            }
-                            return { ...prev, role: r[0] || UserRole.OFFICE_STAFF, roles: r };
-                          });
-                        }}
-                        className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                          !formData.roles.includes(UserRole.ADMIN) && formData.roles.includes(UserRole.OFFICE_STAFF)
-                            ? 'bg-indigo-600/25 border-indigo-500 shadow-md shadow-indigo-500/20 ring-1 ring-indigo-400'
-                            : 'bg-black/30 border-white/10 hover:border-indigo-500/40 text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_8px_currentColor]"></span>
-                            Office Staff
-                          </span>
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-indigo-500/30 text-indigo-200">
-                            Admin Staff
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-400 mt-1 leading-tight">
-                          Head office administrative coordinators and general support personnel.
-                        </p>
-                      </button>
-
-                      {/* Vendor Portal Role */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormData(prev => {
-                            let r = prev.roles.filter(x => x !== UserRole.ADMIN);
-                            if (r.includes(UserRole.VENDOR)) {
-                              r = r.filter(x => x !== UserRole.VENDOR);
-                              if (r.length === 0) r = [UserRole.VENDOR];
-                            } else {
-                              r = [...r, UserRole.VENDOR];
-                            }
-                            return { ...prev, role: r[0] || UserRole.VENDOR, roles: r };
-                          });
-                        }}
-                        className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                          !formData.roles.includes(UserRole.ADMIN) && formData.roles.includes(UserRole.VENDOR)
-                            ? 'bg-amber-600/25 border-amber-500 shadow-md shadow-amber-500/20 ring-1 ring-amber-400'
-                            : 'bg-black/30 border-white/10 hover:border-amber-500/40 text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_currentColor]"></span>
-                            Vendor / Supplier
-                          </span>
-                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200">
-                            Vendor Portal
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-400 mt-1 leading-tight">
-                          Equipment & service vendors with self-service statement download and slip upload portal.
-                        </p>
-                      </button>
-                    </div>
+                  {/* Admin Roles & Privileges Assignment Table (Google Workspace Admin Console Style) */}
+                  <div className="sm:col-span-2">
+                    <AdminRolesAndPrivilegesTable
+                      assignedRoles={formData.roles}
+                      userName={formData.name || 'this user'}
+                      allowedCompanies={formData.allowedCompanies}
+                      isGlobalAdmin={formData.isGlobalAdmin}
+                      onRolesChange={(newRoles, primaryRole) => {
+                        setFormData(prev => ({
+                          ...prev,
+                          roles: newRoles,
+                          role: primaryRole,
+                          isGlobalAdmin: newRoles.includes(UserRole.ADMIN) ? prev.isGlobalAdmin : false
+                        }));
+                      }}
+                    />
+                  </div>
 
                     {/* Admin Level Selection (Only when Administrator role is active) */}
                     {formData.roles.includes(UserRole.ADMIN) && (
@@ -2472,7 +2207,7 @@ const UserManagement: React.FC = () => {
                         </>
                       )}
                     </div>
-                  </div>
+
                   <div className="sm:col-span-2">
                     <label className="text-gray-300 font-medium block mb-1">Residential Address</label>
                     <input 
@@ -2661,6 +2396,24 @@ const UserManagement: React.FC = () => {
                       className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
                     />
                   </div>
+
+                  {/* Admin Roles & Privileges Assignment Table (Google Workspace Admin Console Style) */}
+                  <div className="sm:col-span-2">
+                    <AdminRolesAndPrivilegesTable
+                      assignedRoles={formData.roles}
+                      userName={formData.name || 'this transporter / broker'}
+                      allowedCompanies={formData.allowedCompanies}
+                      isGlobalAdmin={formData.isGlobalAdmin}
+                      onRolesChange={(newRoles, primaryRole) => {
+                        setFormData(prev => ({
+                          ...prev,
+                          roles: newRoles,
+                          role: primaryRole,
+                          isGlobalAdmin: newRoles.includes(UserRole.ADMIN) ? prev.isGlobalAdmin : false
+                        }));
+                      }}
+                    />
+                  </div>
                 </div>
 
                 {/* Transporter User ID & Password */}
@@ -2823,17 +2576,21 @@ const UserManagement: React.FC = () => {
               )}
             </div>
 
-            {/* Actions */}
-            <div className="flex justify-end gap-3 mt-6 pt-3 border-t border-white/10">
+            </div>
+
+            {/* Sticky Actions Footer */}
+            <div className="flex justify-end gap-3 p-3.5 sm:p-4 border-t border-white/10 bg-slate-900/95 backdrop-blur-md shrink-0">
               <button 
+                type="button"
                 onClick={() => setShowModal(false)}
-                className="px-4 py-2 text-xs text-gray-400 hover:text-white transition-colors"
+                className="px-4 py-2 text-xs text-gray-400 hover:text-white transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button 
+                type="button"
                 onClick={handleSaveUser}
-                className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl shadow-lg shadow-brand-600/30 flex items-center gap-2 text-xs font-semibold transition-all hover:scale-102"
+                className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl shadow-lg shadow-brand-600/30 flex items-center gap-2 text-xs font-semibold transition-all hover:scale-102 cursor-pointer"
               >
                 <Save size={15} /> {isEditing ? 'Update Profile' : 'Save & Onboard'}
               </button>

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
   X, MapPin, User, Phone, CreditCard, DollarSign, 
-  CheckCircle, Shield, FileText, Save, AlertTriangle
+  CheckCircle, Shield, FileText, Save, AlertTriangle, Key, Lock, Check
 } from 'lucide-react';
-import { DestinationStaff } from '../types';
-import { saveDestinationStaffToFirestore } from '../services/dbService';
+import { DestinationStaff, UserRole, AppUser } from '../types';
+import { saveDestinationStaffToFirestore, saveUserToFirestore } from '../services/dbService';
+import { AdminRolesAndPrivilegesTable } from './AdminRolesAndPrivilegesTable';
 
 interface DestinationStaffModalProps {
   isOpen: boolean;
@@ -59,6 +60,11 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
     notes: ''
   });
 
+  const [userId, setUserId] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginEnabled, setLoginEnabled] = useState(true);
+  const [assignedRoles, setAssignedRoles] = useState<UserRole[]>([UserRole.DESTINATION_PORT_STAFF]);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -67,6 +73,13 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
       setFormData({
         ...staffToEdit
       });
+      setUserId(staffToEdit.userId || `DEST-${Date.now().toString().slice(-4)}`);
+      setPassword(staffToEdit.password || 'dpl01234');
+      setLoginEnabled(staffToEdit.loginEnabled ?? true);
+      const defaultRole = staffToEdit.role?.toLowerCase().includes('loading') 
+        ? UserRole.LOADING_PORT_STAFF 
+        : (staffToEdit.role?.toLowerCase().includes('unloading') ? UserRole.UNLOADING_PORT_STAFF : UserRole.DESTINATION_PORT_STAFF);
+      setAssignedRoles(staffToEdit.roles && staffToEdit.roles.length > 0 ? staffToEdit.roles : [defaultRole]);
     } else {
       setFormData({
         name: '',
@@ -81,6 +94,10 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
         status: 'ACTIVE',
         notes: ''
       });
+      setUserId(`DEST-${Math.floor(1000 + Math.random() * 9000)}`);
+      setPassword(Math.random().toString(36).slice(-8).toUpperCase());
+      setLoginEnabled(true);
+      setAssignedRoles([UserRole.DESTINATION_PORT_STAFF, UserRole.LOADING_PORT_STAFF]);
     }
     setErrorMsg('');
   }, [staffToEdit, isOpen]);
@@ -111,92 +128,121 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
         role: formData.role || 'Loading Agent',
         status: formData.status || 'ACTIVE',
         baseRate: Number(formData.baseRate) || 0,
+        userId: userId.trim(),
+        password: password.trim(),
+        loginEnabled: loginEnabled,
+        roles: assignedRoles,
         updatedAt: new Date().toISOString(),
         createdAt: staffToEdit?.createdAt || new Date().toISOString()
       };
 
       await saveDestinationStaffToFirestore(payload);
+
+      if (loginEnabled && userId.trim() && password.trim()) {
+        const primaryRole = assignedRoles[0] || UserRole.DESTINATION_PORT_STAFF;
+        const appUser: AppUser = {
+          id: Date.now() % 10000000,
+          userId: userId.trim(),
+          password: password.trim(),
+          name: formData.name.trim(),
+          role: primaryRole,
+          roles: assignedRoles.length > 0 ? assignedRoles : [primaryRole],
+          designation: `${formData.role || 'Port Staff'} (${formData.station || 'Station'})`,
+          contact: formData.phone.trim(),
+          email: `${userId.trim().toLowerCase()}@makgroup.com.pk`,
+          status: formData.status === 'INACTIVE' ? 'SUSPENDED' : 'ACTIVE',
+          allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage'],
+          baseSalary: Number(formData.baseRate) || 40000
+        };
+        await saveUserToFirestore(appUser);
+      }
+
       if (onSaved) onSaved();
       onClose();
     } catch (err: any) {
       console.error('Error saving destination staff:', err);
-      setErrorMsg(err.message || 'Failed to save destination staff. Please try again.');
+      setErrorMsg(err.message || 'Failed to save staff record');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-start justify-center pt-3 sm:pt-6 pb-6 px-3 sm:px-4 overflow-y-auto animate-in fade-in duration-150">
-      <div className="glass-card rounded-2xl w-full max-w-xl border border-white/15 shadow-2xl bg-slate-900/98 mb-6 flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-md overflow-hidden animate-in fade-in duration-200">
+      <div className="relative w-full max-w-2xl bg-slate-900 border border-white/15 rounded-3xl shadow-2xl max-h-[92vh] flex flex-col overflow-hidden">
+        
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-white/10 flex justify-between items-center bg-slate-950/80 rounded-t-2xl">
+        <div className="flex justify-between items-center p-4 sm:p-5 border-b border-white/10 bg-slate-900/95 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
               <MapPin size={20} />
             </div>
             <div>
+              <span className="text-[10px] font-mono uppercase tracking-widest text-amber-400 font-bold">
+                Border & Port Network
+              </span>
               <h3 className="text-base sm:text-lg font-bold text-white">
-                {staffToEdit ? 'Edit Destination Staff Profile' : 'Add New Destination Representative'}
+                {staffToEdit ? 'Edit Destination Staff Profile' : 'Register Port & Station Staff'}
               </h3>
-              <p className="text-xs text-gray-400">
-                Company representatives stationed at ports, dry ports & border crossings (loading, unloading & clearing)
-              </p>
             </div>
           </div>
           <button 
-            type="button" 
+            type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition"
+            className="text-gray-400 hover:text-white p-2 rounded-xl bg-white/5 hover:bg-white/10 transition cursor-pointer"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
-        {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto max-h-[78vh]">
-          {errorMsg && (
-            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-300 flex items-center gap-2">
-              <AlertTriangle size={15} className="shrink-0" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
+        {errorMsg && (
+          <div className="mx-4 sm:mx-6 mt-3 p-3 bg-red-500/20 border border-red-500/40 rounded-xl text-xs text-red-200 flex items-center gap-2 shrink-0">
+            <AlertTriangle size={15} className="shrink-0 text-red-400" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
 
-          {/* Section 1: Personal & Station Info */}
+        {/* Form Body with Fixed Footer */}
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden text-xs">
+          <div className="p-4 sm:p-6 overflow-y-auto space-y-5 custom-scrollbar flex-1 min-h-0 overscroll-contain">
+          {/* Section 1: Basic Information */}
           <div className="space-y-3">
+            <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-1.5">
+              <User size={14} className="text-brand-400" /> Representative Particulars
+            </h4>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <div className="sm:col-span-2">
+              <div>
                 <label className="text-gray-300 font-medium block mb-1">
-                  Representative Full Name <span className="text-red-400">*</span>
+                  Full Name / Representative Title <span className="text-red-400">*</span>
                 </label>
                 <input 
                   type="text"
-                  placeholder="e.g. Khan Muhammad Torkhami"
+                  placeholder="e.g. Haji Rehmatullah / Jan Muhammad"
                   value={formData.name || ''}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="w-full glass-input rounded-xl p-2.5 bg-black/40 border border-white/15 text-white outline-none focus:border-amber-400"
-                  autoFocus
                 />
               </div>
 
               <div>
                 <label className="text-gray-300 font-medium block mb-1">
-                  Station Location <span className="text-red-400">*</span>
+                  Assigned Terminal / Border Station <span className="text-red-400">*</span>
                 </label>
                 <select
                   value={formData.station}
                   onChange={(e) => setFormData({ ...formData, station: e.target.value })}
                   className="w-full glass-input rounded-xl p-2.5 bg-black/40 border border-white/15 text-white outline-none focus:border-amber-400"
                 >
-                  {COMMON_STATIONS.map(s => (
-                    <option key={s} value={s} className="bg-slate-900">{s}</option>
+                  {COMMON_STATIONS.map(st => (
+                    <option key={st} value={st} className="bg-slate-900">{st}</option>
                   ))}
                 </select>
               </div>
 
               <div>
                 <label className="text-gray-300 font-medium block mb-1">
-                  Role / Responsibility <span className="text-red-400">*</span>
+                  Designation / Role Title <span className="text-red-400">*</span>
                 </label>
                 <select
                   value={formData.role}
@@ -323,19 +369,74 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
             </div>
           </div>
 
-          {/* Footer Buttons */}
-          <div className="flex justify-between items-center pt-4 border-t border-white/10">
+          {/* Section 3: Portal Login Credentials & Roles Assignment Table */}
+          <div className="space-y-3 pt-3 border-t border-white/10 bg-white/5 p-4 rounded-2xl border">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Key size={14} className="text-purple-400" />
+                Port Portal Login &amp; Role Privileges
+              </h4>
+              <button
+                type="button"
+                onClick={() => {
+                  const newPass = Math.random().toString(36).slice(-8).toUpperCase();
+                  setPassword(newPass);
+                }}
+                className="text-[11px] text-purple-400 hover:text-purple-300 font-mono underline"
+              >
+                Generate Password
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 font-mono">
+              <div>
+                <label className="text-gray-400 text-[10px] block mb-1">User ID / Login Username:</label>
+                <input 
+                  type="text"
+                  value={userId}
+                  onChange={(e) => setUserId(e.target.value)}
+                  className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-purple-300 text-xs font-bold outline-none focus:border-purple-400"
+                />
+              </div>
+              <div>
+                <label className="text-gray-400 text-[10px] block mb-1">Login Password:</label>
+                <input 
+                  type="text"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white text-xs font-bold outline-none focus:border-purple-400"
+                />
+              </div>
+            </div>
+
+            {/* Standardized Roles & Privileges Table */}
+            <div className="pt-2">
+              <AdminRolesAndPrivilegesTable
+                assignedRoles={assignedRoles}
+                userName={formData.name || 'this port representative'}
+                allowedCompanies={['docks', 'truckit', 'muhib', 'vantage']}
+                onRolesChange={(newRoles) => {
+                  setAssignedRoles(newRoles.length > 0 ? newRoles : [UserRole.DESTINATION_PORT_STAFF]);
+                }}
+              />
+            </div>
+          </div>
+
+          </div>
+
+          {/* Sticky Footer Buttons */}
+          <div className="flex justify-between items-center p-3.5 sm:p-4 border-t border-white/10 bg-slate-900/95 shrink-0">
             <button 
               type="button"
               onClick={onClose}
-              className="bg-white/10 hover:bg-white/15 text-gray-300 px-4 py-2.5 rounded-xl font-medium text-xs transition"
+              className="bg-white/10 hover:bg-white/15 text-gray-300 px-4 py-2.5 rounded-xl font-medium text-xs transition cursor-pointer"
             >
               Cancel
             </button>
             <button 
               type="submit"
               disabled={isSubmitting}
-              className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl font-semibold text-xs shadow-lg shadow-amber-600/30 transition flex items-center gap-2"
+              className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl font-semibold text-xs shadow-lg shadow-amber-600/30 transition flex items-center gap-2 cursor-pointer"
             >
               <Save size={15} />
               <span>{isSubmitting ? 'Saving...' : staffToEdit ? 'Update Profile' : 'Save Representative'}</span>

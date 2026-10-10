@@ -56,6 +56,7 @@ import {
   subscribeToFinances,
   DEFAULT_DATABASE_USERS 
 } from '../services/dbService';
+import { AdminRolesAndPrivilegesTable } from './AdminRolesAndPrivilegesTable';
 import { 
   useParentGroup, 
   ParentGroupInfo, 
@@ -131,6 +132,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formStatus, setFormStatus] = useState<'ACTIVE' | 'SUSPENDED'>('ACTIVE');
+  const [formRoles, setFormRoles] = useState<UserRole[]>([UserRole.ADMIN]);
   const [showPasswordText, setShowPasswordText] = useState(false);
   const [userSaving, setUserSaving] = useState(false);
   const [userFormError, setUserFormError] = useState('');
@@ -216,6 +218,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     setFormEmail('');
     setFormPhone('');
     setFormStatus('ACTIVE');
+    setFormRoles([UserRole.ADMIN]);
     setUserFormError('');
     setShowPasswordText(false);
     setShowUserFormModal(true);
@@ -230,6 +233,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     setFormEmail(user.email || '');
     setFormPhone(user.contact || '');
     setFormStatus(user.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE');
+    setFormRoles(user.roles && user.roles.length > 0 ? user.roles : (user.role ? [user.role] : [UserRole.ADMIN]));
     setUserFormError('');
     setShowPasswordText(false);
     setShowUserFormModal(true);
@@ -267,6 +271,8 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     setUserSaving(true);
     try {
       const targetId = editingUser ? editingUser.id : (Date.now() % 10000000);
+      const assignedRolesList = formRoles.length > 0 ? formRoles : [UserRole.ADMIN];
+      const primaryRole = assignedRolesList[0] || UserRole.ADMIN;
 
       const updatedRecord: AppUser = {
         ...(editingUser || {}),
@@ -274,10 +280,10 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
         userId: cleanUserId,
         name: cleanName,
         password: cleanPassword,
-        role: UserRole.ADMIN,
-        roles: [UserRole.ADMIN],
-        isAdmin: true,
-        isGlobalAdmin: true,
+        role: primaryRole,
+        roles: assignedRolesList,
+        isAdmin: assignedRolesList.includes(UserRole.ADMIN),
+        isGlobalAdmin: assignedRolesList.includes(UserRole.ADMIN),
         allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'],
         designation: formDesignation.trim() || 'Global Super Administrator',
         email: formEmail.trim() || `${cleanUserId}@makgroup.com.pk`,
@@ -1746,42 +1752,56 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
         {/* SUB-MODAL: Create / Edit Admin User Form             */}
         {/* ---------------------------------------------------- */}
         {showUserFormModal && (
-          <div className="fixed inset-0 z-60 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm animate-fade-in">
-            <div className="relative w-full max-w-lg bg-slate-950 border border-amber-500/40 rounded-3xl p-6 shadow-2xl space-y-4">
-              <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md animate-fade-in overflow-hidden">
+            <div className="relative w-full max-w-3xl bg-slate-950 border border-amber-500/40 rounded-3xl shadow-2xl max-h-[92vh] flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between p-4 sm:p-5 border-b border-white/10 bg-slate-950/95 shrink-0">
+                <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                   <ShieldCheck className="text-amber-400" size={18} />
-                  {editingUser ? 'Edit Global Administrator' : 'Create Global Super Administrator'}
+                  {editingUser ? 'Edit Administrator Profile & Roles' : 'Create Administrator Profile & Assign Roles'}
                 </h3>
                 <button
                   type="button"
                   onClick={() => setShowUserFormModal(false)}
-                  className="p-1 rounded-lg text-gray-400 hover:text-white"
+                  className="p-1 rounded-lg text-gray-400 hover:text-white cursor-pointer"
                 >
                   <X size={16} />
                 </button>
               </div>
 
               {userFormError && (
-                <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-200 text-xs">
+                <div className="mx-4 sm:mx-6 mt-3 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-200 text-xs shrink-0">
                   {userFormError}
                 </div>
               )}
 
-              <form onSubmit={handleSaveUser} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-1">Full Name</label>
-                  <input
-                    type="text"
-                    value={formFullName}
-                    onChange={(e) => setFormFullName(e.target.value)}
-                    placeholder="e.g. Arbab Khan"
-                    className="w-full px-3.5 py-2 rounded-xl bg-black/40 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
-                    required
-                  />
+              <form onSubmit={handleSaveUser} className="flex flex-col flex-1 min-h-0 overflow-hidden text-xs">
+                <div className="p-4 sm:p-6 overflow-y-auto space-y-4 custom-scrollbar flex-1 min-h-0 overscroll-contain">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-1">Full Name</label>
+                    <input
+                      type="text"
+                      value={formFullName}
+                      onChange={(e) => setFormFullName(e.target.value)}
+                      placeholder="e.g. Arbab Khan"
+                      className="w-full px-3.5 py-2 rounded-xl bg-black/40 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-1">Designation</label>
+                    <input
+                      type="text"
+                      value={formDesignation}
+                      onChange={(e) => setFormDesignation(e.target.value)}
+                      placeholder="e.g. Managing Director / Super Admin"
+                      className="w-full px-3.5 py-2 rounded-xl bg-black/40 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-gray-300 mb-1">Admin Username / User ID</label>
                     <input
@@ -1817,18 +1837,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-1">Designation</label>
-                  <input
-                    type="text"
-                    value={formDesignation}
-                    onChange={(e) => setFormDesignation(e.target.value)}
-                    placeholder="e.g. Managing Director / Super Admin"
-                    className="w-full px-3.5 py-2 rounded-xl bg-black/40 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-gray-300 mb-1">Email</label>
                     <input
@@ -1852,30 +1861,39 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                   </div>
                 </div>
 
-                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200">
-                  <span className="font-bold">Privilege Scope: </span>
-                  <span>Full access to all 4 subsidiaries, financial ledgers, system backups, and global branding.</span>
+                {/* Google Workspace Console Style Roles & Privileges Table */}
+                <div className="pt-2">
+                  <AdminRolesAndPrivilegesTable
+                    assignedRoles={formRoles}
+                    userName={formFullName || 'this admin'}
+                    allowedCompanies={['docks', 'muhib', 'vantage', 'truckit']}
+                    isGlobalAdmin={true}
+                    onRolesChange={(newRoles) => {
+                      setFormRoles(newRoles.length > 0 ? newRoles : [UserRole.ADMIN]);
+                    }}
+                  />
                 </div>
+              </div>
 
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setShowUserFormModal(false)}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-400 hover:text-white bg-white/5"
-                  >
-                    Cancel
-                  </button>
+              <div className="flex items-center justify-end gap-2 p-3.5 sm:p-4 border-t border-white/10 bg-slate-950/95 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowUserFormModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-400 hover:text-white bg-white/5 cursor-pointer"
+                >
+                  Cancel
+                </button>
 
-                  <button
-                    type="submit"
-                    disabled={userSaving}
-                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 shadow-md shadow-amber-500/25 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  >
-                    <Save size={13} />
-                    <span>{userSaving ? 'Saving...' : editingUser ? 'Update Admin' : 'Create Admin'}</span>
-                  </button>
-                </div>
-              </form>
+                <button
+                  type="submit"
+                  disabled={userSaving}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 shadow-md shadow-amber-500/25 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <Save size={13} />
+                  <span>{userSaving ? 'Saving...' : editingUser ? 'Update Admin' : 'Create Admin'}</span>
+                </button>
+              </div>
+            </form>
             </div>
           </div>
         )}

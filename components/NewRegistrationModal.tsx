@@ -21,6 +21,7 @@ import {
 import { UserRole } from '../types';
 import { saveClientToFirestore, saveUserToFirestore } from '../services/dbService';
 import { sendAppNotification } from '../services/notificationService';
+import { AdminRolesAndPrivilegesTable } from './AdminRolesAndPrivilegesTable';
 
 interface NewRegistrationModalProps {
   isOpen: boolean;
@@ -43,6 +44,7 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
     address: '',
     password: ''
   });
+  const [clientRoles, setClientRoles] = useState<UserRole[]>([UserRole.CLIENT]);
 
   // Transporter Form State
   const [transporterForm, setTransporterForm] = useState({
@@ -55,6 +57,7 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
     fleetCount: '',
     password: ''
   });
+  const [transporterRoles, setTransporterRoles] = useState<UserRole[]>([UserRole.TRANSPORTER]);
 
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -134,14 +137,15 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
 
       // 2. Save User Account for Credentials Login
       const newUserIdNum = Date.now() % 10000000;
+      const primaryRole = clientRoles[0] || UserRole.CLIENT;
       await saveUserToFirestore({
         id: newUserIdNum,
         userId: userId,
         password: cleanPass,
         name: cleanPerson,
         clientName: cleanCompany,
-        role: UserRole.CLIENT,
-        roles: [UserRole.CLIENT],
+        role: primaryRole,
+        roles: clientRoles.length > 0 ? clientRoles : [UserRole.CLIENT],
         designation: 'Corporate Importer / Client',
         contact: cleanPhone,
         email: clientForm.email.trim(),
@@ -200,14 +204,15 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
       const newUserIdNum = Date.now() % 10000000;
 
       // Save User Account with Transporter Role and Pending Status
+      const primaryRole = transporterRoles[0] || UserRole.TRANSPORTER;
       await saveUserToFirestore({
         id: newUserIdNum,
         userId: userId,
         password: cleanPass,
         name: cleanOwner,
         clientName: cleanTransport,
-        role: UserRole.TRANSPORTER,
-        roles: [UserRole.TRANSPORTER],
+        role: primaryRole,
+        roles: transporterRoles.length > 0 ? transporterRoles : [UserRole.TRANSPORTER],
         designation: `Transporter / Fleet Partner (${transporterForm.fleetType})`,
         contact: cleanPhone,
         email: transporterForm.email.trim(),
@@ -246,13 +251,13 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md overflow-y-auto animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md overflow-hidden animate-fade-in">
       <div 
-        className="relative w-full max-w-xl bg-slate-900 border border-amber-500/40 rounded-3xl shadow-[0_0_50px_rgba(245,158,11,0.2)] overflow-hidden my-auto text-left"
+        className="relative w-full max-w-xl bg-slate-900 border border-amber-500/40 rounded-3xl shadow-[0_0_50px_rgba(245,158,11,0.2)] max-h-[92vh] flex flex-col overflow-hidden text-left"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="bg-gradient-to-r from-amber-950/60 via-slate-900 to-slate-950 px-6 py-4 border-b border-amber-500/30 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-amber-950/60 via-slate-900 to-slate-950 px-6 py-4 border-b border-amber-500/30 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             {selectedType && !isSuccess && (
               <button
@@ -282,14 +287,14 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
           <button
             type="button"
             onClick={handleClose}
-            className="p-2 rounded-xl text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition"
+            className="p-2 rounded-xl text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition cursor-pointer"
           >
             <X size={18} />
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
+        <div className="p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0 overscroll-contain">
           {errorMessage && (
             <div className="mb-4 p-3 rounded-xl bg-red-500/20 border border-red-500/40 text-red-300 text-xs flex items-center gap-2">
               <AlertCircle size={16} className="shrink-0" />
@@ -505,6 +510,17 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
                 </div>
               </div>
 
+              <div className="pt-2">
+                <AdminRolesAndPrivilegesTable
+                  assignedRoles={clientRoles}
+                  userName={clientForm.companyName || 'this corporate client'}
+                  allowedCompanies={['docks', 'truckit', 'muhib', 'vantage']}
+                  onRolesChange={(newRoles) => {
+                    setClientRoles(newRoles.length > 0 ? newRoles : [UserRole.CLIENT]);
+                  }}
+                />
+              </div>
+
               <div className="pt-3 border-t border-white/10">
                 <button
                   type="submit"
@@ -638,6 +654,17 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
                     {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                   </button>
                 </div>
+              </div>
+
+              <div className="pt-2">
+                <AdminRolesAndPrivilegesTable
+                  assignedRoles={transporterRoles}
+                  userName={transporterForm.transportName || 'this transporter / fleet'}
+                  allowedCompanies={['docks', 'truckit', 'muhib', 'vantage']}
+                  onRolesChange={(newRoles) => {
+                    setTransporterRoles(newRoles.length > 0 ? newRoles : [UserRole.TRANSPORTER]);
+                  }}
+                />
               </div>
 
               <div className="pt-3 border-t border-white/10">

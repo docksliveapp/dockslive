@@ -715,8 +715,27 @@ const App: React.FC = () => {
           onSignOut={handleSignOut}
           allowedCompanies={allowedCompanies}
           isGlobalAdmin={isGlobalAdmin}
-          onSelectCompany={(selectedId) => {
+          currentRole={currentRole}
+          onSwitchPortal={(role, targetView) => {
+            setCurrentRole(role);
+            setActiveView(targetView);
+            safeAppStorage.setItem('dpl_user_role', role);
+            safeAppStorage.setItem('dpl_active_view', targetView);
+            safeAppStorage.setItem('dpl_last_location_role', role);
+            safeAppStorage.setItem('dpl_last_location_view', targetView);
+            setShowCompanySelection(false);
+          }}
+          onSelectCompany={(selectedId, targetRole, targetView) => {
             setActiveCompany(selectedId);
+            if (targetRole) {
+              setCurrentRole(targetRole);
+              safeAppStorage.setItem('dpl_user_role', targetRole);
+            }
+            if (targetView) {
+              setActiveView(targetView);
+              safeAppStorage.setItem('dpl_active_view', targetView);
+              safeAppStorage.setItem('dpl_last_location_view', targetView);
+            }
             setShowCompanySelection(false);
           }}
         />
@@ -772,8 +791,27 @@ const App: React.FC = () => {
               userRoleTitle={currentDesignation || (currentRole as string)}
               allowedCompanies={allowedCompanies}
               isGlobalAdmin={isGlobalAdmin}
-              onSelectCompany={(selectedId) => {
+              currentRole={currentRole}
+              onSwitchPortal={(role, targetView) => {
+                setCurrentRole(role);
+                setActiveView(targetView);
+                safeAppStorage.setItem('dpl_user_role', role);
+                safeAppStorage.setItem('dpl_active_view', targetView);
+                safeAppStorage.setItem('dpl_last_location_role', role);
+                safeAppStorage.setItem('dpl_last_location_view', targetView);
+                setIsCompanyModalOpen(false);
+              }}
+              onSelectCompany={(selectedId, targetRole, targetView) => {
                 setActiveCompany(selectedId);
+                if (targetRole) {
+                  setCurrentRole(targetRole);
+                  safeAppStorage.setItem('dpl_user_role', targetRole);
+                }
+                if (targetView) {
+                  setActiveView(targetView);
+                  safeAppStorage.setItem('dpl_active_view', targetView);
+                  safeAppStorage.setItem('dpl_last_location_view', targetView);
+                }
                 setIsCompanyModalOpen(false);
               }}
             />
@@ -1140,7 +1178,7 @@ const App: React.FC = () => {
 
         <div 
           id="main-scroll-container"
-          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-32 sm:pb-12 custom-scrollbar overscroll-y-auto"
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-32 sm:pb-12 custom-scrollbar overscroll-contain touch-pan-y"
           style={{ WebkitOverflowScrolling: 'touch' }}
         >
           {renderContent()}
@@ -1182,8 +1220,27 @@ const App: React.FC = () => {
             userRoleTitle={currentDesignation || (currentRole as string)}
             allowedCompanies={allowedCompanies}
             isGlobalAdmin={isGlobalAdmin}
-            onSelectCompany={(selectedId) => {
+            currentRole={currentRole}
+            onSwitchPortal={(role, targetView) => {
+              setCurrentRole(role);
+              setActiveView(targetView);
+              safeAppStorage.setItem('dpl_user_role', role);
+              safeAppStorage.setItem('dpl_active_view', targetView);
+              safeAppStorage.setItem('dpl_last_location_role', role);
+              safeAppStorage.setItem('dpl_last_location_view', targetView);
+              setIsCompanyModalOpen(false);
+            }}
+            onSelectCompany={(selectedId, targetRole, targetView) => {
               setActiveCompany(selectedId);
+              if (targetRole) {
+                setCurrentRole(targetRole);
+                safeAppStorage.setItem('dpl_user_role', targetRole);
+              }
+              if (targetView) {
+                setActiveView(targetView);
+                safeAppStorage.setItem('dpl_active_view', targetView);
+                safeAppStorage.setItem('dpl_last_location_view', targetView);
+              }
               setIsCompanyModalOpen(false);
             }}
           />

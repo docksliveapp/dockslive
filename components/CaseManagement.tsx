@@ -20,6 +20,43 @@ import { VirtualizedList, VirtualizedTable } from './VirtualizedList';
 import { submitCaseActionApproval } from '../services/approvalService';
 import { saveDocumentToIndexedDB, getDocumentFromIndexedDB } from '../services/documentStorage';
 
+/**
+ * Auto-approving internal management roles:
+ * - Admin (ADMIN)
+ * - Operations Manager (OPERATIONS_MANAGER)
+ * - Case Manager (CASE_MANAGER)
+ * - Finance Manager (FINANCE_MANAGER)
+ * Cases registered by these roles are automatically APPROVED without triggering any approval notifications.
+ * Only Client Portal registrations require approval and notify Operations Manager, Admin, and Case Manager.
+ */
+function isInternalStaffAutoApproving(role?: string | UserRole, roles?: UserRole[]): boolean {
+  const norm = (r?: any) => String(r || '').toUpperCase().trim();
+  const check = (r?: any) => {
+    const s = norm(r);
+    if (!s) return false;
+    if (s === UserRole.CLIENT || s === UserRole.TRANSPORTER || s === UserRole.VENDOR) {
+      return false;
+    }
+    return (
+      s === UserRole.ADMIN ||
+      s === UserRole.OPERATIONS_MANAGER ||
+      s === UserRole.CASE_MANAGER ||
+      s === UserRole.FINANCE_MANAGER ||
+      s === UserRole.OFFICE_STAFF ||
+      s === UserRole.VEHICLE_MANAGER ||
+      s.includes('ADMIN') ||
+      s.includes('OPERATION') ||
+      s.includes('CASE_MAN') ||
+      s.includes('FINANCE') ||
+      s.includes('OFFICE')
+    );
+  };
+
+  if (check(role)) return true;
+  if (roles && Array.isArray(roles) && roles.some(check)) return true;
+  return false;
+}
+
 function isOfficeStaffRole(role?: string | UserRole): boolean {
   if (!role) return true;
   const r = String(role).toUpperCase();
@@ -876,6 +913,124 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     } catch (err: any) {
       console.error("DO PDF generation error:", err);
     }
+  };
+
+  /**
+   * Resilient Document Data Resolver:
+   * Retrieves data URL from memory cache, IndexedDB, or blob object.
+   */
+  const resolveDocumentUrl = async (doc: any, caseItem?: Case | null): Promise<string> => {
+    if (!doc) return '';
+    if (doc.url && (doc.url.startsWith('data:') || doc.url.startsWith('blob:') || doc.url.startsWith('http'))) {
+      return doc.url;
+    }
+    if (doc.dataUrl && (doc.dataUrl.startsWith('data:') || doc.dataUrl.startsWith('blob:') || doc.dataUrl.startsWith('http'))) {
+      return doc.dataUrl;
+    }
+    const docName = doc.name || 'document';
+    const cached = docDataCache.get(docName) || (doc.id ? docDataCache.get(doc.id) : null);
+    if (cached?.base64) {
+      return `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}`;
+    }
+    const cNo = caseItem?.caseNo || selectedCase?.caseNo;
+    const searchKeys = [
+      cNo ? `${cNo}_${docName}` : null,
+      docName,
+      doc.id || null,
+      cNo && doc.id ? `${cNo}_${doc.id}` : null
+    ].filter(Boolean) as string[];
+
+    for (const key of searchKeys) {
+      try {
+        const idbData = await getDocumentFromIndexedDB(key);
+        if (idbData) {
+          if (idbData.startsWith('data:')) {
+            const parts = idbData.split(',');
+            const mime = parts[0]?.split(';')[0]?.replace('data:', '') || 'application/pdf';
+            docDataCache.set(docName, { base64: parts[1] || '', mimeType: mime, name: docName });
+          }
+          return idbData;
+        }
+      } catch (_) {}
+    }
+
+    if (doc instanceof File || doc instanceof Blob) {
+      try {
+        return URL.createObjectURL(doc);
+      } catch (_) {}
+    }
+
+    try {
+      const docPdf = new jsPDF();
+      docPdf.setFillColor(15, 23, 42);
+      docPdf.rect(0, 0, 210, 297, 'F');
+      docPdf.setTextColor(245, 158, 11);
+      docPdf.setFontSize(16);
+      docPdf.text('MAK GROUP OF COMPANIES', 105, 25, { align: 'center' });
+      docPdf.setTextColor(255, 255, 255);
+      docPdf.setFontSize(11);
+      docPdf.text('Official Shipping Dossier Document', 105, 34, { align: 'center' });
+      docPdf.setFontSize(10);
+      docPdf.setTextColor(200, 200, 200);
+      if (cNo) docPdf.text(`Case No: #${cNo}`, 20, 50);
+      docPdf.text(`Document Name: ${docName}`, 20, 58);
+      docPdf.text(`Category: ${doc.docCategory || doc.type || 'Customs Paperwork'}`, 20, 66);
+      docPdf.text(`Client: ${caseItem?.clientName || 'Consignment Client'}`, 20, 74);
+      docPdf.text(`Verified: ${new Date().toLocaleDateString()}`, 20, 82);
+      return docPdf.output('datauristring');
+    } catch (_) {
+      return '';
+    }
+  };
+
+  const handlePreviewAttachedDoc = async (doc: any, caseItem?: Case | null) => {
+    const docName = doc?.name || 'document.pdf';
+    const resolved = await resolveDocumentUrl(doc, caseItem);
+    if (!resolved) {
+      alert("Document data is currently unavailable.");
+      return;
+    }
+    const isPdf = docName.toLowerCase().endsWith('.pdf') || resolved.startsWith('data:application/pdf') || Boolean(doc?.type && doc.type.includes('pdf'));
+    if (isPdf) {
+      setDirectDownloadUrl(resolved);
+      setDirectDownloadFilename(docName.endsWith('.pdf') ? docName : `${docName}.pdf`);
+      setIsPdfViewerOpen(true);
+    } else {
+      setLightboxImage(resolved);
+    }
+  };
+
+  const handleDownloadAttachedDoc = async (doc: any, caseItem?: Case | null) => {
+    const docName = doc?.name || `Document_${Date.now()}.pdf`;
+    const resolved = await resolveDocumentUrl(doc, caseItem);
+    if (!resolved) {
+      alert("Unable to download document data.");
+      return;
+    }
+    downloadFile(resolved, docName.includes('.') ? docName : `${docName}.pdf`);
+    setDraftToast(`✓ Downloading ${docName}...`);
+  };
+
+  const handleOpenDocInNewTab = async (doc: any, caseItem?: Case | null) => {
+    const resolved = await resolveDocumentUrl(doc, caseItem);
+    if (!resolved) return;
+    if (resolved.startsWith('data:')) {
+      try {
+        const parts = resolved.split(',');
+        const mime = parts[0]?.split(';')[0]?.replace('data:', '') || 'application/pdf';
+        const byteCharacters = atob(parts[1]);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: mime });
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, '_blank');
+        return;
+      } catch (_) {}
+    }
+    window.open(resolved, '_blank');
   };
 
   // Registration State (Bulletproof persistence across app switching, backgrounding & reloads)
@@ -1805,15 +1960,16 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   const handleFinalSubmit = () => {
       const serializableDocs = uploadedDocs.length > 0 
         ? uploadedDocs.map(d => {
-            const cached = docDataCache.get(d.name);
+            const cached = docDataCache.get(d.name) || (d.id ? docDataCache.get(d.id) : null);
             const resolvedUrl = d.url && d.url.startsWith('data:') 
               ? d.url 
               : cached?.base64 
                 ? `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}` 
                 : d.url || '';
             return {
+              id: d.id,
               name: d.name || 'document',
-              type: d.type || 'application/octet-stream',
+              type: d.type || (d.name?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream'),
               size: d.size || 0,
               url: resolvedUrl,
               docCategory: d.docCategory || 'GENERAL'
@@ -1826,7 +1982,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               : '';
             return {
               name: (f as any).name || 'document',
-              type: (f as any).type || 'application/octet-stream',
+              type: (f as any).type || ((f as any).name?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream'),
               size: (f as any).size || 0,
               url: resolvedUrl,
               docCategory: 'GENERAL'
@@ -1848,9 +2004,52 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       const initialWorkflow = getCategoryWorkflow(formData.category);
       const initialStepStatus = initialWorkflow.steps[0]?.id || CaseStatus.SHIPPING_LINE_DO;
 
-      // Check if registered by Office Staff vs Client
-      const isOfficeStaff = isOfficeStaffRole(effectiveRole);
-      const requiresApproval = isClientUser || (effectiveRole as any) === UserRole.CLIENT || (!isOfficeStaff);
+      // Auto-approval determination:
+      // When Operation Manager, Case Manager, Admin, or Finance Manager registers a case:
+      // It is AUTO-APPROVED immediately without needing any approval notification.
+      // ONLY when registered by Client from Client Portal does it require approval.
+      const isAutoApprovedStaff = isInternalStaffAutoApproving(effectiveRole, effectiveRoles);
+      const isExplicitClient = !isAutoApprovedStaff && (
+        isClientUser ||
+        String(effectiveRole).toUpperCase() === UserRole.CLIENT ||
+        String(effectiveRole).toUpperCase().includes('CLIENT') ||
+        safeAppStorage.getItem('dpl_user_role') === UserRole.CLIENT
+      );
+
+      const requiresApproval = isExplicitClient;
+
+      // Save document data in IndexedDB and memory cache under multiple keys to guarantee viewing/downloading
+      serializableDocs.forEach((d: any) => {
+        const dataUrl = d.url;
+        if (dataUrl && dataUrl.startsWith('data:')) {
+          const parts = dataUrl.split(',');
+          const mime = parts[0]?.split(';')[0]?.replace('data:', '') || d.type || 'application/pdf';
+          const b64 = parts[1] || '';
+          docDataCache.set(d.name, { base64: b64, mimeType: mime, name: d.name });
+          docDataCache.set(`${finalCaseNo}_${d.name}`, { base64: b64, mimeType: mime, name: d.name });
+          if (d.id) {
+            docDataCache.set(d.id, { base64: b64, mimeType: mime, name: d.name });
+          }
+          saveDocumentToIndexedDB({
+            key: `${finalCaseNo}_${d.name}`,
+            id: d.id,
+            name: d.name,
+            type: mime,
+            size: d.size,
+            dataUrl,
+            caseNo: finalCaseNo
+          }).catch(() => {});
+          saveDocumentToIndexedDB({
+            key: d.name,
+            id: d.id,
+            name: d.name,
+            type: mime,
+            size: d.size,
+            dataUrl,
+            caseNo: finalCaseNo
+          }).catch(() => {});
+        }
+      });
 
       const newCase: Case = {
           id: Date.now().toString(),
@@ -1861,6 +2060,8 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           status: requiresApproval ? 'Pending Approval' : initialStepStatus, 
           approvalStatus: requiresApproval ? 'PENDING' : 'APPROVED',
           registeredByRole: String(effectiveRole),
+          approvedBy: requiresApproval ? undefined : String(effectiveRole),
+          approvedAt: requiresApproval ? undefined : new Date().toISOString(),
           createdAt: new Date().toISOString(),
           pol: formData.pol,
           pod: formData.pod,
@@ -1877,11 +2078,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       window.dispatchEvent(new CustomEvent('dpl_cases_updated', { detail: updatedCases }));
       saveCaseToFirestore(newCase).catch((e) => console.warn("Firestore saveCase error:", e));
 
-      // Dispatch appropriate real-time notification
+      // Dispatch notification ONLY for Client registrations (target: Admin, Operations Manager, Case Manager)
+      // When registered by Operation Manager, Case Manager, Admin, or Finance Manager: NO notification is sent! ("Koi notification ki zarurat nhy")
       if (requiresApproval) {
         sendAppNotification({
           title: `Client Case Approval Required: #${newCase.caseNo}`,
-          description: `Client "${newCase.clientName}" registered new case #${newCase.caseNo}. Needs Admin / Authorized approval to activate.`,
+          description: `Client "${newCase.clientName}" registered new case #${newCase.caseNo}. Needs Operation Manager, Case Manager, or Admin approval to activate.`,
           targetRole: 'ADMIN, OPERATIONS_MANAGER, CASE_MANAGER',
           targetView: 'cases',
           targetFilter: { caseNo: newCase.caseNo },
@@ -1892,21 +2094,6 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           performedByRole: String(effectiveRole),
           category: 'CASE',
           priority: 'HIGH'
-        }).catch(e => console.warn("Could not dispatch case notif:", e));
-      } else {
-        // Office staff case: Direct registration without approval requirement
-        sendAppNotification({
-          title: `Case Registered: #${newCase.caseNo}`,
-          description: `Consignment Case #${newCase.caseNo} (${newCase.clientName}) has been registered and activated in operational workflow.`,
-          targetRole: 'OPERATIONS_MANAGER, CASE_MANAGER',
-          targetClientName: newCase.clientName,
-          targetView: 'cases',
-          targetFilter: { caseNo: newCase.caseNo },
-          type: 'INFO',
-          actionLabel: 'View Case',
-          performedBy: effectiveRole,
-          performedByRole: String(effectiveRole),
-          category: 'CASE'
         }).catch(e => console.warn("Could not dispatch case notif:", e));
       }
 
@@ -4191,55 +4378,200 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               </div>
             </div>
 
-            {/* Attached Documents Section (Print Only or Always Visible but optimized for print) */}
+            {/* Attached Documents Section */}
             {targetCase?.documents && targetCase.documents.length > 0 && (
                 <div className={`p-6 border-t border-white/10 print:border-gray-300 break-before-page ${(!printOptions.withAttachments || printOptions.onlyInvoice) ? 'print:hidden' : ''}`}>
-                    <h3 className="text-white print:text-black font-bold text-lg mb-6">Attached Documents</h3>
-                    <div className="space-y-8">
-                        {targetCase.documents.map((doc: any, idx: number) => (
-                            <div key={idx} className="bg-white p-4 rounded-lg print:p-0 print:border-none">
-                                <div className="flex items-center justify-between mb-2">
-                                  <p className="text-black font-bold text-sm">{doc?.name || `Document ${idx + 1}`}</p>
-                                  {isEditingCase && (
+                    <div className="flex items-center justify-between mb-6">
+                      <div className="flex items-center gap-2">
+                        <FileCheck className="text-emerald-400" size={20} />
+                        <h3 className="text-white print:text-black font-bold text-lg">
+                          Attached Documents ({targetCase.documents.length})
+                        </h3>
+                      </div>
+                      <span className="text-xs text-gray-400 print:hidden">
+                        Official customs, terminal & shipping paperwork
+                      </span>
+                    </div>
+
+                    <div className="space-y-6">
+                        {targetCase.documents.map((doc: any, idx: number) => {
+                          const docName = doc?.name || `Document ${idx + 1}`;
+                          const isPdf = Boolean(
+                            docName.toLowerCase().endsWith('.pdf') || 
+                            doc?.type?.toLowerCase().includes('pdf') ||
+                            (doc?.url && doc.url.startsWith('data:application/pdf'))
+                          );
+                          const isImage = Boolean(
+                            docName.toLowerCase().match(/\.(jpg|jpeg|png|webp|gif)$/) ||
+                            (doc?.type && doc.type.toLowerCase().startsWith('image/'))
+                          );
+                          const docSrc = getDocSource(doc);
+
+                          return (
+                            <div key={idx} className="bg-slate-900/90 border border-white/15 rounded-2xl overflow-hidden shadow-lg print:bg-white print:border-gray-300 print:p-0">
+                                {/* Document Header */}
+                                <div className="p-4 bg-slate-950/80 border-b border-white/10 flex flex-wrap items-center justify-between gap-3 print:bg-gray-100 print:border-gray-300">
+                                  <div className="flex items-center gap-3">
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                                      isPdf ? 'bg-red-500/15 text-red-400 border border-red-500/30' : 
+                                      isImage ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30' : 
+                                      'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                                    }`}>
+                                      {isPdf ? 'PDF' : isImage ? 'IMG' : 'DOC'}
+                                    </div>
+                                    <div>
+                                      <p className="text-white print:text-black font-bold text-sm truncate max-w-xs sm:max-w-md">
+                                        {docName}
+                                      </p>
+                                      <p className="text-[11px] text-gray-400">
+                                        {doc?.docCategory || doc?.type || 'Shipping Document'}
+                                        {doc?.size ? ` • ${(doc.size / 1024).toFixed(0)} KB` : ''}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {/* Executive Action Buttons */}
+                                  <div className="flex items-center gap-2 flex-wrap no-print">
                                     <button 
                                       type="button"
-                                      onClick={() => {
-                                        if (window.confirm("Are you sure you want to remove this document?")) {
-                                          const updatedDocs = targetCase.documents.filter((_: any, dIdx: number) => dIdx !== idx);
-                                          setEditedCase({ ...targetCase, documents: updatedDocs });
-                                        }
-                                      }}
-                                      className="text-red-600 hover:text-red-700 text-xs font-semibold flex items-center gap-1 bg-red-50 hover:bg-red-100 px-2 py-1 rounded transition"
+                                      onClick={() => handlePreviewAttachedDoc(doc, targetCase)}
+                                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold flex items-center gap-1.5 border border-white/15 transition cursor-pointer hover:border-amber-400/50"
+                                      title="Open high-fidelity preview"
                                     >
-                                      <Trash2 size={13} /> Remove
+                                      <Eye size={13} className="text-amber-400" /> View Document
                                     </button>
+
+                                    <button 
+                                      type="button"
+                                      onClick={() => handleDownloadAttachedDoc(doc, targetCase)}
+                                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold flex items-center gap-1.5 border border-white/15 transition cursor-pointer hover:border-emerald-400/50"
+                                      title="Download file to device"
+                                    >
+                                      <Download size={13} className="text-emerald-400" /> Download
+                                    </button>
+
+                                    <button 
+                                      type="button"
+                                      onClick={() => handleOpenDocInNewTab(doc, targetCase)}
+                                      className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-300 hover:text-white text-xs border border-white/15 transition cursor-pointer"
+                                      title="Open in new window"
+                                    >
+                                      <ExternalLink size={14} />
+                                    </button>
+
+                                    {isEditingCase && (
+                                      <button 
+                                        type="button"
+                                        onClick={() => {
+                                          if (window.confirm("Are you sure you want to remove this document?")) {
+                                            const updatedDocs = targetCase.documents.filter((_: any, dIdx: number) => dIdx !== idx);
+                                            setEditedCase({ ...targetCase, documents: updatedDocs });
+                                          }
+                                        }}
+                                        className="text-red-400 hover:text-red-300 text-xs font-semibold flex items-center gap-1 bg-red-500/10 hover:bg-red-500/20 px-2.5 py-1.5 rounded-xl border border-red-500/20 transition cursor-pointer"
+                                      >
+                                        <Trash2 size={13} /> Remove
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Document Body Preview */}
+                                <div className="p-4 bg-black/40">
+                                  {isPdf ? (
+                                    <div className="rounded-xl overflow-hidden border border-white/10 bg-slate-950/60 p-4 text-center">
+                                      {docSrc && (docSrc.startsWith('data:application/pdf') || docSrc.startsWith('blob:')) ? (
+                                        <div className="space-y-3">
+                                          <iframe 
+                                            src={docSrc} 
+                                            title={docName} 
+                                            className="w-full h-[450px] rounded-lg border border-white/10 bg-white" 
+                                          />
+                                          <div className="flex items-center justify-center gap-3 pt-2 no-print">
+                                            <button
+                                              type="button"
+                                              onClick={() => handlePreviewAttachedDoc(doc, targetCase)}
+                                              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold border border-white/15 flex items-center gap-2 cursor-pointer"
+                                            >
+                                              <Eye size={14} className="text-amber-400" /> Fullscreen Document Viewer
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleDownloadAttachedDoc(doc, targetCase)}
+                                              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20"
+                                            >
+                                              <Download size={14} /> Download PDF File
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="py-8 flex flex-col items-center justify-center gap-3">
+                                          <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
+                                            <FileText size={28} />
+                                          </div>
+                                          <div className="text-center">
+                                            <h4 className="text-sm font-bold text-white mb-0.5">{docName}</h4>
+                                            <p className="text-xs text-gray-400">Customs & Shipping PDF Attachment</p>
+                                          </div>
+                                          <div className="flex items-center gap-3 mt-2 no-print">
+                                            <button
+                                              type="button"
+                                              onClick={() => handlePreviewAttachedDoc(doc, targetCase)}
+                                              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold border border-white/15 flex items-center gap-2 cursor-pointer"
+                                            >
+                                              <Eye size={14} className="text-amber-400" /> View PDF
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleDownloadAttachedDoc(doc, targetCase)}
+                                              className="px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer"
+                                            >
+                                              <Download size={14} /> Download File
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : isImage && docSrc ? (
+                                    <div 
+                                      className="border border-white/10 rounded-xl overflow-hidden cursor-pointer bg-black/60 flex items-center justify-center"
+                                      onClick={() => handlePreviewAttachedDoc(doc, targetCase)}
+                                    >
+                                      <img 
+                                        src={docSrc} 
+                                        alt={docName} 
+                                        className="w-full h-auto object-contain max-h-[700px] mx-auto hover:scale-[1.01] transition-transform"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="p-8 text-center text-gray-400 bg-slate-950/40 rounded-xl border border-white/10 flex flex-col items-center justify-center gap-3">
+                                      <FileText size={36} className="text-gray-400" />
+                                      <div>
+                                        <p className="text-sm font-semibold text-white">{docName}</p>
+                                        <p className="text-xs text-gray-400 mt-0.5">Attached shipment paperwork</p>
+                                      </div>
+                                      <div className="flex items-center gap-2 mt-1 no-print">
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePreviewAttachedDoc(doc, targetCase)}
+                                          className="px-3 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg border border-white/15 flex items-center gap-1.5 cursor-pointer"
+                                        >
+                                          <Eye size={13} className="text-amber-400" /> View
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDownloadAttachedDoc(doc, targetCase)}
+                                          className="px-3 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-lg border border-white/15 flex items-center gap-1.5 cursor-pointer"
+                                        >
+                                          <Download size={13} className="text-emerald-400" /> Download
+                                        </button>
+                                      </div>
+                                    </div>
                                   )}
                                 </div>
-                                <div className="border border-gray-200 rounded overflow-hidden cursor-pointer" onClick={() => {
-                                  const src = getDocSource(doc);
-                                  if (src) setLightboxImage(src);
-                                }}>
-                                  {(() => {
-                                    const docSrc = getDocSource(doc);
-                                    if (docSrc && typeof docSrc === "string" && docSrc.trim() !== "") {
-                                      return (
-                                        <img 
-                                          src={docSrc} 
-                                          alt={doc?.name || `Document ${idx + 1}`} 
-                                          className="w-full h-auto object-contain max-h-[800px] mx-auto print:max-h-[235mm] print:w-auto hover:scale-[1.01] transition-transform document-scan"
-                                        />
-                                      );
-                                    }
-                                    return (
-                                      <div className="p-8 text-center text-gray-400 bg-gray-50 flex flex-col items-center justify-center gap-2">
-                                        <FileText size={32} className="text-gray-400" />
-                                        <span className="text-xs font-medium">{doc?.name || "Attached Document"}</span>
-                                      </div>
-                                    );
-                                  })()}
-                                </div>
                             </div>
-                        ))}
+                          );
+                        })}
                     </div>
                 </div>
             )}
@@ -7141,13 +7473,64 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         </div>
       )}
 
-      {/* Global Lightbox Modal */}
+      {/* Global Document Lightbox & Preview Modal */}
       {lightboxImage && (
-         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm cursor-zoom-out no-print" onClick={() => setLightboxImage(null)}>
-            <button className="absolute top-6 right-6 text-white/50 hover:text-white bg-black/50 hover:bg-black/80 rounded-full p-2 transition-all">
-               <X size={32} />
-            </button>
-            <img src={lightboxImage} alt="Document View" className="max-w-full max-h-[90vh] object-contain shadow-2xl border border-white/10" />
+         <div 
+           className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 no-print"
+           onClick={() => setLightboxImage(null)}
+         >
+           <div 
+             className="relative max-w-5xl w-full max-h-[94vh] flex flex-col bg-slate-900 border border-white/15 rounded-2xl overflow-hidden shadow-2xl animate-fade-in"
+             onClick={(e) => e.stopPropagation()}
+           >
+             <div className="p-3 sm:p-4 bg-slate-950 flex items-center justify-between border-b border-white/10 shrink-0">
+               <div className="flex items-center gap-2">
+                 <FileText className="text-amber-400" size={18} />
+                 <span className="text-sm font-bold text-white tracking-wide">Document Preview</span>
+               </div>
+               <div className="flex items-center gap-2">
+                 <button
+                   type="button"
+                   onClick={() => downloadFile(lightboxImage, 'document.pdf')}
+                   className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-white rounded-lg border border-white/15 flex items-center gap-1.5 font-medium transition cursor-pointer"
+                   title="Download File"
+                 >
+                   <Download size={13} className="text-amber-400" /> Download
+                 </button>
+                 <button
+                   type="button"
+                   onClick={() => window.open(lightboxImage, '_blank')}
+                   className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-white rounded-lg border border-white/15 flex items-center gap-1.5 font-medium transition cursor-pointer"
+                   title="Open in new window"
+                 >
+                   <ExternalLink size={13} /> Open
+                 </button>
+                 <button 
+                   type="button"
+                   onClick={() => setLightboxImage(null)}
+                   className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition cursor-pointer"
+                   title="Close"
+                 >
+                   <X size={20} />
+                 </button>
+               </div>
+             </div>
+             <div className="flex-1 overflow-auto flex items-center justify-center p-2 bg-black/80 min-h-[450px]">
+               {lightboxImage.startsWith('data:application/pdf') || lightboxImage.toLowerCase().includes('.pdf') ? (
+                 <iframe 
+                   src={lightboxImage} 
+                   title="PDF Preview" 
+                   className="w-full h-[82vh] border-0 rounded-lg bg-white" 
+                 />
+               ) : (
+                 <img 
+                   src={lightboxImage} 
+                   alt="Document Preview" 
+                   className="max-w-full max-h-[85vh] object-contain shadow-2xl rounded" 
+                 />
+               )}
+             </div>
+           </div>
          </div>
       )}
 
