@@ -754,7 +754,7 @@ const App: React.FC = () => {
   if (isDedicatedPortal) {
     return (
       <ErrorBoundary>
-        <div className="h-screen h-[100dvh] min-h-[100dvh] max-h-[100dvh] w-full bg-slate-950 text-gray-100 font-sans overflow-hidden relative">
+        <div className={`h-screen h-[100dvh] min-h-[100dvh] max-h-[100dvh] w-full font-sans overflow-hidden relative transition-colors duration-300 ${appTheme === 'pearl' ? 'bg-transparent text-slate-900' : 'bg-slate-950 text-gray-100'}`}>
           {renderContent()}
 
           {/* Action Center Sidebar */}
@@ -841,7 +841,7 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div className="flex h-screen h-[100dvh] min-h-[100dvh] max-h-[100dvh] w-full bg-transparent text-gray-100 font-sans overflow-hidden relative">
+      <div className={`flex h-screen h-[100dvh] min-h-[100dvh] max-h-[100dvh] w-full bg-transparent font-sans overflow-hidden relative transition-colors duration-300 ${appTheme === 'pearl' ? 'text-slate-900' : 'text-gray-100'}`}>
         
         {/* Sidebar Overlay for Mobile */}
       {mobileSidebarOpen && (
@@ -1134,13 +1134,13 @@ const App: React.FC = () => {
               onClick={() => setAppTheme(prev => prev === 'pearl' ? 'charcoal' : 'pearl')}
               className={`btn-animated-luxury px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 ${
                 appTheme === 'pearl'
-                  ? 'bg-slate-800/90 hover:bg-slate-700/90 text-slate-100 border-white/15 shadow-sm'
+                  ? 'bg-gradient-to-r from-amber-100 via-white to-amber-50 text-slate-900 border-amber-300/80 shadow-md ring-1 ring-amber-300/40'
                   : 'bg-white/15 hover:bg-white/25 text-white border-white/25 shadow-black/20'
               }`}
               title={appTheme === 'pearl' ? "Switch to Charcoal Luxury (Executive Night)" : "Switch to Pearl White (Business Class)"}
             >
-              <Sparkles size={13} className="text-slate-300" />
-              <span className="hidden sm:inline font-mono text-[11px] uppercase tracking-wider">
+              <Sparkles size={13} className={appTheme === 'pearl' ? "text-amber-600" : "text-amber-400"} />
+              <span className="hidden sm:inline font-mono text-[11px] uppercase tracking-wider font-bold">
                 {appTheme === 'pearl' ? 'Pearl White' : 'Charcoal'}
               </span>
             </button>

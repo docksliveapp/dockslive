@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="100%" height="100%">
+  <defs>
+    <!-- Pearl White Medallion Radial Gradient - Authentic Ivory Pearl Luster -->
+    <radialGradient id="pearlMedallionGrad" cx="44%" cy="32%" r="68%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="22%" stop-color="#FAF7F2"/>
+      <stop offset="48%" stop-color="#F3ECE0"/>
+      <stop offset="78%" stop-color="#E8DFCF"/>
+      <stop offset="100%" stop-color="#D9CCBA"/>
+    </radialGradient>
+
+    <!-- Convex Spherical Rim Sheen -->
+    <radialGradient id="rimSpecular" cx="50%" cy="50%" r="50%">
+      <stop offset="90%" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="95%" stop-color="#FFFFFF" stop-opacity="0.6"/>
+      <stop offset="98%" stop-color="#D5C7B2" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#B8A890" stop-opacity="0.9"/>
+    </radialGradient>
+
+    <!-- Deep Executive Slate Charcoal Gradient for MAK Logo -->
+    <linearGradient id="makCharcoalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3A4859"/>
+      <stop offset="50%" stop-color="#2D3A4B"/>
+      <stop offset="100%" stop-color="#1E2837"/>
+    </linearGradient>
+
+    <!-- Gold Foil Gradient for DPL Logo -->
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E5C05B"/>
+      <stop offset="50%" stop-color="#C69E32"/>
+      <stop offset="100%" stop-color="#9A7516"/>
+    </linearGradient>
+
+    <!-- Medallion Soft Drop Shadow -->
+    <filter id="medallionShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#8C7E6A" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- Circular Pearl White Medallion Body -->
+  <g filter="url(#medallionShadow)">
+    <!-- Base Pearl Disk -->
+    <circle cx="500" cy="500" r="475" fill="url(#pearlMedallionGrad)"/>
+    <!-- Outer Rim Highlight Ring -->
+    <circle cx="500" cy="500" r="475" fill="none" stroke="url(#rimSpecular)" stroke-width="12"/>
+    <circle cx="500" cy="500" r="478" fill="none" stroke="#D1C3AD" stroke-width="2"/>
+    <!-- Soft Inner Satin Glow -->
+    <circle cx="470" cy="380" r="340" fill="#FFFFFF" opacity="0.32" filter="blur(30px)"/>
+  </g>
+
+  <!-- Content Group -->
+  <g transform="translate(10, 40)">
+    <!-- ==================== MAK WORDMARK ==================== -->
+    <!-- Letter M -->
+    <path d="M 115,310 
+             L 215,310 
+             L 295,455 
+             L 375,310 
+             L 475,310 
+             L 475,530 
+             L 395,530 
+             L 395,405 
+             L 325,510 
+             L 265,510 
+             L 195,405 
+             L 195,530 
+             L 115,530 
+             Z" 
+          fill="url(#makCharcoalGrad)" />
+
+    <!-- Letter A with Compound Cutout -->
+    <path fill-rule="evenodd" d="M 495,530 
+             L 495,385 
+             C 495,325 540,310 605,310 
+             C 670,310 715,325 715,385 
+             L 715,530 
+             L 635,530 
+             L 635,475 
+             L 575,475 
+             L 575,530 
+             Z
+             M 575,420 
+             L 635,420 
+             L 635,380 
+             C 635,360 625,350 605,350 
+             C 585,350 575,360 575,380 
+             Z" 
+          fill="url(#makCharcoalGrad)" />
+
+    <!-- Letter K -->
+    <path d="M 735,310 
+             L 815,310 
+             L 815,530 
+             L 735,530 
+             Z" 
+          fill="url(#makCharcoalGrad)" />
+    <path d="M 815,430 
+             L 895,310 
+             L 995,310 
+             L 895,445 
+             L 1005,530 
+             L 895,530 
+             L 815,440 
+             Z" 
+          fill="url(#makCharcoalGrad)" />
+
+    <!-- ==================== HORIZONTAL DIVIDER ==================== -->
+    <rect x="115" y="560" width="875" height="5.5" rx="2.75" fill="url(#makCharcoalGrad)" />
+
+    <!-- ==================== GROUP OF COMPANIES ==================== -->
+    <text x="552" y="612" 
+          font-family="'Montserrat', 'Inter', 'Segoe UI', system-ui, sans-serif" 
+          font-size="34" 
+          font-weight="900" 
+          letter-spacing="14" 
+          fill="url(#makCharcoalGrad)" 
+          text-anchor="middle">
+      GROUP OF COMPANIES
+    </text>
+
+    <!-- ==================== 4 SUB-COMPANIES ==================== -->
+    <!-- 1. DPL (Docks Pvt Ltd) -->
+    <g transform="translate(180, 642)">
+      <!-- DPL Wordmark in Gold -->
+      <text x="50" y="45" font-family="'Montserrat', sans-serif" font-size="44" font-weight="900" fill="url(#goldGrad)" letter-spacing="2" text-anchor="middle">DPL</text>
+      <text x="50" y="68" font-family="'Inter', sans-serif" font-size="11.5" font-weight="600" fill="#2D3A4B" text-anchor="middle">Docks (Pvt) Ltd.</text>
+    </g>
+
+    <!-- 2. Truckit (Pvt) Ltd -->
+    <g transform="translate(370, 642)">
+      <!-- Truckit bars in Red and Charcoal -->
+      <rect x="10" y="10" width="22" height="6" rx="3" fill="#2D3A4B"/>
+      <rect x="36" y="10" width="28" height="6" rx="3" fill="#E11D48"/>
+      <rect x="10" y="20" width="30" height="6" rx="3" fill="#2D3A4B"/>
+      <rect x="44" y="20" width="20" height="6" rx="3" fill="#E11D48"/>
+      <rect x="10" y="30" width="16" height="6" rx="3" fill="#2D3A4B"/>
+      <circle cx="34" cy="33" r="3" fill="#2D3A4B"/>
+      <circle cx="48" cy="33" r="3" fill="#E11D48"/>
+      <text x="40" y="68" font-family="'Inter', sans-serif" font-size="11.5" font-weight="600" fill="#2D3A4B" text-anchor="middle">Truckit (Pvt) Ltd.</text>
+    </g>
+
+    <!-- 3. Muhib International (SMC-Pvt) Ltd -->
+    <g transform="translate(540, 638)">
+      <!-- Red circle arc and blue MI -->
+      <circle cx="45" cy="26" r="22" fill="none" stroke="#E11D48" stroke-width="4.5"/>
+      <text x="45" y="34" font-family="'Montserrat', sans-serif" font-size="24" font-weight="900" fill="#1E40AF" text-anchor="middle">MI</text>
+      <text x="45" y="72" font-family="'Inter', sans-serif" font-size="11" font-weight="600" fill="#2D3A4B" text-anchor="middle">Muhib International (SMC-Pvt) Ltd</text>
+    </g>
+
+    <!-- 4. Vantage Shipping Line -->
+    <g transform="translate(735, 638)">
+      <!-- Container Ship icon with blue and cyan -->
+      <rect x="15" y="8" width="45" height="15" fill="none" stroke="#2D3A4B" stroke-width="1.5"/>
+      <path d="M 8,26 L 68,26 L 58,40 L 18,40 Z" fill="#0284C7"/>
+      <path d="M 12,24 C 25,12 45,12 60,24" fill="none" stroke="#EAB308" stroke-width="2"/>
+      <text x="40" y="72" font-family="'Inter', sans-serif" font-size="11" font-weight="600" fill="#2D3A4B" text-anchor="middle">Vantage Shipping Line</text>
+    </g>
+
+    <!-- Fine baseline underline under 4 companies -->
+    <line x1="145" y1="730" x2="845" y2="730" stroke="#B8A890" stroke-width="1.2" stroke-opacity="0.6"/>
+  </g>
+</svg>

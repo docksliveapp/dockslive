@@ -39,9 +39,8 @@
           fill="url(#charcoalGrad)" />
 
     <!-- ==================== LETTER "A" ==================== -->
-    <!-- Signature MAK rounded-arch dome top and horizontal crossbar -->
-    <!-- Outer contour of A with smooth domed head -->
-    <path d="M 465,340 
+    <!-- Signature MAK rounded-arch dome top with transparent inner counter cutout -->
+    <path fill-rule="evenodd" d="M 465,340 
              L 465,150 
              C 465,75 515,50 595,50 
              C 675,50 725,75 725,150 
@@ -50,17 +49,14 @@
              L 630,270 
              L 560,270 
              L 560,340 
-             Z" 
-          fill="url(#charcoalGrad)" />
-
-    <!-- Inner counter cutout of A (rounded arch window) -->
-    <path d="M 560,200 
+             Z
+             M 560,200 
              L 630,200 
              L 630,145 
              C 630,118 618,105 595,105 
              C 572,105 560,118 560,145 
              Z" 
-          fill="#FFFFFF" />
+          fill="url(#charcoalGrad)" />
 
     <!-- ==================== LETTER "K" ==================== -->
     <!-- Left vertical stem and bold diagonal branching arms -->

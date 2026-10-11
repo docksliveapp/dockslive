@@ -10,7 +10,8 @@ import {
   User,
   CheckCircle2,
   ArrowRight,
-  Crown
+  Crown,
+  Sparkles
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { useParentGroup, isUploadedLogo } from '../services/companyService';
@@ -57,6 +58,23 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
   const [draftStep, setDraftStep] = useState(1);
   const [lastLocationView, setLastLocationView] = useState<string | null>(null);
   const [lastLocationRole, setLastLocationRole] = useState<string | null>(null);
+
+  // Luxury Theme: Pearl White vs Charcoal (matching MAK Logo)
+  const [theme, setTheme] = useState<'pearl' | 'charcoal'>(() => {
+    const saved = safeAppStorage.getItem('dpl_app_theme');
+    return (saved === 'charcoal' || saved === 'pearl') ? saved : 'charcoal';
+  });
+
+  useEffect(() => {
+    if (theme === 'pearl') {
+      document.body.classList.remove('theme-charcoal');
+      document.body.classList.add('theme-pearl');
+    } else {
+      document.body.classList.remove('theme-pearl');
+      document.body.classList.add('theme-charcoal');
+    }
+    safeAppStorage.setItem('dpl_app_theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     const regView = safeAppStorage.getItem('dpl_reg_view');
@@ -142,16 +160,44 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950 text-gray-100 p-3 sm:p-6 custom-scrollbar overscroll-contain">
+    <div className={`fixed inset-0 z-50 overflow-y-auto p-3 sm:p-6 custom-scrollbar overscroll-contain transition-colors duration-300 ${
+      theme === 'pearl' ? 'bg-transparent text-slate-900' : 'bg-slate-950 text-gray-100'
+    }`}>
+      {/* Luxury Theme Switcher Button (Top Right) */}
+      <div className="absolute top-3 sm:top-5 right-3 sm:right-6 z-30">
+        <button
+          type="button"
+          onClick={() => setTheme(prev => prev === 'pearl' ? 'charcoal' : 'pearl')}
+          className={`btn-animated-luxury px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-md active:scale-95 ${
+            theme === 'pearl'
+              ? 'bg-gradient-to-r from-amber-100 via-white to-amber-50 text-slate-900 border-amber-300/80 shadow-md ring-1 ring-amber-300/50'
+              : 'bg-slate-900/90 hover:bg-slate-800 text-white border-white/20 shadow-black/30'
+          }`}
+          title={theme === 'pearl' ? "Switch to Charcoal Luxury (Executive Night)" : "Switch to Pearl White (MAK Logo Theme)"}
+        >
+          <Sparkles size={13} className={theme === 'pearl' ? "text-amber-600" : "text-amber-400"} />
+          <span className="font-mono text-[11px] uppercase tracking-wider font-bold">
+            {theme === 'pearl' ? 'Pearl White' : 'Charcoal'}
+          </span>
+        </button>
+      </div>
+
       {/* Background Ambience: Luxury Charcoal & Pearl White Sheen */}
       <div 
-        className="fixed inset-0 pointer-events-none opacity-25"
+        className="fixed inset-0 pointer-events-none transition-all duration-500"
         style={{
-          backgroundImage: `
-            radial-gradient(ellipse 90% 45% at 50% 0%, rgba(241, 245, 249, 0.08) 0%, transparent 60%),
-            radial-gradient(ellipse 70% 50% at 50% 50%, rgba(248, 250, 252, 0.04) 0%, transparent 70%),
-            linear-gradient(180deg, #0B0F17 0%, #111827 40%, #1A2234 75%, #0B0E17 100%)
-          `
+          backgroundImage: theme === 'pearl'
+            ? `
+                radial-gradient(ellipse 90% 55% at 50% 8%, #FFFFFF 0%, rgba(255, 255, 255, 0.95) 28%, #FAF5EC 50%, #EFE7DA 80%, #E3D7C5 100%),
+                radial-gradient(circle at 12% 92%, rgba(255, 255, 255, 0.75) 0%, transparent 45%),
+                radial-gradient(circle at 88% 92%, rgba(226, 215, 197, 0.45) 0%, transparent 45%)
+              `
+            : `
+                radial-gradient(ellipse 90% 45% at 50% 0%, rgba(241, 245, 249, 0.08) 0%, transparent 60%),
+                radial-gradient(ellipse 70% 50% at 50% 50%, rgba(248, 250, 252, 0.04) 0%, transparent 70%),
+                linear-gradient(180deg, #0B0F17 0%, #111827 40%, #1A2234 75%, #0B0E17 100%)
+              `,
+          opacity: theme === 'pearl' ? 1 : 0.25
         }}
       />
 
@@ -167,9 +213,9 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
               />
             ) : (
               <img 
-                src="/logos/mak_group_logo.svg" 
+                src={theme === 'pearl' ? "/logos/mak_pearl_white_emblem.svg" : "/logos/mak_group_logo.svg"} 
                 alt={parentGroup.name || "MAK Group"} 
-                className="w-56 sm:w-64 md:w-72 h-auto max-h-24 sm:max-h-28 object-contain drop-shadow-[0_10px_35px_rgba(0,0,0,0.8)] filter contrast-125" 
+                className="w-56 sm:w-64 md:w-72 h-auto max-h-24 sm:max-h-28 object-contain drop-shadow-[0_10px_35px_rgba(0,0,0,0.25)]" 
               />
             )}
           </div>
@@ -177,38 +223,44 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
 
         {/* Clean Single Enterprise Sign In Card positioned directly underneath logo */}
         <div className="w-full relative z-10 animate-fade-in">
-          <div className="bg-slate-900/95 border border-white/15 rounded-3xl p-6 sm:p-7 shadow-2xl backdrop-blur-xl">
+          <div className={`rounded-3xl p-6 sm:p-7 shadow-2xl backdrop-blur-xl transition-all duration-300 ${
+            theme === 'pearl'
+              ? 'bg-white/92 border border-[#D5CBB9] text-slate-900 shadow-[0_20px_50px_-10px_rgba(120,105,85,0.16)] ring-1 ring-white/80'
+              : 'bg-slate-900/95 border border-white/15 text-white'
+          }`}>
           
           {/* Card Title */}
           <div className="text-center mb-5">
-            <h2 className="text-xl font-bold text-white tracking-wide">
+            <h2 className={`text-xl font-bold tracking-wide ${theme === 'pearl' ? 'text-slate-900' : 'text-white'}`}>
               Enterprise Sign In
             </h2>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className={`text-xs mt-1 ${theme === 'pearl' ? 'text-slate-600' : 'text-slate-400'}`}>
               Enter your credentials to access your company workspace
             </p>
           </div>
 
           {/* Success Notice */}
           {successMessage && (
-            <div className="mb-4 p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-start gap-2">
-              <CheckCircle2 size={16} className="text-emerald-400 shrink-0 mt-0.5" />
-              <span>{successMessage}</span>
+            <div className="mb-4 p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-300 text-xs flex items-start gap-2">
+              <CheckCircle2 size={16} className="text-emerald-500 shrink-0 mt-0.5" />
+              <span className="font-medium">{successMessage}</span>
             </div>
           )}
 
           {/* Error Notice */}
           {errorMessage && (
-            <div className="mb-4 p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
+            <div className="mb-4 p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-600 dark:text-rose-300 text-xs flex items-start gap-2">
               <span className="shrink-0 mt-0.5">⚠️</span>
-              <span className="leading-relaxed">{errorMessage}</span>
+              <span className="leading-relaxed font-medium">{errorMessage}</span>
             </div>
           )}
 
           {/* In-Progress Draft Resumption Notice */}
           {hasActiveDraft && (
-            <div className="mb-4 px-3.5 py-2 rounded-xl bg-white/5 border border-white/20 text-slate-200 text-xs flex items-center gap-2">
-              <Clock size={14} className="shrink-0 text-slate-300" />
+            <div className={`mb-4 px-3.5 py-2 rounded-xl border text-xs flex items-center gap-2 ${
+              theme === 'pearl' ? 'bg-amber-500/10 border-amber-300 text-slate-800' : 'bg-white/5 border-white/20 text-slate-200'
+            }`}>
+              <Clock size={14} className={`shrink-0 ${theme === 'pearl' ? 'text-amber-700' : 'text-slate-300'}`} />
               <span className="truncate">Active case registration draft ({draftCaseNo || `Step ${draftStep}`}) ready to resume.</span>
             </div>
           )}
@@ -216,8 +268,10 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
           {/* Sign In Form */}
           <form onSubmit={handleCredentialsLogin} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-                <User size={13} className="text-slate-400" />
+              <label className={`block text-xs font-semibold uppercase tracking-wider mb-1.5 flex items-center gap-1.5 ${
+                theme === 'pearl' ? 'text-slate-700' : 'text-slate-300'
+              }`}>
+                <User size={13} className={theme === 'pearl' ? 'text-slate-500' : 'text-slate-400'} />
                 <span>User ID / Phone Number</span>
               </label>
               <div className="relative">
@@ -227,7 +281,11 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
                   placeholder="e.g. admin, finance, or phone number"
-                  className="w-full px-4 py-2.5 bg-slate-950 border border-white/15 rounded-xl text-white text-sm focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/20 transition placeholder-gray-500"
+                  className={`w-full px-4 py-2.5 rounded-xl text-sm focus:outline-none transition ${
+                    theme === 'pearl'
+                      ? 'bg-white border border-[#D0C5B0] text-slate-900 placeholder-slate-400 focus:border-slate-800 focus:ring-1 focus:ring-slate-800/20'
+                      : 'bg-slate-950 border border-white/15 text-white placeholder-gray-500 focus:border-white/40 focus:ring-1 focus:ring-white/20'
+                  }`}
                   autoComplete="username"
                   required
                 />
@@ -236,14 +294,18 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <KeyRound size={13} className="text-slate-400" />
+                <label className={`block text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 ${
+                  theme === 'pearl' ? 'text-slate-700' : 'text-slate-300'
+                }`}>
+                  <KeyRound size={13} className={theme === 'pearl' ? 'text-slate-500' : 'text-slate-400'} />
                   <span>Password</span>
                 </label>
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
+                  className={`text-[11px] flex items-center gap-1 cursor-pointer transition-colors ${
+                    theme === 'pearl' ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white'
+                  }`}
                 >
                   {showPassword ? <EyeOff size={13} /> : <Eye size={13} />}
                   <span>{showPassword ? 'Hide' : 'Show'}</span>
@@ -256,7 +318,11 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
-                  className="w-full px-4 py-2.5 bg-slate-950 border border-white/15 rounded-xl text-white text-sm focus:outline-none focus:border-white/40 focus:ring-1 focus:ring-white/20 transition placeholder-gray-500"
+                  className={`w-full px-4 py-2.5 rounded-xl text-sm focus:outline-none transition ${
+                    theme === 'pearl'
+                      ? 'bg-white border border-[#D0C5B0] text-slate-900 placeholder-slate-400 focus:border-slate-800 focus:ring-1 focus:ring-slate-800/20'
+                      : 'bg-slate-950 border border-white/15 text-white placeholder-gray-500 focus:border-white/40 focus:ring-1 focus:ring-white/20'
+                  }`}
                   autoComplete="current-password"
                   required
                 />
@@ -268,7 +334,11 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
               type="submit"
               id="btn-submit-credentials"
               disabled={isLoading}
-              className="w-full mt-2 py-3 px-4 rounded-xl btn-animated-luxury bg-slate-800 hover:bg-slate-700 active:scale-[0.99] text-white font-bold text-sm tracking-wide shadow-xl flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 select-none border border-white/20"
+              className={`w-full mt-2 py-3 px-4 rounded-xl btn-animated-luxury font-bold text-sm tracking-wide shadow-xl flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 select-none ${
+                theme === 'pearl'
+                  ? 'bg-slate-900 hover:bg-slate-800 text-white border border-slate-700 shadow-slate-900/20'
+                  : 'bg-slate-800 hover:bg-slate-700 text-white border border-white/20'
+              }`}
             >
               {isLoading ? (
                 <>
@@ -284,14 +354,18 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
             </button>
 
             {/* Clean Professional New Registration Action */}
-            <div className="pt-3 border-t border-white/10 flex justify-center">
+            <div className={`pt-3 border-t flex justify-center ${theme === 'pearl' ? 'border-slate-200' : 'border-white/10'}`}>
               <button
                 type="button"
                 onClick={() => setIsRegistrationModalOpen(true)}
-                className="w-full py-2.5 px-4 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 hover:text-white border border-white/15 hover:border-white/30 text-xs font-semibold tracking-wide transition cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+                className={`w-full py-2.5 px-4 rounded-xl text-xs font-semibold tracking-wide transition cursor-pointer flex items-center justify-center gap-2 shadow-sm ${
+                  theme === 'pearl'
+                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                    : 'bg-white/5 hover:bg-white/10 text-slate-200 hover:text-white border border-white/15 hover:border-white/30'
+                }`}
               >
                 <span>New Registration</span>
-                <ArrowRight size={14} className="text-slate-400 group-hover:text-white" />
+                <ArrowRight size={14} className={theme === 'pearl' ? 'text-slate-600' : 'text-slate-400'} />
               </button>
             </div>
           </form>
@@ -299,12 +373,14 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
       </div>
 
       {/* Footer Info Notice */}
-      <div className="w-full max-w-xl mx-auto pt-3 pb-2 text-center text-[11px] text-gray-500 relative z-10 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-white/5">
-        <div className="flex items-center gap-2 text-emerald-400/80">
-          <ShieldCheck size={14} className="text-emerald-400" />
-          <span>Authorized Access • 256-bit Encrypted Session</span>
+      <div className={`w-full max-w-xl mx-auto pt-3 pb-2 text-center text-[11px] relative z-10 flex flex-col sm:flex-row items-center justify-between gap-2 border-t ${
+        theme === 'pearl' ? 'text-slate-600 border-slate-300/60' : 'text-gray-500 border-white/5'
+      }`}>
+        <div className="flex items-center gap-2 text-emerald-600">
+          <ShieldCheck size={14} className="text-emerald-600" />
+          <span className="font-medium">Authorized Access • 256-bit Encrypted Session</span>
         </div>
-        <div className="flex items-center gap-2 text-gray-400">
+        <div className={`flex items-center gap-2 ${theme === 'pearl' ? 'text-slate-600' : 'text-gray-400'}`}>
           <span>MAK Group of Companies • Central Operations Cloud</span>
         </div>
       </div>

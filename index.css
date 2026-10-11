@@ -59,17 +59,17 @@ body.theme-charcoal,
 
 body.theme-pearl,
 .theme-pearl {
-  background-color: #0E1420;
+  background-color: #FAF6EE;
   background-image: 
-    radial-gradient(ellipse 90% 50% at 50% 0%, rgba(255, 255, 255, 0.10) 0%, transparent 65%),
-    radial-gradient(ellipse 70% 50% at 50% 45%, rgba(241, 245, 249, 0.05) 0%, transparent 70%),
-    linear-gradient(180deg, #0E1420 0%, #161F30 40%, #1E293B 75%, #0F1622 100%);
+    radial-gradient(ellipse 90% 55% at 50% 8%, #FFFFFF 0%, rgba(255, 255, 255, 0.95) 28%, #FAF5EC 50%, #EFE7DA 80%, #E3D7C5 100%),
+    radial-gradient(circle at 12% 92%, rgba(255, 255, 255, 0.75) 0%, transparent 45%),
+    radial-gradient(circle at 88% 92%, rgba(226, 215, 197, 0.45) 0%, transparent 45%);
   background-attachment: fixed;
   background-size: cover;
-  color: #F8FAFC;
+  color: #1E293B;
 }
 
-/* 2. Executive Frosted Glass ("Glassi") Utilities - Deep Charcoal with Pearl Rim */
+/* 2. Executive Frosted Glass ("Glassi") Utilities - Charcoal vs True Pearl White */
 .glass-card {
   background: rgba(17, 24, 39, 0.88);
   backdrop-filter: blur(18px);
@@ -89,6 +89,17 @@ body.theme-pearl,
   color: #F8FAFC;
 }
 
+/* True Pearl White Glass Card matching MAK Logo Medallion */
+body.theme-pearl .glass-card,
+.theme-pearl .glass-card {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(220, 210, 195, 0.82);
+  box-shadow: 0 18px 40px -10px rgba(120, 105, 85, 0.12), 0 0 1px 1px rgba(255, 255, 255, 0.95) inset;
+  color: #1E293B;
+}
+
 .glass-panel {
   background: rgba(15, 23, 42, 0.82);
   backdrop-filter: blur(14px);
@@ -105,6 +116,16 @@ body.theme-pearl,
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.5);
   color: #F8FAFC;
+}
+
+body.theme-pearl .glass-panel,
+.theme-pearl .glass-panel {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(220, 210, 195, 0.75);
+  box-shadow: 0 10px 25px -8px rgba(120, 105, 85, 0.08);
+  color: #1E293B;
 }
 
 .glass-input {
@@ -134,6 +155,249 @@ body.theme-pearl,
   background: rgba(15, 23, 42, 0.98);
   border-color: rgba(255, 255, 255, 0.45);
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
+}
+
+body.theme-pearl .glass-input,
+.theme-pearl .glass-input {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(205, 195, 178, 0.85);
+  color: #0F172A;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04) inset;
+}
+
+body.theme-pearl .glass-input:focus,
+.theme-pearl .glass-input:focus {
+  background: #FFFFFF;
+  border-color: #2D3748;
+  box-shadow: 0 0 0 2px rgba(45, 55, 72, 0.15);
+  color: #0F172A;
+}
+
+/* ==========================================================================
+   PEARL WHITE THEME DEEP STRUCTURAL OVERRIDES (LOGO MATCHED)
+   ========================================================================== */
+
+/* Header in Pearl White */
+body.theme-pearl header {
+  background: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-bottom: 1px solid rgba(220, 210, 195, 0.85) !important;
+  box-shadow: 0 4px 20px -2px rgba(120, 105, 90, 0.07) !important;
+  color: #1E293B !important;
+}
+
+body.theme-pearl header .bg-slate-800,
+body.theme-pearl header .bg-slate-800\/80,
+body.theme-pearl header .bg-slate-800\/90,
+body.theme-pearl header .bg-slate-900 {
+  background: rgba(248, 244, 236, 0.92) !important;
+  border-color: rgba(215, 205, 190, 0.75) !important;
+  color: #1E293B !important;
+}
+
+body.theme-pearl header .bg-slate-800\/80:hover,
+body.theme-pearl header .bg-slate-700\/80:hover,
+body.theme-pearl header .bg-slate-700:hover {
+  background: rgba(240, 234, 222, 0.95) !important;
+  color: #0F172A !important;
+}
+
+body.theme-pearl header .text-slate-200,
+body.theme-pearl header .text-slate-300,
+body.theme-pearl header .text-white {
+  color: #1E293B !important;
+}
+
+body.theme-pearl header .text-slate-400 {
+  color: #64748B !important;
+}
+
+/* Sidebar in Pearl White */
+body.theme-pearl aside {
+  background: rgba(253, 251, 247, 0.97) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-right: 1px solid rgba(220, 210, 195, 0.85) !important;
+  box-shadow: 4px 0 25px -5px rgba(120, 105, 85, 0.08) !important;
+  color: #1E293B !important;
+}
+
+body.theme-pearl aside .bg-slate-900,
+body.theme-pearl aside .bg-slate-900\/90,
+body.theme-pearl aside .bg-slate-950,
+body.theme-pearl aside .bg-slate-950\/90,
+body.theme-pearl aside .bg-slate-950\/98 {
+  background: rgba(247, 242, 233, 0.95) !important;
+  border-color: rgba(220, 210, 195, 0.7) !important;
+}
+
+body.theme-pearl aside .text-white,
+body.theme-pearl aside .text-slate-100,
+body.theme-pearl aside .text-slate-200,
+body.theme-pearl aside .text-slate-300 {
+  color: #1E293B !important;
+}
+
+body.theme-pearl aside .text-slate-400,
+body.theme-pearl aside .text-gray-400 {
+  color: #64748B !important;
+}
+
+body.theme-pearl aside .border-white\/10,
+body.theme-pearl aside .border-white\/15,
+body.theme-pearl aside .border-white\/20 {
+  border-color: rgba(220, 210, 195, 0.75) !important;
+}
+
+/* Modal Backdrops & Cards in Pearl White */
+body.theme-pearl .fixed.inset-0.bg-black\/60,
+body.theme-pearl .fixed.inset-0.bg-black\/50,
+body.theme-pearl .fixed.inset-0.bg-black\/40,
+body.theme-pearl .fixed.inset-0.bg-black\/30 {
+  background-color: rgba(30, 41, 59, 0.40) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+/* Generic Dark Containers Adapted to Pearl White */
+body.theme-pearl [class*="bg-slate-900"],
+body.theme-pearl [class*="bg-slate-950"] {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(220, 210, 195, 0.8) !important;
+  color: #1E293B;
+}
+
+body.theme-pearl [class*="bg-slate-800"] {
+  background-color: rgba(248, 244, 236, 0.92) !important;
+  border-color: rgba(220, 210, 195, 0.75) !important;
+  color: #1E293B;
+}
+
+body.theme-pearl [class*="border-white/"] {
+  border-color: rgba(215, 205, 190, 0.65) !important;
+}
+
+body.theme-pearl [class*="border-slate-800"],
+body.theme-pearl [class*="border-slate-700"] {
+  border-color: rgba(220, 210, 195, 0.75) !important;
+}
+
+/* Inputs, Selects & Textareas in Pearl White */
+body.theme-pearl input,
+body.theme-pearl select,
+body.theme-pearl textarea {
+  background-color: #FFFFFF !important;
+  border-color: rgba(205, 195, 178, 0.85) !important;
+  color: #0F172A !important;
+}
+
+body.theme-pearl input:focus,
+body.theme-pearl select:focus,
+body.theme-pearl textarea:focus {
+  border-color: #2D3748 !important;
+  box-shadow: 0 0 0 2px rgba(45, 55, 72, 0.15) !important;
+}
+
+body.theme-pearl input::placeholder,
+body.theme-pearl textarea::placeholder {
+  color: #94A3B8 !important;
+}
+
+/* Tables in Pearl White */
+body.theme-pearl table th {
+  background-color: rgba(243, 237, 226, 0.95) !important;
+  color: #334155 !important;
+  border-color: rgba(220, 210, 195, 0.8) !important;
+}
+
+body.theme-pearl table td {
+  border-color: rgba(225, 217, 203, 0.6) !important;
+  color: #1E293B !important;
+}
+
+body.theme-pearl table tbody tr:hover {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+}
+
+/* Typography Hierarchy in Pearl White */
+body.theme-pearl h1,
+body.theme-pearl h2,
+body.theme-pearl h3,
+body.theme-pearl h4,
+body.theme-pearl h5,
+body.theme-pearl h6 {
+  color: #0F172A !important;
+}
+
+body.theme-pearl .text-white {
+  color: #0F172A;
+}
+
+body.theme-pearl .text-slate-100,
+body.theme-pearl .text-slate-200,
+body.theme-pearl .text-slate-300,
+body.theme-pearl .text-gray-100,
+body.theme-pearl .text-gray-200,
+body.theme-pearl .text-gray-300 {
+  color: #334155 !important;
+}
+
+body.theme-pearl .text-slate-400,
+body.theme-pearl .text-gray-400 {
+  color: #64748B !important;
+}
+
+body.theme-pearl .text-slate-500,
+body.theme-pearl .text-gray-500 {
+  color: #475569 !important;
+}
+
+/* Ensure colored status buttons, badges and primary actions preserve white text */
+body.theme-pearl button[class*="bg-blue-"],
+body.theme-pearl button[class*="bg-indigo-"],
+body.theme-pearl button[class*="bg-emerald-"],
+body.theme-pearl button[class*="bg-green-"],
+body.theme-pearl button[class*="bg-red-"],
+body.theme-pearl button[class*="bg-rose-"],
+body.theme-pearl button[class*="bg-amber-"],
+body.theme-pearl button[class*="bg-cyan-"],
+body.theme-pearl button[class*="bg-brand-"],
+body.theme-pearl button[class*="bg-purple-"],
+body.theme-pearl .btn-charcoal-primary,
+body.theme-pearl [class*="bg-gradient-to-r"].text-white,
+body.theme-pearl span[class*="bg-blue-"],
+body.theme-pearl span[class*="bg-emerald-"],
+body.theme-pearl span[class*="bg-green-"],
+body.theme-pearl span[class*="bg-red-"],
+body.theme-pearl span[class*="bg-rose-"],
+body.theme-pearl span[class*="bg-amber-"] {
+  color: #FFFFFF !important;
+}
+
+body.theme-pearl button[class*="bg-blue-"] *,
+body.theme-pearl button[class*="bg-indigo-"] *,
+body.theme-pearl button[class*="bg-emerald-"] *,
+body.theme-pearl button[class*="bg-green-"] *,
+body.theme-pearl button[class*="bg-red-"] *,
+body.theme-pearl button[class*="bg-rose-"] *,
+body.theme-pearl button[class*="bg-brand-"] *,
+body.theme-pearl button[class*="bg-purple-"] *,
+body.theme-pearl .btn-charcoal-primary * {
+  color: #FFFFFF !important;
+}
+
+/* Pearl White Scrollbar Styling */
+body.theme-pearl .custom-scrollbar {
+  scrollbar-color: rgba(180, 165, 145, 0.5) rgba(245, 240, 230, 0.5);
+}
+
+body.theme-pearl .custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(245, 240, 230, 0.6);
+}
+
+body.theme-pearl .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(180, 165, 145, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.8);
 }
 
 /* 3. Luxury Animated Buttons ("Animiated Buttons") */
