@@ -90,13 +90,15 @@ export interface GroupAdminManagementModalProps {
   onClose: () => void;
   currentUserName?: string;
   initialTab?: AdminSettingsTab;
+  isPortalMode?: boolean;
 }
 
 export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps> = ({
   isOpen,
   onClose,
   currentUserName = 'Administrator',
-  initialTab = 'users'
+  initialTab = 'users',
+  isPortalMode = false
 }) => {
   // Normalize initialTab: 'settings' maps to 'logo'
   const getNormalizedTab = (tab: AdminSettingsTab): AdminSettingsTab => {
@@ -741,7 +743,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-fade-in">
+    <div className={isPortalMode ? "w-full h-full flex flex-col overflow-hidden" : "fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto animate-fade-in"}>
       {/* Hidden file input for restore */}
       <input 
         type="file" 
@@ -751,7 +753,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
         className="hidden" 
       />
 
-      <div className="relative w-full max-w-6xl bg-slate-950 border border-amber-500/30 rounded-3xl shadow-[0_0_50px_rgba(245,158,11,0.25)] my-auto flex flex-col max-h-[92vh] overflow-hidden text-gray-100">
+      <div className={isPortalMode ? "w-full h-full flex flex-col bg-slate-950/80 border border-white/10 rounded-2xl overflow-hidden text-gray-100 shadow-2xl" : "relative w-full max-w-6xl bg-slate-950 border border-amber-500/30 rounded-3xl shadow-[0_0_50px_rgba(245,158,11,0.25)] my-auto flex flex-col max-h-[92vh] overflow-hidden text-gray-100"}>
         
         {/* Top Executive Header Bar */}
         <div className="flex items-center justify-between px-5 sm:px-7 py-4 border-b border-white/10 bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-950">

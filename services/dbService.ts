@@ -238,7 +238,8 @@ export async function deleteCaseFromFirestore(caseId: string): Promise<void> {
 // FINANCES
 export function subscribeToFinances(
   onData: (items: FinanceEntry[]) => void,
-  onError?: (err: any) => void
+  onError?: (err: any) => void,
+  options?: { allCompanies?: boolean }
 ) {
   const path = 'finances';
   let cachedDocs: any[] = [];
@@ -248,7 +249,7 @@ export function subscribeToFinances(
     const items: FinanceEntry[] = [];
     let idx = 0;
     cachedDocs.forEach((data) => {
-      if (!matchesActiveCompany(data.companyId, active)) return;
+      if (!options?.allCompanies && !matchesActiveCompany(data.companyId, active)) return;
       const numId = parseNumericDocId(data.id, data._docId || String(idx), idx++);
       items.push({ ...data, id: numId } as FinanceEntry);
     });

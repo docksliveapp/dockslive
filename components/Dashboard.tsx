@@ -9,7 +9,8 @@ import {
   Layers, CheckCircle2, Boxes
 } from 'lucide-react';
 import { LogEntry, CaseStatus, Case, Vehicle, FinanceEntry } from '../types';
-import { subscribeToCases, subscribeToVehicles, subscribeToFinances } from '../services/dbService';
+import { subscribeToCases, subscribeToVehicles, subscribeToFinances, matchesActiveCompany } from '../services/dbService';
+import { CompanyId, GROUP_COMPANIES } from '../services/companyService';
 import { subscribeToActivityLogs, ActivityLogRecord } from '../services/activityLogService';
 import { safeAppStorage } from '../services/storage';
 import { 
@@ -122,9 +123,10 @@ const StatusRow = ({ label, count, color = "text-white", onClick }: any) => (
 
 interface DashboardProps {
     onNavigate: (viewId: string, filterData: any) => void;
+    targetCompanyId?: CompanyId;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
   // Activity Log State
@@ -141,16 +143,28 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   useEffect(() => {
     const unsubCases = subscribeToCases(
-      (cases) => setLiveCases(cases || []),
-      (err) => console.warn("Dashboard case subscription warning:", err)
+      (cases) => {
+        const finalCases = targetCompanyId 
+          ? (cases || []).filter(c => matchesActiveCompany(c.companyId, targetCompanyId))
+          : (cases || []);
+        setLiveCases(finalCases);
+      },
+      (err) => console.warn("Dashboard case subscription warning:", err),
+      { allCompanies: Boolean(targetCompanyId) }
     );
     const unsubVehicles = subscribeToVehicles(
       (vehicles) => setLiveVehicles(vehicles || []),
       (err) => console.warn("Dashboard vehicle subscription warning:", err)
     );
     const unsubFinances = subscribeToFinances(
-      (finances) => setLiveFinances(finances || []),
-      (err) => console.warn("Dashboard finance subscription warning:", err)
+      (finances) => {
+        const finalFinances = targetCompanyId 
+          ? (finances || []).filter(f => matchesActiveCompany(f.companyId, targetCompanyId))
+          : (finances || []);
+        setLiveFinances(finalFinances);
+      },
+      (err) => console.warn("Dashboard finance subscription warning:", err),
+      { allCompanies: Boolean(targetCompanyId) }
     );
     const unsubLogs = subscribeToActivityLogs(
       (records) => setLiveLogs(records || [])
@@ -162,7 +176,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       unsubFinances();
       unsubLogs();
     };
-  }, []);
+  }, [targetCompanyId]);
 
   const filteredLiveLogs = useMemo(() => {
     return liveLogs.filter((item) => {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Search, Package, Truck, Ship, MapPin, Calendar, Clock, CheckCircle2, 
-  AlertCircle, Download, Share2, Copy, Check, ArrowRight, ShieldCheck, 
+  AlertCircle, Download, Share2, Copy, Check, ArrowRight, ArrowLeft, ShieldCheck, 
   FileText, ExternalLink, Anchor, Sparkles, RefreshCw, Box, AlertTriangle,
   QrCode, Printer, Layers, ArrowUpRight
 } from 'lucide-react';
@@ -479,13 +479,23 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
         <div className="max-w-6xl w-full mx-auto px-3 sm:px-6 min-h-16 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
           
           {/* Brand Logo & Title */}
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-brand-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
-              <Package size={20} className="sm:w-[22px] sm:h-[22px]" />
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            {/* Back Button to mak-group.com.pk */}
+            <a
+              href="https://mak-group.com.pk"
+              className="px-2.5 sm:px-3 py-1.5 rounded-lg border border-white/10 bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-sm"
+              title="Back to mak-group.com.pk"
+            >
+              <ArrowLeft size={14} className="text-amber-400 shrink-0" />
+              <span>Back</span>
+            </a>
+
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-amber-500/20 to-brand-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
+              <Package size={18} className="sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 sm:gap-2">
-                <h1 className="text-xs sm:text-base font-bold text-white tracking-wide truncate max-w-[130px] sm:max-w-none">
+                <h1 className="text-xs sm:text-base font-bold text-white tracking-wide truncate max-w-[120px] sm:max-w-none">
                   MAK GROUP
                 </h1>
                 <span className="text-[9px] sm:text-[10px] font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-1.5 sm:px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0">
@@ -546,57 +556,34 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
       {/* Main Container Tracking Body */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-6 sm:space-y-8 min-w-0">
         
-        {/* Hero Search Section */}
-        <section className="text-center space-y-4 max-w-3xl mx-auto pt-2">
+        {/* Clean, Streamlined Tracking Search Section */}
+        <section className="space-y-4 max-w-2xl mx-auto pt-1">
           
-          <div className="inline-flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-900 border border-white/10 px-3.5 py-1.5 rounded-full shadow-sm">
-            <ShieldCheck size={14} className="text-emerald-400" />
-            <span>Universal Status & Customs Clearance Portal • status.makpk.online</span>
+          {/* Back link above search */}
+          <div className="flex items-center justify-between">
+            <a
+              href="https://mak-group.com.pk"
+              className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-amber-400 transition cursor-pointer"
+            >
+              <ArrowLeft size={13} />
+              <span>Back to mak-group.com.pk</span>
+            </a>
+            <span className="text-[11px] text-slate-500 font-mono">status.makpk.online</span>
           </div>
 
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight">
-            Check Container & Shipment Status
-          </h2>
-          
-          <p className="text-xs sm:text-sm text-slate-300 max-w-xl mx-auto leading-relaxed">
-            Enter your <strong>Container Number</strong>, <strong>Bill of Lading (B/L)</strong>, or <strong>Case Reference</strong> to view real-time operations, gate passes, and incomplete workflows.
-          </p>
-
-          <p className="text-[12px] text-amber-300/90 font-medium">
-            (Displays real-time container status, cargo milestones, and pending operations — internal financial data is securely excluded)
-          </p>
-
-          {/* Dual / Single Container Input Search Controls */}
-          <div className="flex items-center justify-center gap-2 mb-3">
-            <button
-              type="button"
-              onClick={() => setIsDualMode(false)}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                !isDualMode 
-                  ? 'bg-amber-500 text-slate-950 font-bold shadow-md' 
-                  : 'bg-slate-900 text-slate-400 hover:text-white border border-white/10'
-              }`}
-            >
-              Single Identifier Search
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsDualMode(true)}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
-                isDualMode 
-                  ? 'bg-amber-500 text-slate-950 font-bold shadow-md' 
-                  : 'bg-slate-900 text-slate-400 hover:text-white border border-white/10'
-              }`}
-            >
-              <Package size={13} />
-              <span>Track 2 Containers (Dual Search)</span>
-            </button>
+          <div className="text-center space-y-1.5">
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              Container Tracking
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-400">
+              Enter Container Number, B/L, or Case Reference to check status.
+            </p>
           </div>
 
           {/* Unified Automatic Identifier Search Input */}
           <form onSubmit={handleSearchSubmit} className="pt-1">
-            <div className="bg-slate-900/90 p-2.5 rounded-2xl border border-white/15 shadow-2xl focus-within:border-amber-400/60 focus-within:ring-2 focus-within:ring-amber-400/20 transition-all space-y-2">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <div className="bg-slate-900/90 p-2.5 rounded-2xl border border-white/15 shadow-xl focus-within:border-amber-400/60 focus-within:ring-2 focus-within:ring-amber-400/20 transition-all space-y-2">
+              <div className={`grid ${isDualMode ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'} gap-2`}>
                 {/* Input 1 */}
                 <div className="relative flex items-center bg-slate-950/70 rounded-xl border border-white/10">
                   <Search size={18} className="absolute left-3.5 text-slate-400 shrink-0" />
@@ -604,7 +591,7 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
                     type="text"
                     value={containerInput1}
                     onChange={(e) => setContainerInput1(e.target.value)}
-                    placeholder={isDualMode ? "Container #1 (e.g. WHSU5957558)..." : "Enter Container No, B/L, or Case Ref (Auto-Detect)..."}
+                    placeholder={isDualMode ? "Container #1 (e.g. WHSU5957558)..." : "Enter Container No, B/L, or Case Ref..."}
                     className="w-full bg-transparent pl-11 pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none font-mono tracking-wide"
                   />
                   {containerInput1 && (
@@ -618,8 +605,8 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
                   )}
                 </div>
 
-                {/* Input 2 (Active in Dual Mode or quick expandable) */}
-                {isDualMode ? (
+                {/* Input 2 (Active in Dual Mode) */}
+                {isDualMode && (
                   <div className="relative flex items-center bg-slate-950/70 rounded-xl border border-amber-500/30">
                     <Package size={18} className="absolute left-3.5 text-amber-400 shrink-0" />
                     <input
@@ -639,78 +626,62 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
                       </button>
                     )}
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIsDualMode(true)}
-                    className="hidden md:flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl border border-dashed border-white/20 text-slate-400 hover:text-amber-300 hover:border-amber-400/40 text-xs transition cursor-pointer"
-                  >
-                    <span>+ Add 2nd Container Number</span>
-                  </button>
                 )}
               </div>
 
-              {/* Submit Button */}
-              <div className="flex justify-end pt-1">
+              {/* Controls bar: toggle 2nd container + Track button */}
+              <div className="flex items-center justify-between pt-1 px-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isDualMode) {
+                      setIsDualMode(false);
+                      setContainerInput2('');
+                    } else {
+                      setIsDualMode(true);
+                    }
+                  }}
+                  className="text-xs text-slate-400 hover:text-amber-300 transition cursor-pointer flex items-center gap-1"
+                >
+                  {isDualMode ? '− Single container' : '+ Track 2nd container'}
+                </button>
+
                 <button
                   type="submit"
-                  className="w-full sm:w-auto py-2.5 px-6 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-98 cursor-pointer shrink-0"
+                  className="py-2.5 px-6 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-98 cursor-pointer shrink-0"
                 >
-                  <span>Check Status</span>
-                  <ArrowRight size={16} />
+                  <Search size={15} />
+                  <span>Search</span>
                 </button>
               </div>
             </div>
           </form>
 
-          {/* Quick Examples */}
-          <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-xs text-slate-400">
-            <span className="text-[11px] text-slate-500">Quick Test Samples:</span>
-            
-            {/* Dual Container Track sample */}
-            <button
-              type="button"
-              onClick={() => handleQuickExample('WHSU5957558', 'TCLU8492015')}
-              className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 transition-colors font-mono text-[11px] flex items-center gap-1 cursor-pointer"
-              title="Track 2 Containers together (Dual Search)"
-            >
-              <Package size={12} className="text-amber-400" />
-              <span>Track 2 Containers (WHSU5957558 & TCLU8492015)</span>
-            </button>
-
-            {/* Repeat container example */}
+          {/* Minimal Examples */}
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-xs text-slate-500">
+            <span>Examples:</span>
             <button
               type="button"
               onClick={() => handleQuickExample('WHSU5957558')}
-              className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-white/10 transition-colors font-mono text-[11px] flex items-center gap-1 cursor-pointer"
-              title="Container with 2 visits (1 year ago + Current 2026 shipment)"
+              className="text-slate-400 hover:text-amber-300 font-mono transition cursor-pointer"
             >
-              <span>WHSU5957558 (2 Voyages)</span>
+              WHSU5957558
             </button>
-
+            <span>·</span>
             <button
               type="button"
               onClick={() => handleQuickExample('TCLU8492015')}
-              className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-white/10 transition-colors font-mono text-[11px] cursor-pointer"
-              title="Operated by Truckit (Pvt.) Ltd"
+              className="text-slate-400 hover:text-amber-300 font-mono transition cursor-pointer"
             >
-              TCLU8492015 (Truckit)
+              TCLU8492015
             </button>
-
+            <span>·</span>
             <button
               type="button"
               onClick={() => handleQuickExample('027G657324')}
-              className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-white/10 transition-colors font-mono text-[11px] cursor-pointer"
+              className="text-slate-400 hover:text-amber-300 font-mono transition cursor-pointer"
             >
-              027G657324 (B/L)
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickExample('DPL-26-0001')}
-              className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-white/10 transition-colors font-mono text-[11px] cursor-pointer"
-            >
-              DPL-26-0001 (Case)
+              027G657324
             </button>
           </div>
         </section>

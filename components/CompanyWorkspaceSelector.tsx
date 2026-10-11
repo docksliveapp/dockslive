@@ -153,6 +153,7 @@ interface CompanyWorkspaceSelectorProps {
   isGlobalAdmin?: boolean;
   currentRole?: UserRole;
   onSwitchPortal?: (role: UserRole, targetView: string) => void;
+  onOpenGroupAdminPortal?: () => void;
 }
 
 export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> = ({
@@ -165,7 +166,8 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   allowedCompanies,
   isGlobalAdmin,
   currentRole,
-  onSwitchPortal
+  onSwitchPortal,
+  onOpenGroupAdminPortal
 }) => {
   const { companyId: currentActiveId } = useActiveCompany();
   const { parentGroup } = useParentGroup();
@@ -415,11 +417,17 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
           {effectiveIsGlobalAdmin ? (
             <button
               type="button"
-              onClick={() => openAdminModal('users')}
+              onClick={() => {
+                if (onOpenGroupAdminPortal) {
+                  onOpenGroupAdminPortal();
+                } else {
+                  openAdminModal('users');
+                }
+              }}
               className="group relative px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold tracking-wide transition-all duration-300 cursor-pointer overflow-hidden border border-white/20 bg-slate-800/90 hover:bg-slate-700/90 text-slate-100 shadow-md hover:shadow-lg transform hover:scale-105 active:scale-95 flex items-center gap-2"
-              title="Open Group Admin Settings (Users, Logo Branding & Backup)"
+              title="Open Group Admin Executive Portal & Settings"
             >
-              <Crown size={14} className="text-slate-300 group-hover:text-white shrink-0" />
+              <Crown size={14} className="text-amber-400 group-hover:text-amber-300 shrink-0" />
               <span className="font-sans font-semibold">Group Admin Settings</span>
             </button>
           ) : (

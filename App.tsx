@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FolderKanban, Users, Truck, Settings, FileText, Bell, LogOut, Menu,
   X, Check, AlertCircle, AlertTriangle, Info, Trash2, Loader2, Maximize2, Minimize2, Upload,
   ShieldCheck, UserCircle, RefreshCw, HardDrive, MapPin, FolderArchive, Building2, ChevronDown, Package, ShieldAlert,
-  Sparkles
+  Sparkles, Crown
 } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import CaseManagement from './components/CaseManagement';
@@ -17,6 +17,7 @@ import GoogleDriveManager from './components/GoogleDriveManager';
 import SplashScreen from './components/SplashScreen';
 import LoginModeSelection, { SelectedModePayload } from './components/LoginModeSelection';
 import CompanyWorkspaceSelector from './components/CompanyWorkspaceSelector';
+import GroupAdminPortal from './components/GroupAdminPortal';
 import { useActiveCompany, setActiveCompany, isUploadedLogo, getCompanyUploadedLogo, getCompanyLogoUrl, CompanyId } from './services/companyService';
 import GoldenAmountWidget from './components/GoldenAmountWidget';
 import ClientPortal from './components/ClientPortal';
@@ -280,6 +281,8 @@ const App: React.FC = () => {
   const [isGlobalAdmin, setIsGlobalAdmin] = useState<boolean>(() => {
     return safeAppStorage.getItem('dpl_is_global_admin') === 'true';
   });
+  const [isGroupAdminPortalOpen, setIsGroupAdminPortalOpen] = useState<boolean>(false);
+  const effectiveIsGlobalAdmin = isGlobalAdmin || currentRole === UserRole.ADMIN;
   const [allowedCompanies, setAllowedCompanies] = useState<string[]>(() => {
     const saved = safeAppStorage.getItem('dpl_allowed_companies');
     if (saved) {
@@ -832,6 +835,24 @@ const App: React.FC = () => {
     );
   }
 
+  // Group Admin Executive Portal (Full dedicated portal for Main Admin with 4 companies live dashboards & total consolidated data)
+  if (isGroupAdminPortalOpen) {
+    return (
+      <ErrorBoundary>
+        <GroupAdminPortal 
+          currentUserName={safeAppStorage.getItem('dpl_current_user_name') || firebaseUser?.displayName || 'Main Admin'}
+          onExitPortal={() => setIsGroupAdminPortalOpen(false)}
+          onSignOut={handleSignOut}
+          onSelectCompanyWorkspace={(selectedId) => {
+            setActiveCompany(selectedId);
+            setIsGroupAdminPortalOpen(false);
+            setShowCompanySelection(false);
+          }}
+        />
+      </ErrorBoundary>
+    );
+  }
+
   if (showCompanySelection) {
     return (
       <ErrorBoundary>
@@ -840,8 +861,9 @@ const App: React.FC = () => {
           userRoleTitle={currentDesignation || (currentRole as string)}
           onSignOut={handleSignOut}
           allowedCompanies={allowedCompanies}
-          isGlobalAdmin={isGlobalAdmin}
+          isGlobalAdmin={effectiveIsGlobalAdmin}
           currentRole={currentRole}
+          onOpenGroupAdminPortal={() => setIsGroupAdminPortalOpen(true)}
           onSwitchPortal={(role, targetView) => {
             setCurrentRole(role);
             setActiveView(targetView);
@@ -916,8 +938,12 @@ const App: React.FC = () => {
               userName={safeAppStorage.getItem('dpl_current_user_name') || 'Staff User'}
               userRoleTitle={currentDesignation || (currentRole as string)}
               allowedCompanies={allowedCompanies}
-              isGlobalAdmin={isGlobalAdmin}
+              isGlobalAdmin={effectiveIsGlobalAdmin}
               currentRole={currentRole}
+              onOpenGroupAdminPortal={() => {
+                setIsCompanyModalOpen(false);
+                setIsGroupAdminPortalOpen(true);
+              }}
               onSwitchPortal={(role, targetView) => {
                 setCurrentRole(role);
                 setActiveView(targetView);
@@ -1101,6 +1127,31 @@ const App: React.FC = () => {
           </button>
         </div>
 
+        {/* Group Admin Executive Portal Button in Sidebar */}
+        {effectiveIsGlobalAdmin && (
+          <div className="w-full px-3 pb-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setMobileSidebarOpen(false);
+                setIsGroupAdminPortalOpen(true);
+              }}
+              className="w-full flex items-center justify-between gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-950/40 via-amber-900/30 to-slate-900/90 hover:from-amber-900/50 hover:to-slate-800/90 border border-amber-500/30 text-amber-200 transition-all text-xs font-bold cursor-pointer group shadow-sm active:scale-95"
+              title="Open Group Admin Executive Portal (Consolidated Total Data & Settings)"
+            >
+              <div className="flex items-center gap-2 truncate">
+                <Crown size={14} className="text-amber-400 shrink-0" />
+                <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} truncate text-[11px]`}>
+                  Group Admin Portal
+                </span>
+              </div>
+              <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold uppercase font-mono`}>
+                Executive
+              </span>
+            </button>
+          </div>
+        )}
+
         {/* Navigation items (Strictly Cases & Finance only for Client) */}
         <nav className="flex-1 overflow-y-auto py-2 space-y-1 px-3 custom-scrollbar">
           {currentNavItems.map((item, idx) => (
@@ -1260,6 +1311,19 @@ const App: React.FC = () => {
               </button>
             </div>
 
+            {/* Group Admin Executive Portal Button in Header */}
+            {effectiveIsGlobalAdmin && (
+              <button
+                type="button"
+                onClick={() => setIsGroupAdminPortalOpen(true)}
+                className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-amber-600/30 to-amber-700/20 hover:from-amber-500/30 hover:to-amber-700/30 border border-amber-400/40 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
+                title="Open Group Admin Executive Portal (Consolidated Total Data & Settings)"
+              >
+                <Crown size={13} className="text-amber-400" />
+                <span className="hidden sm:inline font-mono uppercase text-[11px] tracking-wider font-bold">Admin Portal</span>
+              </button>
+            )}
+
             {/* Luxury Business Class Theme Toggle Button (Pearl White vs Charcoal Luxury) */}
             <button
               type="button"
@@ -1351,8 +1415,12 @@ const App: React.FC = () => {
             userName={safeAppStorage.getItem('dpl_current_user_name') || 'Staff User'}
             userRoleTitle={currentDesignation || (currentRole as string)}
             allowedCompanies={allowedCompanies}
-            isGlobalAdmin={isGlobalAdmin}
+            isGlobalAdmin={effectiveIsGlobalAdmin}
             currentRole={currentRole}
+            onOpenGroupAdminPortal={() => {
+              setIsCompanyModalOpen(false);
+              setIsGroupAdminPortalOpen(true);
+            }}
             onSwitchPortal={(role, targetView) => {
               setCurrentRole(role);
               setActiveView(targetView);

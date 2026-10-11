@@ -567,13 +567,23 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
         <div className="max-w-6xl w-full mx-auto px-3 sm:px-6 min-h-16 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
           
           {/* Brand Logo & Title */}
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-brand-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
-              <Truck size={20} className="sm:w-[22px] sm:h-[22px]" />
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            {/* Back Button to mak-group.com.pk */}
+            <a
+              href="https://mak-group.com.pk"
+              className="px-2.5 sm:px-3 py-1.5 rounded-lg border border-white/10 bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-sm"
+              title="Back to mak-group.com.pk"
+            >
+              <ArrowLeft size={14} className="text-amber-400 shrink-0" />
+              <span>Back</span>
+            </a>
+
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-amber-500/20 to-brand-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
+              <Truck size={18} className="sm:w-5 sm:h-5" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 sm:gap-2">
-                <h1 className="text-xs sm:text-base font-bold text-white tracking-wide truncate max-w-[130px] sm:max-w-none">
+                <h1 className="text-xs sm:text-base font-bold text-white tracking-wide truncate max-w-[120px] sm:max-w-none">
                   MAK GROUP
                 </h1>
                 <span className="text-[9px] sm:text-[10px] font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-1.5 sm:px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0">
@@ -626,88 +636,96 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
       {/* Main Vehicle Verification Portal View */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-6 sm:space-y-8 min-w-0">
         
-        {/* Hero Search Section */}
-        <section className="text-center space-y-4 max-w-3xl mx-auto pt-2">
+        {/* Clean, Streamlined Vehicle Search Section */}
+        <section className="space-y-4 max-w-2xl mx-auto pt-1">
           
-          <div className="inline-flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-900 border border-white/10 px-3.5 py-1.5 rounded-full shadow-sm">
-            <ShieldCheck size={14} className="text-emerald-400" />
-            <span>Public Fleet & Transporter Vehicle Verification Portal • vehicle.makpk.online</span>
+          {/* Back link above search */}
+          <div className="flex items-center justify-between">
+            <a
+              href="https://mak-group.com.pk"
+              className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-amber-400 transition cursor-pointer"
+            >
+              <ArrowLeft size={13} />
+              <span>Back to mak-group.com.pk</span>
+            </a>
+            <span className="text-[11px] text-slate-500 font-mono">vehicle.makpk.online</span>
           </div>
 
-          <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight">
-            Check Vehicle Status & Fleet History
-          </h2>
-          
-          <p className="text-xs sm:text-sm text-slate-300 max-w-xl mx-auto leading-relaxed">
-            Enter any <strong>Vehicle Registration Number</strong> to verify registration date, bi-annual renewals, trip count, validity status, and NOC de-registration certificate.
-          </p>
-
-          <p className="text-[12px] text-amber-300/90 font-medium">
-            (Complete fleet dossier for transporters, brokers, and clients — registration, renewals, trips, expiry, and NOC status)
-          </p>
+          <div className="text-center space-y-1.5">
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              Vehicle Status
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-400">
+              Enter Vehicle Registration Number to check fleet validity and status.
+            </p>
+          </div>
 
           {/* Search Form */}
-          <form onSubmit={handleSearchSubmit} className="pt-2">
-            <div className="relative flex flex-col sm:flex-row items-stretch gap-2 bg-slate-900/90 p-2 rounded-2xl border border-white/15 shadow-2xl focus-within:border-amber-400/60 focus-within:ring-2 focus-within:ring-amber-400/20 transition-all">
+          <form onSubmit={handleSearchSubmit} className="pt-1">
+            <div className="relative flex flex-col sm:flex-row items-stretch gap-2 bg-slate-900/90 p-2 rounded-2xl border border-white/15 shadow-xl focus-within:border-amber-400/60 focus-within:ring-2 focus-within:ring-amber-400/20 transition-all">
               <div className="relative flex-1 flex items-center">
-                <Search size={20} className="absolute left-4 text-slate-400 shrink-0" />
+                <Search size={18} className="absolute left-3.5 text-slate-400 shrink-0" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Enter Vehicle Plate (e.g. TLB-892, P-9912, KHI-7721, JU-4412)..."
-                  className="w-full bg-transparent pl-12 pr-4 py-3 text-sm text-white placeholder-slate-500 outline-none font-mono tracking-wide"
+                  placeholder="Enter Vehicle Plate (e.g. TLB-892, P-9912)..."
+                  className="w-full bg-transparent pl-11 pr-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none font-mono tracking-wide"
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => { setSearchQuery(''); setActiveSearch(''); setSelectedVehicle(null); }}
+                    className="pr-3 text-slate-500 hover:text-white text-xs cursor-pointer"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
 
               <button
                 type="submit"
-                className="py-3 px-6 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-98 cursor-pointer shrink-0"
+                className="py-2.5 px-6 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-98 cursor-pointer shrink-0"
               >
-                <span>Search Fleet</span>
-                <ArrowRight size={16} />
+                <Search size={15} />
+                <span>Search</span>
               </button>
             </div>
           </form>
 
-          {/* Quick Examples */}
-          <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-xs text-slate-400">
-            <span className="text-[11px] text-slate-500">Quick Test Samples:</span>
-            
+          {/* Minimal Examples */}
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-xs text-slate-500">
+            <span>Examples:</span>
             <button
               type="button"
               onClick={() => handleQuickExample('TLB-892')}
-              className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 transition-colors font-mono text-[11px] flex items-center gap-1 cursor-pointer"
-              title="Active Bonded Vehicle with 4 renewals & 24 trips"
+              className="text-slate-400 hover:text-amber-300 font-mono transition cursor-pointer"
             >
-              <span>TLB-892 (Active • 24 Trips)</span>
+              TLB-892
             </button>
-
+            <span>·</span>
             <button
               type="button"
               onClick={() => handleQuickExample('P-9912')}
-              className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-white/10 transition-colors font-mono text-[11px] cursor-pointer"
-              title="Afghan Transit Carrier under Truckit"
+              className="text-slate-400 hover:text-amber-300 font-mono transition cursor-pointer"
             >
-              P-9912 (Truckit)
+              P-9912
             </button>
-
+            <span>·</span>
             <button
               type="button"
               onClick={() => handleQuickExample('KHI-7721')}
-              className="px-2.5 py-1 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30 transition-colors font-mono text-[11px] flex items-center gap-1 cursor-pointer"
-              title="Demonstrates Deregistered / NOC Issued Vehicle"
+              className="text-slate-400 hover:text-amber-300 font-mono transition cursor-pointer"
             >
-              <span>KHI-7721 (NOC Issued)</span>
+              KHI-7721
             </button>
-
+            <span>·</span>
             <button
               type="button"
               onClick={() => handleQuickExample('JU-4412')}
-              className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-colors font-mono text-[11px] flex items-center gap-1 cursor-pointer"
-              title="Demonstrates Expired Vehicle"
+              className="text-slate-400 hover:text-amber-300 font-mono transition cursor-pointer"
             >
-              <span>JU-4412 (Expired)</span>
+              JU-4412
             </button>
           </div>
         </section>
