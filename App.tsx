@@ -664,7 +664,7 @@ const App: React.FC = () => {
             const lastLocationRole = safeAppStorage.getItem('dpl_last_location_role');
 
             let targetView = payload.targetView;
-            if (lastLocationView && (lastLocationRole === payload.role || payload.role === UserRole.ADMIN) && lastLocationView !== 'settings') {
+            if (payload.role !== UserRole.ADMIN && lastLocationView && lastLocationRole === payload.role && lastLocationView !== 'settings') {
               targetView = lastLocationView;
             }
 

@@ -11,7 +11,8 @@ import {
   CheckCircle2,
   ArrowRight,
   Crown,
-  Sparkles
+  Sparkles,
+  RotateCcw
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { useParentGroup, isUploadedLogo } from '../services/companyService';
@@ -52,10 +53,6 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
 
-  // Workflow & Draft Resumption Detection
-  const [hasActiveDraft, setHasActiveDraft] = useState(false);
-  const [draftCaseNo, setDraftCaseNo] = useState('');
-  const [draftStep, setDraftStep] = useState(1);
   const [lastLocationView, setLastLocationView] = useState<string | null>(null);
   const [lastLocationRole, setLastLocationRole] = useState<string | null>(null);
 
@@ -77,18 +74,9 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
   }, [theme]);
 
   useEffect(() => {
-    const regView = safeAppStorage.getItem('dpl_reg_view');
-    const caseNo = safeAppStorage.getItem('dpl_reg_caseno') || '';
-    const stepVal = parseInt(safeAppStorage.getItem('dpl_reg_step') || '1', 10);
     const lastView = safeAppStorage.getItem('dpl_last_location_view');
     const lastRole = safeAppStorage.getItem('dpl_last_location_role');
-
-    if (regView === 'register') {
-      setHasActiveDraft(true);
-      setDraftCaseNo(caseNo);
-      setDraftStep(stepVal);
-    }
-    if (lastView) setLastLocationView(lastView);
+    if (lastView && lastView !== 'settings') setLastLocationView(lastView);
     if (lastRole) setLastLocationRole(lastRole);
   }, []);
 
@@ -133,12 +121,10 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
         targetView = 'finance';
       } else if (userRoles.includes(UserRole.VEHICLE_MANAGER) || userRole === UserRole.TRANSPORTER) {
         targetView = 'vehicles';
-      } else if (hasActiveDraft && (userRoles.includes(UserRole.ADMIN) || userRoles.includes(UserRole.OPERATIONS_MANAGER))) {
+      } else if (userRoles.includes(UserRole.OPERATIONS_MANAGER) || userRoles.includes(UserRole.OFFICE_STAFF)) {
         targetView = 'cases';
       } else if (lastLocationRole === userRole && lastLocationView) {
         targetView = lastLocationView;
-      } else if (userRoles.includes(UserRole.OPERATIONS_MANAGER) || userRoles.includes(UserRole.OFFICE_STAFF)) {
-        targetView = 'cases';
       }
 
       onSelectMode({
@@ -156,6 +142,29 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
       setErrorMessage(err?.message || 'Invalid User ID or Password. Please try again.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleEmergencyReset = async () => {
+    if (window.confirm('Clear local app cookies & cache and reload latest version? This resolves any stuck screens after updates.')) {
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const reg of regs) {
+            await reg.unregister();
+          }
+        }
+        if (typeof caches !== 'undefined') {
+          const keys = await caches.keys();
+          for (const key of keys) {
+            await caches.delete(key);
+          }
+        }
+        safeAppStorage.clear();
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch (_) {}
+      window.location.reload();
     }
   };
 
@@ -252,16 +261,6 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
             <div className="mb-4 p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-600 dark:text-rose-300 text-xs flex items-start gap-2">
               <span className="shrink-0 mt-0.5">⚠️</span>
               <span className="leading-relaxed font-medium">{errorMessage}</span>
-            </div>
-          )}
-
-          {/* In-Progress Draft Resumption Notice */}
-          {hasActiveDraft && (
-            <div className={`mb-4 px-3.5 py-2 rounded-xl border text-xs flex items-center gap-2 ${
-              theme === 'pearl' ? 'bg-amber-500/10 border-amber-300 text-slate-800' : 'bg-white/5 border-white/20 text-slate-200'
-            }`}>
-              <Clock size={14} className={`shrink-0 ${theme === 'pearl' ? 'text-amber-700' : 'text-slate-300'}`} />
-              <span className="truncate">Active case registration draft ({draftCaseNo || `Step ${draftStep}`}) ready to resume.</span>
             </div>
           )}
 
@@ -372,7 +371,7 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
         </div>
       </div>
 
-      {/* Footer Info Notice */}
+      {/* Footer Info Notice & Emergency Reset */}
       <div className={`w-full max-w-xl mx-auto pt-3 pb-2 text-center text-[11px] relative z-10 flex flex-col sm:flex-row items-center justify-between gap-2 border-t ${
         theme === 'pearl' ? 'text-slate-600 border-slate-300/60' : 'text-gray-500 border-white/5'
       }`}>
@@ -380,8 +379,21 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
           <ShieldCheck size={14} className="text-emerald-600" />
           <span className="font-medium">Authorized Access • 256-bit Encrypted Session</span>
         </div>
-        <div className={`flex items-center gap-2 ${theme === 'pearl' ? 'text-slate-600' : 'text-gray-400'}`}>
-          <span>MAK Group of Companies • Central Operations Cloud</span>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleEmergencyReset}
+            className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded transition hover:underline cursor-pointer ${
+              theme === 'pearl' ? 'text-slate-500 hover:text-slate-800' : 'text-gray-400 hover:text-gray-200'
+            }`}
+            title="Click if app hangs after updates to clear stale browser cache"
+          >
+            <RotateCcw size={10} />
+            <span>Reset Cache</span>
+          </button>
+          <div className={`flex items-center gap-2 ${theme === 'pearl' ? 'text-slate-600' : 'text-gray-400'}`}>
+            <span>MAK Group Central Operations Cloud</span>
+          </div>
         </div>
       </div>
       </div>

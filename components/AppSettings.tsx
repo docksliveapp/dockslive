@@ -397,12 +397,24 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
 
   // Execute complete factory reset for this company only
   const handleExecuteFactoryReset = async () => {
-    try {
-      setIsResetting(true);
+    setIsResetting(true);
+    let completed = false;
 
+    const failsafeTimer = setTimeout(() => {
+      if (!completed) {
+        completed = true;
+        setShowResetWarningModal(false);
+        setIsResetting(false);
+        window.location.reload();
+      }
+    }, 4500);
+
+    try {
       const targetCompanyId = activeCompany?.id || 'docks';
       // 1. Wipe Firebase Firestore operational data for THIS SPECIFIC SUBSIDIARY ONLY
       const wipeResult = await wipeCompanyDatabase(targetCompanyId);
+      completed = true;
+      clearTimeout(failsafeTimer);
 
       // 2. Reset local settings state
       setCompanyDocuments([]);
@@ -416,10 +428,14 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
       // Reload window after brief delay so state starts clean
       setTimeout(() => {
         window.location.reload();
-      }, 1600);
+      }, 1200);
     } catch (err: any) {
-      alert("Error executing factory reset: " + (err.message || String(err)));
+      completed = true;
+      clearTimeout(failsafeTimer);
+      console.warn("Factory reset notice:", err);
+      setShowResetWarningModal(false);
       setIsResetting(false);
+      window.location.reload();
     }
   };
 

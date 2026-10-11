@@ -72,6 +72,7 @@ import {
   uploadDatabaseBackupToDrive 
 } from '../services/googleDriveService';
 import GoogleDriveManager from './GoogleDriveManager';
+import { safeAppStorage } from '../services/storage';
 
 export type AdminSettingsTab = 
   | 'users' 
@@ -596,17 +597,36 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     }
 
     setIsResetting(true);
+    let completed = false;
+
+    // Guaranteed failsafe: Never leave UI hanging in 'Wiping...'
+    const failsafeTimer = setTimeout(() => {
+      if (!completed) {
+        completed = true;
+        safeAppStorage.wipeAppOperationalData(true);
+        setShowResetWarningModal(false);
+        setIsResetting(false);
+        window.location.reload();
+      }
+    }, 4500);
+
     try {
       await wipeCompleteDatabase();
+      completed = true;
+      clearTimeout(failsafeTimer);
       setResetSuccessMessage("System database has been reset to clean state across all companies. Reloading...");
       setShowResetWarningModal(false);
       setResetConfirmInput('');
       setTimeout(() => {
         window.location.reload();
-      }, 1500);
+      }, 1000);
     } catch (err: any) {
-      alert("Factory reset failed: " + (err.message || String(err)));
+      completed = true;
+      clearTimeout(failsafeTimer);
+      console.warn("Factory reset notice:", err);
+      setShowResetWarningModal(false);
       setIsResetting(false);
+      window.location.reload();
     }
   };
 

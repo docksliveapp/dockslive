@@ -8,6 +8,7 @@ import { Case, Container, CaseStatus, UserRole } from '../types';
 import { downloadCasePdf, downloadCustomsDeliveryOrderPdf, downloadLoadingBillPdf } from '../services/pdfExportService';
 import { useBranding } from '../services/brandingService';
 import { getCategoryWorkflow, getWorkflowStepIndex, isDestinationUnloadedAndGateOut } from '../services/workflowConfig';
+import { updateCaseInFirestore } from '../services/dbService';
 
 interface FullCaseDetailModalProps {
   isOpen: boolean;
@@ -31,6 +32,13 @@ export const FullCaseDetailModal: React.FC<FullCaseDetailModalProps> = ({
   const { customLogo, companyName } = useBranding();
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [downloadingDoc, setDownloadingDoc] = useState<string | null>(null);
+  const [chargesList, setChargesList] = useState<any[]>(() => targetCase?.charges || []);
+
+  React.useEffect(() => {
+    if (targetCase?.charges) {
+      setChargesList(targetCase.charges);
+    }
+  }, [targetCase]);
 
   if (!isOpen || !targetCase) return null;
 
@@ -301,7 +309,7 @@ export const FullCaseDetailModal: React.FC<FullCaseDetailModalProps> = ({
                 <span>Itemized Billing & Port Charges</span>
               </h4>
               <span className="text-emerald-400 font-mono font-bold text-sm">
-                Total: PKR {(targetCase.charges || []).reduce((sum, ch) => sum + (Number(ch.amount) || 0), 0).toLocaleString()}
+                Total: PKR {(chargesList || []).reduce((sum, ch) => sum + (Number(ch.amount) || 0), 0).toLocaleString()}
               </span>
             </div>
 
@@ -317,18 +325,37 @@ export const FullCaseDetailModal: React.FC<FullCaseDetailModalProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {(!targetCase.charges || targetCase.charges.length === 0) ? (
+                  {(!chargesList || chargesList.length === 0) ? (
                     <tr>
                       <td colSpan={5} className="p-4 text-center text-gray-500 italic">No charges recorded yet.</td>
                     </tr>
                   ) : (
-                    targetCase.charges.map((ch, idx) => (
+                    chargesList.map((ch, idx) => (
                       <tr key={idx} className="hover:bg-white/[0.02]">
                         <td className="p-2.5 text-gray-500 text-[10px]">{idx + 1}</td>
                         <td className="p-2.5 text-white font-medium">{ch.description}</td>
                         <td className="p-2.5 text-gray-400">{ch.category || '-'}</td>
-                        <td className="p-2.5 text-right font-mono font-bold text-emerald-400">
-                          PKR {Number(ch.amount || 0).toLocaleString()}
+                        <td className="p-2.5 text-right">
+                          <div className="inline-flex items-center gap-1.5 justify-end">
+                            <span className="text-[10px] font-mono text-emerald-500 font-bold">PKR</span>
+                            <input
+                              type="number"
+                              value={ch.amount ?? ''}
+                              onChange={(e) => {
+                                const newAmt = Number(e.target.value) || 0;
+                                const updated = [...chargesList];
+                                updated[idx] = { ...updated[idx], amount: newAmt };
+                                setChargesList(updated);
+                                if (targetCase) {
+                                  targetCase.charges = updated;
+                                  updateCaseInFirestore({ ...targetCase, charges: updated }).catch(err => console.warn("Update amount err:", err));
+                                }
+                              }}
+                              className="w-24 sm:w-28 bg-slate-950/90 border border-emerald-500/40 hover:border-emerald-400 focus:border-emerald-400 rounded-lg px-2 py-1 text-right font-mono font-bold text-emerald-300 text-xs outline-none transition-colors"
+                              placeholder="0"
+                              title="Editable Amount in PKR"
+                            />
+                          </div>
                         </td>
                         <td className="p-2.5 text-center">
                           {ch.receiptUrl ? (

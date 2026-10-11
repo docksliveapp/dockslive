@@ -22,8 +22,12 @@ export default defineConfig(({ mode }) => {
           registerType: 'autoUpdate',
           includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
           workbox: {
+            cleanupOutdatedCaches: true,
+            skipWaiting: true,
+            clientsClaim: true,
+            navigateFallback: null,
             maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
-            globPatterns: ['**/*.{js,css,html,svg,png,ico,txt,json}']
+            globPatterns: ['**/*.{js,css,svg,png,ico,txt,json}']
           },
           manifest: {
             id: '/',

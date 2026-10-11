@@ -9,6 +9,7 @@ import {
   getDoc,
   query,
   where,
+  writeBatch
 } from 'firebase/firestore';
 import { 
   db, 
@@ -1307,19 +1308,25 @@ export async function authenticateDatabaseUser(
       };
 
       saveActiveDbUserSession(adminMasterUser);
-      try {
-        await setDoc(doc(db, 'users', '1'), sanitizeForFirestore(adminMasterUser), { merge: true });
-        await setDoc(doc(db, 'users', 'admin'), sanitizeForFirestore({ ...adminMasterUser, id: 'admin', userId: 'admin' }), { merge: true });
-        await setDoc(doc(db, 'users', 'arbab'), sanitizeForFirestore({ ...adminMasterUser, id: 'arbab', userId: 'arbab' }), { merge: true });
-        await setDoc(doc(db, 'users', 'behzad'), sanitizeForFirestore({ ...adminMasterUser, id: 'behzad', userId: 'behzad' }), { merge: true });
-      } catch (_) {}
+      // Fire-and-forget sync to Firestore so login is never blocked or hanged
+      Promise.allSettled([
+        setDoc(doc(db, 'users', '1'), sanitizeForFirestore(adminMasterUser), { merge: true }),
+        setDoc(doc(db, 'users', 'admin'), sanitizeForFirestore({ ...adminMasterUser, id: 'admin', userId: 'admin' }), { merge: true }),
+        setDoc(doc(db, 'users', 'arbab'), sanitizeForFirestore({ ...adminMasterUser, id: 'arbab', userId: 'arbab' }), { merge: true }),
+        setDoc(doc(db, 'users', 'behzad'), sanitizeForFirestore({ ...adminMasterUser, id: 'behzad', userId: 'behzad' }), { merge: true })
+      ]).catch(() => {});
+
       return adminMasterUser;
     }
 
-    // 1. Query Firestore users collection (with safe offline fallback)
+    // 1. Query Firestore users collection (with safe 3.5s timeout to prevent network hangs)
     let matchedUser: AppUser | null = null;
     try {
-      const snap = await getDocs(collection(db, 'users'));
+      const snapPromise = getDocs(collection(db, 'users'));
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Firestore getDocs timeout')), 3500)
+      );
+      const snap = await Promise.race([snapPromise, timeoutPromise]);
       snap.forEach((docSnap) => {
         const u = docSnap.data() as AppUser;
         const uIdLower = (u.userId || '').toLowerCase();
@@ -2008,6 +2015,21 @@ export async function exportSelectiveDatabaseBackup(options: {
  * Permanently wipes live operational data from Firebase Firestore (Cases, Finance, Vehicles, Clients, Vendors, Templates, Ledgers, Notifications, Activity Logs).
  * Clears universal unified storage, localStorage, and sessionStorage completely.
  */
+// Helper for fail-safe asynchronous execution with timeout to prevent UI freezes
+const executeWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> => {
+  let timer: any;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(fallback);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 export async function wipeCompleteDatabase(): Promise<{
   success: boolean;
   deletedCounts: {
@@ -2050,55 +2072,71 @@ export async function wipeCompleteDatabase(): Promise<{
     'activity_logs'
   ] as const;
 
-  for (const colName of collectionsToWipe) {
+  // 1. Wipe Firestore Collections in Parallel using writeBatch with 3.5s per-collection timeout
+  const wipePromises = collectionsToWipe.map(async (colName) => {
     try {
-      const snap = await getDocs(collection(db, colName));
-      const deletePromises = snap.docs.map(async (docSnap) => {
-        await deleteDoc(doc(db, colName, docSnap.id));
-        if (colName === 'cases') deletedCounts.cases++;
-        else if (colName === 'finances' || colName === 'finance') deletedCounts.finances++;
-        else if (colName === 'vehicles') deletedCounts.vehicles++;
-        else if (colName === 'clients') deletedCounts.clients++;
-        else if (colName === 'vendors') deletedCounts.vendors++;
-        else if (colName === 'recurring_templates') deletedCounts.recurringTemplates++;
-        else if (colName === 'staff_ledgers') deletedCounts.staffLedgers++;
-        else if (colName === 'destination_staff') deletedCounts.destinationStaff++;
-        else if (colName === 'notifications') deletedCounts.notifications++;
-        else if (colName === 'activity_logs') deletedCounts.activityLogs++;
-      });
-      await Promise.all(deletePromises);
+      await executeWithTimeout((async () => {
+        const snap = await getDocs(collection(db, colName));
+        if (snap.empty) return;
+        const docs = snap.docs;
+        // Batch delete in chunks of up to 400
+        for (let i = 0; i < docs.length; i += 400) {
+          const chunk = docs.slice(i, i + 400);
+          const batch = writeBatch(db);
+          chunk.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+        }
+        if (colName === 'cases') deletedCounts.cases += docs.length;
+        else if (colName === 'finances' || colName === 'finance') deletedCounts.finances += docs.length;
+        else if (colName === 'vehicles') deletedCounts.vehicles += docs.length;
+        else if (colName === 'clients') deletedCounts.clients += docs.length;
+        else if (colName === 'vendors') deletedCounts.vendors += docs.length;
+        else if (colName === 'recurring_templates') deletedCounts.recurringTemplates += docs.length;
+        else if (colName === 'staff_ledgers') deletedCounts.staffLedgers += docs.length;
+        else if (colName === 'destination_staff') deletedCounts.destinationStaff += docs.length;
+        else if (colName === 'notifications') deletedCounts.notifications += docs.length;
+        else if (colName === 'activity_logs') deletedCounts.activityLogs += docs.length;
+      })(), 3500, null);
     } catch (err) {
       console.warn(`Error wiping collection ${colName}:`, err);
     }
-  }
+  });
 
-  // Reset all user base salaries and remove any non-default staff in Firestore users collection
+  await Promise.all(wipePromises);
+
+  // 2. Reset users collection in Firestore using writeBatch
   try {
-    const usersSnap = await getDocs(collection(db, 'users'));
-    for (const uDoc of usersSnap.docs) {
-      const uData = uDoc.data();
-      const isDefault = DEFAULT_DATABASE_USERS.some(def => String(def.id) === uDoc.id || def.userId === uData.userId);
-      if (!isDefault) {
-        await deleteDoc(doc(db, 'users', uDoc.id));
-      } else {
-        await updateDoc(doc(db, 'users', uDoc.id), {
-          baseSalary: 0,
-          loansAdvances: 0,
-          updatedAt: new Date().toISOString()
-        });
+    await executeWithTimeout((async () => {
+      const usersSnap = await getDocs(collection(db, 'users'));
+      if (!usersSnap.empty) {
+        const batch = writeBatch(db);
+        for (const uDoc of usersSnap.docs) {
+          const uData = uDoc.data();
+          const isDefault = DEFAULT_DATABASE_USERS.some(def => String(def.id) === uDoc.id || def.userId === uData.userId);
+          if (!isDefault) {
+            batch.delete(uDoc.ref);
+          } else {
+            batch.update(uDoc.ref, {
+              baseSalary: 0,
+              loansAdvances: 0,
+              updatedAt: new Date().toISOString()
+            });
+          }
+        }
+        await batch.commit();
       }
-    }
+    })(), 3000, null);
   } catch (err) {
     console.warn('Error resetting users collection in wipeCompleteDatabase:', err);
   }
 
-  // Reset in-memory logos
+  // 3. Reset in-memory logos
   PARENT_GROUP.logo = '';
   Object.keys(GROUP_COMPANIES).forEach((k) => {
     GROUP_COMPANIES[k as CompanyId].logo = '';
   });
 
-  // 1. Wipe universal unified storage (all operational dpl_ keys in memory, localStorage, and sessionStorage)
+  // 4. Wipe universal unified storage (all operational dpl_ keys in memory, localStorage, and sessionStorage)
   try {
     safeAppStorage.wipeAppOperationalData(true);
     safeAppStorage.setItem('dpl_cleanup_phantom_v3', 'done');
@@ -2106,7 +2144,7 @@ export async function wipeCompleteDatabase(): Promise<{
     console.warn('Storage wipe notice:', e);
   }
 
-  // 2. Explicitly remove all known keys to ensure complete wipe of general ledger, finance, cases, etc.
+  // 5. Explicitly purge all known keys to ensure complete wipe
   const explicitKeys = [
     'dpl_live_finance', 'dpl_live_receivables', 'dpl_live_payables', 'dpl_live_cases',
     'dpl_live_transporters', 'dpl_live_vehicles', 'dpl_finance_client', 'dpl_finance_tab',
@@ -2116,7 +2154,8 @@ export async function wipeCompleteDatabase(): Promise<{
     'dpl_reg_draft_active', 'dpl_reg_step', 'dpl_reg_caseno', 'dpl_reg_formdata', 
     'dpl_reg_docs', 'dpl_reg_updated_at', 'dpl_reg_view', 'dpl_vehicles_data', 'dpl_registered_clients',
     'dpl_selected_case', 'dpl_selected_case_id', 'dpl_finance_active_tab', 'dpl_dashboard_timeframe',
-    'dpl_ports', 'dpl_company_docs', 'dpl_custom_banks', 'dpl_last_cloud_backup_time'
+    'dpl_ports', 'dpl_company_docs', 'dpl_custom_banks', 'dpl_last_cloud_backup_time',
+    'dpl_last_location_view', 'dpl_last_location_role', 'dpl_session_active'
   ];
 
   explicitKeys.forEach((k) => {
@@ -2125,13 +2164,13 @@ export async function wipeCompleteDatabase(): Promise<{
     try { sessionStorage.removeItem(k); } catch (_) {}
   });
 
-  // Ensure all payables and finances in memory and storage are strictly empty
+  // 6. Ensure all payables and finances in memory and storage are strictly empty
   safeAppStorage.setJSON('dpl_live_finance', []);
   safeAppStorage.setJSON('dpl_live_payables', []);
   safeAppStorage.setJSON('dpl_live_receivables', []);
   safeAppStorage.setJSON('dpl_live_cases', []);
 
-  // Remove custom branding for all companies and parent group
+  // 7. Remove custom branding for all companies and parent group
   ['docks', 'muhib', 'vantage', 'truckit'].forEach(cId => {
     safeAppStorage.removeItem(`dpl_company_branding_v1_${cId}`);
     try { localStorage.removeItem(`dpl_company_branding_v1_${cId}`); } catch (_) {}
@@ -2139,18 +2178,43 @@ export async function wipeCompleteDatabase(): Promise<{
   safeAppStorage.removeItem('mak_parent_group_branding');
   try { localStorage.removeItem('mak_parent_group_branding'); } catch (_) {}
 
-  // Reset Firestore settings docs to empty logos
+  // 8. Reset Firestore settings docs
   try {
-    await setDoc(doc(db, 'settings', 'branding'), { customLogo: null, updatedAt: new Date().toISOString() }, { merge: true });
-    await setDoc(doc(db, 'settings', 'parent_group'), { logo: '', updatedAt: new Date().toISOString() }, { merge: true });
-    for (const cId of ['muhib', 'vantage', 'truckit']) {
-      await setDoc(doc(db, 'settings', `branding_${cId}`), { customLogo: null, updatedAt: new Date().toISOString() }, { merge: true });
-    }
+    await executeWithTimeout((async () => {
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'settings', 'branding'), { customLogo: null, updatedAt: new Date().toISOString() }, { merge: true });
+      batch.set(doc(db, 'settings', 'parent_group'), { logo: '', updatedAt: new Date().toISOString() }, { merge: true });
+      for (const cId of ['muhib', 'vantage', 'truckit']) {
+        batch.set(doc(db, 'settings', `branding_${cId}`), { customLogo: null, updatedAt: new Date().toISOString() }, { merge: true });
+      }
+      await batch.commit();
+    })(), 2500, null);
   } catch (err) {
     console.warn('Error resetting Firestore settings docs:', err);
   }
 
-  // 3. Dispatch live update events so currently rendered views immediately flush state
+  // 9. Thoroughly clear browser cookies & cache storage
+  try {
+    if (typeof document !== 'undefined') {
+      const cookies = document.cookie.split(';');
+      for (const cookie of cookies) {
+        const eqPos = cookie.indexOf('=');
+        const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+        document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/;domain=${window.location.hostname}`;
+      }
+    }
+  } catch (_) {}
+
+  try {
+    if (typeof window !== 'undefined' && 'caches' in window) {
+      caches.keys().then((keys) => {
+        keys.forEach((k) => caches.delete(k));
+      });
+    }
+  } catch (_) {}
+
+  // 10. Dispatch live update events so currently rendered views immediately flush state
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('dpl_cases_updated'));
     window.dispatchEvent(new Event('dpl_finance_updated'));
@@ -2182,7 +2246,7 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
     vehicles: 0
   };
 
-  // 1. Wipe Firestore docs for this specific company only
+  // 1. Wipe Firestore docs for this specific company only using writeBatch
   const collectionsToCheck = [
     { name: 'cases', type: 'cases' },
     { name: 'finances', type: 'finances' },
@@ -2192,23 +2256,30 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
     { name: 'staff_ledgers', type: 'finances' }
   ] as const;
 
-  for (const item of collectionsToCheck) {
+  const wipePromises = collectionsToCheck.map(async (item) => {
     try {
-      const snap = await getDocs(collection(db, item.name));
-      const deletePromises = snap.docs.map(async (docSnap) => {
-        const data = docSnap.data();
-        if (matchesActiveCompany(data.companyId, companyId)) {
-          await deleteDoc(doc(db, item.name, docSnap.id));
-          if (item.type === 'cases') deletedCounts.cases++;
-          else if (item.type === 'finances') deletedCounts.finances++;
-          else if (item.type === 'vehicles') deletedCounts.vehicles++;
+      await executeWithTimeout((async () => {
+        const snap = await getDocs(collection(db, item.name));
+        const matchedDocs = snap.docs.filter((docSnap) => matchesActiveCompany(docSnap.data().companyId, companyId));
+        if (matchedDocs.length === 0) return;
+
+        for (let i = 0; i < matchedDocs.length; i += 400) {
+          const chunk = matchedDocs.slice(i, i + 400);
+          const batch = writeBatch(db);
+          chunk.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
         }
-      });
-      await Promise.all(deletePromises);
+
+        if (item.type === 'cases') deletedCounts.cases += matchedDocs.length;
+        else if (item.type === 'finances') deletedCounts.finances += matchedDocs.length;
+        else if (item.type === 'vehicles') deletedCounts.vehicles += matchedDocs.length;
+      })(), 3500, null);
     } catch (err) {
       console.warn(`Error wiping company ${companyId} data from ${item.name}:`, err);
     }
-  }
+  });
+
+  await Promise.all(wipePromises);
 
   // Reset this company's logo in memory
   if (GROUP_COMPANIES[companyId]) {

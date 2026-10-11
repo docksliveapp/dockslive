@@ -1240,17 +1240,29 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     setShowRegistrationChargeModal(false);
   };
 
-  // Draft Persistence and Detection
+  // Draft Persistence and Detection with 24-hour Auto-Expiry
   const checkHasDraft = () => {
     try {
       const active = safeAppStorage.getItem('dpl_reg_draft_active') === 'true';
+      if (!active) return false;
+
+      // Auto-expire drafts older than 24 hours to prevent phantom drafts from hanging users
+      const savedTime = safeAppStorage.getItem('dpl_reg_timestamp');
+      if (savedTime && Date.now() - parseInt(savedTime, 10) > 24 * 60 * 60 * 1000) {
+        safeAppStorage.removeItem('dpl_reg_draft_active');
+        safeAppStorage.removeItem('dpl_reg_step');
+        safeAppStorage.removeItem('dpl_reg_caseno');
+        safeAppStorage.removeItem('dpl_reg_formdata');
+        safeAppStorage.removeItem('dpl_reg_docs');
+        safeAppStorage.removeItem('dpl_reg_updated_at');
+        safeAppStorage.removeItem('dpl_reg_timestamp');
+        return false;
+      }
+
       const savedStep = parseInt(safeAppStorage.getItem('dpl_reg_step') || '1', 10);
       const savedFormData = safeAppStorage.getJSON<any>('dpl_reg_formdata', null);
       const savedDocs = safeAppStorage.getJSON<any[]>('dpl_reg_docs', []);
-      if (active) return true;
-      if (savedStep > 1) return true;
-      if (savedDocs && savedDocs.length > 0) return true;
-      if (savedFormData && (Boolean(savedFormData.client?.trim()) || (savedFormData.containers && savedFormData.containers.length > 0))) {
+      if (savedStep > 1 || (savedDocs && savedDocs.length > 0) || (savedFormData && Boolean(savedFormData.client?.trim()))) {
         return true;
       }
       return false;
@@ -1311,6 +1323,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           safeAppStorage.setJSON('dpl_reg_formdata', formData);
           safeAppStorage.setJSON('dpl_reg_docs', uploadedDocs);
           safeAppStorage.setItem('dpl_reg_updated_at', new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+          safeAppStorage.setItem('dpl_reg_timestamp', String(Date.now()));
           setHasDraft(true);
         }
       }, 200);
@@ -1461,6 +1474,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     safeAppStorage.removeItem('dpl_reg_formdata');
     safeAppStorage.removeItem('dpl_reg_docs');
     safeAppStorage.removeItem('dpl_reg_updated_at');
+    safeAppStorage.removeItem('dpl_reg_timestamp');
     safeAppStorage.removeItem('dpl_reg_view');
     setHasDraft(false);
     setGeneratedCaseNo('');
@@ -1507,6 +1521,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     safeAppStorage.removeItem('dpl_reg_formdata');
     safeAppStorage.removeItem('dpl_reg_docs');
     safeAppStorage.removeItem('dpl_reg_updated_at');
+    safeAppStorage.removeItem('dpl_reg_timestamp');
     setHasDraft(false);
     setIsCaseSubmitted(false);
     setSubmittedCaseData(null);
@@ -2108,6 +2123,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       safeAppStorage.removeItem('dpl_reg_formdata');
       safeAppStorage.removeItem('dpl_reg_docs');
       safeAppStorage.removeItem('dpl_reg_updated_at');
+      safeAppStorage.removeItem('dpl_reg_timestamp');
       safeAppStorage.removeItem('dpl_reg_view');
       setHasDraft(false);
 
@@ -2975,8 +2991,27 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                         <tr key={chIdx} className="hover:bg-white/5">
                           <td className="p-3 font-medium text-white">{ch.description}</td>
                           <td className="p-3 text-gray-400">{ch.category || 'Port / Logistics'}</td>
-                          <td className="p-3 font-mono text-emerald-300 font-semibold text-right">
-                            PKR {(Number(ch.amount) || 0).toLocaleString()}
+                          <td className="p-3 text-right">
+                            <div className="inline-flex items-center gap-1.5 justify-end">
+                              <span className="text-[10px] font-mono text-emerald-500 font-bold">PKR</span>
+                              <input
+                                type="number"
+                                value={ch.amount ?? ''}
+                                onChange={(e) => {
+                                  const newAmt = Number(e.target.value) || 0;
+                                  const currentCharges = c.charges ? [...c.charges] : [];
+                                  currentCharges[chIdx] = { ...currentCharges[chIdx], amount: newAmt };
+                                  const updatedCase = { ...c, charges: currentCharges };
+                                  setCases(prev => prev.map(item => item.id === updatedCase.id ? updatedCase : item));
+                                  setReportSelectedCase(updatedCase);
+                                  if (selectedCase?.id === updatedCase.id) setSelectedCase(updatedCase);
+                                  updateCaseInFirestore(updatedCase).catch(err => console.warn("Update amount err:", err));
+                                }}
+                                className="w-24 sm:w-28 bg-slate-950/80 border border-emerald-500/40 hover:border-emerald-400 focus:border-emerald-400 rounded-lg px-2 py-1 text-right font-mono font-bold text-emerald-300 text-xs outline-none transition-colors"
+                                placeholder="0"
+                                title="Editable Amount in PKR"
+                              />
+                            </div>
                           </td>
                           <td className="p-3 text-center">
                             {ch.receiptUrl ? (
@@ -4281,10 +4316,48 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                       <tr key={idx} className="hover:bg-white/5 transition-colors group">
                         <td className="p-3 text-gray-400 text-xs text-center">{idx + 1}</td>
                         <td className="p-3 text-white font-medium text-xs sm:text-sm">
-                          {charge.description}
+                          {isEditingCase ? (
+                            <input
+                              type="text"
+                              value={charge.description || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const currentCharges = targetCase.charges ? [...targetCase.charges] : [];
+                                currentCharges[idx] = { ...currentCharges[idx], description: val };
+                                const updatedCase = { ...targetCase, charges: currentCharges };
+                                setCases(prev => prev.map(c => c.id === updatedCase.id ? updatedCase : c));
+                                setSelectedCase(updatedCase);
+                                setEditedCase(updatedCase);
+                                updateCaseInFirestore(updatedCase).catch(err => console.warn("Update desc err:", err));
+                              }}
+                              className="w-full bg-slate-950/80 border border-white/20 focus:border-brand-400 rounded-lg px-2.5 py-1 text-white text-xs sm:text-sm outline-none"
+                              placeholder="Charge Description"
+                            />
+                          ) : (
+                            <span>{charge.description}</span>
+                          )}
                         </td>
-                        <td className="p-3 text-right font-mono font-semibold text-emerald-400 text-xs sm:text-sm">
-                          PKR {Number(charge.amount || 0).toLocaleString()}
+                        <td className="p-3 text-right">
+                          <div className="inline-flex items-center gap-1.5 justify-end">
+                            <span className="text-[11px] font-mono text-emerald-500 font-bold">PKR</span>
+                            <input
+                              type="number"
+                              value={charge.amount ?? ''}
+                              onChange={(e) => {
+                                const newAmount = Number(e.target.value) || 0;
+                                const currentCharges = targetCase.charges ? [...targetCase.charges] : [];
+                                currentCharges[idx] = { ...currentCharges[idx], amount: newAmount };
+                                const updatedCase = { ...targetCase, charges: currentCharges };
+                                setCases(prev => prev.map(c => c.id === updatedCase.id ? updatedCase : c));
+                                setSelectedCase(updatedCase);
+                                if (isEditingCase) setEditedCase(updatedCase);
+                                updateCaseInFirestore(updatedCase).catch(err => console.warn("Update amount err:", err));
+                              }}
+                              className="w-28 sm:w-36 bg-slate-950/90 border border-emerald-500/40 hover:border-emerald-400 focus:border-emerald-400 rounded-lg px-2.5 py-1 text-right font-mono font-bold text-emerald-300 text-xs sm:text-sm outline-none transition-colors"
+                              placeholder="0"
+                              title="Editable Amount in PKR"
+                            />
+                          </div>
                         </td>
                         <td className="p-3 text-center">
                           {charge.receiptUrl ? (
@@ -7102,9 +7175,34 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     )}
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="font-mono text-emerald-400 font-bold">
-                      PKR {Number(ch.amount).toLocaleString()}
-                    </span>
+                    <div className="inline-flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono text-emerald-500 font-bold">PKR</span>
+                      <input
+                        type="number"
+                        value={ch.amount ?? ''}
+                        onChange={(e) => {
+                          const newAmt = Number(e.target.value) || 0;
+                          setFormData(prev => {
+                            const updated = [...(prev.charges || [])];
+                            updated[cIdx] = { ...updated[cIdx], amount: newAmt };
+                            const syncKey = ch.syncKey;
+                            let updatedArr = prev.serviceArrangements;
+                            if (syncKey && updatedArr && updatedArr[syncKey]) {
+                              updatedArr = {
+                                ...updatedArr,
+                                [syncKey]: { ...updatedArr[syncKey], amount: newAmt }
+                              };
+                            }
+                            const nextState = { ...prev, charges: updated, serviceArrangements: updatedArr };
+                            safeAppStorage.setJSON('dpl_reg_formdata', nextState);
+                            return nextState;
+                          });
+                        }}
+                        className="w-24 sm:w-28 bg-slate-950/90 border border-emerald-500/40 hover:border-emerald-400 focus:border-emerald-400 rounded-lg px-2 py-1 text-right font-mono font-bold text-emerald-300 text-xs outline-none transition-colors"
+                        placeholder="0"
+                        title="Editable Amount in PKR"
+                      />
+                    </div>
                     <button
                       type="button"
                       onClick={() => {

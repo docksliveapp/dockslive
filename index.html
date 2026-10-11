@@ -10,21 +10,25 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v2.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <script>
-      // Clear stale service workers and caches on preview/dev domains to prevent hangs
-      if ('serviceWorker' in navigator && (window.location.hostname.includes('ais-') || window.location.hostname.includes('localhost') || window.location.hostname.includes('127.0.0.1'))) {
-        navigator.serviceWorker.getRegistrations().then(function(regs) {
-          for (var reg of regs) {
-            reg.unregister();
-          }
-        });
-        if (typeof caches !== 'undefined') {
-          caches.keys().then(function(keys) {
-            for (var key of keys) {
-              caches.delete(key);
+      // Universal Stale Cache & Chunk Auto-Recovery
+      // Prevents hangs when new application builds are published
+      window.addEventListener('error', function(e) {
+        var msg = (e && e.message) ? e.message : '';
+        if (msg.indexOf('dynamically imported module') > -1 || msg.indexOf('Loading chunk') > -1 || msg.indexOf('Importing a module script failed') > -1) {
+          if (!sessionStorage.getItem('dpl_bundle_auto_healed')) {
+            sessionStorage.setItem('dpl_bundle_auto_healed', '1');
+            if (typeof caches !== 'undefined') {
+              caches.keys().then(function(names) {
+                Promise.all(names.map(function(n) { return caches.delete(n); })).then(function() {
+                  window.location.reload();
+                });
+              });
+            } else {
+              window.location.reload();
             }
-          });
+          }
         }
-      }
+      });
     </script>
     <meta name="theme-color" content="#0a1224" />
     <meta name="mobile-web-app-capable" content="yes" />
