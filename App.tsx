@@ -49,7 +49,36 @@ const isVehicleTrackingDomainOrRoute = (): boolean => {
     const fullHost = (window.location.host || '').toLowerCase();
     const href = (window.location.href || '').toLowerCase();
     const path = (window.location.pathname || '').toLowerCase();
-    // Connect Vehicle.makpk.online, vehicle.mak-group.com and all vehicle tracking hostnames
+    const hash = (window.location.hash || '').toLowerCase();
+    const search = window.location.search || '';
+    const params = new URLSearchParams(search);
+
+    // 1. Direct query parameters (works on ANY domain including status.makpk.online)
+    if (
+      params.get('mode') === 'vehicle' ||
+      params.get('mode') === 'fleet' ||
+      params.get('portal') === 'vehicle' ||
+      params.get('portal') === 'fleet' ||
+      params.get('view') === 'vehicle' ||
+      params.get('vehicle') === '1' ||
+      params.get('vehicle') === 'true' ||
+      params.has('plate') ||
+      params.has('reg')
+    ) {
+      return true;
+    }
+
+    // 2. Hash routing (e.g. #vehicle, #/vehicle, #fleet)
+    if (hash.includes('vehicle') || hash.includes('fleet')) {
+      return true;
+    }
+
+    // 3. Path routing (e.g. /vehicle, /fleet)
+    if (path.startsWith('/vehicle') || path.startsWith('/vehicles') || path.startsWith('/fleet-status') || path.startsWith('/fleet')) {
+      return true;
+    }
+
+    // 4. Subdomains dedicated to vehicle tracking
     if (
       host.includes('vehicle.makpk.online') ||
       host.includes('vehicles.makpk.online') ||
@@ -62,11 +91,9 @@ const isVehicleTrackingDomainOrRoute = (): boolean => {
       host.startsWith('fleet.') ||
       fullHost.includes('vehicle.makpk.online') ||
       href.includes('vehicle.makpk.online')
-    ) return true;
-    if (path.startsWith('/vehicle') || path.startsWith('/vehicles') || path.startsWith('/fleet-status') || path.startsWith('/fleet')) return true;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('mode') === 'vehicle' || params.get('mode') === 'fleet' || params.get('vehicle') === '1' || params.get('portal') === 'vehicle' || params.get('portal') === 'fleet') return true;
-    if (params.has('plate') || params.has('reg') || (params.has('vehicle') && params.get('vehicle') !== '1')) return true;
+    ) {
+      return true;
+    }
   } catch (_) {}
   return false;
 };
@@ -79,12 +106,46 @@ const isContainerTrackingDomainOrRoute = (): boolean => {
     const fullHost = (window.location.host || '').toLowerCase();
     const href = (window.location.href || '').toLowerCase();
     const path = (window.location.pathname || '').toLowerCase();
-    // Connect Status.mak-group.com.pk, status.makpk.online and all container tracking hostnames
+    const hash = (window.location.hash || '').toLowerCase();
+    const search = window.location.search || '';
+    const params = new URLSearchParams(search);
+
+    // 1. Direct query parameters
     if (
-      host.includes('status.mak-group.com.pk') ||
-      host.includes('status.mak-group.com') ||
+      params.get('mode') === 'status' ||
+      params.get('mode') === 'sttatus' ||
+      params.get('mode') === 'container' ||
+      params.get('mode') === 'tracking' ||
+      params.get('status') === '1' ||
+      params.get('status') === 'true' ||
+      params.get('portal') === 'status' ||
+      params.get('portal') === 'sttatus' ||
+      params.get('portal') === 'container' ||
+      params.get('view') === 'status' ||
+      params.has('container') ||
+      params.has('bl') ||
+      params.has('caseno') ||
+      params.has('case')
+    ) {
+      return true;
+    }
+
+    // 2. Hash routing (e.g. #status, #container)
+    if (hash.includes('status') || hash.includes('container') || hash.includes('tracking')) {
+      return true;
+    }
+
+    // 3. Path routing
+    if (path.startsWith('/status') || path.startsWith('/sttatus') || path.startsWith('/container') || path.startsWith('/tracking') || path.startsWith('/track')) {
+      return true;
+    }
+
+    // 4. Subdomains dedicated to container tracking
+    if (
       host.includes('status.makpk.online') ||
       host.includes('sttatus.makpk.online') ||
+      host.includes('status.mak-group.com.pk') ||
+      host.includes('status.mak-group.com') ||
       host.includes('container.mak-group.com') ||
       host.includes('tracking.mak-group.com') ||
       host.startsWith('status.') ||
@@ -94,19 +155,17 @@ const isContainerTrackingDomainOrRoute = (): boolean => {
       host.startsWith('tracking.') ||
       fullHost.includes('status.makpk.online') ||
       href.includes('status.makpk.online')
-    ) return true;
-    if (path.startsWith('/status') || path.startsWith('/sttatus') || path.startsWith('/container') || path.startsWith('/tracking') || path.startsWith('/track')) return true;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('mode') === 'status' || params.get('mode') === 'sttatus' || params.get('mode') === 'tracking' || params.get('status') === '1' || params.get('portal') === 'status' || params.get('portal') === 'sttatus' || params.get('portal') === 'container') return true;
-    if (params.has('container') || params.has('bl') || params.has('caseno') || params.has('case')) return true;
+    ) {
+      return true;
+    }
   } catch (_) {}
   return false;
 };
 
 const App: React.FC = () => {
   // Public Standalone Tracking Portals (No login required for general public):
-  // Vehicle.makpk.online -> Vehicle Status Portal
-  // Status.makpk.online -> Container Status Portal
+  // Vehicle Portal: ?mode=vehicle or vehicle.makpk.online
+  // Container Portal: ?mode=status or status.makpk.online
   const [isPublicVehicleTrackingOpen, setIsPublicVehicleTrackingOpen] = useState<boolean>(() => isVehicleTrackingDomainOrRoute());
   const [isPublicContainerTrackingOpen, setIsPublicContainerTrackingOpen] = useState<boolean>(() => {
     if (isVehicleTrackingDomainOrRoute()) return false;
@@ -138,21 +197,31 @@ const App: React.FC = () => {
     window.location.hostname.toLowerCase().startsWith('vehicle.')
   );
 
-  // Synchronize browser address bar with dedicated public tracking subdomains
+  // Synchronize browser address bar smoothly with pushState/replaceState
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const host = (window.location.hostname || '').toLowerCase();
     
-    // When Vehicle Status portal is active on production domain, ensure address bar updates to vehicle.makpk.online
+    // When Vehicle Status portal is active, update URL cleanly without breaking navigation
     if (isPublicVehicleTrackingOpen) {
-      if (host.includes('makpk.online') && !host.startsWith('vehicle.')) {
-        const target = selectedPublicVehiclePlate 
-          ? `https://vehicle.makpk.online?vehicle=${encodeURIComponent(selectedPublicVehiclePlate)}`
-          : 'https://vehicle.makpk.online';
-        window.location.href = target;
-      }
+      try {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('mode') !== 'vehicle' && !host.startsWith('vehicle.')) {
+          const target = selectedPublicVehiclePlate 
+            ? `/?mode=vehicle&plate=${encodeURIComponent(selectedPublicVehiclePlate)}`
+            : '/?mode=vehicle';
+          window.history.replaceState({ mode: 'vehicle' }, '', target);
+        }
+      } catch (_) {}
+    } else if (isPublicContainerTrackingOpen) {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('mode') !== 'status' && !host.startsWith('status.')) {
+          window.history.replaceState({ mode: 'status' }, '', '/?mode=status');
+        }
+      } catch (_) {}
     }
-  }, [isPublicVehicleTrackingOpen, selectedPublicVehiclePlate]);
+  }, [isPublicVehicleTrackingOpen, isPublicContainerTrackingOpen, selectedPublicVehiclePlate]);
 
   // Splash Screen & Login Area State:
   // On every app start, reload, or browser refresh:
