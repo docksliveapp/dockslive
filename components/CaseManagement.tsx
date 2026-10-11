@@ -7,6 +7,7 @@ import {
   Building, Phone, Mail, DollarSign, Tag, Package, ShieldCheck, XCircle, Copy, Check, ExternalLink
 } from 'lucide-react';
 import Logo from './Logo';
+import { LegalDocumentHeader, LegalDocumentFooter } from './LegalDocumentHeader';
 import { useBranding } from '../services/brandingService';
 import { autoFillCaseData, downloadFile, docDataCache, detectShippingDocumentType, analyzeReceiptWithAI } from '../services/geminiService';
 import { downloadCasePdf, sharePdfFile, downloadCustomsDeliveryOrderPdf, downloadLoadingBillPdf } from '../services/pdfExportService';
@@ -3128,24 +3129,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
            </div>
         </div>
 
-        {/* Official Header for Print (Visible only in Print) */}
-        <div className="hidden print:block p-4 border-b-2 border-black">
-           <div className="flex justify-between items-center">
-              <div className="flex items-center gap-4">
-                 <Logo className="h-14 w-auto max-w-[200px] object-contain shrink-0" customSrc={activeLogo} />
-                 <div className="flex flex-col justify-center">
-                    <h1 className="text-xl font-bold uppercase tracking-wider text-black leading-tight">{companyName}</h1>
-                    {subtitle && <p className="text-xs text-gray-700 font-medium">{subtitle}</p>}
-                    <p className="text-[11px] text-gray-600 mt-0.5">{branding.address} • Tel: {branding.phone} • Cell: {branding.cell} • Email: {branding.email}</p>
-                    <p className="text-xs font-semibold text-black mt-1 uppercase tracking-wide">COMPREHENSIVE CASE AUDIT & LOGISTICS REPORT</p>
-                 </div>
-              </div>
-              <div className="text-right text-xs text-gray-700 shrink-0">
-                 <p className="font-semibold text-black">Total Records: {reportData.length}</p>
-                 <p>Generated on: {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</p>
-                 {reportSearchTerm && <p>Search Query: "{reportSearchTerm}"</p>}
-              </div>
-           </div>
+        {/* Official Legal Document Header for Print (Unified across all 4 companies) */}
+        <div className="hidden print:block">
+          <LegalDocumentHeader 
+            title="COMPREHENSIVE CASE AUDIT & LOGISTICS REPORT"
+            subRef={`Total Records: ${reportData.length} ${reportSearchTerm ? `• Filter: "${reportSearchTerm}"` : ''}`}
+            subject="OFFICIAL LOGISTICS DOSSIER AUDIT & CASE MASTER RECORD"
+          />
         </div>
 
         {/* Report Table Viewport with Reduced Side Margins & Natural Up/Down Scroll */}
@@ -4081,24 +4071,16 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           )}
 
          <div id="printable-area" className="glass-card rounded-2xl overflow-hidden border border-white/10 print:border-none print:shadow-none">
-            {/* Official Corporate Header for Print (Visible only in Print) */}
-            <div className="hidden print:block p-6 pb-4 border-b-2 border-black bg-white">
-               <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-4">
-                     <Logo className="h-16 w-auto max-w-[210px] object-contain shrink-0" customSrc={activeLogo} />
-                     <div className="flex flex-col justify-center">
-                        <h1 className="text-2xl font-bold uppercase tracking-wider text-black leading-tight">{companyName}</h1>
-                        <p className="text-xs text-gray-700 font-medium">{subtitle || "Customs Clearance, Bonded Carrier & Freight Terminal Services"}</p>
-                        <p className="text-[11px] text-gray-600 mt-0.5">{branding.address} • Tel: {branding.phone} • Cell: {branding.cell} • Email: {branding.email}</p>
-                        <p className="text-xs font-bold text-black mt-1 uppercase tracking-wide">CASE DETAILS</p>
-                     </div>
-                  </div>
-                  <div className="text-right text-xs text-gray-700 shrink-0">
-                     <p className="font-mono font-bold text-sm text-black">{targetCase?.caseNo}</p>
-                     <p>Date: {targetCase?.createdAt || new Date().toLocaleDateString()}</p>
-                     <p>Status: <span className="font-bold text-black">{targetCase?.status}</span></p>
-                  </div>
-               </div>
+            {/* Official Legal Corporate Header for Print (Unified across all 4 companies) */}
+            <div className="hidden print:block p-4 bg-white">
+              <LegalDocumentHeader 
+                title="CASE DOSSIER & PARTICULARS"
+                refNo={targetCase?.caseNo}
+                date={targetCase?.createdAt}
+                clientName={targetCase?.clientName}
+                subRef={`Status: ${targetCase?.status || 'Active'}`}
+                subject={`OFFICIAL CARGO CASE RECORD: ${targetCase?.caseNo || ''}`}
+              />
             </div>
 
             {/* Header / Title Section */}
@@ -4651,23 +4633,14 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             
             {/* Invoice Section */}
             {(printOptions.withInvoice || printOptions.onlyInvoice) && targetCase?.charges && targetCase.charges.length > 0 && (
-                <div className="p-6 border-t border-white/10 print:border-gray-300 break-before-page hidden print:block">
-                    <div className="flex justify-between items-center border-b-2 border-black pb-4 mb-6">
-                      <div className="flex items-center gap-4">
-                        <Logo className="h-14 sm:h-16 w-auto max-w-[210px] object-contain shrink-0" customSrc={activeLogo} />
-                        <div className="flex flex-col justify-center">
-                          <h2 className="text-xl sm:text-2xl font-bold uppercase tracking-wider text-black leading-tight">{companyName}</h2>
-                          <p className="text-xs text-gray-700 font-medium">{subtitle || "Customs Clearance, Bonded Carrier & Freight Terminal Services"}</p>
-                          <p className="text-[11px] text-gray-600 mt-0.5">{branding.address} • Tel: {branding.phone} • Cell: {branding.cell} • Email: {branding.email}</p>
-                          <p className="text-xs font-bold text-black mt-1 uppercase tracking-wide">INVOICE</p>
-                        </div>
-                      </div>
-                      <div className="text-right text-xs text-gray-700 shrink-0">
-                        <p className="font-mono font-bold text-sm text-black">{targetCase.caseNo}</p>
-                        <p>Date: {targetCase.createdAt || new Date().toLocaleDateString()}</p>
-                        <p>Client: <span className="font-semibold text-black">{targetCase.clientName}</span></p>
-                      </div>
-                    </div>
+                <div className="p-6 border-t border-white/10 print:border-gray-300 break-before-page hidden print:block bg-white text-black">
+                    <LegalDocumentHeader 
+                      title="COMMERCIAL INVOICE"
+                      refNo={targetCase.caseNo}
+                      date={targetCase.createdAt}
+                      clientName={targetCase.clientName}
+                      subject={`OFFICIAL BILLING & INVOICE RECORD: ${targetCase.caseNo}`}
+                    />
 
                     <table className="w-full text-left text-sm text-gray-200 print:text-black mb-6 border border-gray-200">
                         <thead className="bg-white/5 print:bg-gray-100 uppercase text-xs font-semibold print:text-black border-b border-gray-200">
@@ -4692,22 +4665,14 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                         </tbody>
                     </table>
 
-                    {/* Authorized Stamp Block */}
-                    <div className="flex justify-end items-center pt-4 border-t border-gray-300 print-avoid-break">
-                        <div className="border-t border-dashed border-black pt-1 w-48 text-center mt-4">
-                            <p className="font-semibold text-black text-[11px]">Authorized Signatory</p>
-                            <p className="text-[10px] text-gray-600">Finance & Terminal Billing</p>
-                        </div>
-                    </div>
+                    {/* Legal Document Footer with Official Subsidiary Seal */}
+                    <LegalDocumentFooter companyId={targetCase?.companyId as any} />
                 </div>
             )}
 
-            {/* Print Footer */}
-            <div className="hidden print:block p-6 mt-8 border-t border-gray-300">
-                <div className="flex justify-between text-xs text-gray-500">
-                    <p>Generated by {companyName} • Secure Customs & Terminal System</p>
-                    <p>Printed: {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</p>
-                </div>
+            {/* Print Footer for Case Dossier */}
+            <div className="hidden print:block p-4 mt-6">
+              <LegalDocumentFooter companyId={targetCase?.companyId as any} />
             </div>
          </div>
   

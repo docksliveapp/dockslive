@@ -1170,7 +1170,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
                 <span className="text-[10px] bg-white/10 text-gray-300 px-2 py-0.5 rounded">Digital Screen</span>
               </div>
               <div className="flex items-center justify-center py-4 bg-slate-900/60 rounded-lg border border-white/5">
-                <Logo customSrc={effectivePreviewLogo} className="h-12 w-auto max-w-[220px]" />
+                <Logo customSrc={effectivePreviewLogo} className="h-20 sm:h-24 w-auto max-w-[340px]" />
               </div>
               <div className="mt-3 text-center">
                 <p className="text-xs text-white font-medium">{brandCompanyName || activeCompany?.legalTitle || activeCompany?.name}</p>
@@ -1187,7 +1187,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
                 <span className="text-[10px] bg-gray-200 text-gray-800 px-2 py-0.5 rounded font-semibold">Print Output</span>
               </div>
               <div className="flex flex-col items-center justify-center py-3 bg-gray-50 rounded-lg border border-gray-200">
-                <Logo customSrc={effectivePreviewLogo} className="h-12 w-auto max-w-[220px] mb-2" />
+                <Logo customSrc={effectivePreviewLogo} className="h-20 sm:h-24 w-auto max-w-[340px] mb-2" />
                 <h5 className="text-sm font-bold uppercase text-black tracking-wide">
                   {brandCompanyName || activeCompany?.legalTitle || activeCompany?.name}
                 </h5>

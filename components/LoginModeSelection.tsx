@@ -211,20 +211,20 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
       />
 
       <div className="min-h-full w-full max-w-md mx-auto flex flex-col justify-center items-center py-6 sm:py-8 relative z-10">
-        {/* Prominent Large MAK Corporate Logo placed closely above Sign In Card */}
-        <div className="w-full flex flex-col items-center text-center mb-3 sm:mb-4">
+        {/* Prominent Large MAK Corporate Logo placed closely above Sign In Card - Doubled in size */}
+        <div className="w-full flex flex-col items-center text-center mb-4 sm:mb-5">
           <div className="inline-flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
             {parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? (
               <img 
                 src={parentGroup.logo} 
                 alt={parentGroup.name || "MAK Group"} 
-                className="w-56 sm:w-64 md:w-72 h-auto max-h-24 sm:max-h-28 object-contain drop-shadow-[0_10px_35px_rgba(0,0,0,0.8)] filter contrast-125" 
+                className="w-48 sm:w-56 md:w-64 h-48 sm:h-56 md:h-64 max-h-48 sm:max-h-56 md:max-h-64 object-contain drop-shadow-[0_15px_45px_rgba(0,0,0,0.4)] filter contrast-125 select-none" 
               />
             ) : (
               <img 
                 src={theme === 'pearl' ? "/logos/mak_pearl_white_emblem.svg" : "/logos/mak_group_logo.svg"} 
                 alt={parentGroup.name || "MAK Group"} 
-                className="w-56 sm:w-64 md:w-72 h-auto max-h-24 sm:max-h-28 object-contain drop-shadow-[0_10px_35px_rgba(0,0,0,0.25)]" 
+                className="w-48 sm:w-56 md:w-64 h-48 sm:h-56 md:h-64 max-h-48 sm:max-h-56 md:max-h-64 object-contain drop-shadow-[0_15px_45px_rgba(0,0,0,0.22)] select-none" 
               />
             )}
           </div>

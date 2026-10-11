@@ -7,6 +7,7 @@ import {
   ArrowLeftRight, FileSpreadsheet, UserPlus, FileCheck, Paperclip
 } from 'lucide-react';
 import Logo from './Logo';
+import { LegalDocumentHeader, LegalDocumentFooter } from './LegalDocumentHeader';
 import { PdfViewerModal } from './PdfViewerModal';
 import { FinanceEntry, Case, Client, LedgerEntry, AppUser, RecurringFinanceTemplate, UserRole, Vendor, CaseStatus, CaseCharge } from '../types';
 import { exportGeneralLedgerToExcel, exportClientLedgerToExcel } from '../services/excelExportService';
@@ -4268,18 +4269,14 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               </div>
             </div>
 
-            {/* Print Header Banner for Client */}
-            <div className="hidden print:block mb-4 p-4 border border-black rounded-lg bg-gray-50">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-xl font-bold text-black">{selectedLedgerClient} - Client Ledger Statement</h2>
-                  <p className="text-xs text-gray-600 mt-1">Statement Period: Full History to {new Date().toLocaleDateString()}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs uppercase font-bold text-gray-600">Net Closing Balance</p>
-                  <p className="text-xl font-bold text-black font-mono">PKR {clientSummary.netBalance.toLocaleString()}</p>
-                </div>
-              </div>
+            {/* Official Legal Document Header for Client Ledger Print */}
+            <div className="hidden print:block mb-4">
+              <LegalDocumentHeader 
+                title="CLIENT STATEMENT OF ACCOUNT"
+                clientName={selectedLedgerClient}
+                subRef={`Net Closing Balance: PKR ${clientSummary.netBalance.toLocaleString()}`}
+                subject={`OFFICIAL CLIENT FINANCIAL LEDGER STATEMENT: ${selectedLedgerClient}`}
+              />
             </div>
 
             {/* Dynamic Ledger Table */}
@@ -6049,23 +6046,13 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
   return (
     <div className="space-y-6 animate-fade-in pb-12 printable-content w-full max-w-full min-w-0 overflow-x-hidden">
-      {/* Print Header */}
-      <div className="hidden print:block mb-8 border-b-2 border-black pb-4">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <Logo className="h-16 w-auto max-w-[210px] object-contain shrink-0" customSrc={activeLogo} />
-            <div className="flex flex-col justify-center text-left">
-              <h1 className="text-2xl font-bold text-black uppercase tracking-wider leading-tight">{companyName}</h1>
-              {subtitle && <p className="text-xs text-gray-700 font-medium">{subtitle}</p>}
-              <p className="text-[11px] text-gray-600 mt-0.5">{branding.address} • Tel: {branding.phone} • Cell: {branding.cell} • Email: {branding.email}</p>
-              <p className="text-xs font-semibold text-black mt-1 uppercase">Financial Book & Statement: {tabs.find(t => t.id === activeTab)?.label}</p>
-            </div>
-          </div>
-          <div className="text-right text-xs text-gray-700 shrink-0">
-            <p className="font-semibold text-black">Date: {new Date().toLocaleDateString()}</p>
-            <p>Active View: {tabs.find(t => t.id === activeTab)?.label}</p>
-          </div>
-        </div>
+      {/* Official Legal Document Header for Print (Unified across all 4 companies) */}
+      <div className="hidden print:block mb-6">
+        <LegalDocumentHeader 
+          title={`FINANCIAL STATEMENT: ${(tabs.find(t => t.id === activeTab)?.label || 'GENERAL LEDGER').toUpperCase()}`}
+          subRef={`Register Book: ${tabs.find(t => t.id === activeTab)?.label || 'General Ledger'}`}
+          subject={`OFFICIAL FINANCIAL STATEMENT & AUDITED BOOK RECORD`}
+        />
       </div>
 
       {/* Mobile-Friendly PDF Download Alert / Notification Banner */}

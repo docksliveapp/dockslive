@@ -60,7 +60,7 @@ const AuthModal: React.FC<AuthModalProps> = ({
         <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 p-6 border-b border-white/10 relative">
           <div className="flex justify-between items-start mb-4">
             <div className="flex items-center gap-3">
-              <Logo className="h-9 w-auto" />
+              <Logo className="h-16 sm:h-20 w-auto" />
             </div>
             <button 
               onClick={onClose}

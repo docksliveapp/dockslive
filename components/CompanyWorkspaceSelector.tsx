@@ -29,7 +29,8 @@ import {
   useActiveCompany,
   useParentGroup,
   isUploadedLogo,
-  getCompanyUploadedLogo
+  getCompanyUploadedLogo,
+  getCompanyLogoUrl
 } from '../services/companyService';
 import { UserRole } from '../types';
 import { safeAppStorage } from '../services/storage';
@@ -457,17 +458,11 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
       {/* 2. CENTER CONGLOMERATE HEADER */}
       <div className="text-center mb-5 sm:mb-7 shrink-0">
         <div className="inline-flex items-center justify-center mb-2 transform hover:scale-105 transition-transform duration-300">
-          {isUploadedLogo(parentGroup.logo) ? (
-            <img 
-              src={parentGroup.logo} 
-              alt={parentGroup.name} 
-              className="h-12 sm:h-16 w-auto max-w-[240px] object-contain drop-shadow-[0_6px_20px_rgba(0,0,0,0.7)]" 
-            />
-          ) : (
-            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-slate-800 border border-white/15 flex items-center justify-center shadow-lg">
-              <Crown className="w-6 h-6 sm:w-7 sm:h-7 text-slate-200" />
-            </div>
-          )}
+          <img 
+            src={parentGroup.logo || "/logos/mak_group_logo.svg"} 
+            alt={parentGroup.name} 
+            className="h-20 sm:h-28 w-auto max-w-[340px] sm:max-w-[420px] object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.8)]" 
+          />
         </div>
 
         <h1 className="text-xl sm:text-2xl font-bold text-white tracking-wide font-sans mb-1 drop-shadow-md">
@@ -565,21 +560,13 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
                 </div>
               )}
 
-              {/* Company Logo Display (Strictly uploaded logo from company settings) */}
-              <div className="h-20 sm:h-24 w-full flex items-center justify-center p-2 mb-3 transform group-hover:scale-105 transition-transform duration-300">
-                {uploadedLogo ? (
-                  <img 
-                    src={uploadedLogo} 
-                    alt={comp.name} 
-                    className="max-h-full max-w-[200px] sm:max-w-[240px] object-contain filter drop-shadow-[0_4px_16px_rgba(0,0,0,0.7)]" 
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center gap-1.5">
-                    <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-black/50 border border-white/10 flex items-center justify-center shadow-inner group-hover:border-white/20 transition-colors">
-                      {getCompanyIcon(comp.id)}
-                    </div>
-                  </div>
-                )}
+              {/* Company Logo Display (Doubled Size - Crisp Official Subsidiary Logo) */}
+              <div className="h-28 sm:h-36 w-full flex items-center justify-center p-2 mb-3 transform group-hover:scale-105 transition-transform duration-300">
+                <img 
+                  src={getCompanyLogoUrl(comp.id)} 
+                  alt={comp.name} 
+                  className="max-h-full max-w-[260px] sm:max-w-[320px] object-contain filter drop-shadow-[0_6px_20px_rgba(0,0,0,0.8)]" 
+                />
               </div>
 
               {/* Only Company Name (Clean & Prominent) */}

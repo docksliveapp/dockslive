@@ -522,10 +522,10 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
             >
               <Menu size={20} />
             </button>
-            <div className="flex items-center gap-2 min-w-0">
-              <Logo variant="icon" className="h-7 w-auto shrink-0" />
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Logo variant="icon" className="h-12 sm:h-14 w-auto shrink-0" />
               <div className="min-w-0">
-                <span className="text-xs font-bold text-white block truncate">
+                <span className="text-xs sm:text-sm font-bold text-white block truncate">
                   {isDestinationStaff ? 'Destination Staff' : 'Loading Staff'}
                 </span>
                 <span className="text-[10px] text-amber-400 block font-mono truncate">

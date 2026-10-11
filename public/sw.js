@@ -1,7 +1,7 @@
 // Service Worker for MAK Group of Companies
 // Play Store / TWA / PWABuilder Compliant Service Worker with Auto-Update
 
-const CACHE_NAME = 'mak-group-pwa-v9';
+const CACHE_NAME = 'mak-group-pwa-v10';
 const OFFLINE_URL = '/';
 
 // Install: Immediately skip waiting to take over

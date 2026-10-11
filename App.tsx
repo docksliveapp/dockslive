@@ -17,7 +17,7 @@ import GoogleDriveManager from './components/GoogleDriveManager';
 import SplashScreen from './components/SplashScreen';
 import LoginModeSelection, { SelectedModePayload } from './components/LoginModeSelection';
 import CompanyWorkspaceSelector from './components/CompanyWorkspaceSelector';
-import { useActiveCompany, setActiveCompany, isUploadedLogo, getCompanyUploadedLogo, CompanyId } from './services/companyService';
+import { useActiveCompany, setActiveCompany, isUploadedLogo, getCompanyUploadedLogo, getCompanyLogoUrl, CompanyId } from './services/companyService';
 import GoldenAmountWidget from './components/GoldenAmountWidget';
 import ClientPortal from './components/ClientPortal';
 import { LoadingPortStaffPortal } from './components/LoadingPortStaffPortal';
@@ -939,14 +939,14 @@ const App: React.FC = () => {
           className="p-3 mx-3 my-2.5 rounded-2xl bg-slate-900/90 border border-white/10 flex items-center gap-2.5 cursor-pointer hover:border-slate-300/40 transition-all group shadow-md shrink-0"
           title={`${activeCompany.name} Dashboard`}
         >
-          <div className="w-9 h-9 rounded-xl bg-black/60 border border-white/15 flex items-center justify-center p-1.5 shrink-0 group-hover:scale-105 transition-transform">
-            <Logo variant="icon" className="max-h-full max-w-full object-contain" />
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-black/60 border border-white/15 flex items-center justify-center p-2 shrink-0 group-hover:scale-105 transition-transform shadow-lg">
+            <Logo variant="icon" className="max-h-full max-w-full object-contain" customSrc={getCompanyLogoUrl(activeCompany.id)} />
           </div>
           <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} min-w-0 flex-1`}>
-            <h3 className="font-extrabold text-xs text-white group-hover:text-slate-100 transition-colors uppercase leading-tight truncate">
+            <h3 className="font-extrabold text-xs sm:text-sm text-white group-hover:text-slate-100 transition-colors uppercase leading-tight truncate">
               {activeCompany.name}
             </h3>
-            <p className="text-[9px] font-mono text-slate-400 tracking-wider uppercase truncate mt-0.5">
+            <p className="text-[10px] font-mono text-slate-400 tracking-wider uppercase truncate mt-0.5">
               {activeCompany.shortName} • {activeCompany.prefix}
             </p>
           </div>
@@ -1054,7 +1054,7 @@ const App: React.FC = () => {
             Center: Company Logo (Centered Prominently - Uploaded from settings)
             Right: Notifications & LogOut (+ Compact Treasury)
         */}
-        <header className="h-14 sm:h-16 bg-slate-900 border-b border-white/10 flex items-center justify-between px-2.5 sm:px-6 z-20 flex-shrink-0 sticky top-0 shadow-md">
+        <header className="h-18 sm:h-22 bg-slate-900 border-b border-white/10 flex items-center justify-between px-2.5 sm:px-6 z-20 flex-shrink-0 sticky top-0 shadow-md">
           {/* Left: Sidebar Menu Toggle & Active View Title */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 justify-start">
             <button 
@@ -1077,30 +1077,20 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Center: Company Logo Centered (Strictly uploaded logo from company settings) */}
+          {/* Center: Company Logo Centered (Doubled size - High-Res Official Subsidiary Logo) */}
           <div className="flex items-center justify-center min-w-0 flex-shrink-0 px-1 sm:px-2">
             <button
               type="button"
               id="header-center-company-logo-btn"
               onClick={() => setIsCompanyModalOpen(true)}
-              className="flex items-center justify-center p-1 sm:px-3 sm:py-1.5 rounded-2xl hover:bg-white/5 border border-transparent hover:border-white/10 transition-all duration-200 cursor-pointer group shrink-0"
+              className="flex items-center justify-center p-1 sm:px-4 sm:py-2 rounded-2xl hover:bg-white/5 border border-transparent hover:border-white/10 transition-all duration-200 cursor-pointer group shrink-0"
               title={`${activeCompany.name} (Click to switch company)`}
             >
-              {activeUploadedLogo ? (
-                <img 
-                  src={activeUploadedLogo} 
-                  alt={activeCompany.name} 
-                  className="h-8 sm:h-10 w-auto max-w-[140px] sm:max-w-[220px] object-contain drop-shadow-[0_2px_10px_rgba(0,0,0,0.6)] group-hover:scale-105 transition-transform duration-200" 
-                />
-              ) : (
-                <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-slate-800/90 border border-white/15 group-hover:border-white/30 text-slate-200 group-hover:text-white transition-all shadow-sm">
-                  <Building2 size={15} className="text-slate-300 group-hover:scale-110 transition-transform shrink-0" />
-                  <span className="font-extrabold text-xs sm:text-sm tracking-wide text-white group-hover:text-slate-100 transition-colors truncate max-w-[120px] sm:max-w-[180px]">
-                    {activeCompany.name}
-                  </span>
-                  <ChevronDown size={13} className="text-slate-400 group-hover:translate-y-0.5 transition-transform shrink-0" />
-                </div>
-              )}
+              <img 
+                src={getCompanyLogoUrl(activeCompany.id)} 
+                alt={activeCompany.name} 
+                className="h-12 sm:h-16 md:h-18 w-auto max-w-[260px] sm:max-w-[420px] object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.7)] group-hover:scale-105 transition-transform duration-200" 
+              />
             </button>
           </div>
 

@@ -5,7 +5,7 @@ import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 
 // Global Build Version - Auto-invalidates stale caches across updates
-const APP_BUILD_VERSION = '2026.10.11-v9';
+const APP_BUILD_VERSION = '2026.10.11-v10';
 
 try {
   const currentVersion = localStorage.getItem('dpl_app_build_version');

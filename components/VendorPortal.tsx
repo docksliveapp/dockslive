@@ -147,9 +147,9 @@ export const VendorPortal: React.FC<VendorPortalProps> = ({
       <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-white/10 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           {customLogo ? (
-            <img src={customLogo} alt="Logo" className="w-28 sm:w-32 h-auto object-contain" />
+            <img src={customLogo} alt="Logo" className="h-14 sm:h-16 w-auto max-w-[240px] object-contain" />
           ) : (
-            <Logo className="w-28 sm:w-32 h-auto" />
+            <Logo className="h-14 sm:h-16 w-auto max-w-[240px]" />
           )}
           <div className="hidden sm:block border-l border-white/10 pl-3">
             <h1 className="text-sm font-extrabold text-amber-300 uppercase tracking-wider">

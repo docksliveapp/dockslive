@@ -5,6 +5,7 @@ import {
   ChevronRight, Download, Filter
 } from 'lucide-react';
 import { Client, Case, FinanceEntry } from '../types';
+import { LegalDocumentHeader, LegalDocumentFooter } from './LegalDocumentHeader';
 
 interface ClientLedgerModalProps {
   isOpen: boolean;
@@ -168,8 +169,19 @@ export const ClientLedgerModal: React.FC<ClientLedgerModalProps> = ({
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-start justify-center pt-3 sm:pt-6 pb-6 px-2 sm:px-4 overflow-y-auto animate-in fade-in duration-150">
       <div className="glass-card rounded-2xl w-full max-w-5xl border border-white/15 shadow-2xl bg-slate-900/98 mb-6 max-h-[94vh] flex flex-col">
+        {/* Official Legal Document Header for Print Output */}
+        <div className="hidden print:block p-4 bg-white">
+          <LegalDocumentHeader 
+            title="CLIENT STATEMENT OF ACCOUNT"
+            clientName={client.name}
+            refNo={client.ntn || undefined}
+            subRef={`Net Closing Balance: PKR ${currentOutstanding.toLocaleString()}`}
+            subject={`OFFICIAL FINANCIAL STATEMENT & LEDGER PARTICULARS: ${client.name}`}
+          />
+        </div>
+
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-white/10 flex justify-between items-center bg-slate-950/80 rounded-t-2xl shrink-0">
+        <div className="p-4 sm:p-5 border-b border-white/10 flex justify-between items-center bg-slate-950/80 rounded-t-2xl shrink-0 no-print">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
               <Building size={20} />
@@ -331,8 +343,13 @@ export const ClientLedgerModal: React.FC<ClientLedgerModalProps> = ({
           )}
         </div>
 
+        {/* Official Legal Document Footer for Print Output */}
+        <div className="hidden print:block p-4">
+          <LegalDocumentFooter notes={`Closing Balance for ${client.name}: PKR ${currentOutstanding.toLocaleString()}`} />
+        </div>
+
         {/* Footer */}
-        <div className="p-3 sm:p-4 border-t border-white/10 flex justify-between items-center bg-slate-950/80 rounded-b-2xl shrink-0">
+        <div className="p-3 sm:p-4 border-t border-white/10 flex justify-between items-center bg-slate-950/80 rounded-b-2xl shrink-0 no-print">
           <span className="text-xs text-gray-400">
             Total {filteredRows.length} statement line items
           </span>

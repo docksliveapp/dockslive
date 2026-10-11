@@ -996,12 +996,12 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           {/* Brand Header */}
           <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="bg-slate-950 p-1.5 rounded-xl border border-white/10">
-                <Logo className="h-7 w-auto" />
+              <div className="bg-slate-950 p-2 rounded-xl border border-white/10">
+                <Logo className="h-14 sm:h-16 w-auto" />
               </div>
               <div>
-                <h1 className="text-sm font-bold text-white tracking-wide">Client Portal</h1>
-                <p className="text-[10px] text-slate-300 font-medium">Importer & Logistics Desk</p>
+                <h1 className="text-base font-bold text-white tracking-wide">Client Portal</h1>
+                <p className="text-xs text-slate-300 font-medium">Importer & Logistics Desk</p>
               </div>
             </div>
             <button
@@ -1209,13 +1209,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             >
               <Menu size={20} />
             </button>
-            <div className="flex items-center gap-2 min-w-0">
-              <Logo variant="icon" className="h-7 w-auto shrink-0" />
+            <div className="flex items-center gap-3 min-w-0">
+              <Logo variant="icon" className="h-12 sm:h-14 w-auto shrink-0" />
               <div className="min-w-0">
-                <span className="text-xs font-bold text-white block truncate">
+                <span className="text-xs sm:text-sm font-bold text-white block truncate">
                   Client Portal
                 </span>
-                <span className="text-[10px] text-slate-300 block font-medium truncate max-w-[150px]">
+                <span className="text-[11px] text-slate-300 block font-medium truncate max-w-[150px]">
                   {selectedClientName}
                 </span>
               </div>

@@ -8,19 +8,21 @@ interface LogoProps {
   customSrc?: string | null;
 }
 
-const Logo: React.FC<LogoProps> = ({ className = "", variant = 'full', customSrc }) => {
+const Logo: React.FC<LogoProps> = ({ className = "h-14 sm:h-16 w-auto", variant = 'full', customSrc }) => {
   const { customLogo: globalLogo, companyName } = useBranding();
   const { activeCompany } = useActiveCompany();
   const [imgError, setImgError] = useState(false);
 
-  const candidateLogo = customSrc !== undefined ? customSrc : (globalLogo || activeCompany?.logo);
+  const candidateLogo = customSrc !== undefined 
+    ? customSrc 
+    : (globalLogo || activeCompany?.logo || '/logos/mak_group_logo.svg');
 
-  if (isUploadedLogo(candidateLogo) && !imgError) {
+  if (candidateLogo && !imgError) {
     return (
       <img 
-        src={candidateLogo!} 
+        src={candidateLogo} 
         alt={companyName || activeCompany?.name || "Company Logo"} 
-        className={`${className} object-contain select-none transition-all duration-300`}
+        className={`${className} object-contain select-none transition-all duration-300 drop-shadow-sm`}
         onError={() => setImgError(true)}
       />
     );
@@ -31,7 +33,7 @@ const Logo: React.FC<LogoProps> = ({ className = "", variant = 'full', customSrc
     <img 
       src="/logos/mak_group_logo.svg" 
       alt="MAK Group of Companies" 
-      className={`${className} object-contain select-none transition-all duration-300`}
+      className={`${className} object-contain select-none transition-all duration-300 drop-shadow-sm`}
       onError={() => setImgError(true)}
     />
   );

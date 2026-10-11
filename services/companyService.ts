@@ -123,13 +123,27 @@ export interface ParentGroupInfo {
   updatedBy?: string;
 }
 
+export function getCompanyLogoUrl(companyId?: CompanyId | null): string {
+  if (!companyId) return '/logos/mak_group_logo.svg';
+  const custom = getCompanyUploadedLogo(companyId);
+  if (custom) return custom;
+  
+  const defaults: Record<CompanyId, string> = {
+    docks: '/logos/docks_logo.svg',
+    muhib: '/logos/muhib_logo.svg',
+    vantage: '/logos/vantage_logo.svg',
+    truckit: '/logos/truckit_logo.svg'
+  };
+  return defaults[companyId] || '/logos/mak_group_logo.svg';
+}
+
 export const DEFAULT_PARENT_GROUP: ParentGroupInfo = {
   id: 'mak',
   name: 'MAK Group of Companies',
   title: 'MAK GROUP OF COMPANIES',
   tagline: 'Premier Multi-Entity Logistics, Customs & International Trade Conglomerate',
   subtitle: 'DOCKS • TRUCKIT • MUHIB • VANTAGE',
-  logo: '',
+  logo: '/logos/mak_group_logo.svg',
   address: 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
   phone: '+92-21-32330103, +92-21-32330104',
   cell: '+92-321-9222883, +92-321-8496006',
@@ -314,7 +328,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Docks (Pvt.) Ltd.',
     category: 'Customs Bonded Carrier & Port Logistics',
     tagline: 'Nationwide Bonded Carrier & Afghan Transit Logistics Specialist',
-    logo: '',
+    logo: '/logos/docks_logo.svg',
     accentColor: '#F59E0B', // Amber / Gold
     borderColor: 'border-amber-500/40',
     badgeBg: 'bg-amber-500/20',
@@ -344,7 +358,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Muhib International (SMC-Pvt.) Ltd.',
     category: 'International Freight Forwarding & Trade Logistics',
     tagline: 'Global Import, Export & Customs Clearance Facilitation',
-    logo: '',
+    logo: '/logos/muhib_logo.svg',
     accentColor: '#2563EB', // Royal Blue & Crimson
     borderColor: 'border-blue-500/40',
     badgeBg: 'bg-blue-500/20',
@@ -374,7 +388,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Vintage Shipping Line (Pvt.) Ltd.',
     category: 'Ocean Freight & Maritime Container Vessel Logistics',
     tagline: 'Worldwide Ocean Freight, Shipping Agency & Container Management',
-    logo: '',
+    logo: '/logos/vantage_logo.svg',
     accentColor: '#0EA5E9', // Sky / Cyan
     borderColor: 'border-cyan-500/40',
     badgeBg: 'bg-cyan-500/20',
@@ -404,7 +418,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Truckit (Pvt.) Ltd.',
     category: 'Nationwide Fleet Haulage & Fast Cargo Trucking',
     tagline: 'High-Speed Cargo Haulage, Heavy Transport & Inter-City Fleet',
-    logo: '',
+    logo: '/logos/truckit_logo.svg',
     accentColor: '#EF4444', // Red
     borderColor: 'border-red-500/40',
     badgeBg: 'bg-red-500/20',
