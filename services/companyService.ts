@@ -382,10 +382,10 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
 
   vantage: {
     id: 'vantage',
-    name: 'Vintage Shipping Line',
+    name: 'Vantage Shipping Line',
     shortName: 'VSL',
     prefix: 'VSL',
-    legalTitle: 'Vintage Shipping Line (Pvt.) Ltd.',
+    legalTitle: 'Vantage Shipping Line (Pvt.) Ltd.',
     category: 'Ocean Freight & Maritime Container Vessel Logistics',
     tagline: 'Worldwide Ocean Freight, Shipping Agency & Container Management',
     logo: '/logos/vantage_logo.svg',
@@ -473,7 +473,7 @@ export function getActiveCompany(): CompanyInfo {
  * Returns the short prefix for serial numbers and codes for the active company:
  * - Docks -> 'DPL'
  * - Muhib -> 'MI'
- * - Vintage -> 'VSL'
+ * - Vantage -> 'VSL'
  * - Truckit -> 'TRK'
  */
 export function getActiveCompanyPrefix(companyId?: CompanyId): string {

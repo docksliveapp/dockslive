@@ -391,8 +391,7 @@ export function drawPdfCorporateFooter(
 
 /**
  * Draws the official corporate stamp only for the active operating company.
- * User requirement: "Bs neeche signature me companies change hojaya kareingee. Bagi sab same rahey ga."
- * Stamp dynamically features the active company (Docks, Truckit, Muhib, or Vintage Shipping Line).
+ * Stamp dynamically features the active company (Docks, Truckit, Muhib, or Vantage Shipping Line).
  */
 export function drawOfficialCompanyStampOnly(
   doc: jsPDF,

@@ -52,8 +52,6 @@ import {
   wipeCompleteDatabase,
   exportSelectiveDatabaseBackup,
   restoreDatabaseSnapshot,
-  subscribeToCases,
-  subscribeToFinances,
   DEFAULT_DATABASE_USERS 
 } from '../services/dbService';
 import { AdminRolesAndPrivilegesTable } from './AdminRolesAndPrivilegesTable';
@@ -66,7 +64,6 @@ import {
   isUploadedLogo
 } from '../services/companyService';
 import { useBranding, optimizeLogoImage } from '../services/brandingService';
-import { downloadTaxReportPdf } from '../services/pdfExportService';
 import { 
   getDriveAccessToken, 
   uploadDatabaseBackupToDrive 
@@ -79,10 +76,7 @@ export type AdminSettingsTab =
   | 'logo' 
   | 'backup' 
   | 'general' 
-  | 'tax' 
   | 'drive' 
-  | 'banks' 
-  | 'approvals' 
   | 'settings';
 
 export interface GroupAdminManagementModalProps {
@@ -91,6 +85,7 @@ export interface GroupAdminManagementModalProps {
   currentUserName?: string;
   initialTab?: AdminSettingsTab;
   isPortalMode?: boolean;
+  hideTabsBar?: boolean;
 }
 
 export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps> = ({
@@ -98,11 +93,12 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
   onClose,
   currentUserName = 'Administrator',
   initialTab = 'users',
-  isPortalMode = false
+  isPortalMode = false,
+  hideTabsBar = false
 }) => {
   // Normalize initialTab: 'settings' maps to 'logo'
   const getNormalizedTab = (tab: AdminSettingsTab): AdminSettingsTab => {
-    if (tab === 'settings') return 'logo';
+    if (tab === 'settings' || (tab as string) === 'tax' || (tab as string) === 'banks' || (tab as string) === 'approvals') return 'logo';
     return tab;
   };
 
@@ -163,54 +159,6 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
       (u.designation && u.designation.toLowerCase().includes(q))
     );
   });
-
-  const pendingRegistrations = usersList.filter(u => u.status === 'PENDING_APPROVAL');
-
-  const handleApproveRegistration = async (user: AppUser) => {
-    try {
-      const updated: AppUser = {
-        ...user,
-        status: 'ACTIVE',
-        isSuspended: false
-      };
-      await saveUserToFirestore(updated);
-
-      if (user.role === UserRole.CLIENT) {
-        await saveClientToFirestore({
-          id: `CLI-${user.id}`,
-          name: user.clientName || user.name,
-          ownerName: user.name,
-          phone: user.contact || '',
-          contact: user.contact || '',
-          email: user.email || '',
-          status: 'ACTIVE',
-          createdAt: new Date().toISOString()
-        });
-      }
-
-      setUserSuccessMessage(`Approved registration for "${user.name}". They can now log in.`);
-      setTimeout(() => setUserSuccessMessage(''), 4000);
-    } catch (err: any) {
-      console.error('Failed to approve registration:', err);
-      alert('Failed to approve registration: ' + (err?.message || err));
-    }
-  };
-
-  const handleRejectRegistration = async (user: AppUser) => {
-    const confirmReject = window.confirm(
-      `Reject and remove registration request from "${user.name}" (${user.userId || user.email})?`
-    );
-    if (!confirmReject) return;
-
-    try {
-      await deleteUserFromFirestore(user.id);
-      setUserSuccessMessage(`Registration request for "${user.name}" has been declined and removed.`);
-      setTimeout(() => setUserSuccessMessage(''), 4000);
-    } catch (err: any) {
-      console.error('Failed to decline registration:', err);
-      alert('Failed to remove registration: ' + (err?.message || err));
-    }
-  };
 
   const handleOpenCreateUser = () => {
     setEditingUser(null);
@@ -514,7 +462,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
           companyName: groupName,
           adminUsername: currentUserName,
           adminUserId: 'AK001',
-          banks,
+          banks: [],
           companyDocuments: []
         }
       });
@@ -651,95 +599,6 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     }, 800);
   };
 
-  // ----------------------------------------------------
-  // 5. TAX & FINANCE STATEMENTS STATE
-  // ----------------------------------------------------
-  const [taxStartDate, setTaxStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d.toISOString().split('T')[0];
-  });
-  const [taxEndDate, setTaxEndDate] = useState(() => {
-    return new Date().toISOString().split('T')[0];
-  });
-  const [taxCases, setTaxCases] = useState<any[]>([]);
-  const [taxFinances, setTaxFinances] = useState<any[]>([]);
-  const [isGeneratingTaxReport, setIsGeneratingTaxReport] = useState(false);
-  const [taxReportSuccess, setTaxReportSuccess] = useState<string | null>(null);
-
-  useEffect(() => {
-    let unsubCases: (() => void) | undefined;
-    let unsubFinances: (() => void) | undefined;
-
-    if (activeTab === 'tax') {
-      unsubCases = subscribeToCases((items) => setTaxCases(items));
-      unsubFinances = subscribeToFinances((items) => setTaxFinances(items));
-    }
-
-    return () => {
-      if (unsubCases) unsubCases();
-      if (unsubFinances) unsubFinances();
-    };
-  }, [activeTab]);
-
-  const handleDownloadTaxReport = async () => {
-    if (!taxStartDate || !taxEndDate) {
-      alert("Please select both start and end dates.");
-      return;
-    }
-    setIsGeneratingTaxReport(true);
-    setTaxReportSuccess(null);
-    try {
-      await downloadTaxReportPdf({
-        startDate: taxStartDate,
-        endDate: taxEndDate,
-        cases: taxCases,
-        finances: taxFinances,
-        branding
-      });
-      setTaxReportSuccess("Tax report generated and downloaded successfully!");
-      setTimeout(() => setTaxReportSuccess(null), 4000);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to generate tax report. Please try again.");
-    } finally {
-      setIsGeneratingTaxReport(false);
-    }
-  };
-
-  // ----------------------------------------------------
-  // 6. CORPORATE BANKS STATE
-  // ----------------------------------------------------
-  const [banks, setBanks] = useState([
-    { id: 1, name: 'HBL Corporate', acct: '0011-2233-4455', iban: 'PK36HABB001122334455', branch: 'Clifton Branch' },
-    { id: 2, name: 'Meezan Bank Ltd', acct: '0102-3344-5566', iban: 'PK45MEZN010233445566', branch: 'I.I. Chundrigar Road' },
-    { id: 3, name: 'Bank Alfalah Corporate', acct: '5566-7788-9900', iban: 'PK12ALFH556677889900', branch: 'Karachi Port Branch' }
-  ]);
-  const [newBank, setNewBank] = useState({ id: 0, name: '', acct: '', iban: '', branch: '' });
-  const [showAddBank, setShowAddBank] = useState(false);
-
-  const handleAddBank = () => {
-    if (!newBank.name || !newBank.acct) return;
-    if (newBank.id) {
-      setBanks(banks.map(b => b.id === newBank.id ? { ...newBank, id: newBank.id } : b));
-    } else {
-      setBanks([...banks, { id: Date.now(), ...newBank }]);
-    }
-    setShowAddBank(false);
-    setNewBank({ id: 0, name: '', acct: '', iban: '', branch: '' });
-  };
-
-  const handleEditBank = (bank: any) => {
-    setNewBank(bank);
-    setShowAddBank(true);
-  };
-
-  const handleDeleteBank = (id: number) => {
-    if (window.confirm('Remove this corporate bank account?')) {
-      setBanks(banks.filter(b => b.id !== id));
-    }
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -766,7 +625,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                 <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
                   Centralized Admin Settings Hub
                 </h2>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
                   Global Super Admin
                 </span>
               </div>
@@ -789,130 +648,83 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
         </div>
 
         {/* Tab Navigation Strip (All 7 Complete Sections) */}
-        <div className="flex items-center gap-1 sm:gap-2 px-5 sm:px-7 py-2.5 border-b border-white/10 bg-slate-900/80 overflow-x-auto scrollbar-none">
-          {/* 1. Admin Users */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('users')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-              activeTab === 'users'
-                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
-                : 'text-gray-300 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <ShieldCheck size={14} />
-            <span>Admin Users</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/30 font-mono">
-              {globalAdmins.length}
-            </span>
-          </button>
-
-          {/* 2. Logo & Branding */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('logo')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-              activeTab === 'logo'
-                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
-                : 'text-gray-300 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <ImageIcon size={14} />
-            <span>Logo & Branding</span>
-            {isCustomLogo && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
-          </button>
-
-          {/* 3. Complete Backup & Restore */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('backup')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-              activeTab === 'backup'
-                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
-                : 'text-gray-300 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <Database size={14} />
-            <span>Complete Backup</span>
-          </button>
-
-          {/* 4. General Settings */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('general')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-              activeTab === 'general'
-                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
-                : 'text-gray-300 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <Sliders size={14} />
-            <span>General</span>
-          </button>
-
-          {/* 5. Tax & Finance */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('tax')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-              activeTab === 'tax'
-                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
-                : 'text-gray-300 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <FileText size={14} />
-            <span>Tax & Finance</span>
-          </button>
-
-          {/* 6. Google Drive Cloud */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('drive')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-              activeTab === 'drive'
-                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
-                : 'text-gray-300 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <HardDrive size={14} />
-            <span>Google Drive</span>
-          </button>
-
-          {/* 7. Corporate Banks */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('banks')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-              activeTab === 'banks'
-                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
-                : 'text-gray-300 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <CreditCard size={14} />
-            <span>Banks</span>
-          </button>
-
-          {/* 8. Pending Approvals */}
-          <button
-            type="button"
-            onClick={() => setActiveTab('approvals')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-              activeTab === 'approvals'
-                ? 'bg-rose-500 text-white shadow-md shadow-rose-500/30'
-                : pendingRegistrations.length > 0
-                ? 'text-rose-300 bg-rose-500/15 border border-rose-500/30 animate-pulse'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <CheckCircle2 size={14} />
-            <span>Approvals</span>
-            {pendingRegistrations.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white font-mono">
-                {pendingRegistrations.length}
+        {!hideTabsBar && (
+          <div className="flex items-center gap-1 sm:gap-2 px-5 sm:px-7 py-2.5 border-b border-white/10 bg-slate-900/80 overflow-x-auto scrollbar-none">
+            {/* 1. Admin Users */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('users')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                activeTab === 'users'
+                  ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
+                  : 'text-gray-300 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <ShieldCheck size={14} />
+              <span>Admin Users</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/30 font-mono">
+                {globalAdmins.length}
               </span>
-            )}
-          </button>
-        </div>
+            </button>
+
+            {/* 2. Logo & Branding */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('logo')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                activeTab === 'logo'
+                  ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
+                  : 'text-gray-300 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <ImageIcon size={14} />
+              <span>Logo & Branding</span>
+              {isCustomLogo && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
+            </button>
+
+            {/* 3. Complete Backup & Restore */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('backup')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                activeTab === 'backup'
+                  ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
+                  : 'text-gray-300 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Database size={14} />
+              <span>Complete Backup</span>
+            </button>
+
+            {/* 4. General Settings */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('general')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                activeTab === 'general'
+                  ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
+                  : 'text-gray-300 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Sliders size={14} />
+              <span>General</span>
+            </button>
+
+            {/* 5. Google Drive Cloud */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('drive')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                activeTab === 'drive'
+                  ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30'
+                  : 'text-gray-300 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <HardDrive size={14} />
+              <span>Google Drive</span>
+            </button>
+          </div>
+        )}
 
         {/* Modal Scrollable Content Area */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-7 space-y-6">
@@ -988,9 +800,9 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
 
               {/* Admins Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {filteredAdmins.map((admin) => (
+                {filteredAdmins.map((admin, aIdx) => (
                   <div
-                    key={admin.id}
+                    key={`modal_admin_${admin.id || admin.userId || aIdx}_${aIdx}`}
                     className="p-4 rounded-2xl bg-white/5 border border-white/10 hover:border-amber-500/40 transition-all flex flex-col justify-between"
                   >
                     <div>
@@ -1003,18 +815,18 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                             <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
                               {admin.name}
                               {admin.userId?.toLowerCase() === 'admin' && (
-                                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 font-bold font-mono">
+                                <span className="text-xs px-1.5 py-0.5 rounded-md bg-amber-500 text-slate-950 font-bold font-mono">
                                   ROOT
                                 </span>
                               )}
                             </h4>
-                            <p className="text-[11px] text-amber-300 font-mono">
+                            <p className="text-xs text-amber-300 font-mono">
                               ID: {admin.userId}
                             </p>
                           </div>
                         </div>
 
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
                           admin.status === 'SUSPENDED'
                             ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
                             : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
@@ -1023,7 +835,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                         </span>
                       </div>
 
-                      <div className="space-y-1 text-[11px] text-gray-300 mt-3 pt-3 border-t border-white/5">
+                      <div className="space-y-1 text-xs text-gray-300 mt-3 pt-3 border-t border-white/5">
                         <p className="flex items-center gap-2">
                           <Crown size={12} className="text-amber-400 shrink-0" />
                           <span className="font-semibold text-gray-200">{admin.designation || 'Global Administrator'}</span>
@@ -1038,7 +850,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                         </p>
                       </div>
 
-                      <div className="mt-3 p-2 rounded-xl bg-black/40 border border-white/5 text-[10px] text-gray-400 flex items-center justify-between">
+                      <div className="mt-3 p-2 rounded-xl bg-black/40 border border-white/5 text-xs text-gray-400 flex items-center justify-between">
                         <span>Access Scope:</span>
                         <span className="text-amber-300 font-semibold">All 4 Companies • Full Master Control</span>
                       </div>
@@ -1048,7 +860,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                       <button
                         type="button"
                         onClick={() => handleToggleStatus(admin)}
-                        className="px-2.5 py-1 rounded-lg text-[11px] font-medium text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition"
+                        className="px-2.5 py-1 rounded-lg text-xs font-medium text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition"
                       >
                         {admin.status === 'SUSPENDED' ? 'Activate' : 'Suspend'}
                       </button>
@@ -1056,18 +868,18 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                       <button
                         type="button"
                         onClick={() => handleOpenEditUser(admin)}
-                        className="px-2.5 py-1 rounded-lg text-[11px] font-medium text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 flex items-center gap-1 transition"
+                        className="px-2.5 py-1 rounded-lg text-xs font-medium text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 flex items-center gap-1 transition"
                       >
-                        <Edit3 size={11} />
+                        <Edit3 size={12} />
                         <span>Edit</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleDeleteUser(admin)}
-                        className="px-2.5 py-1 rounded-lg text-[11px] font-medium text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 flex items-center gap-1 transition"
+                        className="px-2.5 py-1 rounded-lg text-xs font-medium text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 flex items-center gap-1 transition"
                       >
-                        <Trash2 size={11} />
+                        <Trash2 size={12} />
                         <span>Delete</span>
                       </button>
                     </div>
@@ -1141,7 +953,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                     >
                       <Upload className="w-8 h-8 mx-auto text-amber-400 mb-2 animate-bounce" />
                       <p className="text-xs font-bold text-white">Click to Select New Logo File</p>
-                      <p className="text-[11px] text-gray-500 mt-1">PNG, SVG, JPG (Max 5MB)</p>
+                      <p className="text-xs text-gray-400 mt-1">PNG, SVG, JPG (Max 5MB)</p>
                       {isOptimizingLogo && (
                         <p className="text-xs text-amber-300 mt-2 flex items-center justify-center gap-1.5">
                           <Loader2 size={13} className="animate-spin" /> Optimizing image for crisp HD rendering...
@@ -1153,7 +965,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                   {groupLogoFile && (
                     <div className="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200 flex items-center justify-between">
                       <span className="truncate">Selected: {groupLogoFile.name} ({Math.round(groupLogoFile.size / 1024)} KB)</span>
-                      <span className="text-[10px] font-bold text-emerald-400">Ready to Save</span>
+                      <span className="text-xs font-bold text-emerald-400">Ready to Save</span>
                     </div>
                   )}
                 </div>
@@ -1173,11 +985,11 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                     ) : (
                       <div className="flex flex-col items-center justify-center gap-1.5 text-gray-500">
                         <ImageIcon size={28} className="text-gray-600" />
-                        <span className="text-[11px] font-medium">No Logo Uploaded Yet</span>
+                        <span className="text-xs font-medium">No Logo Uploaded Yet</span>
                       </div>
                     )}
                   </div>
-                  <span className="text-[10px] font-mono text-gray-500">
+                  <span className="text-xs font-mono text-gray-400">
                     Live Display Sample
                   </span>
                 </div>
@@ -1440,322 +1252,13 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
           )}
 
           {/* ==================================================== */}
-          {/* TAB 5: TAX & FINANCE STATEMENTS                      */}
-          {/* ==================================================== */}
-          {activeTab === 'tax' && (
-            <div className="space-y-6 animate-fade-in">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
-                <div>
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <FileText className="text-amber-400" size={20} />
-                    Tax & Finance Performance Statements
-                  </h3>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Generate and download official PDF statements for all ledger transactions across subsidiaries.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleDownloadTaxReport}
-                  disabled={isGeneratingTaxReport}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 transition shadow-lg shadow-amber-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  {isGeneratingTaxReport ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                  <span>{isGeneratingTaxReport ? 'Generating PDF...' : 'Download Statement PDF'}</span>
-                </button>
-              </div>
-
-              {taxReportSuccess && (
-                <div className="p-3.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2">
-                  <CheckCircle2 size={16} className="text-emerald-400" />
-                  <span>{taxReportSuccess}</span>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-1">Period Start Date</label>
-                  <input
-                    type="date"
-                    value={taxStartDate}
-                    onChange={(e) => setTaxStartDate(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-1">Period End Date</label>
-                  <input
-                    type="date"
-                    value={taxEndDate}
-                    onChange={(e) => setTaxEndDate(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-              </div>
-
-              {/* Performance Stats Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
-                  <p className="text-[11px] text-gray-400 uppercase font-mono">Period Cases</p>
-                  <p className="text-xl font-bold text-white mt-1">{taxCases.length}</p>
-                </div>
-                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
-                  <p className="text-[11px] text-gray-400 uppercase font-mono">Total Transactions</p>
-                  <p className="text-xl font-bold text-white mt-1">{taxFinances.length}</p>
-                </div>
-                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-                  <p className="text-[11px] text-emerald-300 uppercase font-mono">Total Inflow</p>
-                  <p className="text-xl font-bold text-emerald-300 mt-1">
-                    PKR {taxFinances.filter(f => f.type === 'INCOME').reduce((s, f) => s + (f.amount || 0), 0).toLocaleString()}
-                  </p>
-                </div>
-                <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30">
-                  <p className="text-[11px] text-rose-300 uppercase font-mono">Total Outflow</p>
-                  <p className="text-xl font-bold text-rose-300 mt-1">
-                    PKR {taxFinances.filter(f => f.type === 'EXPENSE').reduce((s, f) => s + (f.amount || 0), 0).toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ==================================================== */}
-          {/* TAB 6: GOOGLE DRIVE CLOUD                            */}
+          {/* TAB 5: GOOGLE DRIVE CLOUD                            */}
           {/* ==================================================== */}
           {activeTab === 'drive' && (
             <div className="space-y-4 animate-fade-in">
               <GoogleDriveManager attachedMode={true} />
             </div>
           )}
-
-          {/* ==================================================== */}
-          {/* TAB 7: CORPORATE BANKS MANAGEMENT                    */}
-          {/* ==================================================== */}
-          {activeTab === 'banks' && (
-            <div className="space-y-6 animate-fade-in">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
-                <div>
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <CreditCard className="text-amber-400" size={20} />
-                    Corporate Banks Management
-                  </h3>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Manage corporate bank accounts printed on tax invoices, client billing, and remittance forms.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewBank({ id: 0, name: '', acct: '', iban: '', branch: '' });
-                    setShowAddBank(true);
-                  }}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 transition shadow-lg shadow-amber-500/25 flex items-center gap-2 cursor-pointer"
-                >
-                  <Plus size={15} />
-                  <span>Add Bank Account</span>
-                </button>
-              </div>
-
-              {/* Add/Edit Bank Form */}
-              {showAddBank && (
-                <div className="p-5 rounded-2xl bg-white/5 border border-white/10 space-y-4 animate-fade-in">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                    {newBank.id ? 'Edit Bank Account' : 'Add New Corporate Bank'}
-                  </h4>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-300 mb-1">Bank Name</label>
-                      <input
-                        type="text"
-                        value={newBank.name}
-                        onChange={(e) => setNewBank({ ...newBank, name: e.target.value })}
-                        placeholder="e.g. Habib Bank Limited"
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-300 mb-1">Branch Name</label>
-                      <input
-                        type="text"
-                        value={newBank.branch}
-                        onChange={(e) => setNewBank({ ...newBank, branch: e.target.value })}
-                        placeholder="e.g. Clifton Corporate Branch"
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-300 mb-1">Account Number</label>
-                      <input
-                        type="text"
-                        value={newBank.acct}
-                        onChange={(e) => setNewBank({ ...newBank, acct: e.target.value })}
-                        placeholder="e.g. 0011-2233-4455"
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white font-mono focus:outline-none focus:border-amber-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-300 mb-1">IBAN</label>
-                      <input
-                        type="text"
-                        value={newBank.iban}
-                        onChange={(e) => setNewBank({ ...newBank, iban: e.target.value })}
-                        placeholder="e.g. PK36HABB001122334455"
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white font-mono focus:outline-none focus:border-amber-400"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowAddBank(false)}
-                      className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-400 hover:text-white bg-white/5 hover:bg-white/10"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleAddBank}
-                      className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 shadow-md"
-                    >
-                      {newBank.id ? 'Update Bank' : 'Save Bank'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Banks List */}
-              <div className="space-y-3">
-                {banks.map((bank) => (
-                  <div
-                    key={bank.id}
-                    className="p-4 rounded-2xl bg-white/5 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-amber-500/40 transition"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 font-bold text-xs">
-                        {bank.name.substring(0, 3).toUpperCase()}
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-white">{bank.name}</h4>
-                        <p className="text-xs text-gray-400">{bank.branch}</p>
-                      </div>
-                    </div>
-
-                    <div className="text-left sm:text-right font-mono">
-                      <p className="text-xs text-white">{bank.acct}</p>
-                      <p className="text-[11px] text-gray-400">{bank.iban}</p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleEditBank(bank)}
-                        className="p-2 rounded-lg text-amber-300 hover:text-white bg-white/5 hover:bg-amber-500/20 transition"
-                        title="Edit Bank"
-                      >
-                        <Edit3 size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteBank(bank.id)}
-                        className="p-2 rounded-lg text-rose-400 hover:text-white bg-white/5 hover:bg-rose-500/20 transition"
-                        title="Remove Bank"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* ==================================================== */}
-          {/* TAB 8: PENDING REGISTRATIONS APPROVALS                */}
-          {/* ==================================================== */}
-          {activeTab === 'approvals' && (
-            <div className="space-y-6 animate-fade-in">
-              <div className="flex items-center justify-between pb-3 border-b border-white/10">
-                <div>
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <CheckCircle2 className="text-rose-400" size={20} />
-                    Pending Client & Transporter Approvals
-                  </h3>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Review and activate newly registered corporate clients, cargo owners, and haulage transporters.
-                  </p>
-                </div>
-                <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                  {pendingRegistrations.length} Pending
-                </span>
-              </div>
-
-              {pendingRegistrations.length === 0 ? (
-                <div className="p-12 text-center rounded-2xl bg-white/5 border border-dashed border-white/10">
-                  <CheckCircle2 size={36} className="text-emerald-400 mx-auto mb-3" />
-                  <h4 className="text-sm font-bold text-white">All Clear • No Pending Registrations</h4>
-                  <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
-                    New clients or transporters registering via the sign-in portal will appear here for one-click verification.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {pendingRegistrations.map((user) => (
-                    <div
-                      key={user.id}
-                      className="p-4 rounded-2xl bg-white/5 border border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-300 shrink-0">
-                          {user.role === UserRole.TRANSPORTER ? <Truck size={20} /> : <Building size={20} />}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-sm font-bold text-white">{user.name}</h4>
-                            <span className="px-2 py-0.2 rounded-full text-[10px] font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                              {user.role === UserRole.TRANSPORTER ? 'Transporter' : 'Client'}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            Username / ID: <span className="text-amber-300 font-mono">{user.userId}</span> • Email: {user.email || 'N/A'} • Contact: {user.contact || 'N/A'}
-                          </p>
-                          {user.clientName && (
-                            <p className="text-xs text-gray-300 font-semibold mt-0.5">
-                              Company: {user.clientName}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleRejectRegistration(user)}
-                          className="px-3 py-1.5 rounded-xl text-xs font-bold text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition flex items-center gap-1.5"
-                        >
-                          <UserX size={13} />
-                          <span>Decline</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleApproveRegistration(user)}
-                          className="px-4 py-1.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-emerald-400 to-emerald-500 hover:from-emerald-300 hover:to-emerald-400 transition shadow-md shadow-emerald-500/25 flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <UserCheck size={13} />
-                          <span>Approve & Activate</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
         </div>
 
         {/* Modal Footer */}
@@ -2026,7 +1529,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
               </div>
 
               <p className="text-xs text-gray-300 leading-relaxed">
-                This will delete all live cases, financial entries, payables, receivables, and operational data across <span className="text-rose-300 font-bold">ALL 4 subsidiaries</span> (Docks, Muhib, Vintage, Truckit) and the Parent Group. Ensure you have downloaded a JSON backup first.
+                This will delete all live cases, financial entries, payables, receivables, and operational data across <span className="text-rose-300 font-bold">ALL 4 subsidiaries</span> (Docks, Muhib, Vantage, Truckit) and the Parent Group. Ensure you have downloaded a JSON backup first.
               </p>
 
               <div>

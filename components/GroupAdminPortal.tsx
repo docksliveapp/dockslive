@@ -35,7 +35,13 @@ import {
   Clock,
   Eye,
   Activity,
-  AlertCircle
+  AlertCircle,
+  Lock,
+  Key,
+  EyeOff,
+  Save,
+  Check,
+  UserCheck
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -53,7 +59,8 @@ import {
   subscribeToVehicles, 
   subscribeToFinances, 
   subscribeToUsers,
-  matchesActiveCompany 
+  matchesActiveCompany,
+  saveUserToFirestore
 } from '../services/dbService';
 import { 
   CompanyId, 
@@ -81,14 +88,11 @@ type PortalView =
   | 'company_muhib'
   | 'company_vantage'
   | 'company_truckit'
-  | 'setting_users'
+  | 'setting_profile'
   | 'setting_logo'
   | 'setting_backup'
   | 'setting_general'
-  | 'setting_tax'
-  | 'setting_drive'
-  | 'setting_banks'
-  | 'setting_approvals';
+  | 'setting_drive';
 
 export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
   onExitPortal,
@@ -98,6 +102,31 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
 }) => {
   const [activeView, setActiveView] = useState<PortalView>('overview');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Main Admin Profile Editing State
+  const [profileUserId, setProfileUserId] = useState(() => {
+    return safeAppStorage.getItem('dpl_admin_userid') || 'admin';
+  });
+  const [profileDisplayName, setProfileDisplayName] = useState(() => {
+    return safeAppStorage.getItem('dpl_current_user_name') || currentUserName || 'Arbab Khan';
+  });
+  const [profileEmail, setProfileEmail] = useState(() => {
+    return safeAppStorage.getItem('dpl_admin_email') || 'docks.live.app@gmail.com';
+  });
+  const [profilePhone, setProfilePhone] = useState(() => {
+    return safeAppStorage.getItem('dpl_admin_phone') || '+92 300 8221199';
+  });
+  const [profileCurrentPassword, setProfileCurrentPassword] = useState('');
+  const [profileNewPassword, setProfileNewPassword] = useState('');
+  const [profileConfirmPassword, setProfileConfirmPassword] = useState('');
+  const [profilePin, setProfilePin] = useState(() => {
+    return safeAppStorage.getItem('dpl_admin_pin') || '9999';
+  });
+  const [showProfilePasswords, setShowProfilePasswords] = useState(false);
+  const [profileSuccessMsg, setProfileSuccessMsg] = useState('');
+  const [profileErrorMsg, setProfileErrorMsg] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // Parent Group & Branding
   const { parentGroup } = useParentGroup();
@@ -146,11 +175,6 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
       unsubUsers();
     };
   }, []);
-
-  // Pending Registrations Count
-  const pendingApprovalsCount = useMemo(() => {
-    return allUsers.filter(u => u.status === 'PENDING_APPROVAL').length;
-  }, [allUsers]);
 
   // Calculations per subsidiary and consolidated
   const statsByCompany = useMemo(() => {
@@ -330,28 +354,91 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
     exportTableToExcel(filename, 'Consolidated Executive Report', headers, rows, [32, 14, 25, 20, 18, 20, 18, 22, 25, 22]);
   };
 
+  // Save Main Admin Profile & Credentials
+  const handleSaveAdminProfile = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setProfileErrorMsg('');
+    setProfileSuccessMsg('');
+
+    if (!profileUserId.trim()) {
+      setProfileErrorMsg('User ID cannot be blank.');
+      return;
+    }
+    if (!profileDisplayName.trim()) {
+      setProfileErrorMsg('Display Name cannot be blank.');
+      return;
+    }
+    if (profileNewPassword && profileNewPassword !== profileConfirmPassword) {
+      setProfileErrorMsg('New password and confirm password do not match.');
+      return;
+    }
+    if (profileNewPassword && profileNewPassword.length < 4) {
+      setProfileErrorMsg('New password must be at least 4 characters long.');
+      return;
+    }
+
+    setIsSavingProfile(true);
+    try {
+      safeAppStorage.setItem('dpl_admin_userid', profileUserId.trim());
+      safeAppStorage.setItem('dpl_current_user_name', profileDisplayName.trim());
+      safeAppStorage.setItem('dpl_user_name', profileDisplayName.trim());
+      safeAppStorage.setItem('dpl_admin_email', profileEmail.trim());
+      safeAppStorage.setItem('dpl_admin_phone', profilePhone.trim());
+      safeAppStorage.setItem('dpl_admin_pin', profilePin.trim());
+
+      if (profileNewPassword) {
+        safeAppStorage.setItem('dpl_admin_password', profileNewPassword);
+      }
+
+      // Sync with Firestore user record if exists
+      const matchedUser = allUsers.find(u => 
+        (u.userId && u.userId.toLowerCase() === profileUserId.toLowerCase()) ||
+        (u.name && u.name.toLowerCase() === currentUserName.toLowerCase()) ||
+        u.isAdmin
+      );
+
+      if (matchedUser) {
+        await saveUserToFirestore({
+          ...matchedUser,
+          name: profileDisplayName.trim(),
+          userId: profileUserId.trim(),
+          email: profileEmail.trim(),
+          contact: profilePhone.trim(),
+          ...(profileNewPassword ? { password: profileNewPassword } : {})
+        });
+      }
+
+      setProfileSuccessMsg('Main Admin Profile & Security Credentials successfully updated!');
+      setProfileCurrentPassword('');
+      setProfileNewPassword('');
+      setProfileConfirmPassword('');
+      setTimeout(() => setProfileSuccessMsg(''), 5000);
+    } catch (err: any) {
+      console.error('Error updating admin profile:', err);
+      setProfileErrorMsg(err?.message || 'Failed to save admin profile.');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
   // Helper to switch view and close mobile drawer
   const handleSelectView = (view: PortalView) => {
     setActiveView(view);
     setMobileSidebarOpen(false);
   };
 
-  // Convert setting view to setting tab key
+  // Convert setting view to setting tab key for remaining tabs
   const getSettingsTabFromView = (view: PortalView): AdminSettingsTab => {
     switch (view) {
-      case 'setting_users': return 'users';
       case 'setting_logo': return 'logo';
       case 'setting_backup': return 'backup';
       case 'setting_general': return 'general';
-      case 'setting_tax': return 'tax';
       case 'setting_drive': return 'drive';
-      case 'setting_banks': return 'banks';
-      case 'setting_approvals': return 'approvals';
-      default: return 'users';
+      default: return 'logo';
     }
   };
 
-  const isSettingsActive = activeView.startsWith('setting_');
+  const isSettingsActive = activeView.startsWith('setting_') && activeView !== 'setting_profile';
   const isCompanyViewActive = activeView.startsWith('company_');
 
   const selectedCompanyId: CompanyId | null = (() => {
@@ -378,8 +465,10 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
       {/* ======================================================== */}
       {/* SIDEBAR NAVIGATION                                       */}
       {/* ======================================================== */}
-      <aside className={`fixed top-0 left-0 h-full bg-[#0E121B] border-r border-white/10 z-50 flex flex-col transition-all duration-300 w-72 sm:w-80 lg:static lg:w-72 shadow-2xl ${
-        mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+      <aside className={`fixed top-0 left-0 h-full bg-[#0E121B] border-r border-white/10 z-50 flex flex-col transition-all duration-300 w-72 sm:w-80 shadow-2xl ${
+        mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      } lg:static ${
+        sidebarCollapsed ? 'lg:hidden' : 'lg:translate-x-0 lg:w-72'
       }`}>
         
         {/* Header / Conglomerate Branding */}
@@ -390,21 +479,29 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <h1 className="font-extrabold text-xs sm:text-sm text-white tracking-wide uppercase truncate">
+                <h1 className="font-extrabold text-sm text-white tracking-wide uppercase truncate">
                   MAK Group Portal
                 </h1>
               </div>
-              <p className="text-[10px] font-mono text-amber-400 uppercase tracking-wider truncate">
+              <p className="text-xs font-mono text-amber-400 uppercase tracking-wider truncate">
                 Main Admin Control Panel
               </p>
             </div>
           </div>
           <button 
             type="button"
-            onClick={() => setMobileSidebarOpen(false)}
-            className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10"
+            onClick={() => {
+              if (window.innerWidth < 1024) {
+                setMobileSidebarOpen(false);
+              } else {
+                setSidebarCollapsed(true);
+              }
+            }}
+            className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition cursor-pointer flex items-center gap-1.5 text-xs font-semibold border border-white/10 shrink-0"
+            title="Hide Sidebar"
           >
-            <X size={18} />
+            <span>Hide</span>
+            <X size={15} />
           </button>
         </div>
 
@@ -413,7 +510,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
           
           {/* SECTION 1: EXECUTIVE HUB */}
           <div>
-            <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
+            <div className="px-3 py-1 text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">
               Executive Hub
             </div>
             <button
@@ -429,7 +526,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 <Crown size={16} className={activeView === 'overview' ? 'text-amber-400' : 'text-slate-400'} />
                 <span className="truncate">Group Executive Dashboard</span>
               </div>
-              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold shrink-0">
+              <span className="text-xs font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold shrink-0">
                 Total
               </span>
             </button>
@@ -437,19 +534,19 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
 
           {/* SECTION 2: 4 SUBSIDIARY COMPANIES */}
           <div>
-            <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono flex items-center justify-between">
+            <div className="px-3 py-1 text-xs font-bold text-slate-400 uppercase tracking-widest font-mono flex items-center justify-between">
               <span>Subsidiaries (4 Companies)</span>
-              <span className="text-[9px] text-amber-400">Live Data</span>
+              <span className="text-xs text-amber-400 font-semibold">Live Data</span>
             </div>
             <div className="space-y-1 mt-1">
-              {COMPANIES_LIST.map((comp) => {
+              {COMPANIES_LIST.map((comp, cIdx) => {
                 const viewKey: PortalView = `company_${comp.id}` as PortalView;
                 const isSelected = activeView === viewKey;
                 const s = statsByCompany[comp.id];
 
                 return (
                   <button
-                    key={comp.id}
+                    key={`comp_nav_${comp.id}_${cIdx}`}
                     type="button"
                     onClick={() => handleSelectView(viewKey)}
                     className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl transition-all cursor-pointer text-left ${
@@ -467,13 +564,13 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                         />
                       </div>
                       <div className="min-w-0 flex-1 truncate">
-                        <div className="font-bold text-[11px] truncate text-white">{comp.name}</div>
-                        <div className="text-[9px] text-slate-400 font-mono truncate">{comp.shortName} • {comp.category}</div>
+                        <div className="font-bold text-xs truncate text-white">{comp.name}</div>
+                        <div className="text-xs text-slate-400 font-mono truncate">{comp.shortName} • {comp.category}</div>
                       </div>
                     </div>
 
                     <div className="text-right shrink-0">
-                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/10 text-slate-200">
+                      <span className="text-xs font-mono font-bold px-1.5 py-0.5 rounded bg-white/10 text-slate-200">
                         {s ? s.totalCases : 0} Cases
                       </span>
                     </div>
@@ -483,128 +580,85 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
             </div>
           </div>
 
-          {/* SECTION 3: GROUP ADMIN SETTINGS (ALL 8 CONTROLS) */}
+          {/* SECTION 3: GROUP ADMIN SETTINGS */}
           <div>
-            <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
+            <div className="px-3 py-1 text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">
               Group Admin Settings
             </div>
-            <div className="space-y-0.5 mt-1">
+            <div className="space-y-1 mt-1">
+              {/* Profile Editing */}
               <button
                 type="button"
-                onClick={() => handleSelectView('setting_users')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl transition-all cursor-pointer ${
-                  activeView === 'setting_users'
-                    ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40'
+                onClick={() => handleSelectView('setting_profile')}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer ${
+                  activeView === 'setting_profile'
+                    ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 shadow-sm'
                     : 'text-slate-300 hover:bg-white/5 hover:text-white'
                 }`}
               >
                 <div className="flex items-center gap-2.5">
-                  <ShieldCheck size={15} className="text-slate-400" />
-                  <span>Admin Users & Privileges</span>
+                  <UserCheck size={16} className={activeView === 'setting_profile' ? 'text-amber-400' : 'text-slate-400'} />
+                  <span className="text-xs font-semibold">Profile Editing</span>
                 </div>
-                <span className="text-[9px] font-mono bg-white/10 px-1.5 py-0.5 rounded text-slate-300 font-bold">
-                  {allUsers.length}
+                <span className="text-xs font-mono bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-bold">
+                  Main ID
                 </span>
               </button>
 
+              {/* Logos & Subsidiary Branding */}
               <button
                 type="button"
                 onClick={() => handleSelectView('setting_logo')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer ${
                   activeView === 'setting_logo'
                     ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40'
                     : 'text-slate-300 hover:bg-white/5 hover:text-white'
                 }`}
               >
-                <ImageIcon size={15} className="text-slate-400" />
-                <span>Logos & Subsidiary Branding</span>
+                <ImageIcon size={16} className={activeView === 'setting_logo' ? 'text-amber-400' : 'text-slate-400'} />
+                <span className="text-xs font-semibold">Logos & Subsidiary Branding</span>
               </button>
 
+              {/* Backup & System Recovery */}
               <button
                 type="button"
                 onClick={() => handleSelectView('setting_backup')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer ${
                   activeView === 'setting_backup'
                     ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40'
                     : 'text-slate-300 hover:bg-white/5 hover:text-white'
                 }`}
               >
-                <Database size={15} className="text-slate-400" />
-                <span>Backup & System Recovery</span>
+                <Database size={16} className={activeView === 'setting_backup' ? 'text-amber-400' : 'text-slate-400'} />
+                <span className="text-xs font-semibold">Backup & System Recovery</span>
               </button>
 
+              {/* Conglomerate Legal Details */}
               <button
                 type="button"
                 onClick={() => handleSelectView('setting_general')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer ${
                   activeView === 'setting_general'
                     ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40'
                     : 'text-slate-300 hover:bg-white/5 hover:text-white'
                 }`}
               >
-                <Sliders size={15} className="text-slate-400" />
-                <span>Conglomerate Legal Details</span>
+                <Sliders size={16} className={activeView === 'setting_general' ? 'text-amber-400' : 'text-slate-400'} />
+                <span className="text-xs font-semibold">Conglomerate Legal Details</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => handleSelectView('setting_tax')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
-                  activeView === 'setting_tax'
-                    ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40'
-                    : 'text-slate-300 hover:bg-white/5 hover:text-white'
-                }`}
-              >
-                <FileText size={15} className="text-slate-400" />
-                <span>Tax & SRB Withholding</span>
-              </button>
-
+              {/* Google Drive Storage Sync */}
               <button
                 type="button"
                 onClick={() => handleSelectView('setting_drive')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer ${
                   activeView === 'setting_drive'
                     ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40'
                     : 'text-slate-300 hover:bg-white/5 hover:text-white'
                 }`}
               >
-                <HardDrive size={15} className="text-slate-400" />
-                <span>Google Drive Storage Sync</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectView('setting_banks')}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
-                  activeView === 'setting_banks'
-                    ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40'
-                    : 'text-slate-300 hover:bg-white/5 hover:text-white'
-                }`}
-              >
-                <CreditCard size={15} className="text-slate-400" />
-                <span>Corporate Bank Accounts</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectView('setting_approvals')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl transition-all cursor-pointer ${
-                  activeView === 'setting_approvals'
-                    ? 'bg-rose-500/20 text-rose-300 font-bold border border-rose-500/40'
-                    : pendingApprovalsCount > 0
-                    ? 'bg-rose-500/10 text-rose-300 hover:bg-rose-500/20'
-                    : 'text-slate-300 hover:bg-white/5 hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <CheckCircle2 size={15} className={pendingApprovalsCount > 0 ? 'text-rose-400' : 'text-slate-400'} />
-                  <span>Pending Staff Approvals</span>
-                </div>
-                {pendingApprovalsCount > 0 && (
-                  <span className="text-[9px] font-mono bg-rose-500 text-white font-bold px-1.5 py-0.5 rounded-full animate-pulse">
-                    {pendingApprovalsCount}
-                  </span>
-                )}
+                <HardDrive size={16} className={activeView === 'setting_drive' ? 'text-amber-400' : 'text-slate-400'} />
+                <span className="text-xs font-semibold">Google Drive Storage Sync</span>
               </button>
             </div>
           </div>
@@ -617,8 +671,8 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
               <div className="min-w-0 truncate">
-                <span className="text-[11px] font-bold text-white block truncate">{currentUserName}</span>
-                <span className="text-[9px] font-mono text-amber-300 block truncate">Global Super Admin</span>
+                <span className="text-xs font-bold text-white block truncate">{profileDisplayName || currentUserName}</span>
+                <span className="text-xs font-mono text-amber-300 block truncate">Global Super Admin (@{profileUserId})</span>
               </div>
             </div>
           </div>
@@ -659,11 +713,24 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <button
               type="button"
-              onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-              className="lg:hidden p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white border border-white/10 cursor-pointer"
-              title="Toggle Menu"
+              onClick={() => {
+                if (window.innerWidth < 1024) {
+                  setMobileSidebarOpen(!mobileSidebarOpen);
+                } else {
+                  setSidebarCollapsed(!sidebarCollapsed);
+                }
+              }}
+              className={`px-3 py-2 sm:px-3.5 sm:py-2 rounded-xl border cursor-pointer flex items-center gap-2 transition active:scale-95 shrink-0 ${
+                sidebarCollapsed 
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-md shadow-amber-500/10 hover:bg-amber-500/30' 
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border-white/10'
+              }`}
+              title={sidebarCollapsed ? "Show / Expand Sidebar" : "Hide / Collapse Sidebar"}
             >
-              <Menu size={18} />
+              <Menu size={18} className={sidebarCollapsed ? "text-amber-400" : "text-slate-300"} />
+              <span className="text-xs font-bold tracking-wide">
+                {sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar"}
+              </span>
             </button>
 
             <div className="flex items-center gap-2 min-w-0">
@@ -672,20 +739,17 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 Main Admin
               </span>
               <div className="min-w-0 truncate">
-                <h2 className="text-xs sm:text-sm font-extrabold text-white uppercase tracking-wider truncate">
+                <h2 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider truncate">
                   {activeView === 'overview' && 'MAK Group Executive Overview • Consolidated Multi-Entity Dashboard'}
                   {activeView === 'company_docks' && 'Docks (Pvt.) Ltd. • Subsidiary Dashboard'}
                   {activeView === 'company_muhib' && 'Muhib International (SMC-Pvt.) Ltd. • Subsidiary Dashboard'}
-                  {activeView === 'company_vantage' && 'Vintage Shipping Line • Subsidiary Dashboard'}
+                  {activeView === 'company_vantage' && 'Vantage Shipping Line • Subsidiary Dashboard'}
                   {activeView === 'company_truckit' && 'Truckit (Pvt.) Ltd. • Subsidiary Dashboard'}
-                  {activeView === 'setting_users' && 'Admin Users & Privileges'}
+                  {activeView === 'setting_profile' && 'Main Admin Profile Editing • Credentials & Security'}
                   {activeView === 'setting_logo' && 'Logos & Subsidiary Branding'}
                   {activeView === 'setting_backup' && 'System Backup & Recovery'}
                   {activeView === 'setting_general' && 'Conglomerate Legal Details'}
-                  {activeView === 'setting_tax' && 'Tax & SRB Withholding'}
                   {activeView === 'setting_drive' && 'Google Drive Cloud Sync'}
-                  {activeView === 'setting_banks' && 'Corporate Bank Accounts'}
-                  {activeView === 'setting_approvals' && 'Pending Staff Registration Approvals'}
                 </h2>
               </div>
             </div>
@@ -743,18 +807,18 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-2 mb-1.5">
-                      <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 border border-amber-400/40 text-amber-300 text-[10px] font-mono font-bold uppercase">
+                      <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 border border-amber-400/40 text-amber-300 text-xs font-mono font-bold uppercase">
                         Enterprise Conglomerate Intelligence
                       </span>
                       <span className="text-slate-400 text-xs font-mono">
                         Live Cross-Entity Aggregate
                       </span>
                     </div>
-                    <h2 className="text-xl sm:text-2xl font-black text-white tracking-wide">
+                    <h2 className="text-xl sm:text-2xl font-bold text-white tracking-wide">
                       {parentGroup.name}
                     </h2>
                     <p className="text-xs sm:text-sm text-slate-300 max-w-2xl mt-1 leading-relaxed">
-                      Real-time consolidated tracking, financial reconciliation, and fleet oversight aggregating all 4 corporate subsidiaries: <span className="text-amber-300 font-semibold">Docks</span>, <span className="text-blue-300 font-semibold">Muhib International</span>, <span className="text-cyan-300 font-semibold">Vintage Shipping Line</span>, and <span className="text-red-300 font-semibold">Truckit</span>.
+                      Real-time consolidated tracking, financial reconciliation, and fleet oversight aggregating all 4 corporate subsidiaries: <span className="text-amber-300 font-semibold">Docks</span>, <span className="text-blue-300 font-semibold">Muhib International</span>, <span className="text-cyan-300 font-semibold">Vantage Shipping Line</span>, and <span className="text-red-300 font-semibold">Truckit</span>.
                     </p>
                   </div>
 
@@ -762,7 +826,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                     <button
                       type="button"
                       onClick={handleExportConsolidatedReport}
-                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-extrabold text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition"
+                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition"
                     >
                       <Download size={15} />
                       <span>Consolidated Audit Excel</span>
@@ -777,13 +841,13 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 {/* Total Shipments */}
                 <div className="p-4 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-lg">
                   <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
-                    <span className="font-semibold uppercase tracking-wider text-[11px]">Total Consignments</span>
+                    <span className="font-semibold uppercase tracking-wider text-xs">Total Consignments</span>
                     <FolderKanban size={16} className="text-amber-400" />
                   </div>
-                  <div className="text-2xl sm:text-3xl font-black font-mono text-white">
+                  <div className="text-2xl sm:text-3xl font-bold font-mono text-white">
                     {grandTotals.totalCases}
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between font-mono">
+                  <div className="text-xs text-slate-400 mt-1 flex items-center justify-between font-mono">
                     <span>{grandTotals.totalContainers} Total Containers</span>
                     <span className="text-emerald-400 font-bold">{grandTotals.completedCases} Cleared</span>
                   </div>
@@ -792,13 +856,13 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 {/* Active In-Transit */}
                 <div className="p-4 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-lg">
                   <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
-                    <span className="font-semibold uppercase tracking-wider text-[11px]">Active In-Transit</span>
+                    <span className="font-semibold uppercase tracking-wider text-xs">Active In-Transit</span>
                     <Activity size={16} className="text-blue-400" />
                   </div>
-                  <div className="text-2xl sm:text-3xl font-black font-mono text-blue-300">
+                  <div className="text-2xl sm:text-3xl font-bold font-mono text-blue-300">
                     {grandTotals.activeCases}
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between font-mono">
+                  <div className="text-xs text-slate-400 mt-1 flex items-center justify-between font-mono">
                     <span>In-transit / Port handling</span>
                     <span className="text-blue-400 font-bold">Live Flow</span>
                   </div>
@@ -807,13 +871,13 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 {/* Universal Fleet */}
                 <div className="p-4 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-lg">
                   <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
-                    <span className="font-semibold uppercase tracking-wider text-[11px]">Universal Fleet</span>
+                    <span className="font-semibold uppercase tracking-wider text-xs">Universal Fleet</span>
                     <Truck size={16} className="text-cyan-400" />
                   </div>
-                  <div className="text-2xl sm:text-3xl font-black font-mono text-cyan-300">
+                  <div className="text-2xl sm:text-3xl font-bold font-mono text-cyan-300">
                     {grandTotals.totalVehiclesCount}
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between font-mono">
+                  <div className="text-xs text-slate-400 mt-1 flex items-center justify-between font-mono">
                     <span>Prime Movers & Trailers</span>
                     <span className="text-emerald-400 font-bold">{grandTotals.availableFleet} Ready</span>
                   </div>
@@ -822,13 +886,13 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 {/* Net Operating Margin */}
                 <div className="p-4 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-lg">
                   <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
-                    <span className="font-semibold uppercase tracking-wider text-[11px]">Net Operating Profit</span>
+                    <span className="font-semibold uppercase tracking-wider text-xs">Net Operating Profit</span>
                     <DollarSign size={16} className="text-emerald-400" />
                   </div>
-                  <div className="text-xl sm:text-2xl font-black font-mono text-emerald-400 truncate">
+                  <div className="text-xl sm:text-2xl font-bold font-mono text-emerald-400 truncate">
                     PKR {grandTotals.netProfit.toLocaleString()}
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between font-mono">
+                  <div className="text-xs text-slate-400 mt-1 flex items-center justify-between font-mono">
                     <span>Revenue - Expenses</span>
                     <span className="text-emerald-400 font-bold">Group Margin</span>
                   </div>
@@ -839,39 +903,39 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-950/30 to-[#111724] border border-emerald-500/20">
                   <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider">Total Group Revenue (Receivables)</span>
+                    <span className="text-slate-400 font-semibold uppercase text-xs tracking-wider">Total Group Revenue</span>
                     <TrendingUp size={14} className="text-emerald-400" />
                   </div>
                   <div className="text-lg sm:text-xl font-bold font-mono text-emerald-300">
                     PKR {grandTotals.totalReceivables.toLocaleString()}
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-1">
+                  <p className="text-xs text-slate-400 mt-1">
                     Consolidated billings, invoiced freight & client ledger dues across all companies.
                   </p>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-rose-950/30 to-[#111724] border border-rose-500/20">
                   <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider">Total Group Expenses (Payables)</span>
+                    <span className="text-slate-400 font-semibold uppercase text-xs tracking-wider">Total Group Expenses</span>
                     <TrendingDown size={14} className="text-rose-400" />
                   </div>
                   <div className="text-lg sm:text-xl font-bold font-mono text-rose-300">
                     PKR {grandTotals.totalPayables.toLocaleString()}
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-1">
+                  <p className="text-xs text-slate-400 mt-1">
                     Port dues, line demurrage, driver trip bills, staff payroll & overheads.
                   </p>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-950/30 to-[#111724] border border-blue-500/20">
                   <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider">Total Treasury & Bank Reserves</span>
+                    <span className="text-slate-400 font-semibold uppercase text-xs tracking-wider">Total Treasury & Reserves</span>
                     <CreditCard size={14} className="text-blue-400" />
                   </div>
                   <div className="text-lg sm:text-xl font-bold font-mono text-blue-300">
                     PKR {(grandTotals.bankLiquidity + grandTotals.cashInHand).toLocaleString()}
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-1">
+                  <p className="text-xs text-slate-400 mt-1">
                     Bank: PKR {grandTotals.bankLiquidity.toLocaleString()} • Office Cash: PKR {grandTotals.cashInHand.toLocaleString()}
                   </p>
                 </div>
@@ -892,13 +956,13 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {COMPANIES_LIST.map((comp) => {
+                  {COMPANIES_LIST.map((comp, cIdx) => {
                     const s = statsByCompany[comp.id];
                     const viewKey: PortalView = `company_${comp.id}` as PortalView;
 
                     return (
                       <div
-                        key={comp.id}
+                        key={`matrix_comp_${comp.id}_${cIdx}`}
                         className="group relative rounded-2xl p-5 bg-[#111724] border border-white/10 hover:border-amber-400/50 transition-all duration-300 shadow-xl flex flex-col justify-between"
                       >
                         <div>
@@ -911,15 +975,15 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                                 className="max-h-full max-w-full object-contain filter drop-shadow" 
                               />
                             </div>
-                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/10 text-amber-300 font-bold uppercase">
+                            <span className="text-xs font-mono px-2 py-0.5 rounded bg-white/10 text-amber-300 font-bold uppercase">
                               {comp.shortName}
                             </span>
                           </div>
 
-                          <h4 className="font-extrabold text-sm text-white group-hover:text-amber-300 transition-colors line-clamp-1">
+                          <h4 className="font-bold text-sm text-white group-hover:text-amber-300 transition-colors line-clamp-1">
                             {comp.name}
                           </h4>
-                          <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">
+                          <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">
                             {comp.category}
                           </p>
 
@@ -971,7 +1035,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                       <BarChart3 size={16} className="text-amber-400" />
                       <span>Consignment Volume by Subsidiary</span>
                     </h3>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-xs text-slate-400">
                       Comparison of total cases, active shipments, and containers across the 4 corporate entities.
                     </p>
                   </div>
@@ -1009,7 +1073,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                       <Boxes size={16} className="text-amber-400" />
                       <span>Cross-Entity Live Consignment Feed</span>
                     </h3>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-xs text-slate-400">
                       Recent cases from all subsidiaries updated in real time.
                     </p>
                   </div>
@@ -1035,7 +1099,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                       <option value="ALL">All Companies</option>
                       <option value="docks">Docks (Pvt.) Ltd.</option>
                       <option value="muhib">Muhib International</option>
-                      <option value="vantage">Vintage Shipping</option>
+                      <option value="vantage">Vantage Shipping</option>
                       <option value="truckit">Truckit (Pvt.) Ltd.</option>
                     </select>
                   </div>
@@ -1045,7 +1109,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
                     <thead>
-                      <tr className="border-b border-white/10 text-slate-400 font-mono text-[10px] uppercase">
+                      <tr className="border-b border-white/10 text-slate-400 font-mono text-xs uppercase">
                         <th className="py-2.5 px-3">Subsidiary</th>
                         <th className="py-2.5 px-3">Case No.</th>
                         <th className="py-2.5 px-3">Client</th>
@@ -1063,12 +1127,12 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                           </td>
                         </tr>
                       ) : (
-                        recentCasesFeed.map((c) => {
+                        recentCasesFeed.map((c, cIdx) => {
                           const cCompany = GROUP_COMPANIES[(c.companyId || 'docks') as CompanyId] || GROUP_COMPANIES.docks;
                           return (
-                            <tr key={c.id || c.caseNo} className="hover:bg-white/5 transition-colors">
+                            <tr key={`grp_case_feed_${c.companyId || 'co'}_${c.id || c.caseNo || cIdx}_${cIdx}`} className="hover:bg-white/5 transition-colors">
                               <td className="py-2.5 px-3">
-                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded font-bold text-[10px] bg-white/10 text-slate-200">
+                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded font-bold text-xs bg-white/10 text-slate-200">
                                   <span>{cCompany.shortName}</span>
                                 </span>
                               </td>
@@ -1085,7 +1149,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                                 {c.containers?.length || 1} units
                               </td>
                               <td className="py-2.5 px-3 font-sans">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                                   c.status === CaseStatus.COMPLETED
                                     ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                                     : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
@@ -1093,7 +1157,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                                   {c.status}
                                 </span>
                               </td>
-                              <td className="py-2.5 px-3 text-right text-slate-400 text-[10px]">
+                              <td className="py-2.5 px-3 text-right text-slate-400 text-xs">
                                 {c.createdAt ? c.createdAt.split('T')[0] : 'Today'}
                               </td>
                             </tr>
@@ -1125,10 +1189,10 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="font-black text-base sm:text-lg text-white">
+                      <h3 className="font-bold text-base sm:text-lg text-white">
                         {currentSelectedCompany.name}
                       </h3>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold uppercase">
+                      <span className="text-xs font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold uppercase">
                         {currentSelectedCompany.shortName}
                       </span>
                     </div>
@@ -1177,15 +1241,280 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
           )}
 
           {/* ======================================================== */}
-          {/* VIEW C: GROUP ADMIN SETTINGS PANELS (EMBEDDED FULLSCREEN) */}
+          {/* VIEW C: MAIN ADMIN PROFILE EDITING                        */}
+          {/* ======================================================== */}
+          {activeView === 'setting_profile' && (
+            <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
+              
+              {/* Header Card */}
+              <div className="p-6 rounded-3xl bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-950 border border-amber-500/30 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shadow-amber-500/30 border border-amber-300/40 shrink-0">
+                    <Crown size={28} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-bold text-white">
+                        Main Admin Profile & Credentials
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                        ROOT MASTER
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Directly manage your Master User ID, Display Name, Password, and Master Security PIN.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectView('overview')}
+                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <ArrowLeft size={14} />
+                    <span>Back to Overview</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Success / Error Alerts */}
+              {profileSuccessMsg && (
+                <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-3 animate-fade-in">
+                  <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
+                  <span className="font-semibold">{profileSuccessMsg}</span>
+                </div>
+              )}
+
+              {profileErrorMsg && (
+                <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-200 text-xs flex items-center gap-3 animate-fade-in">
+                  <AlertCircle size={18} className="text-rose-400 shrink-0" />
+                  <span className="font-semibold">{profileErrorMsg}</span>
+                </div>
+              )}
+
+              {/* Profile Editing Form */}
+              <form onSubmit={handleSaveAdminProfile} className="space-y-6">
+                
+                {/* 1. Identity & Contact Details */}
+                <div className="p-6 rounded-2xl bg-[#111724] border border-white/10 shadow-lg space-y-4">
+                  <div className="border-b border-white/10 pb-3 flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <UserCheck size={16} className="text-amber-400" />
+                        Admin Identification & Contact Details
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Primary authentication credentials and global enterprise identification
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1.5">
+                        Main User ID / Login Username *
+                      </label>
+                      <input
+                        type="text"
+                        value={profileUserId}
+                        onChange={(e) => setProfileUserId(e.target.value)}
+                        placeholder="e.g. admin"
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/15 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-amber-400 text-xs"
+                      />
+                      <span className="text-slate-400 text-xs mt-1 block font-mono">
+                        Primary login identifier used for executive authentication
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1.5">
+                        Full Name / Display Name *
+                      </label>
+                      <input
+                        type="text"
+                        value={profileDisplayName}
+                        onChange={(e) => setProfileDisplayName(e.target.value)}
+                        placeholder="e.g. Arbab Khan"
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/15 text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 text-xs"
+                      />
+                      <span className="text-slate-400 text-xs mt-1 block">
+                        Displayed across executive documents, legal dossiers, and portals
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1.5">
+                        Official Email Address
+                      </label>
+                      <input
+                        type="email"
+                        value={profileEmail}
+                        onChange={(e) => setProfileEmail(e.target.value)}
+                        placeholder="e.g. docks.live.app@gmail.com"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/15 text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1.5">
+                        Direct Phone / WhatsApp
+                      </label>
+                      <input
+                        type="tel"
+                        value={profilePhone}
+                        onChange={(e) => setProfilePhone(e.target.value)}
+                        placeholder="e.g. +92 300 8221199"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/15 text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Password & Security Credentials */}
+                <div className="p-6 rounded-2xl bg-[#111724] border border-white/10 shadow-lg space-y-4">
+                  <div className="border-b border-white/10 pb-3 flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <Lock size={16} className="text-amber-400" />
+                        Password & Security PIN
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Leave blank to maintain current master password
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowProfilePasswords(!showProfilePasswords)}
+                      className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      {showProfilePasswords ? <EyeOff size={14} /> : <Eye size={14} />}
+                      <span>{showProfilePasswords ? "Hide Passwords" : "Show Passwords"}</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1.5">
+                        New Password
+                      </label>
+                      <input
+                        type={showProfilePasswords ? "text" : "password"}
+                        value={profileNewPassword}
+                        onChange={(e) => setProfileNewPassword(e.target.value)}
+                        placeholder="Enter new password"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/15 text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1.5">
+                        Confirm New Password
+                      </label>
+                      <input
+                        type={showProfilePasswords ? "text" : "password"}
+                        value={profileConfirmPassword}
+                        onChange={(e) => setProfileConfirmPassword(e.target.value)}
+                        placeholder="Re-type new password"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/15 text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-300 mb-1.5">
+                        Master Security PIN
+                      </label>
+                      <input
+                        type={showProfilePasswords ? "text" : "password"}
+                        value={profilePin}
+                        maxLength={6}
+                        onChange={(e) => setProfilePin(e.target.value)}
+                        placeholder="4 or 6 digit PIN"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/15 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-amber-400 text-xs tracking-widest"
+                      />
+                      <span className="text-slate-400 text-xs mt-1 block">
+                        Required for sensitive system overrides and master authorization
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Privileges Summary */}
+                <div className="p-5 rounded-2xl bg-amber-500/5 border border-amber-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <span className="text-xs font-bold text-amber-300 uppercase tracking-wider font-mono">
+                      Active Role Privileges
+                    </span>
+                    <p className="text-xs text-slate-300">
+                      Unrestricted executive authorization active across all 4 subsidiaries (Docks, Muhib, Vantage, Truckit) including database management and master recovery.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 shrink-0">
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-semibold">
+                      Full Access Active
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-mono font-bold">
+                      Root Admin
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4. Action Buttons */}
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProfileUserId(safeAppStorage.getItem('dpl_admin_userid') || 'admin');
+                      setProfileDisplayName(safeAppStorage.getItem('dpl_current_user_name') || currentUserName || 'Arbab Khan');
+                      setProfileEmail(safeAppStorage.getItem('dpl_admin_email') || 'docks.live.app@gmail.com');
+                      setProfilePhone(safeAppStorage.getItem('dpl_admin_phone') || '+92 300 8221199');
+                      setProfileCurrentPassword('');
+                      setProfileNewPassword('');
+                      setProfileConfirmPassword('');
+                      setProfileErrorMsg('');
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold transition cursor-pointer"
+                  >
+                    Reset
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isSavingProfile}
+                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg shadow-amber-500/30 transition cursor-pointer active:scale-95 disabled:opacity-50"
+                  >
+                    {isSavingProfile ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save size={14} />
+                        <span>Save Profile & Credentials</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* ======================================================== */}
+          {/* VIEW D: GROUP ADMIN SETTINGS (EMBEDDED FULLSCREEN)       */}
           {/* ======================================================== */}
           {isSettingsActive && (
             <div className="h-full min-h-[700px] flex flex-col animate-fade-in max-w-7xl mx-auto">
               <GroupAdminManagementModal
                 isOpen={true}
                 isPortalMode={true}
+                hideTabsBar={true}
                 onClose={() => handleSelectView('overview')}
-                currentUserName={currentUserName}
+                currentUserName={profileDisplayName || currentUserName}
                 initialTab={getSettingsTabFromView(activeView)}
               />
             </div>

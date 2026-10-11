@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="100%" height="100%">
+  <defs>
+    <!-- Luxury Charcoal Gradient matching MAK Logo Cutout -->
+    <linearGradient id="charcoalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3C4858"/>
+      <stop offset="50%" stop-color="#2D3748"/>
+      <stop offset="100%" stop-color="#1A202C"/>
+    </linearGradient>
+
+    <!-- Subtle Metallic Specular Reflection -->
+    <linearGradient id="pearlSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.15"/>
+      <stop offset="40%" stop-color="#FFFFFF" stop-opacity="0.03"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.1"/>
+    </linearGradient>
+
+    <filter id="luxuryShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0F172A" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#luxuryShadow)">
+    <!-- ==================== LETTER "M" ==================== -->
+    <path d="M 50,50 
+             L 155,50 
+             L 245,215 
+             L 335,50 
+             L 440,50 
+             L 440,340 
+             L 345,340 
+             L 345,175 
+             L 270,305 
+             L 220,305 
+             L 145,175 
+             L 145,340 
+             L 50,340 
+             Z" 
+          fill="url(#charcoalGrad)" />
+
+    <!-- ==================== LETTER "A" ==================== -->
+    <path fill-rule="evenodd" d="M 465,340 
+             L 465,150 
+             C 465,75 515,50 595,50 
+             C 675,50 725,75 725,150 
+             L 725,340 
+             L 630,340 
+             L 630,270 
+             L 560,270 
+             L 560,340 
+             Z
+             M 560,200 
+             L 630,200 
+             L 630,145 
+             C 630,118 618,105 595,105 
+             C 572,105 560,118 560,145 
+             Z" 
+          fill="url(#charcoalGrad)" />
+
+    <!-- ==================== LETTER "K" ==================== -->
+    <path d="M 750,50 
+             L 845,50 
+             L 845,340 
+             L 750,340 
+             Z" 
+          fill="url(#charcoalGrad)" />
+
+    <path d="M 845,215 
+             L 935,50 
+             L 1060,50 
+             L 940,230 
+             L 1070,340 
+             L 945,340 
+             L 845,225 
+             Z" 
+          fill="url(#charcoalGrad)" />
+
+    <!-- Metallic Sheen Overlay across MAK Wordmark -->
+    <rect x="50" y="50" width="1020" height="290" fill="url(#pearlSheen)" opacity="0.6" style="mix-blend-mode: overlay;" />
+
+    <!-- ==================== HORIZONTAL DIVIDER RULE ==================== -->
+    <rect x="50" y="375" width="1020" height="7.5" rx="3.75" fill="url(#charcoalGrad)" />
+
+    <!-- ==================== SUBTITLE: GROUP OF COMPANIES ==================== -->
+    <text x="560" y="445" 
+          font-family="'Montserrat', 'Inter', 'Segoe UI', system-ui, sans-serif" 
+          font-size="44" 
+          font-weight="900" 
+          letter-spacing="18" 
+          fill="url(#charcoalGrad)" 
+          text-anchor="middle">
+      GROUP OF COMPANIES
+    </text>
+  </g>
+</svg>
