@@ -32,12 +32,23 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
   });
 
   const [activeSearch, setActiveSearch] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE_VALID' | 'ON_TRIP' | 'EXPIRED' | 'CANCELLED_NOC'>('ALL');
   const [vehicles, setVehicles] = useState<Vehicle[]>(SEED_TRACKING_VEHICLES);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
   const [lastSyncedTime, setLastSyncedTime] = useState<string>('');
+
+  useEffect(() => {
+    if (selectedVehicle) {
+      document.title = `${selectedVehicle.registrationNumber} - Fleet Status & Verification • vehicle.makpk.online`;
+    } else if (activeSearch) {
+      document.title = `${activeSearch} - Vehicle Status • vehicle.makpk.online`;
+    } else {
+      document.title = 'Vehicle Status & Fleet Verification • vehicle.makpk.online';
+    }
+  }, [selectedVehicle, activeSearch]);
 
   // Fetch all vehicles across all company databases
   useEffect(() => {
@@ -174,6 +185,50 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
     if (cid === 'muhib') return { name: 'Muhib International', short: 'MUHIB', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' };
     if (cid === 'vantage') return { name: 'Vantage Shipping Line', short: 'VANTAGE', color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30' };
     return { name: 'Docks (Pvt.) Ltd.', short: 'DOCKS', color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' };
+  };
+
+  // Filtered vehicles when browsing full fleet (no search query)
+  const browsableVehicles = useMemo(() => {
+    if (activeSearch) return matchingVehicles;
+    if (statusFilter === 'ALL') return vehicles;
+    return vehicles.filter(v => {
+      const a = getVehicleStatusAnalysis(v);
+      return a.statusType === statusFilter;
+    });
+  }, [vehicles, activeSearch, matchingVehicles, statusFilter]);
+
+  const fleetCounts = useMemo(() => {
+    let active = 0, onTrip = 0, expired = 0, noc = 0;
+    vehicles.forEach(v => {
+      const a = getVehicleStatusAnalysis(v);
+      if (a.statusType === 'ACTIVE_VALID') active++;
+      else if (a.statusType === 'ON_TRIP') onTrip++;
+      else if (a.statusType === 'EXPIRED') expired++;
+      else if (a.statusType === 'CANCELLED_NOC') noc++;
+    });
+    return { all: vehicles.length, active, onTrip, expired, noc };
+  }, [vehicles]);
+
+  const handleSelectVehicle = (v: Vehicle) => {
+    setSelectedVehicle(v);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('vehicle', v.registrationNumber || '');
+      window.history.replaceState({}, '', url.toString());
+    }
+  };
+
+  const handleBackToFleetList = () => {
+    setSelectedVehicle(null);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (activeSearch) {
+        url.searchParams.set('vehicle', activeSearch);
+      } else {
+        url.searchParams.delete('vehicle');
+      }
+      window.history.replaceState({}, '', url.toString());
+    }
   };
 
   // Generate Official Vehicle Status & NOC Clearance Slip (PDF)
@@ -480,11 +535,11 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
     }
   };
 
-  const handleCopyShareLink = () => {
+  const handleCopyShareLink = (targetPlate?: string) => {
     if (typeof window === 'undefined') return;
-    const plate = encodeURIComponent(activeSearch);
-    const host = window.location.hostname.toLowerCase();
-    const isCustom = host.includes('vehicle.makpk.online') || host.includes('vehicle.mak-group.com');
+    const plate = encodeURIComponent(targetPlate || activeSearch || (selectedVehicle?.registrationNumber || ''));
+    const host = (window.location.hostname || '').toLowerCase();
+    const isCustom = host.includes('makpk.online') || host.includes('vehicle.mak-group.com');
     const shareUrl = isCustom
       ? `https://vehicle.makpk.online?vehicle=${plate}`
       : `${window.location.origin}/?mode=vehicle&plate=${plate}`;
@@ -492,6 +547,16 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2500);
     }).catch(() => {});
+  };
+
+  const handleSwitchToContainer = () => {
+    const host = (window.location.hostname || '').toLowerCase();
+    if (host.includes('makpk.online') || host.includes('mak-group.com')) {
+      window.location.href = 'https://status.makpk.online';
+      return;
+    }
+    if (onSwitchToContainerTracker) onSwitchToContainerTracker();
+    else window.location.href = 'https://status.makpk.online';
   };
 
   return (
@@ -535,7 +600,7 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
             {/* Link to Container Tracking (Status.makpk.online) */}
             <button
               type="button"
-              onClick={onSwitchToContainerTracker || (() => { window.location.href = 'https://status.makpk.online'; })}
+              onClick={handleSwitchToContainer}
               className="text-[11px] sm:text-xs text-amber-300 hover:text-white px-2.5 sm:px-3 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 transition-colors flex items-center gap-1 sm:gap-1.5 cursor-pointer shadow-sm shrink-0"
               title="Open Container & Shipment Status Tracking (Status.makpk.online)"
             >
@@ -647,169 +712,264 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
           </div>
         </section>
 
-        {/* Results Area */}
-        {activeSearch && (
-          <section className="space-y-6 animate-in fade-in duration-300">
-            
-            {/* Search Header Bar with Count */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-slate-400">Search results for:</span>
-                <span className="font-mono font-bold text-white bg-slate-800 px-2.5 py-0.5 rounded border border-white/10">
-                  {activeSearch}
-                </span>
-                <span className="text-slate-500">·</span>
-                <span className="text-emerald-400 font-semibold">
-                  {matchingVehicles.length} {matchingVehicles.length === 1 ? 'vehicle record found' : 'vehicle records found'}
-                </span>
+        {/* Results / Fleet Section */}
+        <section className="space-y-6 animate-in fade-in duration-300">
+          
+          {/* If a vehicle is selected: Show Dossier Card */}
+          {selectedVehicle ? (
+            <div className="space-y-6">
+              {/* Back to Results / Switch Vehicle */}
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleBackToFleetList}
+                  className="text-xs text-slate-300 hover:text-white px-3.5 py-1.5 rounded-xl border border-white/10 bg-slate-900 hover:bg-slate-800 flex items-center gap-2 transition-colors cursor-pointer w-fit"
+                >
+                  <ArrowLeft size={14} />
+                  <span>{activeSearch ? `Back to Search (${matchingVehicles.length})` : `Back to Fleet Directory (${vehicles.length})`}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleCopyShareLink(selectedVehicle.registrationNumber)}
+                  className="text-xs text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-white/10 bg-slate-900 hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Copy direct link to this vehicle status"
+                >
+                  {copiedLink ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                  <span>{copiedLink ? 'Link Copied' : 'Share Verification Link'}</span>
+                </button>
               </div>
 
-              {matchingVehicles.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleCopyShareLink}
-                    className="text-xs text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-white/10 bg-slate-900 hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
-                    title="Copy direct link to this vehicle status"
-                  >
-                    {copiedLink ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    <span>{copiedLink ? 'Link Copied' : 'Copy Direct Link'}</span>
-                  </button>
+              <VehicleDossierCard
+                vehicle={selectedVehicle}
+                onDownloadPdf={() => handleDownloadVehicleCertificate(selectedVehicle)}
+              />
+            </div>
+          ) : (
+            <>
+              {/* Search or Filter Header Bar */}
+              {activeSearch ? (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-slate-400">Search results for:</span>
+                    <span className="font-mono font-bold text-white bg-slate-800 px-2.5 py-0.5 rounded border border-white/10">
+                      {activeSearch}
+                    </span>
+                    <span className="text-slate-500">·</span>
+                    <span className="text-emerald-400 font-semibold">
+                      {matchingVehicles.length} {matchingVehicles.length === 1 ? 'vehicle record found' : 'vehicle records found'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { setActiveSearch(''); setSearchQuery(''); }}
+                      className="ml-2 text-[11px] text-amber-400 hover:underline cursor-pointer"
+                    >
+                      View All Fleet
+                    </button>
+                  </div>
+
+                  {matchingVehicles.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyShareLink()}
+                        className="text-xs text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-white/10 bg-slate-900 hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Copy direct link to this vehicle status"
+                      >
+                        {copiedLink ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                        <span>{copiedLink ? 'Link Copied' : 'Copy Direct Link'}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+                  <div className="flex items-center gap-2">
+                    <Layers size={16} className="text-amber-400" />
+                    <span className="text-sm font-bold text-white tracking-wide">
+                      Verified Fleet Directory
+                    </span>
+                    <span className="text-xs text-slate-400 font-mono">
+                      ({browsableVehicles.length} of {vehicles.length})
+                    </span>
+                  </div>
+
+                  {/* Filter Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter('ALL')}
+                      className={`px-2.5 py-1 rounded-lg border text-xs font-semibold transition cursor-pointer ${
+                        statusFilter === 'ALL'
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
+                          : 'bg-slate-900 text-slate-400 border-white/10 hover:text-white'
+                      }`}
+                    >
+                      All ({fleetCounts.all})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter('ACTIVE_VALID')}
+                      className={`px-2.5 py-1 rounded-lg border text-xs font-semibold transition cursor-pointer ${
+                        statusFilter === 'ACTIVE_VALID'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm'
+                          : 'bg-slate-900 text-slate-400 border-white/10 hover:text-white'
+                      }`}
+                    >
+                      Active ({fleetCounts.active})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter('ON_TRIP')}
+                      className={`px-2.5 py-1 rounded-lg border text-xs font-semibold transition cursor-pointer ${
+                        statusFilter === 'ON_TRIP'
+                          ? 'bg-blue-500/20 text-blue-300 border-blue-500/40 shadow-sm'
+                          : 'bg-slate-900 text-slate-400 border-white/10 hover:text-white'
+                      }`}
+                    >
+                      On Trip ({fleetCounts.onTrip})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter('EXPIRED')}
+                      className={`px-2.5 py-1 rounded-lg border text-xs font-semibold transition cursor-pointer ${
+                        statusFilter === 'EXPIRED'
+                          ? 'bg-red-500/20 text-red-300 border-red-500/40 shadow-sm'
+                          : 'bg-slate-900 text-slate-400 border-white/10 hover:text-white'
+                      }`}
+                    >
+                      Expired ({fleetCounts.expired})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter('CANCELLED_NOC')}
+                      className={`px-2.5 py-1 rounded-lg border text-xs font-semibold transition cursor-pointer ${
+                        statusFilter === 'CANCELLED_NOC'
+                          ? 'bg-purple-500/20 text-purple-300 border-purple-500/40 shadow-sm'
+                          : 'bg-slate-900 text-slate-400 border-white/10 hover:text-white'
+                      }`}
+                    >
+                      NOC Issued ({fleetCounts.noc})
+                    </button>
+                  </div>
                 </div>
               )}
-            </div>
 
-            {/* No Match State */}
-            {matchingVehicles.length === 0 && (
-              <div className="p-10 rounded-2xl bg-slate-900/50 border border-white/10 text-center space-y-4 max-w-lg mx-auto">
-                <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-white/10 flex items-center justify-center text-slate-400 mx-auto">
-                  <AlertCircle size={28} />
+              {/* No Match State */}
+              {browsableVehicles.length === 0 && (
+                <div className="p-10 rounded-2xl bg-slate-900/50 border border-white/10 text-center space-y-4 max-w-lg mx-auto">
+                  <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-white/10 flex items-center justify-center text-slate-400 mx-auto">
+                    <AlertCircle size={28} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">No Vehicles Found</h3>
+                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                      {activeSearch ? (
+                        <>No fleet record matched <code className="text-amber-300 font-mono">{activeSearch}</code> in the database.</>
+                      ) : (
+                        <>No vehicles match the selected status filter.</>
+                      )}
+                    </p>
+                  </div>
+                  {activeSearch && (
+                    <div className="text-left text-xs text-slate-400 bg-slate-950 p-4 rounded-xl border border-white/5 space-y-1.5">
+                      <p className="font-semibold text-slate-300">Tips:</p>
+                      <p>• Make sure the plate number includes letters and digits (e.g. <code>TLB-892</code> or <code>P-9912</code>).</p>
+                      <p>• You can also search by partial registration number or the transporter name.</p>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">No Vehicle Found</h3>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    No fleet record matched <code className="text-amber-300 font-mono">{activeSearch}</code> in the database.
+              )}
+
+              {/* Vehicles Grid */}
+              {browsableVehicles.length > 0 && (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-400 font-medium">
+                    Click any vehicle below to view complete registration certificate, bi-annual renewal history, trips count and NOC status:
                   </p>
-                </div>
-                <div className="text-left text-xs text-slate-400 bg-slate-950 p-4 rounded-xl border border-white/5 space-y-1.5">
-                  <p className="font-semibold text-slate-300">Tips:</p>
-                  <p>• Make sure the plate number includes letters and digits (e.g. <code>TLB-892</code> or <code>P-9912</code>).</p>
-                  <p>• You can also search by partial registration number or the transporter name.</p>
-                </div>
-              </div>
-            )}
 
-            {/* Matching Vehicles Grid (User brief: "Jo bhi vehicle number likha jaega use number se kitne ki vehicles hongi woh neeche a jaayengi") */}
-            {matchingVehicles.length > 0 && !selectedVehicle && (
-              <div className="space-y-3">
-                <p className="text-xs text-slate-400 font-medium">
-                  Select a vehicle below to view its complete registration, renewal history, trips and NOC status:
-                </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {browsableVehicles.map((v) => {
+                      const analysis = getVehicleStatusAnalysis(v);
+                      const opComp = getOperatingCompany(v);
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {matchingVehicles.map((v) => {
-                    const analysis = getVehicleStatusAnalysis(v);
-                    const opComp = getOperatingCompany(v);
+                      return (
+                        <div
+                          key={v.id || v.registrationNumber}
+                          onClick={() => handleSelectVehicle(v)}
+                          className="p-5 rounded-2xl bg-slate-900/90 hover:bg-slate-900 border border-white/10 hover:border-amber-400/50 transition-all cursor-pointer group shadow-xl hover:shadow-2xl hover:scale-[1.01] flex flex-col justify-between gap-4"
+                        >
+                          <div className="space-y-3">
+                            {/* Plate Strip */}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${opComp.color}`}>
+                                  {opComp.short}
+                                </span>
+                                <span className="font-mono text-lg font-bold text-white tracking-wider group-hover:text-amber-300 transition-colors">
+                                  {v.registrationNumber}
+                                </span>
+                              </div>
 
-                    return (
-                      <div
-                        key={v.id || v.registrationNumber}
-                        onClick={() => setSelectedVehicle(v)}
-                        className="p-5 rounded-2xl bg-slate-900/90 hover:bg-slate-900 border border-white/10 hover:border-amber-400/50 transition-all cursor-pointer group shadow-xl hover:shadow-2xl hover:scale-[1.01] flex flex-col justify-between gap-4"
-                      >
-                        <div className="space-y-3">
-                          {/* Plate Strip */}
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${opComp.color}`}>
-                                {opComp.short}
-                              </span>
-                              <span className="font-mono text-lg font-bold text-white tracking-wider group-hover:text-amber-300 transition-colors">
-                                {v.registrationNumber}
-                              </span>
+                              {/* Status Badge */}
+                              {analysis.statusType === 'CANCELLED_NOC' ? (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/40">
+                                  NOC Issued
+                                </span>
+                              ) : analysis.statusType === 'EXPIRED' ? (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/40">
+                                  Expired
+                                </span>
+                              ) : analysis.statusType === 'ON_TRIP' ? (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                                  On Trip
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                  Active / Valid
+                                </span>
+                              )}
                             </div>
 
-                            {/* Status Badge */}
-                            {analysis.statusType === 'CANCELLED_NOC' ? (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/40">
-                                NOC Issued
-                              </span>
-                            ) : analysis.statusType === 'EXPIRED' ? (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/40">
-                                Expired
-                              </span>
-                            ) : analysis.statusType === 'ON_TRIP' ? (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40">
-                                On Trip
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                                Active / Valid
-                              </span>
-                            )}
+                            {/* Quick Specs */}
+                            <div className="text-xs text-slate-300 space-y-1">
+                              <p className="truncate">
+                                <span className="text-slate-400">Category: </span>
+                                <strong>{v.category || 'Bonded Carrier'}</strong>
+                              </p>
+                              <p className="truncate">
+                                <span className="text-slate-400">Transporter: </span>
+                                <strong>{v.transporterName || 'Fleet Operator'}</strong>
+                              </p>
+                              <p className="truncate">
+                                <span className="text-slate-400">Registered: </span>
+                                <span>{v.registrationDate || 'N/A'}</span>
+                              </p>
+                            </div>
                           </div>
 
-                          {/* Quick Specs */}
-                          <div className="text-xs text-slate-300 space-y-1">
-                            <p className="truncate">
-                              <span className="text-slate-400">Category: </span>
-                              <strong>{v.category || 'Bonded Carrier'}</strong>
-                            </p>
-                            <p className="truncate">
-                              <span className="text-slate-400">Transporter: </span>
-                              <strong>{v.transporterName || 'Fleet Operator'}</strong>
-                            </p>
-                            <p className="truncate">
-                              <span className="text-slate-400">Registered: </span>
-                              <span>{v.registrationDate || 'N/A'}</span>
-                            </p>
+                          {/* Quick Stats Footer */}
+                          <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs text-slate-400">
+                            <span className="text-amber-300 font-semibold">
+                              {analysis.renewalCount} Renewals
+                            </span>
+                            <span className="text-emerald-300 font-semibold">
+                              {analysis.tripsCount} Completed Trips
+                            </span>
+                            <span className="text-slate-400 group-hover:text-white transition-colors flex items-center gap-1 font-bold">
+                              View Dossier →
+                            </span>
                           </div>
                         </div>
-
-                        {/* Quick Stats Footer */}
-                        <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs text-slate-400">
-                          <span className="text-amber-300 font-semibold">
-                            {analysis.renewalCount} Renewals
-                          </span>
-                          <span className="text-emerald-300 font-semibold">
-                            {analysis.tripsCount} Completed Trips
-                          </span>
-                          <span className="text-slate-400 group-hover:text-white transition-colors flex items-center gap-1 font-bold">
-                            View Dossier →
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </>
+          )}
 
-            {/* FULL VEHICLE STATUS DOSSIER (User brief: "vah apni vehicle per click kar kar use vehicle ka status Dekh sakega") */}
-            {selectedVehicle && (
-              <div className="space-y-6">
-                
-                {/* Back to Results / Switch Vehicle */}
-                {matchingVehicles.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedVehicle(null)}
-                    className="text-xs text-slate-300 hover:text-white px-3.5 py-1.5 rounded-xl border border-white/10 bg-slate-900 hover:bg-slate-800 flex items-center gap-2 transition-colors cursor-pointer w-fit"
-                  >
-                    <ArrowLeft size={14} />
-                    <span>Back to matching vehicles ({matchingVehicles.length})</span>
-                  </button>
-                )}
-
-                <VehicleDossierCard
-                  vehicle={selectedVehicle}
-                  onDownloadPdf={() => handleDownloadVehicleCertificate(selectedVehicle)}
-                />
-              </div>
-            )}
-
-          </section>
-        )}
+        </section>
 
       </main>
 

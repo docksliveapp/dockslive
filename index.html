@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Docks (Pvt.) Ltd</title>
+    <script>
+      (function() {
+        try {
+          var h = window.location.hostname.toLowerCase();
+          if (h.includes('vehicle.') || h.includes('fleet.')) {
+            document.title = 'Vehicle Status & Fleet Verification • vehicle.makpk.online';
+          } else if (h.includes('status.') || h.includes('sttatus.') || h.includes('container.') || h.includes('track.')) {
+            document.title = 'Shipment & Container Status • status.makpk.online';
+          }
+        } catch (_) {}
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="shortcut icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-v2.png" />

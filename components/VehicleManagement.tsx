@@ -1131,8 +1131,16 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
           </button>
           <button 
             type="button"
-            onClick={() => onOpenPublicTracker ? onOpenPublicTracker() : window.open('/?mode=vehicle', '_blank')}
-            className="bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 hover:text-white px-3.5 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-all"
+            onClick={() => {
+              const host = (window.location.hostname || '').toLowerCase();
+              if (host.includes('makpk.online') || host.includes('mak-group.com')) {
+                window.location.href = 'https://vehicle.makpk.online';
+                return;
+              }
+              if (onOpenPublicTracker) onOpenPublicTracker();
+              else window.open('/?mode=vehicle', '_blank');
+            }}
+            className="bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 hover:text-white px-3.5 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-all cursor-pointer"
             title="Open Live Public Vehicle Status Portal (vehicle.makpk.online)"
           >
             <Globe size={16} className="text-amber-400" />
@@ -1743,8 +1751,8 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                       type="button"
                       onClick={() => {
                         const plate = encodeURIComponent(v.registrationNumber);
-                        const host = window.location.hostname.toLowerCase();
-                        const isCustom = host.includes('vehicle.makpk.online') || host.includes('vehicle.mak-group.com');
+                        const host = (window.location.hostname || '').toLowerCase();
+                        const isCustom = host.includes('makpk.online') || host.includes('mak-group.com');
                         const directUrl = isCustom
                           ? `https://vehicle.makpk.online?vehicle=${plate}`
                           : `${window.location.origin}/?mode=vehicle&plate=${plate}`;
@@ -1752,7 +1760,9 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                           setCopiedStatusPlate(v.registrationNumber);
                           setTimeout(() => setCopiedStatusPlate(null), 3000);
                         }).catch(() => {});
-                        if (onOpenPublicTracker) {
+                        if (isCustom) {
+                          window.location.href = directUrl;
+                        } else if (onOpenPublicTracker) {
                           onOpenPublicTracker(v.registrationNumber);
                         } else {
                           window.open(directUrl, '_blank');
