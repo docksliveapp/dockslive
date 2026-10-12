@@ -3,12 +3,19 @@ import {
   Search, Package, Truck, Ship, MapPin, Calendar, Clock, CheckCircle2, 
   AlertCircle, Download, Share2, Copy, Check, ArrowRight, ArrowLeft, ShieldCheck, 
   FileText, ExternalLink, Anchor, Sparkles, RefreshCw, Box, AlertTriangle,
-  QrCode, Printer, Layers, ArrowUpRight
+  QrCode, Printer, Layers, ArrowUpRight, ChevronRight, User
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Case, CaseStatus, Container } from '../types';
 import { getCategoryWorkflow, getWorkflowStepIndex } from '../services/workflowConfig';
-import { fetchAllTrackingCases, searchTrackingCases, parseTrackingTokens, SEED_TRACKING_CASES } from '../services/containerTrackingService';
+import { 
+  fetchAllTrackingCases, 
+  searchTrackingCases, 
+  parseTrackingTokens, 
+  SEED_TRACKING_CASES,
+  extractMatchingContainers,
+  MatchedContainerItem
+} from '../services/containerTrackingService';
 import { subscribeToCases } from '../services/dbService';
 
 interface PublicContainerTrackingPortalProps {
@@ -22,41 +29,18 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
   onExitPortal,
   onSwitchToVehicleTracker
 }) => {
-  // Read query from props or URL parameter (?q=, ?container=, ?container1=, ?container2=, ?bl=, ?caseno=, ?case=)
-  const [containerInput1, setContainerInput1] = useState<string>(() => {
-    if (initialQuery) {
-      const parts = initialQuery.split(/[,;\s]+/);
-      return parts[0] || initialQuery;
-    }
+  // Read query from props or URL parameter (?q=, ?container=, ?container1=, ?container2=, ?bl=, ?truck=, ?caseno=, ?case=)
+  const [searchQuery, setSearchQuery] = useState<string>(() => {
+    if (initialQuery) return initialQuery;
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      return params.get('container1') || params.get('q') || params.get('container') || params.get('bl') || params.get('caseno') || params.get('case') || '';
+      return params.get('q') || params.get('container') || params.get('container1') || params.get('bl') || params.get('truck') || params.get('caseno') || params.get('case') || '';
     }
     return '';
-  });
-
-  const [containerInput2, setContainerInput2] = useState<string>(() => {
-    if (initialQuery && initialQuery.includes(',')) {
-      const parts = initialQuery.split(/[,;\s]+/);
-      return parts[1] || '';
-    }
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      return params.get('container2') || '';
-    }
-    return '';
-  });
-
-  const [isDualMode, setIsDualMode] = useState<boolean>(() => {
-    if (initialQuery && (initialQuery.includes(',') || initialQuery.includes(' '))) return true;
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      return params.has('container2') || (params.get('q') || '').includes(',');
-    }
-    return false;
   });
 
   const [activeSearch, setActiveSearch] = useState<string>('');
+  const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
   const [cases, setCases] = useState<Case[]>(SEED_TRACKING_CASES);
   const [isLoadingCases, setIsLoadingCases] = useState<boolean>(true);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
@@ -64,8 +48,10 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
   const [lastSyncedTime, setLastSyncedTime] = useState<string>('');
 
   useEffect(() => {
-    document.title = 'Shipment & Container Status • status.makpk.online';
-  }, []);
+    document.title = activeSearch 
+      ? `${activeSearch} - Container Status • status.makpk.online`
+      : 'Shipment & Container Status • status.makpk.online';
+  }, [activeSearch]);
 
   // Synchronize cases across all subsidiary company databases (Docks, Truckit, Muhib, Vantage)
   useEffect(() => {
@@ -113,72 +99,39 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
 
   // Trigger search on mount if initial query exists
   useEffect(() => {
-    const raw = [containerInput1, containerInput2].filter(Boolean).map(s => s.trim()).filter(Boolean);
-    if (raw.length > 0 && !activeSearch) {
-      setActiveSearch(raw.join(', '));
+    if (initialQuery && initialQuery.trim()) {
+      setSearchQuery(initialQuery.trim());
+      setActiveSearch(initialQuery.trim());
+      setSelectedContainerId(null);
+    } else if (searchQuery.trim() && !activeSearch) {
+      setActiveSearch(searchQuery.trim());
     }
-  }, [containerInput1, containerInput2]);
+  }, [initialQuery, searchQuery]);
 
   const handleSearchSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const parts = [containerInput1.trim()];
-    if (isDualMode && containerInput2.trim()) {
-      parts.push(containerInput2.trim());
-    }
-    const clean = parts.filter(Boolean).join(', ');
+    const clean = searchQuery.trim();
     if (!clean) return;
     setActiveSearch(clean);
+    setSelectedContainerId(null);
 
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.set('q', clean);
-      if (containerInput1.trim()) url.searchParams.set('container1', containerInput1.trim());
-      if (isDualMode && containerInput2.trim()) url.searchParams.set('container2', containerInput2.trim());
-      else url.searchParams.delete('container2');
       window.history.replaceState({}, '', url.toString());
     }
   };
 
-  const handleQuickExample = (example1: string, example2?: string) => {
-    setContainerInput1(example1);
-    if (example2) {
-      setContainerInput2(example2);
-      setIsDualMode(true);
-    } else {
-      setContainerInput2('');
-      setIsDualMode(false);
-    }
-    const combined = [example1, example2].filter(Boolean).join(', ');
-    setActiveSearch(combined);
+  const handleQuickExample = (exampleQuery: string) => {
+    setSearchQuery(exampleQuery);
+    setActiveSearch(exampleQuery);
+    setSelectedContainerId(null);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
-      url.searchParams.set('q', combined);
-      url.searchParams.set('container1', example1);
-      if (example2) url.searchParams.set('container2', example2);
-      else url.searchParams.delete('container2');
+      url.searchParams.set('q', exampleQuery);
       window.history.replaceState({}, '', url.toString());
     }
   };
-
-  // Parse searched tokens (e.g. 1 or 2 container numbers)
-  const searchedTokens = useMemo(() => {
-    return parseTrackingTokens(activeSearch);
-  }, [activeSearch]);
-
-  // Map each token to its matching cases
-  const tokenResults = useMemo(() => {
-    if (searchedTokens.length === 0) return [];
-    return searchedTokens.map(tok => {
-      const matched = searchTrackingCases(tok, cases);
-      return {
-        token: tok,
-        cases: matched,
-        latest: matched[0] || null,
-        history: matched.slice(1),
-        count: matched.length
-      };
-    });
-  }, [searchedTokens, cases]);
 
   // Perform multi-company database matching
   const matchingCases = useMemo(() => {
@@ -186,20 +139,32 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
     return searchTrackingCases(activeSearch, cases);
   }, [cases, activeSearch]);
 
-  const latestCase = matchingCases[0] || null;
-  const historicCases = matchingCases.slice(1);
+  // Extract individual matching containers
+  const matchingContainers = useMemo(() => {
+    if (!activeSearch) return [];
+    return extractMatchingContainers(activeSearch, matchingCases, getCategoryWorkflow, getWorkflowStepIndex);
+  }, [activeSearch, matchingCases]);
+
+  // Determine active displayed container if drilling into details
+  const activeContainerItem = useMemo(() => {
+    if (matchingContainers.length === 1) return matchingContainers[0];
+    if (selectedContainerId) {
+      return matchingContainers.find(c => String(c.id) === String(selectedContainerId)) || null;
+    }
+    return null;
+  }, [matchingContainers, selectedContainerId]);
 
   // Helper to format operating company badge
-  const getOperatingCompany = (c: Case) => {
-    const cid = (c.companyId || 'docks').toLowerCase();
-    if (cid === 'truckit') return { name: 'Truckit (Pvt.) Ltd.', short: 'TRUCKIT', color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' };
-    if (cid === 'muhib') return { name: 'Muhib International', short: 'MUHIB', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' };
-    if (cid === 'vantage') return { name: 'Vantage Shipping Line', short: 'VANTAGE', color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30' };
-    return { name: 'Docks (Pvt.) Ltd.', short: 'DOCKS', color: 'text-brand-400 bg-brand-500/10 border-brand-500/30' };
+  const getOperatingCompany = (cid?: string) => {
+    const c = (cid || 'docks').toLowerCase();
+    if (c === 'truckit') return { name: 'Truckit (Pvt.) Ltd.', short: 'TRUCKIT', color: 'text-amber-800 bg-amber-50 border-amber-300' };
+    if (c === 'muhib') return { name: 'Muhib International', short: 'MUHIB', color: 'text-emerald-800 bg-emerald-50 border-emerald-300' };
+    if (c === 'vantage') return { name: 'Vantage Shipping Line', short: 'VANTAGE', color: 'text-cyan-800 bg-cyan-50 border-cyan-300' };
+    return { name: 'Docks (Pvt.) Ltd.', short: 'DOCKS', color: 'text-blue-800 bg-blue-50 border-blue-300' };
   };
 
   // Generate Official Public Container Tracking Slip PDF
-  const handleDownloadTrackingSlip = (targetCase: Case, isLatestVoyage: boolean = true) => {
+  const handleDownloadTrackingSlip = (targetContainer: MatchedContainerItem) => {
     setIsGeneratingPdf(true);
     try {
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -233,8 +198,7 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
       doc.setTextColor(15, 23, 42);
       doc.setFontSize(13);
       doc.setFont('helvetica', 'bold');
-      const titlePrefix = isLatestVoyage ? 'CURRENT CONSIGNMENT STATUS REPORT' : 'PREVIOUS CONSIGNMENT HISTORICAL SLIP';
-      doc.text(titlePrefix, margin, y);
+      doc.text('OFFICIAL CONTAINER STATUS & WORKFLOW DOSSIER', margin, y);
 
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
@@ -248,14 +212,6 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
       y += 5;
 
       // 3. Primary Shipment Metadata Box
-      const opComp = getOperatingCompany(targetCase);
-      const containers = targetCase.containers || [];
-      const primaryContainer: Container = containers.find(c => {
-        const num = (c.number || (c as any).containerNo || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        const q = activeSearch.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        return num.includes(q) || q.includes(num);
-      }) || containers[0] || ({ id: 0, number: activeSearch, size: '40ft', weight: 0, status: 'Pending' } as unknown as Container);
-
       doc.setFillColor(248, 250, 252);
       doc.rect(margin, y, pageWidth - (margin * 2), 48, 'F');
       doc.setDrawColor(203, 213, 225);
@@ -266,7 +222,6 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
       const col3 = margin + 125;
       let boxY = y + 7;
 
-      // Row 1
       doc.setFontSize(7.5);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(100, 116, 139);
@@ -275,15 +230,14 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
       doc.text('CASE REFERENCE', col3, boxY);
 
       boxY += 4.5;
-      doc.setFontSize(10.5);
+      doc.setFontSize(11);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(15, 23, 42);
-      doc.text(primaryContainer.number || activeSearch, col1, boxY);
-      doc.text(targetCase.blNumber || targetCase.extractedData?.blNumber || 'N/A', col2, boxY);
-      doc.text(targetCase.caseNo || targetCase.id || 'N/A', col3, boxY);
+      doc.text(targetContainer.containerNumber, col1, boxY);
+      doc.text(targetContainer.blNumber || 'N/A', col2, boxY);
+      doc.text(targetContainer.caseNo || 'N/A', col3, boxY);
 
       boxY += 8;
-      // Row 2
       doc.setFontSize(7.5);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(100, 116, 139);
@@ -295,137 +249,60 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
       doc.setFontSize(9);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(30, 41, 59);
-      const sealStr = primaryContainer.sealNo ? ` (Seal: ${primaryContainer.sealNo})` : '';
-      doc.text(`${primaryContainer.size || '40ft'}${sealStr}`, col1, boxY);
-      doc.text(targetCase.pol || 'Port of Loading', col2, boxY);
-      doc.text(targetCase.pod || 'Port of Discharge', col3, boxY);
+      const sealStr = targetContainer.sealNo ? ` (Seal: ${targetContainer.sealNo})` : '';
+      doc.text(`${targetContainer.size || '40ft'}${sealStr}`, col1, boxY);
+      doc.text(targetContainer.pol || 'Port of Loading', col2, boxY);
+      doc.text(targetContainer.pod || 'Port of Discharge', col3, boxY);
 
       boxY += 8;
-      // Row 3
       doc.setFontSize(7.5);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(100, 116, 139);
-      doc.text('OPERATING SUBSIDIARY', col1, boxY);
-      doc.text('SHIPPING LINE & VESSEL', col2, boxY);
-      doc.text('CURRENT OPERATIONAL STAGE', col3, boxY);
+      doc.text('ASSIGNED TRUCK / TRAILER', col1, boxY);
+      doc.text('DRIVER & TRANSPORTER', col2, boxY);
+      doc.text('OPERATING SUBSIDIARY', col3, boxY);
 
       boxY += 4.5;
       doc.setFontSize(9);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(30, 41, 59);
-      doc.text(opComp.name, col1, boxY);
-      const vesselStr = targetCase.extractedData?.vesselName ? ` • ${targetCase.extractedData.vesselName}` : '';
-      doc.text(`${targetCase.extractedData?.shippingLine || targetCase.shippingLine || 'Carrier'}${vesselStr}`, col2, boxY);
-      doc.setTextColor(217, 119, 6); // amber-600
-      doc.text(String(targetCase.status || 'Active Stage'), col3, boxY);
+      doc.text(targetContainer.vehicleNo || 'Awaiting Haulage', col1, boxY);
+      doc.text(`${targetContainer.driverName || 'Designated Driver'} (${targetContainer.transporterName || 'Fleet Network'})`, col2, boxY);
+      doc.text(targetContainer.companyName, col3, boxY);
 
       y += 54;
 
-      // 4. Workflow Milestones Section
-      const workflowConfig = getCategoryWorkflow(targetCase.category);
-      const activeStepIdx = getWorkflowStepIndex(targetCase.category, targetCase.status);
-      const isCompleted = targetCase.status === CaseStatus.COMPLETED;
+      // 4. Current Status Field
+      doc.setFillColor(targetContainer.isCompleted ? 240 : 254, targetContainer.isCompleted ? 253 : 243, targetContainer.isCompleted ? 244 : 199);
+      doc.rect(margin, y, pageWidth - (margin * 2), 16, 'F');
+      doc.setDrawColor(targetContainer.isCompleted ? 34 : 245, targetContainer.isCompleted ? 197 : 158, targetContainer.isCompleted ? 94 : 11);
+      doc.rect(margin, y, pageWidth - (margin * 2), 16, 'S');
+
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(targetContainer.isCompleted ? 21 : 180, targetContainer.isCompleted ? 128 : 83, targetContainer.isCompleted ? 61 : 9);
+      doc.text('CURRENT OPERATIONAL WORKFLOW STATUS:', margin + 4, y + 5);
 
       doc.setFontSize(10.5);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(15, 23, 42);
-      doc.text('OPERATIONAL WORKFLOW & MILESTONE BREAKDOWN', margin, y);
-      y += 4.5;
+      doc.text(targetContainer.currentWorkflowStep, margin + 4, y + 11.5);
 
-      doc.setFontSize(7.5);
+      y += 22;
+
+      // 5. Workflow Stage Description
+      doc.setFontSize(8.5);
       doc.setFont('helvetica', 'normal');
-      doc.setTextColor(100, 116, 139);
-      doc.text(`Service: ${targetCase.category || 'General Freight'} (Total ${workflowConfig.totalSteps} Milestones)`, margin, y);
-      y += 5.5;
-
-      // Table Header
-      doc.setFillColor(241, 245, 249);
-      doc.rect(margin, y, pageWidth - (margin * 2), 6, 'F');
-      doc.setFontSize(7.5);
-      doc.setFont('helvetica', 'bold');
       doc.setTextColor(71, 85, 105);
-      doc.text('STEP', margin + 3, y + 4.2);
-      doc.text('MILESTONE TITLE', margin + 18, y + 4.2);
-      doc.text('STAGE DESCRIPTION', margin + 70, y + 4.2);
-      doc.text('STATUS', pageWidth - margin - 3, y + 4.2, { align: 'right' });
-      y += 7;
+      doc.text(`Active Milestone: ${targetContainer.currentWorkflowDescription}`, margin, y);
 
-      const incompleteStepsList: string[] = [];
+      y += 10;
 
-      // Steps Rows
-      workflowConfig.steps.forEach((step, idx) => {
-        const stepDone = idx < activeStepIdx || isCompleted;
-        const stepActive = idx === activeStepIdx && !isCompleted;
-        const stepPending = idx > activeStepIdx && !isCompleted;
-
-        if (stepPending || stepActive) {
-          incompleteStepsList.push(`Step ${idx + 1}: ${step.shortTitle || step.title}`);
-        }
-
-        doc.setFillColor(idx % 2 === 0 ? 255 : 250, idx % 2 === 0 ? 255 : 250, idx % 2 === 0 ? 255 : 250);
-        doc.rect(margin, y, pageWidth - (margin * 2), 7.5, 'F');
-
-        doc.setFontSize(7.5);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(100, 116, 139);
-        doc.text(String(idx + 1), margin + 4, y + 5);
-
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(15, 23, 42);
-        doc.text(step.shortTitle || step.title, margin + 18, y + 5);
-
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(100, 116, 139);
-        const descSnippet = step.description.length > 58 ? `${step.description.substring(0, 55)}...` : step.description;
-        doc.text(descSnippet, margin + 70, y + 5);
-
-        // Status Badge
-        if (stepDone) {
-          doc.setTextColor(22, 163, 74); // green-600
-          doc.setFont('helvetica', 'bold');
-          doc.text('COMPLETED', pageWidth - margin - 3, y + 5, { align: 'right' });
-        } else if (stepActive) {
-          doc.setTextColor(217, 119, 6); // amber-600
-          doc.setFont('helvetica', 'bold');
-          doc.text('IN PROGRESS', pageWidth - margin - 3, y + 5, { align: 'right' });
-        } else {
-          doc.setTextColor(148, 163, 184); // slate-400
-          doc.setFont('helvetica', 'normal');
-          doc.text('INCOMPLETE', pageWidth - margin - 3, y + 5, { align: 'right' });
-        }
-
-        y += 7.5;
-      });
-
-      y += 6;
-
-      // 5. Incomplete Workflows Highlight Box (if incomplete)
-      if (!isCompleted && incompleteStepsList.length > 0) {
-        doc.setFillColor(254, 243, 199); // amber-100
-        doc.rect(margin, y, pageWidth - (margin * 2), 16, 'F');
-        doc.setDrawColor(245, 158, 11);
-        doc.rect(margin, y, pageWidth - (margin * 2), 16, 'S');
-
-        doc.setFontSize(7.5);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(180, 83, 9); // amber-700
-        doc.text('WORKFLOW STAGES AWAITING COMPLETION:', margin + 4, y + 4.5);
-
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(146, 64, 14);
-        const summaryText = incompleteStepsList.join('  •  ');
-        const splitSummary = doc.splitTextToSize(summaryText, pageWidth - (margin * 2) - 8);
-        doc.text(splitSummary, margin + 4, y + 9);
-
-        y += 20;
-      }
-
-      // 6. Security & Verification Notice
+      // 6. Security Notice
       doc.setFillColor(241, 245, 249);
-      doc.rect(margin, y, pageWidth - (margin * 2), 20, 'F');
+      doc.rect(margin, y, pageWidth - (margin * 2), 16, 'F');
       doc.setDrawColor(203, 213, 225);
-      doc.rect(margin, y, pageWidth - (margin * 2), 20, 'S');
+      doc.rect(margin, y, pageWidth - (margin * 2), 16, 'S');
 
       doc.setFontSize(7.5);
       doc.setFont('helvetica', 'bold');
@@ -435,19 +312,16 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
       doc.setFontSize(7);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(71, 85, 105);
-      doc.text('1. Public Verification: This status document is live verifiable through status.makpk.online.', margin + 4, y + 9);
-      doc.text('2. Financial Privacy: Invoicing, tariffs, and accounts are strictly excluded from public verification.', margin + 4, y + 13);
-      doc.text('3. Central Helpline: For delivery arrangements and port gate passes, call: +92-21-32330103.', margin + 4, y + 17);
+      doc.text('1. Public Verification: This status document is live verifiable through status.makpk.online.', margin + 4, y + 8.5);
+      doc.text('2. Pure Operational Record: Financial accounts, invoicing, and tariffs are strictly confidential.', margin + 4, y + 12.5);
 
-      y += 24;
-
-      // 7. Footer
+      // Footer
       doc.setFontSize(7.5);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(148, 163, 184);
-      doc.text(`MAK Group of Companies • status.makpk.online • Container ${primaryContainer.number || activeSearch}`, pageWidth / 2, 287, { align: 'center' });
+      doc.text(`MAK Group of Companies • status.makpk.online • Container ${targetContainer.containerNumber}`, pageWidth / 2, 287, { align: 'center' });
 
-      const safeFilename = `Tracking_${(primaryContainer.number || targetCase.caseNo || 'Container').replace(/[^a-zA-Z0-9_-]/g, '_')}_${isLatestVoyage ? 'Current' : 'History'}.pdf`;
+      const safeFilename = `Container_${targetContainer.containerNumber}_Status.pdf`;
       doc.save(safeFilename);
     } catch (err) {
       console.error('Error generating PDF:', err);
@@ -461,7 +335,7 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
     if (typeof window === 'undefined') return;
     const query = encodeURIComponent(activeSearch);
     const host = (window.location.hostname || '').toLowerCase();
-    const isCustom = host.includes('makpk.online') || host.includes('status.mak-group.com.pk') || host.includes('status.mak-group.com');
+    const isCustom = host.includes('makpk.online') || host.includes('status.mak-group.com');
     const shareUrl = isCustom
       ? `https://status.makpk.online?q=${query}`
       : `${window.location.origin}/?mode=status&q=${query}`;
@@ -472,49 +346,53 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
   };
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-200">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#FAF9F5] text-slate-800 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-950">
       
-      {/* Top Header Strip */}
-      <header className="border-b border-white/10 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40 shadow-xl w-full max-w-full overflow-hidden">
+      {/* 1. Top Corporate Announcement Strip (Matching docks.com.pk) */}
+      <div className="w-full bg-[#0F172A] text-slate-200 text-center py-2 px-3 text-[11px] sm:text-xs font-semibold tracking-wide border-b border-slate-800 flex items-center justify-center gap-2">
+        <span>MAK - GROUP OF COMPANIES</span>
+        <span className="text-amber-400">|</span>
+        <span className="text-slate-300 font-normal">Pakistan's Premier Multimodal Logistics Network</span>
+      </div>
+
+      {/* 2. Top Header Navigation Bar (Clean Ivory & Gold matching docks.com.pk) */}
+      <header className="border-b border-slate-200/90 bg-white/95 backdrop-blur-md sticky top-0 z-40 shadow-xs w-full max-w-full overflow-hidden">
         <div className="max-w-6xl w-full mx-auto px-3 sm:px-6 min-h-16 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
           
-          {/* Brand Logo & Title */}
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            {/* Back Button to mak-group.com.pk */}
+          {/* Left: Brand Logo & Title */}
+          <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
             <a
               href="https://mak-group.com.pk"
-              className="px-2.5 sm:px-3 py-1.5 rounded-lg border border-white/10 bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-sm"
+              className="px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs"
               title="Back to mak-group.com.pk"
             >
-              <ArrowLeft size={14} className="text-amber-400 shrink-0" />
+              <ArrowLeft size={14} className="text-amber-600 shrink-0" />
               <span>Back</span>
             </a>
 
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-amber-500/20 to-brand-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
-              <Package size={18} className="sm:w-5 sm:h-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <h1 className="text-xs sm:text-base font-bold text-white tracking-wide truncate max-w-[120px] sm:max-w-none">
-                  MAK GROUP
-                </h1>
-                <span className="text-[9px] sm:text-[10px] font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-1.5 sm:px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0">
-                  Container Status
+            {/* MAK GROUP OF COMPANIES Brand Typography */}
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="flex flex-col">
+                <span className="text-base sm:text-lg font-black tracking-tight text-slate-900 font-serif leading-none">
+                  MAK - GROUP
+                </span>
+                <span className="text-[9px] sm:text-[10px] font-extrabold tracking-[0.2em] text-amber-600 uppercase leading-tight mt-0.5">
+                  GROUP OF COMPANIES
                 </span>
               </div>
-              <p className="text-[10px] sm:text-[11px] text-slate-400 hidden sm:block truncate">
-                Docks (Pvt.) Ltd. • Truckit • Muhib International • Vantage Shipping Line
-              </p>
+              <span className="hidden sm:inline-flex text-[10px] font-bold text-amber-700 bg-amber-100/80 border border-amber-300 px-2 py-0.5 rounded-full uppercase tracking-wider ml-1">
+                Container Status
+              </span>
             </div>
           </div>
 
-          {/* Subdomain & Controls */}
+          {/* Right: Domain indicator & Switcher to Vehicle Status */}
           <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             <div className="text-right hidden md:block">
-              <span className="text-xs text-amber-400 font-mono font-bold block">
+              <span className="text-xs text-amber-700 font-mono font-bold block">
                 status.makpk.online
               </span>
-              <span className="text-[10px] text-slate-400 block">
+              <span className="text-[10px] text-slate-500 block">
                 {lastSyncedTime ? `Live synced at ${lastSyncedTime}` : 'Multi-entity real-time sync'}
               </span>
             </div>
@@ -531,10 +409,10 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
                 if (onSwitchToVehicleTracker) onSwitchToVehicleTracker();
                 else window.location.href = 'https://vehicle.makpk.online';
               }}
-              className="text-[11px] sm:text-xs text-cyan-300 hover:text-white px-2.5 sm:px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors flex items-center gap-1 sm:gap-1.5 cursor-pointer shrink-0 shadow-sm"
+              className="text-[11px] sm:text-xs text-slate-800 hover:text-amber-800 px-2.5 sm:px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 transition-colors flex items-center gap-1.5 font-semibold cursor-pointer shadow-xs shrink-0"
               title="Switch to Fleet & Vehicle Verification (vehicle.makpk.online)"
             >
-              <Truck size={13} className="text-cyan-400 shrink-0" />
+              <Truck size={13} className="text-amber-600 shrink-0" />
               <span>Vehicle Status</span>
             </button>
 
@@ -543,353 +421,335 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
               <button
                 type="button"
                 onClick={onExitPortal}
-                className="text-[11px] sm:text-xs text-slate-300 hover:text-white px-2.5 sm:px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                className="text-[11px] sm:text-xs text-slate-600 hover:text-slate-900 px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors cursor-pointer shrink-0"
                 title="Return to Internal Workspace"
               >
-                Staff Portal
+                Close
               </button>
             )}
           </div>
         </div>
       </header>
 
-      {/* Main Container Tracking Body */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-6 sm:space-y-8 min-w-0">
+      {/* 3. Main Body Container with docks.com.pk luxury branding */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-8 min-w-0">
         
-        {/* Clean, Streamlined Tracking Search Section */}
-        <section className="space-y-4 max-w-2xl mx-auto pt-1">
+        {/* Hero Section matching Screenshot_20261012_060549_Edge.jpg */}
+        <section className="space-y-4 max-w-2xl mx-auto text-center pt-1">
           
-          {/* Back link above search */}
-          <div className="flex items-center justify-between">
-            <a
-              href="https://mak-group.com.pk"
-              className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-amber-400 transition cursor-pointer"
-            >
-              <ArrowLeft size={13} />
-              <span>Back to mak-group.com.pk</span>
-            </a>
-            <span className="text-[11px] text-slate-500 font-mono">status.makpk.online</span>
+          {/* Welcome Pill */}
+          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full border border-amber-300/80 bg-gradient-to-r from-amber-50/80 via-white to-amber-50/80 text-slate-800 text-xs font-semibold shadow-xs">
+            <span className="text-amber-600">✨</span>
+            <span className="tracking-wide">WELCOME TO MAK - GROUP OF COMPANIES</span>
           </div>
 
-          <div className="text-center space-y-1.5">
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Container Tracking
+          {/* Golden Subheading */}
+          <p className="text-xs sm:text-sm font-bold text-amber-700 uppercase tracking-widest leading-relaxed">
+            CONNECTING PORTS • CROSS-BORDER TRANSIT • OCEAN LINER FREIGHT
+          </p>
+
+          {/* Circular Emblem matching docks.com.pk */}
+          <div className="flex justify-center pt-2 pb-1">
+            <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full p-1 bg-gradient-to-br from-amber-200 via-slate-800 to-amber-300 shadow-xl flex items-center justify-center">
+              <div className="w-full h-full rounded-full bg-white border-2 border-slate-900 flex flex-col items-center justify-center text-center p-2 relative overflow-hidden">
+                <span className="font-serif font-black text-xl sm:text-2xl text-slate-900 tracking-tighter leading-none">
+                  MAK
+                </span>
+                <span className="text-[7px] sm:text-[8px] font-extrabold text-amber-700 tracking-wider uppercase leading-tight mt-0.5">
+                  GROUP OF COMPANIES
+                </span>
+                <div className="w-16 h-[1px] bg-slate-200 my-1" />
+                <div className="grid grid-cols-4 gap-1 text-[7px] font-bold text-slate-600 tracking-tight">
+                  <span className="text-blue-700">DPL</span>
+                  <span className="text-amber-700">Truckit</span>
+                  <span className="text-emerald-700">Muhib</span>
+                  <span className="text-cyan-700">Vantage</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Title */}
+          <div className="space-y-1.5">
+            <h2 className="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight font-serif">
+              UNIFIED CONTAINER STATUS &amp; TRACKING
             </h2>
-            <p className="text-xs sm:text-sm text-slate-400">
-              Enter Container Number, B/L, or Case Reference to check status.
+            <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto">
+              Search by Container Number, Assigned Truck Number, Bill of Lading (B/L), or MAK Case ID to check active workflows.
             </p>
           </div>
 
-          {/* Unified Automatic Identifier Search Input */}
-          <form onSubmit={handleSearchSubmit} className="pt-1">
-            <div className="bg-slate-900/90 p-2.5 rounded-2xl border border-white/15 shadow-xl focus-within:border-amber-400/60 focus-within:ring-2 focus-within:ring-amber-400/20 transition-all space-y-2">
-              <div className={`grid ${isDualMode ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'} gap-2`}>
-                {/* Input 1 */}
-                <div className="relative flex items-center bg-slate-950/70 rounded-xl border border-white/10">
-                  <Search size={18} className="absolute left-3.5 text-slate-400 shrink-0" />
-                  <input
-                    type="text"
-                    value={containerInput1}
-                    onChange={(e) => setContainerInput1(e.target.value)}
-                    placeholder={isDualMode ? "Container #1 (e.g. WHSU5957558)..." : "Enter Container No, B/L, or Case Ref..."}
-                    className="w-full bg-transparent pl-11 pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none font-mono tracking-wide"
-                  />
-                  {containerInput1 && (
-                    <button
-                      type="button"
-                      onClick={() => setContainerInput1('')}
-                      className="pr-3 text-slate-500 hover:text-white text-xs cursor-pointer"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-
-                {/* Input 2 (Active in Dual Mode) */}
-                {isDualMode && (
-                  <div className="relative flex items-center bg-slate-950/70 rounded-xl border border-amber-500/30">
-                    <Package size={18} className="absolute left-3.5 text-amber-400 shrink-0" />
-                    <input
-                      type="text"
-                      value={containerInput2}
-                      onChange={(e) => setContainerInput2(e.target.value)}
-                      placeholder="Container #2 (e.g. TCLU8492015)..."
-                      className="w-full bg-transparent pl-11 pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none font-mono tracking-wide"
-                    />
-                    {containerInput2 && (
-                      <button
-                        type="button"
-                        onClick={() => setContainerInput2('')}
-                        className="pr-3 text-slate-500 hover:text-white text-xs cursor-pointer"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
+          {/* Search Form: Searchable by Container No, Truck No, BL No, Case No */}
+          <form onSubmit={handleSearchSubmit} className="pt-2">
+            <div className="relative flex flex-col sm:flex-row items-stretch gap-2 bg-white p-2 rounded-2xl border-2 border-slate-200 shadow-lg focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-300/40 transition-all">
+              <div className="relative flex-1 flex items-center">
+                <Search size={18} className="absolute left-3.5 text-slate-400 shrink-0" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Enter Container No, Truck No, B/L No, or Case Ref..."
+                  className="w-full bg-transparent pl-11 pr-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none font-mono tracking-wide font-bold"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => { setSearchQuery(''); setActiveSearch(''); setSelectedContainerId(null); }}
+                    className="pr-3 text-slate-400 hover:text-slate-800 text-sm cursor-pointer font-bold"
+                  >
+                    ×
+                  </button>
                 )}
               </div>
 
-              {/* Controls bar: toggle 2nd container + Track button */}
-              <div className="flex items-center justify-between pt-1 px-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isDualMode) {
-                      setIsDualMode(false);
-                      setContainerInput2('');
-                    } else {
-                      setIsDualMode(true);
-                    }
-                  }}
-                  className="text-xs text-slate-400 hover:text-amber-300 transition cursor-pointer flex items-center gap-1"
-                >
-                  {isDualMode ? '− Single container' : '+ Track 2nd container'}
-                </button>
-
-                <button
-                  type="submit"
-                  className="py-2.5 px-6 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-98 cursor-pointer shrink-0"
-                >
-                  <Search size={15} />
-                  <span>Search</span>
-                </button>
-              </div>
+              <button
+                type="submit"
+                className="py-2.5 px-6 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 transition-all active:scale-98 cursor-pointer shrink-0"
+              >
+                <Search size={15} />
+                <span>Search</span>
+              </button>
             </div>
           </form>
 
-          {/* Minimal Examples */}
+          {/* Quick Search Helper Tags */}
           <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-xs text-slate-500">
-            <span>Examples:</span>
+            <span className="font-semibold text-slate-600">Quick Examples:</span>
             <button
               type="button"
               onClick={() => handleQuickExample('WHSU5957558')}
-              className="text-slate-400 hover:text-amber-300 font-mono transition cursor-pointer"
+              className="text-amber-700 hover:text-amber-900 font-mono font-bold hover:underline transition cursor-pointer"
+              title="Search by single Container Number"
             >
-              WHSU5957558
+              WHSU5957558 (Single Cont)
             </button>
             <span>·</span>
             <button
               type="button"
-              onClick={() => handleQuickExample('TCLU8492015')}
-              className="text-slate-400 hover:text-amber-300 font-mono transition cursor-pointer"
+              onClick={() => handleQuickExample('HLCU9201840')}
+              className="text-amber-700 hover:text-amber-900 font-mono font-bold hover:underline transition cursor-pointer"
+              title="Search by B/L (Multiple Containers)"
             >
-              TCLU8492015
+              HLCU9201840 (Multi Cont B/L)
             </button>
             <span>·</span>
             <button
               type="button"
-              onClick={() => handleQuickExample('027G657324')}
-              className="text-slate-400 hover:text-amber-300 font-mono transition cursor-pointer"
+              onClick={() => handleQuickExample('TLB-892')}
+              className="text-amber-700 hover:text-amber-900 font-mono font-bold hover:underline transition cursor-pointer"
+              title="Search by Assigned Truck Plate"
             >
-              027G657324
+              TLB-892 (By Truck No)
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => handleQuickExample('DPL-26-0012')}
+              className="text-amber-700 hover:text-amber-900 font-mono font-bold hover:underline transition cursor-pointer"
+              title="Search by Case Number"
+            >
+              DPL-26-0012 (By Case No)
             </button>
           </div>
         </section>
 
-        {/* Results Presentation Area */}
+        {/* 4. Results Presentation Area */}
         {activeSearch && (
-          <section className="space-y-8 animate-in fade-in duration-300">
+          <section className="space-y-6 animate-in fade-in duration-300">
             
-            {/* Search Header Bar with Match Count & Action Buttons */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+            {/* Search Header Strip */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-slate-400">Search results for:</span>
-                <span className="font-mono font-bold text-white bg-slate-800 px-2.5 py-0.5 rounded border border-white/10">
+                <span className="text-slate-500 font-medium">Search results for:</span>
+                <span className="font-mono font-bold text-slate-900 bg-white px-2.5 py-0.5 rounded border border-slate-300 shadow-xs">
                   {activeSearch}
                 </span>
-                <span className="text-slate-500">·</span>
-                <span className="text-emerald-400 font-semibold">
-                  {matchingCases.length} {matchingCases.length === 1 ? 'operation record found' : 'operation records found'}
+                <span className="text-slate-300">·</span>
+                <span className="text-emerald-700 font-bold">
+                  {matchingContainers.length} {matchingContainers.length === 1 ? 'Container Record' : 'Containers Listed'}
                 </span>
-                <span className="text-slate-500">·</span>
-                <span className="text-slate-400">Searched across all subsidiary databases</span>
+                <span className="text-slate-300">·</span>
+                <span className="text-slate-500">Searched across all 4 subsidiaries</span>
               </div>
 
-              {matchingCases.length > 0 && (
-                <div className="flex items-center gap-2 self-start sm:self-auto">
+              {matchingContainers.length > 0 && (
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={handleCopyShareLink}
-                    className="text-xs text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-white/10 bg-slate-900 hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
-                    title="Copy direct link to this status"
+                    className="text-xs text-slate-700 hover:text-slate-950 px-3 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs font-semibold"
+                    title="Copy direct verification link"
                   >
-                    {copiedLink ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    <span>{copiedLink ? 'Link Copied' : 'Copy Direct Link'}</span>
+                    {copiedLink ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                    <span>{copiedLink ? 'Link Copied' : 'Share Status Link'}</span>
                   </button>
-
-                  {latestCase && (
-                    <button
-                      type="button"
-                      onClick={() => handleDownloadTrackingSlip(latestCase, true)}
-                      disabled={isGeneratingPdf}
-                      className="text-xs text-amber-300 hover:text-amber-200 px-3.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 flex items-center gap-1.5 font-semibold transition-colors cursor-pointer"
-                      title="Download official PDF tracking slip"
-                    >
-                      <Download size={14} />
-                      <span>{isGeneratingPdf ? 'Generating PDF...' : 'Download PDF Slip'}</span>
-                    </button>
-                  )}
                 </div>
               )}
             </div>
 
-            {/* No Match State */}
-            {matchingCases.length === 0 && (
-              <div className="p-10 rounded-2xl bg-slate-900/50 border border-white/10 text-center space-y-4 max-w-lg mx-auto">
-                <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-white/10 flex items-center justify-center text-slate-400 mx-auto">
-                  <AlertCircle size={28} />
+            {/* A. If NO record found: "no record found likha jaega" */}
+            {matchingContainers.length === 0 && (
+              <div className="p-8 sm:p-12 rounded-3xl bg-white border-2 border-rose-200 text-center space-y-4 max-w-lg mx-auto shadow-xl">
+                <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-300 flex items-center justify-center text-rose-600 mx-auto">
+                  <AlertCircle size={32} />
                 </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">No Shipment Record Found</h3>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    No active or historical records matched <code className="text-amber-300 font-mono">{activeSearch}</code> in the database.
+                <div className="space-y-1.5">
+                  <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase">
+                    No Record Found
+                  </h3>
+                  <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                    No container or consignment record found matching <code className="text-slate-900 font-mono font-bold px-2 py-0.5 rounded bg-slate-100 border border-slate-300">{activeSearch}</code> in the MAK Group database.
                   </p>
                 </div>
-                <div className="text-left text-xs text-slate-400 bg-slate-950 p-4 rounded-xl border border-white/5 space-y-1.5">
-                  <p className="font-semibold text-slate-300">Suggestions:</p>
-                  <p>• Make sure the Container Number format is correct (e.g. <code>WHSU5957558</code> or <code>TCLU8492015</code>).</p>
-                  <p>• You can also search by your <strong>Bill of Lading (B/L)</strong> number or <strong>Case Reference</strong>.</p>
-                  <p>• If newly registered, please allow a short interval for central synchronization.</p>
+                <div className="text-left text-xs text-slate-600 bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1.5">
+                  <p className="font-bold text-slate-800">Search Help:</p>
+                  <p>• <strong>Container Number</strong>: Check format (e.g. <code>WHSU5957558</code> or <code>HLXU8821094</code>).</p>
+                  <p>• <strong>Truck / Vehicle Number</strong>: Enter plate number (e.g. <code>TLB-892</code> or <code>P-9912</code>).</p>
+                  <p>• <strong>Bill of Lading</strong>: Enter B/L number (e.g. <code>027G657324</code> or <code>HLCU9201840</code>).</p>
+                  <p>• <strong>Case Reference</strong>: Enter MAK job number (e.g. <code>DPL-26-0001</code>).</p>
                 </div>
               </div>
             )}
 
-            {/* MULTI-CONTAINER SPECIFIC PRESENTATION (WHEN 2 CONTAINERS ARE SEARCHED) */}
-            {tokenResults.length > 1 && (
-              <div className="space-y-8">
-                <div className="p-4 rounded-xl bg-slate-900/90 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
-                  <div className="flex items-center gap-2">
-                    <Package className="w-5 h-5 text-amber-400 shrink-0" />
-                    <div>
-                      <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                        Dual Container Status Tracking ({tokenResults.length} Containers Monitored)
-                      </h3>
-                      <p className="text-xs text-slate-400">
-                        Operational milestones, vessel bookings, and customs releases displayed per container.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {tokenResults.map((t, idx) => (
-                      <span key={`tok_pill_${idx}`} className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                        Container #{idx + 1}: {t.token}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+            {/* B. If EXACTLY 1 Container (or user drilled into 1 container from the list): "uska status samne a jaega" */}
+            {activeContainerItem && (
+              <div className="space-y-4">
+                {/* Back to multiple containers list if user clicked from list */}
+                {matchingContainers.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedContainerId(null)}
+                    className="text-xs text-slate-700 hover:text-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 flex items-center gap-2 transition-colors cursor-pointer w-fit shadow-xs font-semibold"
+                  >
+                    <ArrowLeft size={14} />
+                    <span>Back to Containers List ({matchingContainers.length} Containers)</span>
+                  </button>
+                )}
 
-                {tokenResults.map((tRes, tIdx) => (
-                  <div key={`tok_section_${tRes.token}_${tIdx}`} className="space-y-4 pt-2">
-                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full bg-amber-400 flex items-center justify-center text-[8px] font-bold text-slate-950">
-                          {tIdx + 1}
-                        </span>
-                        <h4 className="text-base font-bold text-white font-mono flex items-center gap-2">
-                          <span>Container #{tIdx + 1}:</span>
-                          <span className="text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded border border-amber-500/30">{tRes.token}</span>
-                        </h4>
-                        <span className="text-xs text-slate-400">
-                          ({tRes.count} {tRes.count === 1 ? 'consignments found' : 'consignments found'})
-                        </span>
-                      </div>
-                    </div>
-
-                    {tRes.count === 0 ? (
-                      <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10 text-center">
-                        <p className="text-xs text-slate-400">
-                          No active or historic records found for container <strong className="text-amber-300 font-mono">{tRes.token}</strong>.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {tRes.latest && (
-                          <ConsignmentCard 
-                            caseItem={tRes.latest} 
-                            searchedQuery={tRes.token}
-                            onDownloadPdf={() => handleDownloadTrackingSlip(tRes.latest, true)}
-                            isLatest={true}
-                          />
-                        )}
-
-                        {tRes.history.length > 0 && (
-                          <div className="space-y-3 pt-2 pl-2 sm:pl-4 border-l-2 border-amber-500/30">
-                            <h5 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                              <Clock size={13} className="text-amber-400" />
-                              <span>Earlier Voyages for Container {tRes.token} ({tRes.history.length} Previous Consignments)</span>
-                            </h5>
-                            {tRes.history.map((pastCase, pIdx) => (
-                              <ConsignmentCard
-                                key={`past_${tRes.token}_${pIdx}`}
-                                caseItem={pastCase}
-                                searchedQuery={tRes.token}
-                                onDownloadPdf={() => handleDownloadTrackingSlip(pastCase, false)}
-                                isLatest={false}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* SINGLE CONTAINER / IDENTIFIER PRESENTATION (WHEN 1 CONTAINER IS SEARCHED) */}
-            {tokenResults.length <= 1 && latestCase && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                      Current / Latest Consignment
-                    </h3>
-                  </div>
-                  {historicCases.length > 0 && (
-                    <span className="text-xs text-amber-300 font-medium bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full">
-                      Note: Earlier voyage records for this container are archived below ({historicCases.length} Past Voyages)
-                    </span>
-                  )}
-                </div>
-
-                <ConsignmentCard 
-                  caseItem={latestCase} 
-                  searchedQuery={activeSearch}
-                  onDownloadPdf={() => handleDownloadTrackingSlip(latestCase, true)}
-                  isLatest={true}
+                {/* Single Container Detailed Dossier Card */}
+                <SingleContainerDossierCard
+                  item={activeContainerItem}
+                  onDownloadPdf={() => handleDownloadTrackingSlip(activeContainerItem)}
+                  isGeneratingPdf={isGeneratingPdf}
                 />
               </div>
             )}
 
-            {/* PAST / HISTORIC CONSIGNMENTS FOR SINGLE CONTAINER SEARCH */}
-            {tokenResults.length <= 1 && historicCases.length > 0 && (
-              <div className="space-y-4 pt-6 border-t border-white/10">
-                <div className="p-4 rounded-xl bg-slate-900/80 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                      <Clock size={16} className="text-amber-400" />
-                      <span>Previous Consignment History (Earlier Voyages &amp; Operations)</span>
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      This container previously operated under our logistics network. Historical records are archived below:
-                    </p>
+            {/* C. If MORE THAN 1 Container and no single container drilled in: "ek se jyada container hai to list a jayegi container number ki aur uske aage status likha Hoga is aur status ki field ke andar jo bhi work slow chal raha hoga current vah najar aaega" */}
+            {!activeContainerItem && matchingContainers.length > 1 && (
+              <div className="space-y-4">
+                {/* Header Summary Banner */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-300 text-amber-700 flex items-center justify-center shrink-0">
+                      <Package size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
+                        Multiple Containers Consignment ({matchingContainers.length} Containers Monitored)
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Container numbers with their assigned trucks and current live workflow stages. Click any container to view complete timeline.
+                      </p>
+                    </div>
                   </div>
-                  <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-white/10 shrink-0">
-                    {historicCases.length} Previous {historicCases.length === 1 ? 'Record' : 'Records'}
+                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-slate-100 text-slate-800 border border-slate-300 shrink-0 font-mono">
+                    Total: {matchingContainers.length} Units
                   </span>
                 </div>
 
-                <div className="space-y-4">
-                  {historicCases.map((pastCase, pIdx) => (
-                    <ConsignmentCard
-                      key={`past_${pastCase.id || pastCase.caseNo}_${pIdx}`}
-                      caseItem={pastCase}
-                      searchedQuery={activeSearch}
-                      onDownloadPdf={() => handleDownloadTrackingSlip(pastCase, false)}
-                      isLatest={false}
-                    />
-                  ))}
+                {/* Responsive Containers List with Prominent Workflow Status Field */}
+                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+                  <div className="divide-y divide-slate-100">
+                    {matchingContainers.map((cItem, idx) => {
+                      const opBadge = getOperatingCompany(cItem.companyId);
+
+                      return (
+                        <div 
+                          key={cItem.id || idx}
+                          onClick={() => setSelectedContainerId(String(cItem.id))}
+                          className="p-4 sm:p-5 hover:bg-amber-50/40 transition-colors cursor-pointer group flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                        >
+                          {/* Container Specs & Identifiers */}
+                          <div className="space-y-2 min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-mono font-bold shrink-0">
+                                {idx + 1}
+                              </span>
+                              <span className="font-mono text-lg sm:text-xl font-black text-slate-900 tracking-wider group-hover:text-amber-800 transition-colors">
+                                {cItem.containerNumber}
+                              </span>
+                              <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 shrink-0">
+                                {cItem.size || '40ft'}
+                              </span>
+                              {cItem.sealNo && (
+                                <span className="text-xs font-mono text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 shrink-0">
+                                  Seal: {cItem.sealNo}
+                                </span>
+                              )}
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${opBadge.color} shrink-0`}>
+                                {opBadge.short}
+                              </span>
+                            </div>
+
+                            {/* Truck & Consignment Metadata */}
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+                              <div className="flex items-center gap-1">
+                                <Truck size={13} className="text-emerald-700" />
+                                <span>Truck: <strong className="text-slate-900 font-mono">{cItem.vehicleNo || 'Awaiting Haulage'}</strong></span>
+                                {cItem.driverName && <span className="text-slate-500 font-normal">({cItem.driverName})</span>}
+                              </div>
+                              <div>
+                                <span>B/L: <strong className="text-slate-900 font-mono">{cItem.blNumber || 'N/A'}</strong></span>
+                              </div>
+                              <div>
+                                <span>Case: <strong className="text-slate-900 font-mono">{cItem.caseNo}</strong></span>
+                              </div>
+                              <div>
+                                <span>Category: <strong className="text-amber-800">{cItem.category}</strong></span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* DEDICATED STATUS FIELD (Showing current active workflow) */}
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-3 shrink-0 lg:max-w-md">
+                            <div className={`p-3 rounded-xl border-2 flex-1 min-w-[260px] ${
+                              cItem.isCompleted
+                                ? 'bg-emerald-50 border-emerald-400 text-emerald-950 shadow-xs'
+                                : 'bg-amber-50 border-amber-400 text-amber-950 shadow-xs'
+                            }`}>
+                              <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider mb-1">
+                                <span className="font-mono text-slate-600">CURRENT WORKFLOW STATUS</span>
+                                <span className={`flex items-center gap-1 font-bold ${cItem.isCompleted ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                  <span className={`w-2 h-2 rounded-full ${cItem.isCompleted ? 'bg-emerald-600' : 'bg-amber-600 animate-ping'}`} />
+                                  {cItem.isCompleted ? 'Completed' : 'In Progress'}
+                                </span>
+                              </div>
+                              <p className="text-xs sm:text-sm font-black text-slate-900 line-clamp-1">
+                                {cItem.currentWorkflowStep}
+                              </p>
+                              <p className="text-[11px] text-slate-600 line-clamp-1 mt-0.5">
+                                {cItem.currentWorkflowDescription}
+                              </p>
+                            </div>
+
+                            {/* View Full Status Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedContainerId(String(cItem.id));
+                              }}
+                              className="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-amber-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs shrink-0 cursor-pointer"
+                            >
+                              <span>View Status</span>
+                              <ChevronRight size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             )}
@@ -899,18 +759,18 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
 
       </main>
 
-      {/* Public Footer */}
-      <footer className="border-t border-white/10 bg-slate-950 py-8 text-center text-xs text-slate-400 space-y-3">
+      {/* 5. Corporate Footer matching docks.com.pk */}
+      <footer className="border-t border-slate-200 bg-white py-8 text-center text-xs text-slate-600 space-y-3 mt-12">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="text-left">
-            <p className="font-semibold text-white">MAK Group of Companies — Public Container Tracking Service</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">
+            <p className="font-bold text-slate-900">MAK Group of Companies — Public Container Tracking Service</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
               Tower Office: State Life Building No. 7, G-Allana Road, Tower, Karachi, Pakistan.
             </p>
           </div>
-          <div className="text-right text-[11px] text-slate-400">
-            <p>Central Operations: +92-21-32330103 • info@makgroup.com.pk</p>
-            <p className="text-amber-400/90 mt-0.5 font-medium">Zero Financial Disclosures • Pure Milestone Verification</p>
+          <div className="text-right text-[11px] text-slate-500">
+            <p>Direct Support: +92-21-32330103 • info@makgroup.com.pk</p>
+            <p className="text-amber-700 mt-0.5 font-bold">Zero Financial Disclosures • Pure Operational Milestone Verification</p>
           </div>
         </div>
       </footer>
@@ -918,98 +778,89 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
   );
 };
 
-interface ConsignmentCardProps {
-  caseItem: Case;
-  searchedQuery: string;
+interface SingleContainerDossierCardProps {
+  item: MatchedContainerItem;
   onDownloadPdf: () => void;
-  isLatest: boolean;
+  isGeneratingPdf: boolean;
 }
 
-const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
-  caseItem,
-  searchedQuery,
+const SingleContainerDossierCard: React.FC<SingleContainerDossierCardProps> = ({
+  item,
   onDownloadPdf,
-  isLatest
+  isGeneratingPdf
 }) => {
-  const containers = caseItem.containers || [];
-  const primaryContainer: Container = containers.find(c => {
-    const num = (c.number || (c as any).containerNo || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    const q = searchedQuery.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    return num.includes(q) || q.includes(num);
-  }) || containers[0] || ({ id: 0, number: searchedQuery, size: '40ft', weight: 0, status: 'Pending' } as unknown as Container);
-
-  const cid = (caseItem.companyId || 'docks').toLowerCase();
-  const opComp = (() => {
-    if (cid === 'truckit') return { name: 'Truckit (Pvt.) Ltd.', badge: 'TRUCKIT', border: 'border-amber-500/30 text-amber-400 bg-amber-500/10' };
-    if (cid === 'muhib') return { name: 'Muhib International', badge: 'MUHIB', border: 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' };
-    if (cid === 'vantage') return { name: 'Vantage Shipping Line', badge: 'VANTAGE', border: 'border-cyan-500/30 text-cyan-400 bg-cyan-500/10' };
-    return { name: 'Docks (Pvt.) Ltd.', badge: 'DOCKS', border: 'border-blue-500/30 text-blue-400 bg-blue-500/10' };
-  })();
-
+  const caseItem = item.caseItem;
   const workflowConfig = getCategoryWorkflow(caseItem.category);
   const activeStepIdx = getWorkflowStepIndex(caseItem.category, caseItem.status);
-  const isCompletedCase = caseItem.status === CaseStatus.COMPLETED;
+  const isCompletedCase = caseItem.status === CaseStatus.COMPLETED || item.isCompleted;
 
-  // Separate completed, current, and incomplete/pending steps
   const completedSteps = workflowConfig.steps.filter((_, idx) => idx < activeStepIdx || isCompletedCase);
   const currentStep = !isCompletedCase ? workflowConfig.steps[activeStepIdx] : null;
   const incompleteSteps = !isCompletedCase ? workflowConfig.steps.filter((_, idx) => idx > activeStepIdx) : [];
-
-  const registrationDate = caseItem.registrationDate || caseItem.createdAt || 'N/A';
   const progressPercent = isCompletedCase ? 100 : Math.round((completedSteps.length / workflowConfig.totalSteps) * 100);
 
+  const cid = (item.companyId || 'docks').toLowerCase();
+  const opComp = (() => {
+    if (cid === 'truckit') return { name: 'Truckit (Pvt.) Ltd.', badge: 'TRUCKIT', border: 'border-amber-300 text-amber-800 bg-amber-50' };
+    if (cid === 'muhib') return { name: 'Muhib International', badge: 'MUHIB', border: 'border-emerald-300 text-emerald-800 bg-emerald-50' };
+    if (cid === 'vantage') return { name: 'Vantage Shipping Line', badge: 'VANTAGE', border: 'border-cyan-300 text-cyan-800 bg-cyan-50' };
+    return { name: 'Docks (Pvt.) Ltd.', badge: 'DOCKS', border: 'border-blue-300 text-blue-800 bg-blue-50' };
+  })();
+
   return (
-    <div className={`rounded-2xl border transition-all ${
-      isLatest 
-        ? 'bg-slate-900/90 border-white/20 shadow-2xl ring-1 ring-white/10' 
-        : 'bg-slate-900/50 border-white/10 opacity-95'
-    } overflow-hidden`}>
+    <div className="rounded-3xl border border-slate-200 bg-white shadow-xl overflow-hidden space-y-0">
       
-      {/* Consignment Header Strip */}
-      <div className="p-4 sm:p-6 border-b border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 bg-slate-950/60 min-w-0">
-        <div className="space-y-1.5 min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+      {/* 1. TOP SECTION: CONTAINER SPECIFICATIONS HEADER */}
+      <div className="p-5 sm:p-7 border-b border-slate-800 bg-[#0F172A] text-white flex flex-col md:flex-row md:items-center justify-between gap-4 min-w-0">
+        <div className="space-y-3 min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
             <span className={`px-2.5 py-0.5 rounded-md text-xs font-bold border ${opComp.border} shrink-0`}>
               {opComp.badge}
             </span>
-            <span className="font-mono text-base sm:text-xl font-bold text-white tracking-wide truncate">
-              {primaryContainer.number || searchedQuery}
+            <span className="font-mono text-2xl sm:text-4xl font-black text-white tracking-wider truncate">
+              {item.containerNumber}
             </span>
-            <span className="text-xs font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 rounded-md flex items-center gap-1 shrink-0">
-              <ShieldCheck size={12} className="text-amber-400" />
-              <span>Category: {workflowConfig.category}</span>
+            <span className="text-xs font-semibold text-slate-300 bg-white/10 border border-white/20 px-2.5 py-0.5 rounded shrink-0">
+              {item.size || '40ft'} Equipment
             </span>
-            <span className="text-xs font-semibold text-slate-400 bg-white/5 border border-white/10 px-2 py-0.5 rounded shrink-0">
-              {primaryContainer.size || '40ft'} Equipment
-            </span>
-            {primaryContainer.sealNo && (
-              <span className="text-xs text-slate-400 bg-white/5 border border-white/10 px-2 py-0.5 rounded font-mono shrink-0">
-                Seal: {primaryContainer.sealNo}
-              </span>
-            )}
-            {isLatest ? (
-              <span className="text-xs font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-0.5 rounded-full flex items-center gap-1 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span>Current Consignment</span>
-              </span>
-            ) : (
-              <span className="text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1 shrink-0">
-                <Clock size={11} />
-                <span>Previous Voyage (Historical Record)</span>
+            {item.sealNo && (
+              <span className="text-xs font-mono text-amber-300 bg-amber-500/20 border border-amber-500/30 px-2.5 py-0.5 rounded shrink-0">
+                Seal: {item.sealNo}
               </span>
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs text-slate-400">
-            <span>Case Ref: <strong className="text-white font-mono">{caseItem.caseNo || caseItem.id}</strong></span>
+          {/* Quick Specifications Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-900/90 p-3.5 rounded-2xl border border-white/10">
+            <div>
+              <span className="text-slate-400 block text-[11px]">Bill of Lading (B/L):</span>
+              <strong className="text-white text-xs truncate block font-mono">{item.blNumber}</strong>
+            </div>
+            <div>
+              <span className="text-slate-400 block text-[11px]">MAK Case Reference:</span>
+              <strong className="text-white text-xs truncate block font-mono">{item.caseNo}</strong>
+            </div>
+            <div>
+              <span className="text-slate-400 block text-[11px]">Operating Subsidiary:</span>
+              <strong className="text-amber-300 text-xs truncate block">{item.companyName}</strong>
+            </div>
+            <div>
+              <span className="text-slate-400 block text-[11px]">Logistics Category:</span>
+              <strong className="text-slate-200 text-xs truncate block">{item.category}</strong>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-slate-400">
+            <span>Routing: <strong className="text-white">{item.pol}</strong> → <strong className="text-white">{item.pod}</strong></span>
             <span>·</span>
-            <span>B/L No: <strong className="text-white font-mono">{caseItem.blNumber || caseItem.extractedData?.blNumber || 'N/A'}</strong></span>
-            <span>·</span>
-            <span>Category: <strong className="text-amber-300">{workflowConfig.category}</strong></span>
-            <span>·</span>
-            <span>Date: <strong className="text-slate-300">{registrationDate}</strong></span>
-            <span>·</span>
-            <span>Operating Entity: <strong className="text-slate-300">{opComp.name}</strong></span>
+            <span>Registered On: <strong className="text-slate-200">{item.registrationDate}</strong></span>
+            {item.vehicleNo && (
+              <>
+                <span>·</span>
+                <span>Assigned Truck: <strong className="text-amber-300 font-mono">{item.vehicleNo}</strong></span>
+                {item.driverName && <span>({item.driverName})</span>}
+              </>
+            )}
           </div>
         </div>
 
@@ -1017,173 +868,177 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
           <button
             type="button"
             onClick={onDownloadPdf}
-            className="w-full sm:w-auto px-3.5 sm:px-4 py-2 bg-gradient-to-r from-amber-500/20 to-amber-600/20 hover:from-amber-500/30 hover:to-amber-600/30 text-amber-300 hover:text-amber-200 rounded-xl text-xs font-bold flex items-center justify-center gap-2 border border-amber-500/30 transition-all cursor-pointer shadow-sm"
+            disabled={isGeneratingPdf}
+            className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 transition-all cursor-pointer active:scale-95"
+            title="Download official PDF container status certificate"
           >
             <Download size={14} />
-            <span>Download Status Slip (PDF)</span>
+            <span>{isGeneratingPdf ? 'Generating PDF...' : 'Download Status Slip (PDF)'}</span>
           </button>
         </div>
       </div>
 
-      {/* Consignment Body */}
-      <div className="p-4 sm:p-6 space-y-5 sm:space-y-6 min-w-0">
+      {/* 2. DEDICATED PROMINENT STATUS FIELD (Active Workflow Stage) */}
+      <div className="p-5 sm:p-7 bg-[#FCFAF5] border-b border-slate-200">
+        <div className={`p-5 sm:p-6 rounded-2xl border-2 transition-all shadow-md ${
+          isCompletedCase
+            ? 'bg-emerald-50 border-emerald-500 text-emerald-950 shadow-emerald-100'
+            : 'bg-amber-50 border-amber-500 text-amber-950 shadow-amber-100'
+        }`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1.5 flex-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 block font-mono">
+                CURRENT WORKFLOW STAGE
+              </span>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className={`text-2xl sm:text-3xl font-black font-mono tracking-tight ${
+                  isCompletedCase ? 'text-emerald-700' : 'text-amber-800'
+                }`}>
+                  {item.currentWorkflowStep}
+                </span>
+
+                <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 ${
+                  isCompletedCase
+                    ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                    : 'bg-amber-100 text-amber-900 border-amber-300'
+                }`}>
+                  {isCompletedCase ? (
+                    <>
+                      <CheckCircle2 size={14} className="text-emerald-600" />
+                      <span>Consignment Completed &amp; Delivered</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-amber-600 animate-ping" />
+                      <span>In Progress • Active Milestone Stage</span>
+                    </>
+                  )}
+                </span>
+              </div>
+              <p className="text-xs text-slate-700 pt-1 leading-relaxed font-medium">
+                {item.currentWorkflowDescription}
+              </p>
+            </div>
+
+            {/* Gauge Percentage */}
+            <div className="text-right sm:border-l sm:border-amber-300/60 sm:pl-6 shrink-0">
+              <span className="text-xs font-semibold text-slate-500 block">Milestone Progress</span>
+              <span className="text-2xl sm:text-3xl font-black text-slate-900 font-mono">
+                {progressPercent}%
+              </span>
+              <span className="text-[10px] text-slate-600 block">
+                {completedSteps.length} of {workflowConfig.totalSteps} Steps Complete
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Dossier Content */}
+      <div className="p-6 space-y-6 bg-white">
         
-        {/* Overall Progress Gauge */}
-        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-950/70 border border-white/10 space-y-2 min-w-0">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-1">
-            <span className="font-semibold text-slate-300 flex items-center gap-2">
-              <Layers size={14} className="text-amber-400" />
-              <span>{workflowConfig.category} Milestone Progress</span>
-            </span>
-            <span className="font-mono font-bold text-amber-300">
-              {progressPercent}% Completed ({completedSteps.length} of {workflowConfig.totalSteps} Milestones)
-            </span>
-          </div>
-          <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-            <div 
-              className={`h-full transition-all duration-500 ${isCompletedCase ? 'bg-emerald-500' : 'bg-gradient-to-r from-amber-500 to-emerald-500'}`}
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Core Shipment Metrics Grid (Strictly Operational - Zero Financials) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 min-w-0">
+        {/* Core Shipment Metrics Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           
-          {/* POL & POD Routing */}
-          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1 min-w-0">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Anchor size={12} className="text-brand-400 shrink-0" />
-              <span className="truncate">Routing (Origin → Destination)</span>
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <Anchor size={13} className="text-blue-600" />
+              <span>Routing Origin / POL</span>
             </span>
-            <p className="text-xs font-bold text-white truncate" title={caseItem.pol}>
-              {caseItem.pol || 'Port of Loading'}
+            <p className="text-sm font-bold text-slate-900 truncate" title={item.pol}>
+              {item.pol || 'Port of Loading'}
             </p>
-            <div className="flex items-center gap-1 text-[11px] text-slate-400 min-w-0">
-              <ArrowRight size={11} className="text-amber-400 shrink-0" />
-              <span className="truncate text-slate-300 font-medium" title={caseItem.pod}>
-                {caseItem.pod || 'Port of Discharge'}
-              </span>
-            </div>
-          </div>
-
-          {/* Current Milestone / Status */}
-          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1 min-w-0">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <CheckCircle2 size={12} className="text-amber-400 shrink-0" />
-              <span className="truncate">Current Status Stage</span>
-            </span>
-            <p className="text-xs font-bold text-amber-300 truncate" title={String(caseItem.status)}>
-              {caseItem.status || 'Active Operations'}
-            </p>
-            <p className="text-[11px] text-slate-400 truncate">
-              {isCompletedCase ? 'Shipment Completed & Delivered' : `Active: ${currentStep?.shortTitle || activeStepIdx + 1}`}
+            <p className="text-[11px] text-slate-500">
+              Loading Port
             </p>
           </div>
 
-          {/* Shipping Line & Vessel */}
-          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1 min-w-0">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Ship size={12} className="text-cyan-400 shrink-0" />
-              <span className="truncate">Ocean Line & Vessel</span>
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <MapPin size={13} className="text-emerald-600" />
+              <span>Destination POD / Terminal</span>
             </span>
-            <p className="text-xs font-bold text-white truncate" title={caseItem.extractedData?.shippingLine || caseItem.shippingLine}>
-              {caseItem.extractedData?.shippingLine || caseItem.shippingLine || 'Carrier Assigned'}
+            <p className="text-sm font-bold text-slate-900 truncate" title={item.pod}>
+              {item.pod || 'Port of Discharge'}
             </p>
-            <p className="text-[11px] text-slate-400 truncate">
+            <p className="text-[11px] text-slate-500">
+              Delivery Destination
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <Truck size={13} className="text-amber-600" />
+              <span>Assigned Haulage Truck</span>
+            </span>
+            <p className="text-sm font-bold text-slate-900 font-mono">
+              {item.vehicleNo || 'Awaiting Haulage'}
+            </p>
+            <p className="text-[11px] text-slate-500 truncate">
+              {item.transporterName || 'Fleet Network'}
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <Ship size={13} className="text-cyan-600" />
+              <span>Ocean Carrier &amp; Line</span>
+            </span>
+            <p className="text-sm font-bold text-slate-900 truncate" title={caseItem.shippingLine}>
+              {caseItem.extractedData?.shippingLine || caseItem.shippingLine || 'Shipping Line'}
+            </p>
+            <p className="text-[11px] text-slate-500 truncate">
               {caseItem.extractedData?.vesselName ? `Vessel: ${caseItem.extractedData.vesselName}` : 'Vessel Voyage'}
-              {caseItem.extractedData?.voyageNo ? ` (${caseItem.extractedData.voyageNo})` : ''}
             </p>
           </div>
-
-          {/* Cargo Classification */}
-          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-white/10 space-y-1 min-w-0">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Box size={12} className="text-purple-400 shrink-0" />
-              <span className="truncate">Category & Cargo</span>
-            </span>
-            <p className="text-xs font-bold text-amber-300 truncate" title={workflowConfig.category}>
-              {workflowConfig.category}
-            </p>
-            <p className="text-[11px] text-slate-400 truncate" title={caseItem.extractedData?.itemName || 'General Cargo'}>
-              {caseItem.extractedData?.itemName || (caseItem.extractedData?.grossWeight ? `${caseItem.extractedData.grossWeight.toLocaleString()} KG Gross` : `${primaryContainer.size || '40ft'} Equipment`)}
-            </p>
-          </div>
-
         </div>
 
-        {/* Assigned Inland Vehicle Dispatch (If assigned) */}
-        {primaryContainer.vehicleNo && (
-          <div className="p-3.5 rounded-xl bg-slate-950/50 border border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400">
-                <Truck size={16} />
-              </div>
-              <div>
-                <span className="text-slate-400">Inland Fleet Trailer: </span>
-                <strong className="text-white font-mono">{primaryContainer.vehicleNo}</strong>
-                {primaryContainer.transporterName && (
-                  <span className="text-slate-400"> ({primaryContainer.transporterName})</span>
-                )}
-              </div>
-            </div>
-            {primaryContainer.driverName && (
-              <div className="text-slate-400 text-[11px]">
-                Driver: <strong className="text-slate-200">{primaryContainer.driverName}</strong>
-                {primaryContainer.driverContact && ` • ${primaryContainer.driverContact}`}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* INCOMPLETE WORKFLOWS CARD (User brief: "likha Hoga ki is waqt kon kon se workflow incomplete hain") */}
+        {/* INCOMPLETE WORKFLOWS CARD */}
         {!isCompletedCase && (incompleteSteps.length > 0 || currentStep) && (
-          <div className="p-4 sm:p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-3 shadow-lg shadow-amber-500/5">
+          <div className="p-4 sm:p-5 rounded-2xl bg-amber-50 border-2 border-amber-300 text-xs space-y-3 shadow-xs">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-amber-300 font-bold text-sm">
-                <AlertTriangle size={17} className="text-amber-400 shrink-0" />
-                <span>Incomplete Workflow Milestones ({incompleteSteps.length + (currentStep ? 1 : 0)} Remaining)</span>
+              <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
+                <AlertTriangle size={17} className="text-amber-600 shrink-0" />
+                <span>Pending Workflow Stages ({incompleteSteps.length + (currentStep ? 1 : 0)} Remaining)</span>
               </div>
-              <span className="text-[11px] text-amber-400 font-semibold bg-amber-500/20 px-2 py-0.5 rounded">
-                Pending Actions
+              <span className="text-[11px] text-amber-800 font-bold bg-amber-100 px-2 py-0.5 rounded border border-amber-300">
+                Action Pending
               </span>
             </div>
 
-            <p className="text-slate-300 leading-relaxed text-xs">
-              The following operational milestones are currently pending completion for this consignment:
+            <p className="text-slate-700 leading-relaxed text-xs">
+              The following operational milestones are currently underway or awaiting completion for this consignment:
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
-              {/* Currently Active Step (In Progress) */}
               {currentStep && (
-                <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-500/40 space-y-1">
+                <div className="p-3 rounded-xl bg-white border border-amber-400 space-y-1 shadow-xs">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-bold text-amber-300 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                    <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-600 animate-ping" />
                       Step {activeStepIdx + 1}: {currentStep.title}
                     </span>
-                    <span className="text-[10px] font-bold text-amber-400 uppercase bg-amber-400/20 px-1.5 py-0.5 rounded">
+                    <span className="text-[10px] font-bold text-amber-800 uppercase bg-amber-100 px-1.5 py-0.5 rounded">
                       In Progress
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                  <p className="text-[11px] text-slate-600 leading-relaxed">
                     {currentStep.description}
                   </p>
                 </div>
               )}
 
-              {/* Subsequent Pending Steps */}
               {incompleteSteps.map((s, sIdx) => (
-                <div key={s.id || sIdx} className="p-3 rounded-xl bg-black/40 border border-white/5 space-y-1">
+                <div key={s.id || sIdx} className="p-3 rounded-xl bg-white border border-slate-200 space-y-1 shadow-xs">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-semibold text-slate-300">
+                    <span className="font-semibold text-slate-800">
                       Step {activeStepIdx + 2 + sIdx}: {s.title}
                     </span>
-                    <span className="text-[10px] font-semibold text-slate-400 uppercase bg-white/5 px-1.5 py-0.5 rounded">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase bg-slate-100 px-1.5 py-0.5 rounded">
                       Awaiting Completion
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
                     {s.description}
                   </p>
                 </div>
@@ -1192,54 +1047,53 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
           </div>
         )}
 
-        {/* STEP-BY-STEP WORKFLOW STATUS BREAKDOWN */}
+        {/* STEP-BY-STEP WORKFLOW STATUS TIMELINE */}
         <div className="space-y-3 pt-2">
           <div className="flex items-center justify-between">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-              <span>Full Workflow Milestones Breakdown ({workflowConfig.totalSteps} Total Steps)</span>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-2">
+              <Layers size={14} className="text-amber-600" />
+              <span>Full Operational Milestones Timeline ({workflowConfig.totalSteps} Total Steps)</span>
             </h4>
             <div className="flex items-center gap-3 text-xs">
-              <span className="text-emerald-400 font-semibold flex items-center gap-1">
+              <span className="text-emerald-700 font-semibold flex items-center gap-1">
                 <CheckCircle2 size={13} /> {completedSteps.length} Completed
               </span>
               {!isCompletedCase && (
-                <span className="text-amber-400 font-semibold flex items-center gap-1">
+                <span className="text-amber-700 font-semibold flex items-center gap-1">
                   <Clock size={13} /> {incompleteSteps.length + (currentStep ? 1 : 0)} Incomplete
                 </span>
               )}
             </div>
           </div>
 
-          {/* Stepper Timeline Visualizer */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-2.5 min-w-0">
             {workflowConfig.steps.map((step, idx) => {
               const isCompleted = idx < activeStepIdx || isCompletedCase;
               const isActive = idx === activeStepIdx && !isCompletedCase;
-              const isPending = idx > activeStepIdx && !isCompletedCase;
 
               return (
                 <div 
                   key={step.id || idx}
-                  className={`p-3 rounded-xl border text-xs transition-all relative min-w-0 break-words ${
+                  className={`p-3.5 rounded-xl border text-xs transition-all ${
                     isCompleted
-                      ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-200'
+                      ? 'bg-emerald-50/60 border-emerald-300 text-emerald-950 shadow-xs'
                       : isActive
-                        ? 'bg-amber-950/40 border-amber-500/50 text-amber-200 ring-1 ring-amber-500/30 shadow-lg'
-                        : 'bg-slate-950/50 border-white/5 text-slate-400'
+                        ? 'bg-amber-50 border-2 border-amber-500 text-amber-950 ring-2 ring-amber-200 shadow-md'
+                        : 'bg-slate-50 border-slate-200 text-slate-500'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2 mb-1.5">
-                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-black/40 text-slate-300">
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white text-slate-700 border border-slate-200">
                       Step {idx + 1}
                     </span>
 
                     {isCompleted ? (
-                      <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
+                      <span className="text-[10px] font-bold text-emerald-700 flex items-center gap-1">
                         <CheckCircle2 size={12} /> Complete
                       </span>
                     ) : isActive ? (
-                      <span className="text-[10px] font-bold text-amber-400 flex items-center gap-1 animate-pulse">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> In Progress
+                      <span className="text-[10px] font-bold text-amber-800 flex items-center gap-1 animate-pulse">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-600" /> Active
                       </span>
                     ) : (
                       <span className="text-[10px] font-medium text-slate-400 flex items-center gap-1">
@@ -1248,10 +1102,10 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
                     )}
                   </div>
 
-                  <p className={`font-bold leading-snug ${isCompleted ? 'text-white' : isActive ? 'text-amber-200' : 'text-slate-300'}`}>
-                    {step.shortTitle || step.title}
+                  <p className="font-bold text-slate-900 mb-1">
+                    {step.title}
                   </p>
-                  <p className="text-[10px] text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                  <p className="text-[11px] text-slate-600 leading-snug">
                     {step.description}
                   </p>
                 </div>
@@ -1259,16 +1113,6 @@ const ConsignmentCard: React.FC<ConsignmentCardProps> = ({
             })}
           </div>
         </div>
-
-        {/* Completed Shipment Banner */}
-        {isCompletedCase && (
-          <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-200 flex items-center gap-2.5">
-            <CheckCircle2 size={20} className="text-emerald-400 shrink-0" />
-            <p>
-              <strong>Consignment Successfully Concluded:</strong> All operational steps, terminal gate movements, and destination delivery procedures have been fully completed for this container.
-            </p>
-          </div>
-        )}
 
       </div>
     </div>

@@ -240,6 +240,89 @@ export const SEED_TRACKING_CASES: Case[] = [
         status: 'Loaded'
       }
     ]
+  },
+
+  // 4. Multi-Container Consignment: 3 Containers under B/L HLCU9201840 / Case DPL-26-0012 (Docks Pvt Ltd)
+  {
+    id: 'case_hlcu_multi',
+    caseNo: 'DPL-26-0012',
+    companyId: 'docks',
+    clientName: 'INDUS STEEL INDUSTRIES (PVT) LTD',
+    category: 'Bonded Carrier',
+    pol: 'HAMBURG, GERMANY',
+    pod: 'KARACHI PORT TRUST (KPT)',
+    status: CaseStatus.IN_TRANSIT,
+    registrationDate: '2026-03-29',
+    createdAt: '2026-03-29T10:15:00.000Z',
+    updatedAt: '2026-03-31T11:45:00.000Z',
+    blNumber: 'HLCU9201840',
+    gdNumber: 'KAPE-HC-99214',
+    shippingLine: 'HAPAG-LLOYD AG',
+    shippingAgent: 'HAPAG-LLOYD PAKISTAN',
+    documents: [],
+    extractedData: {
+      shipperName: 'THYSSENKRUPP INDUSTRIAL SOLUTIONS AG',
+      consigneeName: 'INDUS STEEL INDUSTRIES (PVT) LTD',
+      shippingLine: 'HAPAG-LLOYD',
+      blNumber: 'HLCU9201840',
+      blDate: '2026-03-15',
+      pol: 'HAMBURG, GERMANY',
+      pod: 'KARACHI PORT TRUST (KPT)',
+      vesselName: 'AL ZUBARA',
+      voyageNo: '2411E',
+      grossWeight: 72400,
+      packageCount: 140,
+      packagingType: 'BUNDLES',
+      itemName: 'ALLOY STEEL SECTIONS & INDUSTRIAL BEAMS'
+    },
+    containers: [
+      {
+        id: 401,
+        number: 'HLXU8821094',
+        size: '40ft',
+        weight: 24800,
+        sealNo: 'HL-90124',
+        vehicleNo: 'TLB-892',
+        driverName: 'Muhammad Aslam',
+        driverContact: '+92-300-8273611',
+        driverCnic: '42201-8931201-3',
+        status: 'In Transit',
+        transporterName: 'Bilal Goods Transport Co.'
+      },
+      {
+        id: 402,
+        number: 'HLXU8821095',
+        size: '40ft',
+        weight: 25100,
+        sealNo: 'HL-90125',
+        vehicleNo: 'P-9912',
+        driverName: 'Gul Khan',
+        driverContact: '+92-333-9118822',
+        driverCnic: '17301-7729104-5',
+        status: 'In Transit',
+        transporterName: 'Khyber Bonded Carriers'
+      },
+      {
+        id: 403,
+        number: 'HLXU8821096',
+        size: '20ft',
+        weight: 22500,
+        sealNo: 'HL-90126',
+        vehicleNo: 'KHI-7721',
+        driverName: 'Abdul Sattar',
+        driverContact: '+92-321-4455881',
+        driverCnic: '42301-5519284-1',
+        status: 'Pending',
+        transporterName: 'Al-Makkah Transport Network'
+      }
+    ],
+    workflowDetails: {
+      [CaseStatus.SHIPPING_LINE_DO]: { status: 'Completed', completed: true, date: '2026-03-29', remarks: 'Hapag-Lloyd Delivery Order released' },
+      [CaseStatus.TP_FILING]: { status: 'Completed', completed: true, date: '2026-03-30', remarks: 'Transit Permit (TP) filed via WeBOC' },
+      [CaseStatus.EXCISE_PAYMENT]: { status: 'Completed', completed: true, date: '2026-03-30', remarks: 'Sindh Excise duty paid' },
+      [CaseStatus.VEHICLE_ASSIGNMENT]: { status: 'Completed', completed: true, date: '2026-03-31', remarks: 'Trailers assigned (TLB-892, P-9912, KHI-7721)' },
+      [CaseStatus.IN_TRANSIT]: { status: 'In Progress', completed: false, date: '2026-03-31', remarks: 'Bonded convoy en-route under Customs satellite tracking' }
+    }
   }
 ];
 
@@ -386,6 +469,9 @@ export function searchTrackingCases(query: string, allCases: Case[]): Case[] {
       if (cont.sealNo) terms.push(cont.sealNo.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
       if (cont.vehicleNo) terms.push(cont.vehicleNo.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
     });
+    if ((c as any).vehicleNo) terms.push(String((c as any).vehicleNo).replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+    if ((c as any).truckNumber) terms.push(String((c as any).truckNumber).replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+    if ((c as any).assignedVehiclePlate) terms.push(String((c as any).assignedVehiclePlate).replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
 
     // Check if ANY searched token matches any of the case's terms
     return cleanTokens.some(tok => {
@@ -400,3 +486,133 @@ export function searchTrackingCases(query: string, allCases: Case[]): Case[] {
     return timeB - timeA;
   });
 }
+
+export interface MatchedContainerItem {
+  id: string | number;
+  containerNumber: string;
+  size: string;
+  sealNo?: string;
+  weight?: number;
+  vehicleNo?: string;
+  driverName?: string;
+  driverContact?: string;
+  driverCnic?: string;
+  transporterName?: string;
+  caseNo: string;
+  caseId: string;
+  blNumber: string;
+  companyId: string;
+  companyName: string;
+  category: string;
+  pol: string;
+  pod: string;
+  status: string;
+  currentWorkflowStep: string;
+  currentWorkflowDescription: string;
+  currentWorkflowStepIndex: number;
+  totalWorkflowSteps: number;
+  progressPercent: number;
+  isCompleted: boolean;
+  registrationDate: string;
+  caseItem: Case;
+}
+
+/**
+ * Extracts individual matching container items across all matching cases.
+ * Accurately extracts container numbers, assigned truck, and current workflow stage.
+ */
+export function extractMatchingContainers(
+  query: string,
+  matchedCases: Case[],
+  getWorkflowFn?: (category?: string) => any,
+  getStepIndexFn?: (category?: string, status?: any) => number
+): MatchedContainerItem[] {
+  if (!matchedCases || matchedCases.length === 0) return [];
+  const cleanQ = (query || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  const items: MatchedContainerItem[] = [];
+
+  matchedCases.forEach((c) => {
+    const cid = (c.companyId || 'docks').toLowerCase();
+    const compName = cid === 'truckit' ? 'Truckit (Pvt.) Ltd.' :
+                     cid === 'muhib' ? 'Muhib International' :
+                     cid === 'vantage' ? 'Vantage Shipping Line' :
+                     'Docks (Pvt.) Ltd.';
+
+    let workflowTitle = String(c.status || 'Active Operations');
+    let workflowDesc = 'Consignment is undergoing authorized operational milestones.';
+    let activeStepIdx = 0;
+    let totalSteps = 6;
+    const isCompleted = c.status === CaseStatus.COMPLETED || String(c.status).toLowerCase().includes('completed') || String(c.status).toLowerCase().includes('delivered');
+
+    if (getWorkflowFn && getStepIndexFn) {
+      try {
+        const wf = getWorkflowFn(c.category);
+        totalSteps = wf.totalSteps || 6;
+        activeStepIdx = getStepIndexFn(c.category, c.status);
+        const curStep = wf.steps?.[activeStepIdx];
+        if (isCompleted) {
+          workflowTitle = 'Completed & Delivered';
+          workflowDesc = 'All customs and delivery milestones verified successfully.';
+        } else if (curStep) {
+          workflowTitle = curStep.title || curStep.shortTitle || String(c.status);
+          workflowDesc = curStep.description || '';
+        }
+      } catch (_) {}
+    }
+
+    const progressPercent = isCompleted ? 100 : Math.round((Math.max(activeStepIdx, 0) / Math.max(totalSteps, 1)) * 100);
+
+    const containersList = (c.containers && c.containers.length > 0)
+      ? c.containers
+      : (c.containerNumber ? [{ id: 1, number: c.containerNumber, size: '40ft', status: c.status }] : []);
+
+    containersList.forEach((cont: any, idx: number) => {
+      const cNum = cont.number || cont.containerNo || `CONT-${idx + 1}`;
+      const cNumClean = String(cNum).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+      // If query was a specific container number, prioritize that specific container if there's a match
+      // If query was BL, Truck, Case No, or multi-query, include all containers of the consignment
+      const matchesDirectly = !cleanQ ||
+        cNumClean.includes(cleanQ) ||
+        cleanQ.includes(cNumClean) ||
+        String(c.blNumber || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().includes(cleanQ) ||
+        String(c.caseNo || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().includes(cleanQ) ||
+        String(cont.vehicleNo || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().includes(cleanQ);
+
+      if (matchesDirectly) {
+        items.push({
+          id: `${c.id || c.caseNo}_cont_${cont.id || idx}`,
+          containerNumber: cNum,
+          size: cont.size || '40ft',
+          sealNo: cont.sealNo || '',
+          weight: cont.weight || c.extractedData?.grossWeight,
+          vehicleNo: cont.vehicleNo || (c as any).vehicleNo || (c as any).truckNumber,
+          driverName: cont.driverName,
+          driverContact: cont.driverContact,
+          driverCnic: cont.driverCnic,
+          transporterName: cont.transporterName,
+          caseNo: c.caseNo || c.id,
+          caseId: c.id,
+          blNumber: c.blNumber || c.extractedData?.blNumber || 'N/A',
+          companyId: cid,
+          companyName: compName,
+          category: c.category || 'Bonded Carrier',
+          pol: c.pol || 'Port of Loading',
+          pod: c.pod || 'Port of Discharge',
+          status: String(c.status || 'Active'),
+          currentWorkflowStep: workflowTitle,
+          currentWorkflowDescription: workflowDesc,
+          currentWorkflowStepIndex: activeStepIdx,
+          totalWorkflowSteps: totalSteps,
+          progressPercent,
+          isCompleted,
+          registrationDate: c.registrationDate || c.createdAt?.slice(0, 10) || 'N/A',
+          caseItem: c
+        });
+      }
+    });
+  });
+
+  return items;
+}
+

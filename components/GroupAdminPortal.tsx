@@ -709,7 +709,8 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
       <main className="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden relative bg-[#090C12]">
         
         {/* Top Navbar */}
-        <header className="h-16 sm:h-18 bg-[#0F1420] border-b border-white/10 flex items-center justify-between px-3 sm:px-6 shrink-0 z-20">
+        <header className="h-14 sm:h-16 bg-[#0F1420] border-b border-white/10 flex items-center justify-between px-2.5 sm:px-6 shrink-0 z-20 gap-2">
+          {/* Left section: Sidebar toggle & Title */}
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
             <button
               type="button"
@@ -720,52 +721,53 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                   setSidebarCollapsed(!sidebarCollapsed);
                 }
               }}
-              className={`px-3 py-2 sm:px-3.5 sm:py-2 rounded-xl border cursor-pointer flex items-center gap-2 transition active:scale-95 shrink-0 ${
+              className={`h-9 px-2.5 sm:px-3 rounded-xl border cursor-pointer flex items-center gap-1.5 transition active:scale-95 shrink-0 ${
                 sidebarCollapsed 
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-md shadow-amber-500/10 hover:bg-amber-500/30' 
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm hover:bg-amber-500/30' 
                   : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border-white/10'
               }`}
               title={sidebarCollapsed ? "Show / Expand Sidebar" : "Hide / Collapse Sidebar"}
             >
-              <Menu size={18} className={sidebarCollapsed ? "text-amber-400" : "text-slate-300"} />
-              <span className="text-xs font-bold tracking-wide">
-                {sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar"}
+              <Menu size={16} className={sidebarCollapsed ? "text-amber-400" : "text-slate-300"} />
+              <span className="text-[11px] sm:text-xs font-semibold whitespace-nowrap">
+                {sidebarCollapsed ? "Sidebar" : "Hide"}
               </span>
             </button>
 
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono font-bold text-xs uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-                <Crown size={12} className="text-amber-400" />
-                Main Admin
+            {/* Badge & Title */}
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+              <span className="h-7 px-2 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono font-bold text-[10px] sm:text-xs uppercase tracking-wider shrink-0 flex items-center gap-1">
+                <Crown size={11} className="text-amber-400 shrink-0" />
+                <span>Admin</span>
               </span>
-              <div className="min-w-0 truncate">
-                <h2 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider truncate">
-                  {activeView === 'overview' && 'MAK Group Executive Overview • Consolidated Multi-Entity Dashboard'}
-                  {activeView === 'company_docks' && 'Docks (Pvt.) Ltd. • Subsidiary Dashboard'}
-                  {activeView === 'company_muhib' && 'Muhib International (SMC-Pvt.) Ltd. • Subsidiary Dashboard'}
-                  {activeView === 'company_vantage' && 'Vantage Shipping Line • Subsidiary Dashboard'}
-                  {activeView === 'company_truckit' && 'Truckit (Pvt.) Ltd. • Subsidiary Dashboard'}
-                  {activeView === 'setting_profile' && 'Main Admin Profile Editing • Credentials & Security'}
-                  {activeView === 'setting_logo' && 'Logos & Subsidiary Branding'}
-                  {activeView === 'setting_backup' && 'System Backup & Recovery'}
-                  {activeView === 'setting_general' && 'Conglomerate Legal Details'}
-                  {activeView === 'setting_drive' && 'Google Drive Cloud Sync'}
+              <div className="min-w-0 truncate hidden xs:block sm:block">
+                <h2 className="text-xs sm:text-sm font-semibold text-white tracking-wide truncate">
+                  {activeView === 'overview' && 'MAK Group Overview'}
+                  {activeView === 'company_docks' && 'Docks (Pvt.) Ltd.'}
+                  {activeView === 'company_muhib' && 'Muhib International'}
+                  {activeView === 'company_vantage' && 'Vantage Shipping Line'}
+                  {activeView === 'company_truckit' && 'Truckit (Pvt.) Ltd.'}
+                  {activeView === 'setting_profile' && 'Admin Profile & Security'}
+                  {activeView === 'setting_logo' && 'Logos & Branding'}
+                  {activeView === 'setting_backup' && 'Backup & Recovery'}
+                  {activeView === 'setting_general' && 'Legal Details'}
+                  {activeView === 'setting_drive' && 'Drive Cloud Sync'}
                 </h2>
               </div>
             </div>
           </div>
 
           {/* Quick Actions Right */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {activeView === 'overview' && (
               <button
                 type="button"
                 onClick={handleExportConsolidatedReport}
-                className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-md shadow-emerald-600/20 cursor-pointer"
+                className="h-9 px-2.5 sm:px-3 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer active:scale-95"
                 title="Export complete 4 companies consolidated Excel report"
               >
-                <Download size={13} />
-                <span className="hidden sm:inline">Export Excel</span>
+                <Download size={14} />
+                <span className="hidden md:inline">Export Excel</span>
               </button>
             )}
 
@@ -773,22 +775,22 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectCompanyWorkspace(currentSelectedCompany.id)}
-                className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-md shadow-blue-600/20 cursor-pointer"
+                className="h-9 px-2.5 sm:px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer active:scale-95"
                 title={`Open full operational workspace for ${currentSelectedCompany.name}`}
               >
-                <ExternalLink size={13} />
-                <span className="hidden sm:inline">Open Full Workspace</span>
+                <ExternalLink size={14} />
+                <span className="hidden md:inline">Open Workspace</span>
               </button>
             )}
 
             <button
               type="button"
               onClick={onExitPortal}
-              className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+              className="h-9 px-2.5 sm:px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95"
               title="Return to subsidiary workspace"
             >
-              <ArrowLeft size={13} />
-              <span className="hidden sm:inline">Exit Portal</span>
+              <ArrowLeft size={14} />
+              <span className="hidden sm:inline">Exit</span>
             </button>
           </div>
         </header>
@@ -803,32 +805,32 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
             <div className="space-y-6 animate-fade-in max-w-7xl mx-auto">
               
               {/* Executive Welcome & Group Headline Banner */}
-              <div className="relative rounded-3xl p-5 sm:p-7 bg-gradient-to-r from-amber-950/40 via-slate-900 to-blue-950/40 border border-amber-500/30 shadow-2xl overflow-hidden">
-                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 border border-amber-400/40 text-amber-300 text-xs font-mono font-bold uppercase">
+              <div className="relative rounded-2xl sm:rounded-3xl p-4 sm:p-6 bg-gradient-to-br from-amber-950/30 via-slate-900 to-[#0e1626] border border-amber-500/25 shadow-xl overflow-hidden">
+                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-3.5">
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-md bg-amber-400/15 border border-amber-400/30 text-amber-300 text-[10px] sm:text-xs font-semibold uppercase tracking-wider">
                         Enterprise Conglomerate Intelligence
                       </span>
-                      <span className="text-slate-400 text-xs font-mono">
+                      <span className="text-slate-400 text-[11px] sm:text-xs font-medium">
                         Live Cross-Entity Aggregate
                       </span>
                     </div>
-                    <h2 className="text-xl sm:text-2xl font-bold text-white tracking-wide">
+                    <h2 className="text-lg sm:text-2xl font-bold text-white tracking-tight">
                       {parentGroup.name}
                     </h2>
-                    <p className="text-xs sm:text-sm text-slate-300 max-w-2xl mt-1 leading-relaxed">
+                    <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
                       Real-time consolidated tracking, financial reconciliation, and fleet oversight aggregating all 4 corporate subsidiaries: <span className="text-amber-300 font-semibold">Docks</span>, <span className="text-blue-300 font-semibold">Muhib International</span>, <span className="text-cyan-300 font-semibold">Vantage Shipping Line</span>, and <span className="text-red-300 font-semibold">Truckit</span>.
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0 pt-1 md:pt-0">
                     <button
                       type="button"
                       onClick={handleExportConsolidatedReport}
-                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition"
+                      className="w-full sm:w-auto px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 cursor-pointer active:scale-95 transition"
                     >
-                      <Download size={15} />
+                      <Download size={14} />
                       <span>Consolidated Audit Excel</span>
                     </button>
                   </div>
@@ -836,65 +838,73 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
               </div>
 
               {/* 1. CONSOLIDATED GRAND TOTAL KPI METRICS */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
                 
-                {/* Total Shipments */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-lg">
-                  <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
-                    <span className="font-semibold uppercase tracking-wider text-xs">Total Consignments</span>
-                    <FolderKanban size={16} className="text-amber-400" />
+                {/* Total Consignments */}
+                <div className="p-3.5 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-md flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                      <span className="font-semibold uppercase tracking-wider text-[11px] sm:text-xs">Total Consignments</span>
+                      <FolderKanban size={15} className="text-amber-400 shrink-0" />
+                    </div>
+                    <div className="text-xl sm:text-3xl font-bold font-mono text-white">
+                      {grandTotals.totalCases}
+                    </div>
                   </div>
-                  <div className="text-2xl sm:text-3xl font-bold font-mono text-white">
-                    {grandTotals.totalCases}
-                  </div>
-                  <div className="text-xs text-slate-400 mt-1 flex items-center justify-between font-mono">
-                    <span>{grandTotals.totalContainers} Total Containers</span>
-                    <span className="text-emerald-400 font-bold">{grandTotals.completedCases} Cleared</span>
+                  <div className="text-[11px] sm:text-xs text-slate-400 mt-2 pt-2 border-t border-white/5 flex flex-col xs:flex-row xs:items-center justify-between gap-1">
+                    <span>{grandTotals.totalContainers} Containers</span>
+                    <span className="text-emerald-400 font-semibold">{grandTotals.completedCases} Cleared</span>
                   </div>
                 </div>
 
                 {/* Active In-Transit */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-lg">
-                  <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
-                    <span className="font-semibold uppercase tracking-wider text-xs">Active In-Transit</span>
-                    <Activity size={16} className="text-blue-400" />
+                <div className="p-3.5 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-md flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                      <span className="font-semibold uppercase tracking-wider text-[11px] sm:text-xs">Active In-Transit</span>
+                      <Activity size={15} className="text-blue-400 shrink-0" />
+                    </div>
+                    <div className="text-xl sm:text-3xl font-bold font-mono text-blue-300">
+                      {grandTotals.activeCases}
+                    </div>
                   </div>
-                  <div className="text-2xl sm:text-3xl font-bold font-mono text-blue-300">
-                    {grandTotals.activeCases}
-                  </div>
-                  <div className="text-xs text-slate-400 mt-1 flex items-center justify-between font-mono">
-                    <span>In-transit / Port handling</span>
-                    <span className="text-blue-400 font-bold">Live Flow</span>
+                  <div className="text-[11px] sm:text-xs text-slate-400 mt-2 pt-2 border-t border-white/5 flex flex-col xs:flex-row xs:items-center justify-between gap-1">
+                    <span>Port Handling</span>
+                    <span className="text-blue-400 font-semibold">Live Flow</span>
                   </div>
                 </div>
 
                 {/* Universal Fleet */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-lg">
-                  <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
-                    <span className="font-semibold uppercase tracking-wider text-xs">Universal Fleet</span>
-                    <Truck size={16} className="text-cyan-400" />
+                <div className="p-3.5 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-md flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                      <span className="font-semibold uppercase tracking-wider text-[11px] sm:text-xs">Universal Fleet</span>
+                      <Truck size={15} className="text-cyan-400 shrink-0" />
+                    </div>
+                    <div className="text-xl sm:text-3xl font-bold font-mono text-cyan-300">
+                      {grandTotals.totalVehiclesCount}
+                    </div>
                   </div>
-                  <div className="text-2xl sm:text-3xl font-bold font-mono text-cyan-300">
-                    {grandTotals.totalVehiclesCount}
-                  </div>
-                  <div className="text-xs text-slate-400 mt-1 flex items-center justify-between font-mono">
-                    <span>Prime Movers & Trailers</span>
-                    <span className="text-emerald-400 font-bold">{grandTotals.availableFleet} Ready</span>
+                  <div className="text-[11px] sm:text-xs text-slate-400 mt-2 pt-2 border-t border-white/5 flex flex-col xs:flex-row xs:items-center justify-between gap-1">
+                    <span>Heavy Fleet</span>
+                    <span className="text-emerald-400 font-semibold">{grandTotals.availableFleet} Ready</span>
                   </div>
                 </div>
 
-                {/* Net Operating Margin */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-lg">
-                  <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
-                    <span className="font-semibold uppercase tracking-wider text-xs">Net Operating Profit</span>
-                    <DollarSign size={16} className="text-emerald-400" />
+                {/* Net Operating Profit */}
+                <div className="p-3.5 sm:p-5 rounded-2xl bg-[#111724] border border-white/10 shadow-md flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between text-slate-400 mb-1.5">
+                      <span className="font-semibold uppercase tracking-wider text-[11px] sm:text-xs">Net Operating Profit</span>
+                      <DollarSign size={15} className="text-emerald-400 shrink-0" />
+                    </div>
+                    <div className="text-lg sm:text-2xl font-bold font-mono text-emerald-400 truncate">
+                      PKR {grandTotals.netProfit.toLocaleString()}
+                    </div>
                   </div>
-                  <div className="text-xl sm:text-2xl font-bold font-mono text-emerald-400 truncate">
-                    PKR {grandTotals.netProfit.toLocaleString()}
-                  </div>
-                  <div className="text-xs text-slate-400 mt-1 flex items-center justify-between font-mono">
-                    <span>Revenue - Expenses</span>
-                    <span className="text-emerald-400 font-bold">Group Margin</span>
+                  <div className="text-[11px] sm:text-xs text-slate-400 mt-2 pt-2 border-t border-white/5 flex flex-col xs:flex-row xs:items-center justify-between gap-1">
+                    <span>Consolidated</span>
+                    <span className="text-emerald-400 font-semibold">Group Margin</span>
                   </div>
                 </div>
               </div>
@@ -1119,7 +1129,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                         <th className="py-2.5 px-3 text-right">Date</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-white/5 font-mono">
+                    <tbody className="divide-y divide-white/5 font-sans">
                       {recentCasesFeed.length === 0 ? (
                         <tr>
                           <td colSpan={7} className="py-8 text-center text-slate-500">

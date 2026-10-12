@@ -35,26 +35,14 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
   const [selectedNotification, setSelectedNotification] = useState<AppNotification | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'WORKFLOW' | 'FINANCE' | 'APPROVAL'>('ALL');
-  const [liveToast, setLiveToast] = useState<AppNotification | null>(null);
-  const initialLoadRef = useRef(true);
 
-  // Real-time Firestore subscription
+  // Real-time Firestore subscription (clean, no annoying popups)
   useEffect(() => {
     const unsub = subscribeToNotifications((items) => {
-      const incoming = items || [];
-      // Trigger toast for brand new pending notification on real-time event
-      if (!initialLoadRef.current && incoming.length > notifications.length) {
-        const newest = incoming.find(n => n.status === 'PENDING');
-        if (newest) {
-          setLiveToast(newest);
-          setTimeout(() => setLiveToast(null), 7000);
-        }
-      }
-      initialLoadRef.current = false;
-      setNotifications(incoming);
+      setNotifications(items || []);
     });
     return () => unsub();
-  }, [notifications.length]);
+  }, []);
 
   // Normalization helper for roles
   const normalizeRole = (r?: any): string => {
@@ -429,18 +417,18 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
 
   return (
     <>
-      {/* Trigger Button with Live Pulsing Badge */}
+      {/* Trigger Button with Live Badge showing notification count */}
       <button 
         type="button"
         onClick={() => setIsOpen(!isOpen)} 
-        className={buttonClassName || "relative p-2 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 border border-white/10 transition active:scale-95"}
-        title="Live Notification & Action Center"
+        className={buttonClassName || "relative p-2 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 border border-white/10 transition active:scale-95 shrink-0 flex items-center justify-center"}
+        title={unreadCount > 0 ? `${unreadCount} unread notifications` : "Notifications"}
         aria-label="Notifications"
       >
         <Bell size={18} />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-slate-900 shadow-lg animate-pulse">
-            {unreadCount > 9 ? '9+' : unreadCount}
+          <span className="absolute -top-1.5 -right-1.5 min-w-[19px] h-[19px] px-1 bg-red-600 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-slate-900 shadow-md">
+            {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
@@ -782,58 +770,6 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
           onClose={() => setIsModalOpen(false)}
           onAction={handleNotificationAction}
         />
-      )}
-
-      {/* Real-time Floating In-App Toast Alert */}
-      {liveToast && typeof document !== 'undefined' && createPortal(
-        <div 
-          className="fixed top-5 right-5 z-[99999] max-w-sm w-full bg-slate-900/95 border border-amber-500/50 text-white rounded-2xl shadow-2xl p-4 flex items-start gap-3 animate-slide-left backdrop-blur-xl"
-          style={{ backgroundColor: '#0f172a' }}
-        >
-          <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center justify-center shrink-0 mt-0.5">
-            <Bell size={18} className="animate-bounce" />
-          </div>
-          <div className="flex-1 min-w-0 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                {liveToast.notificationSubType?.replace(/_/g, ' ') || 'New Task Alert'}
-              </span>
-              <button 
-                type="button" 
-                onClick={() => setLiveToast(null)}
-                className="text-gray-400 hover:text-white p-0.5 rounded cursor-pointer"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <h4 className="text-xs font-bold text-white truncate">{liveToast.title}</h4>
-            <p className="text-[11px] text-gray-300 line-clamp-2 leading-relaxed">{liveToast.description}</p>
-            <div className="pt-1 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  handleCardClick(liveToast);
-                  setLiveToast(null);
-                }}
-                className="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-yellow-300 text-slate-950 font-black text-[11px] flex items-center gap-1 shadow cursor-pointer active:scale-95 transition"
-              >
-                <span>Take Action</span>
-                <ArrowRight size={11} />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  handleMarkAsRead(liveToast);
-                  setLiveToast(null);
-                }}
-                className="px-2 py-1 rounded-lg text-gray-400 hover:text-white text-[11px] cursor-pointer"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
       )}
     </>
   );

@@ -1211,6 +1211,30 @@ const App: React.FC = () => {
           </div>
         </div>
 
+        {/* Theme Toggle in Sidebar */}
+        <div className="px-3 pb-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setAppTheme(prev => prev === 'pearl' ? 'charcoal' : 'pearl')}
+            className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition shadow-sm active:scale-95 cursor-pointer ${
+              appTheme === 'pearl'
+                ? 'bg-gradient-to-r from-amber-100 via-white to-amber-50 text-slate-900 border-amber-300'
+                : 'bg-white/10 hover:bg-white/15 text-slate-200 border-white/15'
+            } ${!desktopSidebarExpanded ? 'lg:justify-center' : ''}`}
+            title="Toggle Theme"
+          >
+            <div className="flex items-center gap-2 truncate">
+              <Sparkles size={14} className={appTheme === 'pearl' ? "text-amber-600" : "text-amber-400"} />
+              <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[11px]`}>
+                Theme: {appTheme === 'pearl' ? 'Pearl White' : 'Charcoal'}
+              </span>
+            </div>
+            <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[9px] px-1.5 py-0.5 rounded bg-black/10 font-bold uppercase font-mono`}>
+              {appTheme === 'pearl' ? 'Light' : 'Dark'}
+            </span>
+          </button>
+        </div>
+
         {/* Logout at Sidebar Bottom */}
         <div className="p-3 border-t border-white/5 shrink-0">
           <button 
@@ -1226,53 +1250,53 @@ const App: React.FC = () => {
 
       {/* Content Area */}
       <main className="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden relative">
-        {/* Top Header - Exact Layout Requested:
+        {/* Top Header - Exact Clean Proportions:
             Left: Sidebar Menu Button
-            Center: Company Logo (Centered Prominently - Uploaded from settings)
-            Right: Notifications & LogOut (+ Compact Treasury)
+            Center: Company Logo Centered with clean boundaries
+            Right: Notifications & LogOut (+ Desktop Quick Actions)
         */}
-        <header className="h-18 sm:h-22 bg-slate-900 border-b border-white/10 flex items-center justify-between px-2.5 sm:px-6 z-20 flex-shrink-0 sticky top-0 shadow-md">
+        <header className="h-14 sm:h-18 md:h-20 bg-slate-900 border-b border-white/10 flex items-center justify-between px-2.5 sm:px-6 z-20 flex-shrink-0 sticky top-0 shadow-md gap-2">
           {/* Left: Sidebar Menu Toggle & Active View Title */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 justify-start">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 shrink-0">
             <button 
               type="button"
               onClick={() => window.innerWidth < 1024 ? setMobileSidebarOpen(!mobileSidebarOpen) : setDesktopSidebarExpanded(!desktopSidebarExpanded)} 
               className="p-2 sm:p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-gray-300 hover:text-white border border-white/10 hover:border-white/30 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
               title="Toggle Sidebar Menu"
             >
-              <Menu size={19} className="text-slate-200" />
+              <Menu size={18} className="text-slate-200" />
             </button>
 
-            <span className="hidden sm:inline-flex px-2 py-0.5 rounded-lg bg-white/10 border border-white/20 text-slate-200 font-mono font-bold text-xs shrink-0 shadow-sm">
+            <span className="hidden md:inline-flex px-2 py-0.5 rounded-lg bg-white/10 border border-white/20 text-slate-200 font-mono font-bold text-xs shrink-0 shadow-sm">
               {activeCompany.prefix || activeCompany.shortName}
             </span>
 
-            <div className="hidden md:flex items-center gap-2 min-w-0">
+            <div className="hidden lg:flex items-center gap-2 min-w-0">
               <span className="text-xs font-bold text-slate-300 uppercase tracking-wider truncate">
                 {activeView === 'dashboard' ? 'Overview' : activeView.replace('-', ' ')}
               </span>
             </div>
           </div>
 
-          {/* Center: Company Logo Centered (Doubled size - High-Res Official Subsidiary Logo) */}
-          <div className="flex items-center justify-center min-w-0 flex-shrink-0 px-1 sm:px-2">
+          {/* Center: Company Logo Centered with responsive bounds to prevent collision */}
+          <div className="flex items-center justify-center min-w-0 flex-1 px-1 sm:px-2 overflow-hidden">
             <button
               type="button"
               id="header-center-company-logo-btn"
               onClick={() => setIsCompanyModalOpen(true)}
-              className="flex items-center justify-center p-1 sm:px-4 sm:py-2 rounded-2xl hover:bg-white/5 border border-transparent hover:border-white/10 transition-all duration-200 cursor-pointer group shrink-0"
+              className="flex items-center justify-center p-0.5 sm:px-3 sm:py-1.5 rounded-xl hover:bg-white/5 border border-transparent hover:border-white/10 transition-all duration-200 cursor-pointer group shrink-0 max-w-full"
               title={`${activeCompany.name} (Click to switch company)`}
             >
               <img 
                 src={getCompanyLogoUrl(activeCompany.id)} 
                 alt={activeCompany.name} 
-                className="h-12 sm:h-16 md:h-18 w-auto max-w-[260px] sm:max-w-[420px] object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.7)] group-hover:scale-105 transition-transform duration-200" 
+                className="h-8 sm:h-12 md:h-16 w-auto max-w-[125px] xs:max-w-[155px] sm:max-w-[260px] md:max-w-[360px] object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.7)] group-hover:scale-105 transition-transform duration-200" 
               />
             </button>
           </div>
 
-          {/* Right: Notifications & LogOut (Amount Counter moved to Sidebar next to Finance) */}
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 justify-end shrink-0">
+          {/* Right: Notifications & LogOut (Desktop Quick Actions) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 justify-end">
             {/* Quick Public Trackers Preview Buttons for Staff */}
             <div className="hidden xl:flex items-center gap-1.5 mr-1">
               <button
@@ -1311,24 +1335,24 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            {/* Group Admin Executive Portal Button in Header */}
+            {/* Group Admin Executive Portal Button in Header (shown on sm and up) */}
             {effectiveIsGlobalAdmin && (
               <button
                 type="button"
                 onClick={() => setIsGroupAdminPortalOpen(true)}
-                className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-amber-600/30 to-amber-700/20 hover:from-amber-500/30 hover:to-amber-700/30 border border-amber-400/40 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
+                className="hidden sm:flex px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-amber-600/30 to-amber-700/20 hover:from-amber-500/30 hover:to-amber-700/30 border border-amber-400/40 text-amber-300 font-bold text-xs items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
                 title="Open Group Admin Executive Portal (Consolidated Total Data & Settings)"
               >
                 <Crown size={13} className="text-amber-400" />
-                <span className="hidden sm:inline font-mono uppercase text-[11px] tracking-wider font-bold">Admin Portal</span>
+                <span className="font-mono uppercase text-[11px] tracking-wider font-bold">Admin Portal</span>
               </button>
             )}
 
-            {/* Luxury Business Class Theme Toggle Button (Pearl White vs Charcoal Luxury) */}
+            {/* Luxury Business Class Theme Toggle Button (shown on sm and up) */}
             <button
               type="button"
               onClick={() => setAppTheme(prev => prev === 'pearl' ? 'charcoal' : 'pearl')}
-              className={`btn-animated-luxury px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 ${
+              className={`hidden sm:flex btn-animated-luxury px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-semibold items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 ${
                 appTheme === 'pearl'
                   ? 'bg-gradient-to-r from-amber-100 via-white to-amber-50 text-slate-900 border-amber-300/80 shadow-md ring-1 ring-amber-300/40'
                   : 'bg-white/15 hover:bg-white/25 text-white border-white/25 shadow-black/20'
@@ -1336,7 +1360,7 @@ const App: React.FC = () => {
               title={appTheme === 'pearl' ? "Switch to Charcoal Luxury (Executive Night)" : "Switch to Pearl White (Business Class)"}
             >
               <Sparkles size={13} className={appTheme === 'pearl' ? "text-amber-600" : "text-amber-400"} />
-              <span className="hidden sm:inline font-mono text-[11px] uppercase tracking-wider font-bold">
+              <span className="font-mono text-[11px] uppercase tracking-wider font-bold">
                 {appTheme === 'pearl' ? 'Pearl White' : 'Charcoal'}
               </span>
             </button>
@@ -1364,7 +1388,7 @@ const App: React.FC = () => {
               type="button"
               id="header-signout-btn"
               onClick={handleSignOut}
-              className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 flex items-center justify-center transition-all duration-200 shadow-sm active:scale-95 cursor-pointer flex-shrink-0"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 flex items-center justify-center transition-all duration-200 shadow-sm active:scale-95 cursor-pointer shrink-0"
               title="Sign Out"
             >
               <LogOut size={15} className="text-red-400" />
