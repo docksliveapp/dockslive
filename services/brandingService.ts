@@ -59,7 +59,7 @@ export function getStoredBranding(companyOverride?: CompanyInfo): CompanyBrandin
   const activeCompany = companyOverride || getActiveCompany();
   const defaultB = getDefaultBranding(activeCompany);
   const companyKey = `${STORAGE_KEY}_${activeCompany.id}`;
-  const stored = safeAppStorage.getJSON<Partial<CompanyBranding>>(companyKey, {});
+  const stored = safeAppStorage.getRawJSON<Partial<CompanyBranding>>(companyKey, {});
   const parentGroup = getParentGroupInfo();
 
   // Determine correct company name according to active subsidiary:
@@ -219,9 +219,9 @@ function broadcastBranding(branding: CompanyBranding) {
   const activeCompany = getActiveCompany();
   const companyKey = `${STORAGE_KEY}_${activeCompany.id}`;
   activeBrandingCache = branding;
-  safeAppStorage.setJSON(companyKey, branding);
+  safeAppStorage.setRawJSON(companyKey, branding);
   if (activeCompany.id === 'docks') {
-    safeAppStorage.setJSON(STORAGE_KEY, branding);
+    safeAppStorage.setRawJSON(STORAGE_KEY, branding);
   }
   brandingListeners.forEach(fn => {
     try { fn(branding); } catch (_) {}
@@ -305,7 +305,7 @@ export async function optimizeLogoImage(file: File, maxWidth = 800, maxHeight = 
 export async function saveBranding(updates: Partial<CompanyBranding>): Promise<CompanyBranding> {
   const activeCompany = getActiveCompany();
   const companyKey = `${STORAGE_KEY}_${activeCompany.id}`;
-  const currentStored = safeAppStorage.getJSON<Partial<CompanyBranding>>(companyKey, {});
+  const currentStored = safeAppStorage.getRawJSON<Partial<CompanyBranding>>(companyKey, {});
   const current = getStoredBranding();
   
   const next: CompanyBranding = {

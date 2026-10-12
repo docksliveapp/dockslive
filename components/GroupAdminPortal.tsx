@@ -551,12 +551,12 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                     onClick={() => handleSelectView(viewKey)}
                     className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl transition-all cursor-pointer text-left ${
                       isSelected
-                        ? 'bg-blue-600/20 border border-blue-500/40 text-white shadow-md'
+                        ? 'bg-amber-500/20 border border-amber-500/40 text-amber-200 shadow-md font-semibold'
                         : 'text-slate-300 hover:bg-white/5 hover:text-white border border-transparent'
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1 truncate">
-                      <div className="w-7 h-7 rounded-lg bg-black/50 border border-white/10 flex items-center justify-center p-1 shrink-0">
+                      <div className="w-7 h-7 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center p-1 shrink-0">
                         <img 
                           src={getCompanyLogoUrl(comp.id)} 
                           alt={comp.name} 
@@ -1190,7 +1190,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
               {/* Subsidiary Top Identification Card */}
               <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-[#111724] to-slate-900 border border-white/15 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xl">
                 <div className="flex items-center gap-3">
-                  <div className="w-14 h-14 rounded-2xl bg-black/60 border border-white/20 flex items-center justify-center p-2 shrink-0">
+                  <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center p-2 shrink-0">
                     <img 
                       src={getCompanyLogoUrl(currentSelectedCompany.id)} 
                       alt={currentSelectedCompany.name} 
@@ -1202,7 +1202,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                       <h3 className="font-bold text-base sm:text-lg text-white">
                         {currentSelectedCompany.name}
                       </h3>
-                      <span className="text-xs font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold uppercase">
+                      <span className="text-xs font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold uppercase border border-amber-500/30">
                         {currentSelectedCompany.shortName}
                       </span>
                     </div>
@@ -1226,7 +1226,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                     <button
                       type="button"
                       onClick={() => onSelectCompanyWorkspace(currentSelectedCompany.id)}
-                      className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-lg shadow-blue-600/25 cursor-pointer"
+                      className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-bold flex items-center gap-1.5 transition shadow-lg shadow-amber-500/25 cursor-pointer active:scale-95"
                       title="Switch active company to this subsidiary and manage cases"
                     >
                       <ExternalLink size={13} />

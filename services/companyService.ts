@@ -24,7 +24,7 @@ export function isUploadedLogo(url?: string | null): boolean {
 export function getCompanyUploadedLogo(companyId: CompanyId): string | null {
   try {
     const brandingKey = `dpl_company_branding_v1_${companyId}`;
-    const stored = safeAppStorage.getJSON<any>(brandingKey, {});
+    const stored = safeAppStorage.getRawJSON<any>(brandingKey, {});
 
     // 1. Check if the company opted to use Main Admin Group Logo
     if (stored?.useMainLogoAsOfficial) {
@@ -39,8 +39,9 @@ export function getCompanyUploadedLogo(companyId: CompanyId): string | null {
       return stored.customLogo;
     }
 
+    // 3. Fallback to docksLegacy ONLY if the requested company is actually 'docks'
     if (companyId === 'docks') {
-      const docksLegacy = safeAppStorage.getJSON<any>('dpl_company_branding_v1', {});
+      const docksLegacy = safeAppStorage.getRawJSON<any>('dpl_company_branding_v1', {});
       if (docksLegacy?.useMainLogoAsOfficial) {
         const parentGroup = getParentGroupInfo();
         if (parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
@@ -52,6 +53,7 @@ export function getCompanyUploadedLogo(companyId: CompanyId): string | null {
       }
     }
 
+    // 4. Default company preset logo if custom
     const comp = GROUP_COMPANIES[companyId];
     if (comp?.logo && isUploadedLogo(comp.logo)) {
       return comp.logo;
@@ -68,12 +70,12 @@ export function getCompanyUploadedLogo(companyId: CompanyId): string | null {
 export function isCompanyUsingMainLogo(companyId: CompanyId): boolean {
   try {
     const brandingKey = `dpl_company_branding_v1_${companyId}`;
-    const stored = safeAppStorage.getJSON<any>(brandingKey, {});
+    const stored = safeAppStorage.getRawJSON<any>(brandingKey, {});
     if (typeof stored?.useMainLogoAsOfficial === 'boolean') {
       return stored.useMainLogoAsOfficial;
     }
     if (companyId === 'docks') {
-      const docksLegacy = safeAppStorage.getJSON<any>('dpl_company_branding_v1', {});
+      const docksLegacy = safeAppStorage.getRawJSON<any>('dpl_company_branding_v1', {});
       if (typeof docksLegacy?.useMainLogoAsOfficial === 'boolean') {
         return docksLegacy.useMainLogoAsOfficial;
       }
@@ -266,7 +268,7 @@ export function initAllCompaniesFirestoreSync() {
         if (snap.exists()) {
           const data = snap.data();
           const key = `dpl_company_branding_v1_${cId}`;
-          const currentStored = safeAppStorage.getJSON<any>(key, {});
+          const currentStored = safeAppStorage.getRawJSON<any>(key, {});
           const cleanCustomLogo = data.customLogo || data.logo || currentStored.customLogo || null;
           const updated = {
             ...currentStored,
@@ -278,9 +280,9 @@ export function initAllCompaniesFirestoreSync() {
             companyName: data.companyName || currentStored.companyName,
             subtitle: data.subtitle || currentStored.subtitle,
           };
-          safeAppStorage.setJSON(key, updated);
+          safeAppStorage.setRawJSON(key, updated);
           if (cId === 'docks') {
-            safeAppStorage.setJSON('dpl_company_branding_v1', updated);
+            safeAppStorage.setRawJSON('dpl_company_branding_v1', updated);
           }
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('dpl_branding_changed', { detail: updated }));

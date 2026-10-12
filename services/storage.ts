@@ -225,6 +225,55 @@ export const safeAppStorage = {
     try {
       safeAppStorage.setItem(key, JSON.stringify(value));
     } catch (_) {}
+  },
+  // Exact un-scoped direct storage access (bypasses resolveScopedStorageKey)
+  getRawItem: (key: string): string | null => {
+    if (memoryCache[key] !== undefined) return memoryCache[key];
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const val = window.localStorage.getItem(key);
+        if (val !== null) {
+          memoryCache[key] = val;
+          return val;
+        }
+      }
+    } catch (_) {}
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const val = window.sessionStorage.getItem(key);
+        if (val !== null) {
+          memoryCache[key] = val;
+          return val;
+        }
+      }
+    } catch (_) {}
+    return null;
+  },
+  setRawItem: (key: string, value: string): void => {
+    memoryCache[key] = value;
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(key, value);
+      }
+    } catch (_) {}
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        window.sessionStorage.setItem(key, value);
+      }
+    } catch (_) {}
+  },
+  getRawJSON: <T>(key: string, fallback: T): T => {
+    try {
+      const val = safeAppStorage.getRawItem(key);
+      if (val) return JSON.parse(val) as T;
+    } catch (_) {}
+    return fallback;
+  },
+  setRawJSON: <T>(key: string, value: T): void => {
+    try {
+      safeAppStorage.setRawItem(key, JSON.stringify(value));
+    } catch (_) {}
   }
 };
+
 

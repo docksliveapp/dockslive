@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Bell, X, Check, CheckCircle2, Clock, FileText, DollarSign, 
-  Truck, ShieldAlert, ShieldCheck, ArrowRight, Filter, AlertTriangle, Info,
-  Sparkles, ExternalLink
+  Truck, ShieldCheck, ArrowRight, AlertTriangle, Info,
+  ExternalLink, CheckCheck
 } from 'lucide-react';
 import { AppNotification, UserRole } from '../types';
-import { subscribeToNotifications, saveNotificationToFirestore, updateNotificationInFirestore } from '../services/dbService';
+import { subscribeToNotifications, updateNotificationInFirestore } from '../services/dbService';
 import NotificationModal from './NotificationModal';
 import { approveActionRequest, rejectActionRequest } from '../services/approvalService';
 
@@ -19,6 +19,7 @@ interface LiveNotificationCenterProps {
   onNavigateToTab?: (tabName: string) => void;
   buttonClassName?: string;
   showBadgeOnly?: boolean;
+  theme?: 'pearl' | 'charcoal';
 }
 
 export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
@@ -29,14 +30,18 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
   onNavigateToCase,
   onNavigateToTab,
   buttonClassName = '',
+  theme,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [selectedNotification, setSelectedNotification] = useState<AppNotification | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<'ALL' | 'WORKFLOW' | 'FINANCE' | 'APPROVAL'>('ALL');
+  const [activeFilter, setActiveFilter] = useState<'ALL' | 'UNREAD' | 'APPROVALS'>('ALL');
 
-  // Real-time Firestore subscription (clean, no annoying popups)
+  // Detect active theme
+  const isPearl = theme === 'pearl' || (typeof document !== 'undefined' && document.body.classList.contains('theme-pearl'));
+
+  // Real-time Firestore subscription
   useEffect(() => {
     const unsub = subscribeToNotifications((items) => {
       setNotifications(items || []);
@@ -108,16 +113,14 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       userRolesNorm.some(r => r.includes('FINANCE'));
 
     const isCaseManager = 
-      currentNorm === 'CASEMANAGER' ||
+      currentNorm === 'CASEMANAGER' || 
       userRolesNorm.includes('CASEMANAGER') ||
       currentNorm.includes('CASE') ||
       userRolesNorm.some(r => r.includes('CASE'));
 
     return notifications.filter(n => {
-      // 1. ADMIN & SUPER ADMIN: Must receive and see ALL activities & notifications across the system!
-      if (isAdmin) {
-        return true;
-      }
+      // 1. ADMIN & SUPER ADMIN: See all notifications across the system
+      if (isAdmin) return true;
 
       // 2. Specific client or transporter target check
       if (n.targetClientName) {
@@ -140,104 +143,86 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       const matchesDirectRole = declaredTargetRoles.some(tr => 
         tr === currentNorm || userRolesNorm.includes(tr)
       );
-      if (matchesDirectRole) {
-        return true;
-      }
+      if (matchesDirectRole) return true;
 
       // 5. Special domain routing:
-      // If notification is for fleet/transporters/renewals, Vehicle Manager MUST see it
       if (isVehicleManager) {
         if (
           n.category === 'TRANSPORTER' || 
           declaredTargetRoles.some(tr => tr.includes('VEHICLE') || tr.includes('FLEET') || tr.includes('TRANSPORT')) ||
           (n.targetView && (n.targetView.includes('vehicle') || n.targetView.includes('transporter'))) ||
           (n.title && (n.title.includes('Vehicle') || n.title.includes('Renewal') || n.title.includes('Transporter') || n.title.includes('Trailer') || n.title.includes('Fleet')))
-        ) {
-          return true;
-        }
+        ) return true;
       }
 
-      // Operations Manager handles case workflow approvals, driver confirmations, assignments
       if (isOperationsManager) {
         if (
           n.category === 'CASE' ||
           declaredTargetRoles.some(tr => tr.includes('OPERATION') || tr.includes('CASE')) ||
           (n.targetView && n.targetView.includes('case'))
-        ) {
-          return true;
-        }
+        ) return true;
       }
 
-      // Finance Manager handles client payments, ledger downloads, invoice alerts, custom DPL charges
       if (isFinanceManager) {
         if (
           n.category === 'FINANCE' ||
           declaredTargetRoles.some(tr => tr.includes('FINANCE')) ||
           (n.targetView && n.targetView.includes('finance')) ||
           (n.title && (n.title.includes('Finance') || n.title.includes('Invoice') || n.title.includes('Payment') || n.title.includes('Salary') || n.title.includes('Ledger') || n.title.includes('Bill') || n.title.includes('Expense') || n.title.includes('Charges')))
-        ) {
-          return true;
-        }
+        ) return true;
       }
 
-      // Case Manager handles case registrations, workflow tracking, approvals
       if (isCaseManager) {
         if (
           n.category === 'CASE' ||
           declaredTargetRoles.some(tr => tr.includes('CASE') || tr.includes('OPERATION')) ||
           (n.targetView && n.targetView.includes('case')) ||
           (n.title && (n.title.includes('Case') || n.title.includes('Workflow') || n.title.includes('Registration') || n.title.includes('Shipment') || n.title.includes('Transit')))
-        ) {
-          return true;
-        }
+        ) return true;
       }
 
-      // 6. If client role, hide internal approvals
+      // 6. If client role, hide internal administrative deletion/cancellation approvals
       if (currentNorm === 'CLIENT' || userRolesNorm.includes('CLIENT')) {
         if (
           n.notificationSubType === 'DELETION_APPROVAL' ||
           n.notificationSubType === 'CANCELLATION_APPROVAL' ||
           n.notificationSubType === 'EDIT_APPROVAL'
-        ) {
-          return false;
-        }
+        ) return false;
       }
 
       return false;
     });
   }, [notifications, currentRole, currentRoles, clientName, userIdentifier]);
 
-  // Tab filtering
-  const filteredNotifications = useMemo(() => {
-    if (activeFilter === 'ALL') return relevantNotifications;
-    if (activeFilter === 'WORKFLOW') {
-      return relevantNotifications.filter(n => 
-        n.notificationSubType === 'WORKFLOW_TASK' ||
-        n.notificationSubType === 'CASE_APPROVAL' || 
-        (n.targetView && n.targetView.includes('case')) ||
-        (n.title && (n.title.includes('Case') || n.title.includes('Workflow') || n.title.includes('Shipment')))
-      );
-    }
-    if (activeFilter === 'FINANCE') {
-      return relevantNotifications.filter(n => 
-        n.notificationSubType === 'FINANCE_RECORDED' ||
+  // Unread Count
+  const unreadCount = useMemo(() => {
+    return relevantNotifications.filter(n => n.status === 'PENDING').length;
+  }, [relevantNotifications]);
+
+  // Pending Approvals Count
+  const pendingApprovalsCount = useMemo(() => {
+    return relevantNotifications.filter(n => {
+      if (n.status !== 'PENDING') return false;
+      return (
         n.notificationSubType === 'PAYMENT_APPROVAL' ||
-        n.notificationSubType === 'BUYING' || 
-        (n.targetView && n.targetView.includes('finance')) ||
-        (n.title && (n.title.includes('Invoice') || n.title.includes('Payment') || n.title.includes('Bill') || n.title.includes('Tariff') || n.title.includes('Finance') || n.title.includes('Salary') || n.title.includes('Expense')))
+        n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
+        n.notificationSubType === 'CASE_APPROVAL' ||
+        n.notificationSubType === 'DELETION_APPROVAL' ||
+        n.notificationSubType === 'CANCELLATION_APPROVAL' ||
+        n.notificationSubType === 'EDIT_APPROVAL' ||
+        n.approvalData?.actionType === 'VERIFY_PAYMENT' ||
+        n.approvalData?.actionType === 'APPROVE_CLIENT'
       );
+    }).length;
+  }, [relevantNotifications]);
+
+  // Filtered Notifications based on selected tab
+  const filteredNotifications = useMemo(() => {
+    if (activeFilter === 'UNREAD') {
+      return relevantNotifications.filter(n => n.status === 'PENDING');
     }
-    if (activeFilter === 'APPROVAL') {
+    if (activeFilter === 'APPROVALS') {
       return relevantNotifications.filter(n => {
-        const isMonthlyExpense = 
-          n.notificationSubType === 'FINANCE_RECORDED' ||
-          n.description?.toLowerCase().includes('monthly salary') ||
-          n.description?.toLowerCase().includes('fixed expense') ||
-          n.title?.toLowerCase().includes('monthly salary') ||
-          n.title?.toLowerCase().includes('monthly fixed');
-
-        if (isMonthlyExpense) return false;
-
         return (
           n.notificationSubType === 'PAYMENT_APPROVAL' ||
           n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
@@ -253,19 +238,6 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     return relevantNotifications;
   }, [relevantNotifications, activeFilter]);
 
-  const unreadCount = useMemo(() => {
-    return relevantNotifications.filter(n => n.status === 'PENDING').length;
-  }, [relevantNotifications]);
-
-  const handleOpenNotification = (n: AppNotification, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (n.status === 'PENDING') {
-      handleMarkAsRead(n);
-    }
-    setSelectedNotification(n);
-    setIsModalOpen(true);
-  };
-
   const handleMarkAsRead = async (n: AppNotification, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     try {
@@ -278,27 +250,41 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     }
   };
 
+  const handleMarkAllRead = async () => {
+    try {
+      const pendingItems = relevantNotifications.filter(n => n.status === 'PENDING');
+      for (const item of pendingItems) {
+        await updateNotificationInFirestore({
+          ...item,
+          status: 'RESOLVED'
+        });
+      }
+    } catch (err) {
+      console.warn("Could not mark all as read:", err);
+    }
+  };
+
   const handleCardClick = async (n: AppNotification) => {
-    // Instant live mark-as-read on tap like Facebook / Instagram
+    // 1. Mark as read on tap
     if (n.status === 'PENDING') {
       handleMarkAsRead(n);
     }
 
-    // Direct 1-tap navigation for case workflows:
+    // 2. Direct 1-tap navigation for cases
     if (n.targetFilter?.caseNo && onNavigateToCase) {
       onNavigateToCase(n.targetFilter.caseNo, n.targetFilter);
       setIsOpen(false);
       return;
     }
 
-    // Direct navigation for tabs (e.g. finance, users, vehicles):
+    // 3. Direct navigation for tabs
     if (n.targetView && onNavigateToTab) {
       onNavigateToTab(n.targetView);
       setIsOpen(false);
       return;
     }
 
-    // Otherwise open notification details modal
+    // 4. Otherwise open detail modal
     setSelectedNotification(n);
     setIsModalOpen(true);
   };
@@ -326,20 +312,6 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       });
     } catch (err) {
       console.error("Failed to reject notification action:", err);
-    }
-  };
-
-  const handleMarkAllRead = async () => {
-    try {
-      const pendingItems = relevantNotifications.filter(n => n.status === 'PENDING');
-      for (const item of pendingItems) {
-        await updateNotificationInFirestore({
-          ...item,
-          status: 'RESOLVED'
-        });
-      }
-    } catch (err) {
-      console.warn("Could not mark all as read:", err);
     }
   };
 
@@ -390,178 +362,199 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     }
   };
 
-  const getBadgeIcon = (subType?: string) => {
+  const getNotificationIcon = (subType?: string) => {
     switch (subType) {
       case 'PAYMENT_APPROVAL':
-        return <DollarSign size={15} className="text-emerald-400" />;
-      case 'CLIENT_REGISTRATION_APPROVAL':
-        return <ShieldCheck size={15} className="text-purple-400" />;
-      case 'WORKFLOW_TASK':
-        return <FileText size={15} className="text-amber-400" />;
-      case 'FINANCE_RECORDED':
-        return <CheckCircle2 size={15} className="text-teal-400" />;
-      case 'DELETION_APPROVAL':
-        return <AlertTriangle size={15} className="text-red-400" />;
-      case 'CANCELLATION_APPROVAL':
-        return <AlertTriangle size={15} className="text-amber-400" />;
-      case 'EDIT_APPROVAL':
-        return <Info size={15} className="text-cyan-400" />;
-      case 'CASE_APPROVAL':
-        return <FileText size={15} className="text-blue-400" />;
       case 'BUYING':
-        return <DollarSign size={15} className="text-emerald-400" />;
+        return <DollarSign size={16} className="text-emerald-500" />;
+      case 'CLIENT_REGISTRATION_APPROVAL':
+        return <ShieldCheck size={16} className="text-purple-500" />;
+      case 'WORKFLOW_TASK':
+      case 'CASE_APPROVAL':
+        return <FileText size={16} className="text-amber-500" />;
+      case 'FINANCE_RECORDED':
+        return <CheckCircle2 size={16} className="text-teal-500" />;
+      case 'DELETION_APPROVAL':
+      case 'CANCELLATION_APPROVAL':
+        return <AlertTriangle size={16} className="text-rose-500" />;
+      case 'EDIT_APPROVAL':
+        return <Info size={16} className="text-sky-500" />;
+      case 'VEHICLE_GATE_PASS':
+      case 'TRANSPORTER_ASSIGNED':
+        return <Truck size={16} className="text-amber-500" />;
       default:
-        return <Bell size={15} className="text-amber-400" />;
+        return <Bell size={16} className="text-amber-500" />;
     }
   };
 
   return (
     <>
-      {/* Trigger Button with Live Badge showing notification count */}
+      {/* Trigger Button with Clean Badge */}
       <button 
         type="button"
         onClick={() => setIsOpen(!isOpen)} 
-        className={buttonClassName || "relative p-2 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 border border-white/10 transition active:scale-95 shrink-0 flex items-center justify-center"}
-        title={unreadCount > 0 ? `${unreadCount} unread notifications` : "Notifications"}
+        className={buttonClassName ? `${buttonClassName} relative` : "relative h-9 w-9 p-2 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 border border-white/10 transition active:scale-95 shrink-0 flex items-center justify-center cursor-pointer"}
+        title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : "Notifications"}
         aria-label="Notifications"
       >
         <Bell size={18} />
         {unreadCount > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 min-w-[19px] h-[19px] px-1 bg-red-600 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-slate-900 shadow-md">
+          <span 
+            className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-600 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow ring-2 ${
+              isPearl ? 'ring-white' : 'ring-slate-900'
+            } pointer-events-none z-30`}
+            style={{ lineHeight: 1 }}
+          >
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
 
-      {/* Slide-Over Notification Drawer (Rendered via createPortal to body to prevent any overflow or stacking bleed) */}
+      {/* Slide-Over Notification Drawer */}
       {isOpen && typeof document !== 'undefined' && createPortal(
         <div className="fixed inset-0 z-[99990] overflow-hidden" style={{ isolation: 'isolate' }}>
-          {/* Backdrop overlay (separate div, does not wrap drawer, so backdrop-filter never bleeds into drawer content) */}
+          {/* Backdrop */}
           <div 
-            className="fixed inset-0 bg-black/80 transition-opacity animate-fade-in"
+            className="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity animate-fade-in"
             onClick={() => setIsOpen(false)}
             aria-hidden="true"
           />
 
-          {/* Drawer Panel: 100% Solid Opaque Background (#020617), high z-index, zero bleed-through */}
+          {/* Drawer Panel */}
           <div 
-            className="fixed top-0 right-0 bottom-0 z-[99995] w-full sm:w-[450px] max-w-full h-full h-[100dvh] bg-[#020617] border-l border-slate-800 shadow-2xl flex flex-col transform transition-transform duration-300 animate-slide-left text-gray-100"
-            style={{ backgroundColor: '#020617', opacity: 1, isolation: 'isolate' }}
+            className={`fixed top-0 right-0 bottom-0 z-[99995] w-full sm:w-[420px] max-w-full h-full h-[100dvh] shadow-2xl flex flex-col transform transition-transform duration-300 animate-slide-left ${
+              isPearl 
+                ? 'bg-white text-slate-900 border-l border-slate-200' 
+                : 'bg-slate-950 text-slate-100 border-l border-slate-800'
+            }`}
+            style={{ isolation: 'isolate' }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
-            <div 
-              className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between shrink-0"
-              style={{ backgroundColor: '#020617' }}
-            >
+            {/* Header: Clean, Uncluttered */}
+            <div className={`p-4 sm:p-5 border-b flex items-center justify-between shrink-0 ${
+              isPearl ? 'border-slate-200 bg-slate-50/50' : 'border-slate-800 bg-slate-900/50'
+            }`}>
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                  isPearl 
+                    ? 'bg-amber-100 text-amber-700 border border-amber-300/60' 
+                    : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                }`}>
                   <Bell size={18} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
-                    <span>Live Notification Center</span>
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  </h3>
-                  <p className="text-[10px] text-gray-400">
-                    Real-time operational alerts, tasks & invoices
+                  <div className="flex items-center gap-2">
+                    <h3 className={`text-base font-bold ${isPearl ? 'text-slate-900' : 'text-white'}`}>
+                      Notifications
+                    </h3>
+                    {unreadCount > 0 && (
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/20">
+                        {unreadCount} new
+                      </span>
+                    )}
+                  </div>
+                  <p className={`text-xs ${isPearl ? 'text-slate-500' : 'text-slate-400'}`}>
+                    Stay updated with tasks, alerts & shipments
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 {unreadCount > 0 && (
                   <button
                     type="button"
                     onClick={handleMarkAllRead}
-                    className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold px-2 py-1 rounded hover:bg-white/5 transition"
+                    className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg transition cursor-pointer ${
+                      isPearl 
+                        ? 'text-amber-800 hover:bg-amber-100/70' 
+                        : 'text-amber-400 hover:bg-white/10'
+                    }`}
                     title="Mark all notifications as read"
                   >
-                    Mark Read
+                    Mark all read
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
-                  className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition"
+                  className={`p-1.5 rounded-lg transition cursor-pointer ${
+                    isPearl 
+                      ? 'text-slate-400 hover:text-slate-700 hover:bg-slate-100' 
+                      : 'text-slate-400 hover:text-white hover:bg-white/10'
+                  }`}
+                  aria-label="Close"
                 >
                   <X size={18} />
                 </button>
               </div>
             </div>
 
-            {/* Filter Tabs - Compact Grid Layout with Zero Left/Right Scrolling */}
-            <div 
-              className="p-2.5 border-b border-slate-800 grid grid-cols-4 gap-1.5 shrink-0 select-none"
-              style={{ backgroundColor: '#020617' }}
-            >
+            {/* Filter Tabs: Simple, Clean Pills */}
+            <div className={`px-4 py-2.5 border-b flex items-center gap-2 shrink-0 select-none ${
+              isPearl ? 'border-slate-200 bg-white' : 'border-slate-800 bg-slate-950'
+            }`}>
               <button
                 type="button"
                 onClick={() => setActiveFilter('ALL')}
-                className={`py-1.5 px-1 rounded-xl text-center font-bold text-[10px] sm:text-xs transition truncate ${
+                className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer ${
                   activeFilter === 'ALL'
-                    ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                    ? (isPearl ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'bg-amber-500 text-slate-950 font-bold shadow-xs')
+                    : (isPearl ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-400 hover:text-white hover:bg-white/5')
                 }`}
               >
                 All ({relevantNotifications.length})
               </button>
+
               <button
                 type="button"
-                onClick={() => setActiveFilter('WORKFLOW')}
-                className={`py-1.5 px-1 rounded-xl text-center font-bold text-[10px] sm:text-xs transition truncate ${
-                  activeFilter === 'WORKFLOW'
-                    ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                onClick={() => setActiveFilter('UNREAD')}
+                className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  activeFilter === 'UNREAD'
+                    ? (isPearl ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'bg-amber-500 text-slate-950 font-bold shadow-xs')
+                    : (isPearl ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-400 hover:text-white hover:bg-white/5')
                 }`}
               >
-                Workflow
+                Unread ({unreadCount})
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveFilter('FINANCE')}
-                className={`py-1.5 px-1 rounded-xl text-center font-bold text-[10px] sm:text-xs transition truncate ${
-                  activeFilter === 'FINANCE'
-                    ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                    : 'text-gray-400 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                Finance
-              </button>
-              {currentRole !== UserRole.CLIENT ? (
+
+              {pendingApprovalsCount > 0 && currentRole !== UserRole.CLIENT && (
                 <button
                   type="button"
-                  onClick={() => setActiveFilter('APPROVAL')}
-                  className={`py-1.5 px-1 rounded-xl text-center font-bold text-[10px] sm:text-xs transition truncate ${
-                    activeFilter === 'APPROVAL'
-                      ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  onClick={() => setActiveFilter('APPROVALS')}
+                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                    activeFilter === 'APPROVALS'
+                      ? (isPearl ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'bg-amber-500 text-slate-950 font-bold shadow-xs')
+                      : (isPearl ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-400 hover:text-white hover:bg-white/5')
                   }`}
                 >
-                  Approvals
+                  Approvals ({pendingApprovalsCount})
                 </button>
-              ) : (
-                <div />
               )}
             </div>
 
             {/* Notifications List */}
-            <div 
-              className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2.5 custom-scrollbar overflow-x-hidden"
-              style={{ backgroundColor: '#020617' }}
-            >
+            <div className={`flex-1 overflow-y-auto p-3 sm:p-4 space-y-2.5 custom-scrollbar ${
+              isPearl ? 'bg-slate-50/50' : 'bg-slate-950'
+            }`}>
               {filteredNotifications.length === 0 ? (
-                <div 
-                  className="h-full flex flex-col items-center justify-center text-center p-6 text-gray-500 space-y-3 rounded-2xl border border-slate-800"
-                  style={{ backgroundColor: '#080e1a' }}
-                >
-                  <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center text-gray-400 border border-white/5">
-                    <CheckCircle2 size={28} className="text-emerald-400/80" />
+                <div className={`h-full min-h-[300px] flex flex-col items-center justify-center text-center p-6 space-y-3 rounded-2xl border ${
+                  isPearl 
+                    ? 'border-slate-200 bg-white text-slate-400' 
+                    : 'border-slate-800 bg-slate-900/40 text-slate-500'
+                }`}>
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border ${
+                    isPearl ? 'bg-slate-100 border-slate-200 text-slate-400' : 'bg-white/5 border-white/5 text-slate-400'
+                  }`}>
+                    <CheckCircle2 size={24} className="text-emerald-500" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-gray-200">All caught up!</h4>
-                    <p className="text-[11px] text-gray-400 max-w-[240px] mt-1 leading-relaxed">
-                      No pending notifications or approval requests for {String(currentRole).replace(/_/g, ' ')}.
+                    <h4 className={`text-sm font-semibold ${isPearl ? 'text-slate-700' : 'text-slate-200'}`}>
+                      All caught up!
+                    </h4>
+                    <p className={`text-xs mt-1 ${isPearl ? 'text-slate-400' : 'text-slate-400'}`}>
+                      {activeFilter === 'UNREAD' 
+                        ? 'No unread notifications at the moment.' 
+                        : 'No notifications to display right now.'}
                     </p>
                   </div>
                 </div>
@@ -569,191 +562,177 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                 filteredNotifications.map((n, idx) => {
                   const isPending = n.status === 'PENDING';
 
-                  const isMonthlyExpense = 
-                    n.notificationSubType === 'FINANCE_RECORDED' ||
-                    n.description?.toLowerCase().includes('monthly salary') ||
-                    n.description?.toLowerCase().includes('fixed expense') ||
-                    n.title?.toLowerCase().includes('monthly salary') ||
-                    n.title?.toLowerCase().includes('monthly fixed');
-
                   const isPaymentApproval = 
                     n.notificationSubType === 'PAYMENT_APPROVAL' ||
                     n.approvalData?.actionType === 'VERIFY_PAYMENT';
 
                   const isApproval = 
-                    !isMonthlyExpense && (
-                      isPaymentApproval ||
-                      n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
-                      n.notificationSubType === 'CASE_APPROVAL' ||
-                      n.notificationSubType === 'DELETION_APPROVAL' ||
-                      n.notificationSubType === 'CANCELLATION_APPROVAL' ||
-                      n.notificationSubType === 'EDIT_APPROVAL' ||
-                      n.approvalData?.actionType === 'APPROVE_CLIENT'
-                    );
-
-                  const subTypeLabel = isMonthlyExpense
-                    ? 'AUTO-POSTED EXPENSE'
-                    : isPaymentApproval
-                    ? 'PAYMENT VERIFICATION'
-                    : n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL'
-                    ? 'CLIENT REGISTRATION'
-                    : n.notificationSubType === 'WORKFLOW_TASK'
-                    ? 'WORKFLOW TASK'
-                    : n.notificationSubType?.replace(/_/g, ' ') || 'SYSTEM ALERT';
+                    isPaymentApproval ||
+                    n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
+                    n.notificationSubType === 'CASE_APPROVAL' ||
+                    n.notificationSubType === 'DELETION_APPROVAL' ||
+                    n.notificationSubType === 'CANCELLATION_APPROVAL' ||
+                    n.notificationSubType === 'EDIT_APPROVAL' ||
+                    n.approvalData?.actionType === 'APPROVE_CLIENT';
 
                   return (
                     <div 
                       key={`live_notif_${n.id || idx}_${idx}`}
                       onClick={() => handleCardClick(n)}
-                      className={`p-3.5 rounded-2xl border transition-all cursor-pointer group space-y-2.5 relative select-none ${
-                        isPending && isApproval
-                          ? 'bg-slate-900 border-amber-500/50 hover:border-amber-400 shadow-lg shadow-amber-500/5 border-l-4 border-l-amber-400'
-                          : 'bg-slate-900/60 border-white/10 hover:border-white/20 opacity-85 hover:opacity-100'
+                      className={`p-3 sm:p-3.5 rounded-xl border transition-all cursor-pointer group space-y-2 relative shadow-xs ${
+                        isPearl
+                          ? isPending
+                            ? 'bg-white border-amber-300/80 hover:border-amber-400 shadow-sm'
+                            : 'bg-white/80 border-slate-200 hover:border-slate-300 opacity-80 hover:opacity-100'
+                          : isPending
+                            ? 'bg-slate-900 border-amber-500/30 hover:border-amber-400/50 shadow-sm'
+                            : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 opacity-75 hover:opacity-100'
                       }`}
-                      style={{ backgroundColor: isPending && isApproval ? '#0f172a' : '#0c1322' }}
                     >
-                      {/* Top Row: Icon, Title, Unread Pulse Dot, Timestamp */}
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border ${
-                            isMonthlyExpense
-                              ? 'bg-teal-500/15 text-teal-400 border-teal-500/30'
-                              : isPending 
-                              ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' 
-                              : 'bg-white/5 text-gray-400 border-white/10'
+                      {/* Top Header Row */}
+                      <div className="flex items-start justify-between gap-2.5">
+                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                          {/* Clean Icon Box */}
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border mt-0.5 ${
+                            isPearl
+                              ? 'bg-slate-100 border-slate-200'
+                              : 'bg-white/5 border-white/10'
                           }`}>
-                            {getBadgeIcon(n.notificationSubType)}
+                            {getNotificationIcon(n.notificationSubType)}
                           </div>
+
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
-                              <h4 className="text-xs font-bold text-white group-hover:text-amber-300 transition truncate">
+                              {isPending && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                              )}
+                              <h4 className={`text-xs sm:text-sm font-semibold truncate transition ${
+                                isPearl 
+                                  ? 'text-slate-900 group-hover:text-amber-800' 
+                                  : 'text-slate-100 group-hover:text-amber-300'
+                              }`}>
                                 {n.title}
                               </h4>
-                              {isPending && isApproval && (
-                                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" title="Action Pending" />
-                              )}
                             </div>
-                            <span className={`text-[10px] font-mono uppercase font-semibold ${
-                              isMonthlyExpense ? 'text-teal-400' : 'text-amber-400/90'
+                            <span className={`text-[11px] block mt-0.5 font-mono ${
+                              isPearl ? 'text-slate-400' : 'text-slate-500'
                             }`}>
-                              {subTypeLabel}
+                              {n.timestamp || 'Recent'}
                             </span>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <span className="text-[10px] text-gray-400 font-mono">
-                            {n.timestamp || 'Just now'}
-                          </span>
-                          {isPending && (
+                        {/* Status / Quick Read Check */}
+                        <div className="flex items-center gap-1 shrink-0">
+                          {isPending ? (
                             <button
                               type="button"
                               onClick={(e) => handleMarkAsRead(n, e)}
-                              className="text-gray-400 hover:text-emerald-400 p-1 rounded-md hover:bg-white/10 transition"
+                              className={`text-xs p-1 rounded-md transition cursor-pointer ${
+                                isPearl 
+                                  ? 'text-slate-400 hover:text-emerald-600 hover:bg-slate-100' 
+                                  : 'text-slate-400 hover:text-emerald-400 hover:bg-white/10'
+                              }`}
                               title="Mark as Read"
                             >
                               <Check size={14} />
                             </button>
+                          ) : (
+                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                              isPearl ? 'text-slate-400 bg-slate-100' : 'text-slate-500 bg-white/5'
+                            }`}>
+                              Read
+                            </span>
                           )}
                         </div>
                       </div>
 
-                      {/* Description */}
-                      <p className="text-[11px] text-gray-300 line-clamp-2 leading-relaxed">
+                      {/* Clean Message Body */}
+                      <p className={`text-xs line-clamp-2 leading-relaxed ${
+                        isPearl ? 'text-slate-600' : 'text-slate-300'
+                      }`}>
                         {n.description}
                       </p>
 
-                      {/* Action Bar (One-Tap Actionable) */}
-                      <div className="flex flex-wrap items-center justify-between gap-1.5 pt-2 border-t border-white/10 text-xs">
-                        {/* If Approval: Direct 1-tap Approve & Reject buttons */}
-                        {isApproval ? (
-                          <div className="flex items-center gap-1.5 w-full sm:w-auto">
-                            <button
-                              type="button"
-                              onClick={(e) => handleQuickApprove(n, e)}
-                              className="flex-1 sm:flex-none px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center justify-center gap-1 transition shadow shadow-emerald-600/20 active:scale-95"
-                            >
-                              <Check size={12} />
-                              <span>{isPaymentApproval ? 'Verify & Credit' : 'Approve'}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => handleQuickReject(n, e)}
-                              className="flex-1 sm:flex-none px-2 py-1 rounded-lg bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-300 font-bold text-[11px] flex items-center justify-center gap-1 transition active:scale-95"
-                            >
-                              <X size={12} />
-                              <span>Reject</span>
-                            </button>
-                          </div>
-                        ) : isMonthlyExpense ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/15 text-teal-300 border border-teal-500/30 flex items-center gap-1 font-mono">
-                              <CheckCircle2 size={11} />
-                              Auto-Recorded
-                            </span>
-                            {onNavigateToTab && (
+                      {/* Action Row */}
+                      {(isApproval && isPending) || (n.targetFilter?.caseNo && onNavigateToCase) || (onNavigateToTab && n.targetView === 'finance') ? (
+                        <div className={`flex items-center justify-between gap-2 pt-2 border-t ${
+                          isPearl ? 'border-slate-100' : 'border-white/5'
+                        }`}>
+                          {isApproval && isPending ? (
+                            <div className="flex items-center gap-2">
                               <button
                                 type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onNavigateToTab('finance');
-                                  setIsOpen(false);
-                                }}
-                                className="text-amber-400 hover:text-amber-300 font-semibold text-[11px] flex items-center gap-1 ml-1"
+                                onClick={(e) => handleQuickApprove(n, e)}
+                                className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 transition shadow-xs active:scale-95 cursor-pointer"
                               >
-                                <span>View Ledger</span>
-                                <ExternalLink size={11} />
+                                <Check size={13} />
+                                <span>{isPaymentApproval ? 'Verify' : 'Approve'}</span>
                               </button>
-                            )}
-                          </div>
-                        ) : (n.targetFilter?.caseNo && onNavigateToCase) ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onNavigateToCase(n.targetFilter.caseNo, n.targetFilter);
-                              setIsOpen(false);
-                            }}
-                            className="text-emerald-400 hover:text-emerald-300 font-semibold text-[11px] flex items-center gap-1"
-                          >
-                            <span>Open Workflow ({n.targetFilter.caseNo})</span>
-                            <ExternalLink size={11} />
-                          </button>
-                        ) : n.targetView ? (
-                          <div className="flex items-center gap-1">
-                            <span className="text-emerald-400 font-semibold text-[11px] flex items-center gap-1">
-                              <span>Open in {n.targetView.toUpperCase()}</span>
-                              <ExternalLink size={11} />
-                            </span>
-                          </div>
-                        ) : (
-                          <div />
-                        )}
+                              <button
+                                type="button"
+                                onClick={(e) => handleQuickReject(n, e)}
+                                className={`px-2.5 py-1 rounded-lg border font-semibold text-xs flex items-center gap-1 transition active:scale-95 cursor-pointer ${
+                                  isPearl 
+                                    ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100' 
+                                    : 'bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25'
+                                }`}
+                              >
+                                <X size={13} />
+                                <span>Reject</span>
+                              </button>
+                            </div>
+                          ) : (n.targetFilter?.caseNo && onNavigateToCase) ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onNavigateToCase(n.targetFilter.caseNo, n.targetFilter);
+                                setIsOpen(false);
+                              }}
+                              className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>Open Case</span>
+                              <ExternalLink size={12} />
+                            </button>
+                          ) : onNavigateToTab && n.targetView === 'finance' ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onNavigateToTab('finance');
+                                setIsOpen(false);
+                              }}
+                              className="text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>View Finance</span>
+                              <ExternalLink size={12} />
+                            </button>
+                          ) : null}
 
-                        {/* Details Modal Trigger Button */}
-                        <button
-                          type="button"
-                          onClick={(e) => handleOpenNotification(n, e)}
-                          className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-amber-300 hover:text-white text-[11px] font-semibold flex items-center gap-1 transition ml-auto"
-                        >
-                          <span>Full Details</span>
-                          <ArrowRight size={11} />
-                        </button>
-                      </div>
+                          <span className={`text-[11px] font-medium flex items-center gap-1 ml-auto ${
+                            isPearl ? 'text-amber-700' : 'text-amber-400'
+                          }`}>
+                            <span>Details</span>
+                            <ArrowRight size={11} />
+                          </span>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })
               )}
             </div>
 
-            {/* Footer Summary */}
-            <div 
-              className="p-3 border-t border-slate-800 text-[11px] text-gray-400 flex items-center justify-between shrink-0"
-              style={{ backgroundColor: '#020617' }}
-            >
-              <span>Workspace: <strong className="text-white capitalize">{String(currentRole).replace(/_/g, ' ')}</strong></span>
-              <span className="text-emerald-400 font-medium flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            {/* Footer Summary: Clean & Minimal */}
+            <div className={`p-3 px-4 border-t text-xs flex items-center justify-between shrink-0 ${
+              isPearl 
+                ? 'border-slate-200 bg-slate-50 text-slate-500' 
+                : 'border-slate-800 bg-slate-900/50 text-slate-400'
+            }`}>
+              <span>Role: <strong className={isPearl ? 'text-slate-800 capitalize' : 'text-white capitalize'}>{String(currentRole).replace(/_/g, ' ')}</strong></span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 Live Cloud Sync
               </span>
             </div>

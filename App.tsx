@@ -1255,50 +1255,64 @@ const App: React.FC = () => {
             Center: Company Logo Centered with clean boundaries
             Right: Notifications & LogOut (+ Desktop Quick Actions)
         */}
-        <header className="h-14 sm:h-18 md:h-20 bg-slate-900 border-b border-white/10 flex items-center justify-between px-2.5 sm:px-6 z-20 flex-shrink-0 sticky top-0 shadow-md gap-2">
-          {/* Left: Sidebar Menu Toggle & Active View Title */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 shrink-0">
+        <header className={`h-14 sm:h-16 md:h-20 border-b flex items-center justify-between px-2 sm:px-4 md:px-6 z-20 flex-shrink-0 sticky top-0 shadow-md gap-1.5 sm:gap-3 transition-colors duration-200 ${
+          appTheme === 'pearl' 
+            ? 'bg-white/95 border-amber-900/10 shadow-slate-200/50 text-slate-800' 
+            : 'bg-slate-900/98 border-white/10 shadow-black/40 text-slate-100'
+        }`}>
+          {/* Left: Sidebar Menu Toggle & Active Entity Pill */}
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 shrink-0">
             <button 
               type="button"
               onClick={() => window.innerWidth < 1024 ? setMobileSidebarOpen(!mobileSidebarOpen) : setDesktopSidebarExpanded(!desktopSidebarExpanded)} 
-              className="p-2 sm:p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-gray-300 hover:text-white border border-white/10 hover:border-white/30 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
+              className={`p-2 sm:p-2.5 rounded-xl border transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 ${
+                appTheme === 'pearl'
+                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+                  : 'bg-slate-800/90 hover:bg-slate-700 text-gray-200 hover:text-white border-white/10'
+              }`}
               title="Toggle Sidebar Menu"
             >
-              <Menu size={18} className="text-slate-200" />
+              <Menu size={18} className={appTheme === 'pearl' ? "text-slate-800" : "text-slate-200"} />
             </button>
 
-            <span className="hidden md:inline-flex px-2 py-0.5 rounded-lg bg-white/10 border border-white/20 text-slate-200 font-mono font-bold text-xs shrink-0 shadow-sm">
+            <span className={`px-2 py-1 rounded-lg border font-mono font-bold text-xs shrink-0 shadow-sm ${
+              appTheme === 'pearl'
+                ? 'bg-amber-500/15 border-amber-500/30 text-amber-950'
+                : 'bg-white/10 border-white/20 text-slate-200'
+            }`}>
               {activeCompany.prefix || activeCompany.shortName}
             </span>
 
-            <div className="hidden lg:flex items-center gap-2 min-w-0">
-              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider truncate">
+            <div className="hidden xl:flex items-center gap-1.5 min-w-0">
+              <span className={`text-xs font-bold uppercase tracking-wider truncate ${
+                appTheme === 'pearl' ? 'text-slate-600' : 'text-slate-300'
+              }`}>
                 {activeView === 'dashboard' ? 'Overview' : activeView.replace('-', ' ')}
               </span>
             </div>
           </div>
 
-          {/* Center: Company Logo Centered with responsive bounds to prevent collision */}
+          {/* Center: Company Logo Centered with dedicated container and pristine background */}
           <div className="flex items-center justify-center min-w-0 flex-1 px-1 sm:px-2 overflow-hidden">
             <button
               type="button"
               id="header-center-company-logo-btn"
               onClick={() => setIsCompanyModalOpen(true)}
-              className="flex items-center justify-center p-0.5 sm:px-3 sm:py-1.5 rounded-xl hover:bg-white/5 border border-transparent hover:border-white/10 transition-all duration-200 cursor-pointer group shrink-0 max-w-full"
+              className="flex items-center justify-center px-1.5 py-1 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 border border-transparent transition-all duration-200 cursor-pointer group shrink-0 max-w-full"
               title={`${activeCompany.name} (Click to switch company)`}
             >
               <img 
                 src={getCompanyLogoUrl(activeCompany.id)} 
                 alt={activeCompany.name} 
-                className="h-8 sm:h-12 md:h-16 w-auto max-w-[125px] xs:max-w-[155px] sm:max-w-[260px] md:max-w-[360px] object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.7)] group-hover:scale-105 transition-transform duration-200" 
+                className="h-8 sm:h-11 md:h-14 w-auto max-w-[120px] xs:max-w-[150px] sm:max-w-[220px] md:max-w-[320px] object-contain drop-shadow group-hover:scale-105 transition-transform duration-200" 
               />
             </button>
           </div>
 
-          {/* Right: Notifications & LogOut (Desktop Quick Actions) */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 justify-end">
-            {/* Quick Public Trackers Preview Buttons for Staff */}
-            <div className="hidden xl:flex items-center gap-1.5 mr-1">
+          {/* Right: Actions, Notifications & Sign Out */}
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0 justify-end">
+            {/* Quick Public Trackers Preview Buttons for Staff (Desktop) */}
+            <div className="hidden 2xl:flex items-center gap-1.5 mr-1">
               <button
                 type="button"
                 onClick={() => {
@@ -1310,10 +1324,14 @@ const App: React.FC = () => {
                   setIsPublicContainerTrackingOpen(true);
                   try { window.history.pushState({ mode: 'status' }, '', '/?mode=status'); } catch (_) {}
                 }}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer ${
+                  appTheme === 'pearl'
+                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+                    : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border-white/10'
+                }`}
                 title="Preview Public Container Tracker (Status.makpk.online)"
               >
-                <Package size={13} className="text-slate-300" />
+                <Package size={13} />
                 <span>status.</span>
               </button>
               <button
@@ -1327,41 +1345,64 @@ const App: React.FC = () => {
                   setIsPublicVehicleTrackingOpen(true);
                   try { window.history.pushState({ mode: 'vehicle' }, '', '/?mode=vehicle'); } catch (_) {}
                 }}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer ${
+                  appTheme === 'pearl'
+                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+                    : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border-white/10'
+                }`}
                 title="Preview Public Vehicle Tracker (vehicle.makpk.online)"
               >
-                <Truck size={13} className="text-slate-300" />
+                <Truck size={13} />
                 <span>vehicle.</span>
               </button>
             </div>
 
-            {/* Group Admin Executive Portal Button in Header (shown on sm and up) */}
+            {/* Group Admin Executive Portal Button in Header */}
             {effectiveIsGlobalAdmin && (
               <button
                 type="button"
                 onClick={() => setIsGroupAdminPortalOpen(true)}
-                className="hidden sm:flex px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-amber-600/30 to-amber-700/20 hover:from-amber-500/30 hover:to-amber-700/30 border border-amber-400/40 text-amber-300 font-bold text-xs items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer shrink-0"
-                title="Open Group Admin Executive Portal (Consolidated Total Data & Settings)"
+                className={`h-9 px-2 sm:px-2.5 md:px-3 rounded-xl border font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer shrink-0 ${
+                  appTheme === 'pearl'
+                    ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-900 border-amber-400/60'
+                    : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-400/40'
+                }`}
+                title="Open Group Admin Executive Portal"
               >
-                <Crown size={13} className="text-amber-400" />
-                <span className="font-mono uppercase text-[11px] tracking-wider font-bold">Admin Portal</span>
+                <Crown size={14} className={appTheme === 'pearl' ? "text-amber-700" : "text-amber-400"} />
+                <span className="font-mono uppercase text-[11px] tracking-wider font-bold hidden sm:inline">Admin</span>
               </button>
             )}
 
-            {/* Luxury Business Class Theme Toggle Button (shown on sm and up) */}
+            {/* User Account Chip */}
+            <div 
+              className={`h-9 px-2 sm:px-2.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 shrink-0 max-w-[130px] sm:max-w-[170px] ${
+                appTheme === 'pearl'
+                  ? 'bg-slate-100 text-slate-700 border-slate-300'
+                  : 'bg-slate-800 text-slate-300 border-white/10'
+              }`}
+              title={`Active Account: ${safeAppStorage.getItem('dpl_current_user_name') || firebaseUser?.displayName || currentClientName || 'Admin'} (${currentRole})`}
+            >
+              <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+              <span className="truncate text-[11px] font-medium hidden sm:inline">
+                {safeAppStorage.getItem('dpl_current_user_name') || firebaseUser?.displayName || currentClientName || 'Admin'}
+              </span>
+            </div>
+
+            {/* Luxury Theme Toggle Button */}
             <button
               type="button"
               onClick={() => setAppTheme(prev => prev === 'pearl' ? 'charcoal' : 'pearl')}
-              className={`hidden sm:flex btn-animated-luxury px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-semibold items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 ${
+              className={`h-9 px-2 sm:px-2.5 md:px-3 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 ${
                 appTheme === 'pearl'
-                  ? 'bg-gradient-to-r from-amber-100 via-white to-amber-50 text-slate-900 border-amber-300/80 shadow-md ring-1 ring-amber-300/40'
-                  : 'bg-white/15 hover:bg-white/25 text-white border-white/25 shadow-black/20'
+                  ? 'bg-amber-100 hover:bg-amber-200 text-slate-900 border-amber-300'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-white/15'
               }`}
-              title={appTheme === 'pearl' ? "Switch to Charcoal Luxury (Executive Night)" : "Switch to Pearl White (Business Class)"}
+              title={appTheme === 'pearl' ? "Switch to Charcoal Luxury" : "Switch to Pearl White"}
             >
-              <Sparkles size={13} className={appTheme === 'pearl' ? "text-amber-600" : "text-amber-400"} />
-              <span className="font-mono text-[11px] uppercase tracking-wider font-bold">
-                {appTheme === 'pearl' ? 'Pearl White' : 'Charcoal'}
+              <Sparkles size={14} className={appTheme === 'pearl' ? "text-amber-600" : "text-amber-400"} />
+              <span className="font-mono text-[11px] uppercase tracking-wider font-bold hidden md:inline">
+                {appTheme === 'pearl' ? 'Pearl' : 'Charcoal'}
               </span>
             </button>
 
@@ -1371,6 +1412,12 @@ const App: React.FC = () => {
               currentRoles={currentRoles}
               userIdentifier={currentClientName || firebaseUser?.displayName || firebaseUser?.email || 'Admin'}
               clientName={currentClientName}
+              theme={appTheme}
+              buttonClassName={`h-9 w-9 rounded-xl border transition active:scale-95 shrink-0 flex items-center justify-center cursor-pointer ${
+                appTheme === 'pearl'
+                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
+                  : 'bg-slate-800 hover:bg-slate-700 text-gray-200 hover:text-white border-white/10'
+              }`}
               onNavigateToCase={(caseNoOrId, filterData) => {
                 setActiveView('cases');
                 setNavigationFilter(filterData || caseNoOrId);
@@ -1383,12 +1430,12 @@ const App: React.FC = () => {
               }}
             />
 
-            {/* Squircle Sign Out Button with LogOut Logo */}
+            {/* Sign Out Button */}
             <button
               type="button"
               id="header-signout-btn"
               onClick={handleSignOut}
-              className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 flex items-center justify-center transition-all duration-200 shadow-sm active:scale-95 cursor-pointer shrink-0"
+              className="h-9 w-9 rounded-xl bg-red-500/10 hover:bg-red-500/20 active:bg-red-500/30 text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 flex items-center justify-center transition-all duration-200 shadow-sm active:scale-95 cursor-pointer shrink-0"
               title="Sign Out"
             >
               <LogOut size={15} className="text-red-400" />
