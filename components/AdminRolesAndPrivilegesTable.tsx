@@ -131,9 +131,6 @@ export const AdminRolesAndPrivilegesTable: React.FC<AdminRolesAndPrivilegesTable
   const [searchQuery, setSearchQuery] = useState('');
   const [scopeModalRole, setScopeModalRole] = useState<RoleDefinition | null>(null);
   const [customScopeMap, setCustomScopeMap] = useState<Record<string, string>>({});
-  const [rowsPerPage, setRowsPerPage] = useState<number>(5);
-  const [currentPage, setCurrentPage] = useState<number>(1);
-
   // Toggle role assignment
   const handleToggleRole = (roleDef: RoleDefinition) => {
     if (readOnly) return;
@@ -159,12 +156,6 @@ export const AdminRolesAndPrivilegesTable: React.FC<AdminRolesAndPrivilegesTable
       (r.badge && r.badge.toLowerCase().includes(q))
     );
   }, [searchQuery]);
-
-  const totalPages = Math.ceil(filteredRoles.length / rowsPerPage) || 1;
-  const paginatedRoles = useMemo(() => {
-    const start = (currentPage - 1) * rowsPerPage;
-    return filteredRoles.slice(start, start + rowsPerPage);
-  }, [filteredRoles, currentPage, rowsPerPage]);
 
   const assignedCount = assignedRoles.length;
 
@@ -201,10 +192,7 @@ export const AdminRolesAndPrivilegesTable: React.FC<AdminRolesAndPrivilegesTable
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1);
-              }}
+              onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Filter roles or privileges..."
               className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-400"
             />
@@ -272,7 +260,7 @@ export const AdminRolesAndPrivilegesTable: React.FC<AdminRolesAndPrivilegesTable
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
-            {paginatedRoles.map((roleDef) => {
+            {filteredRoles.map((roleDef) => {
               const isAssigned = assignedRoles.includes(roleDef.id);
               const scopeText = customScopeMap[roleDef.id] || (isAssigned ? roleDef.defaultScope : '-');
 
@@ -377,7 +365,7 @@ export const AdminRolesAndPrivilegesTable: React.FC<AdminRolesAndPrivilegesTable
               );
             })}
 
-            {paginatedRoles.length === 0 && (
+            {filteredRoles.length === 0 && (
               <tr>
                 <td colSpan={5} className="py-8 text-center text-slate-400 text-xs">
                   No roles match your search query &quot;{searchQuery}&quot;.
@@ -388,49 +376,20 @@ export const AdminRolesAndPrivilegesTable: React.FC<AdminRolesAndPrivilegesTable
         </table>
       </div>
 
-      {/* 3. Table Pagination & Footer Control (Matching Google Admin Console footer) */}
+      {/* 3. Role Summary Footer (Clean, No clumsy pagination) */}
       <div className="p-3.5 border-t border-white/10 bg-[#10141D] flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
         <div className="flex items-center gap-2">
-          <span>Rows per page:</span>
-          <select
-            value={rowsPerPage}
-            onChange={(e) => {
-              setRowsPerPage(Number(e.target.value));
-              setCurrentPage(1);
-            }}
-            className="bg-slate-900 border border-white/10 rounded-lg px-2 py-1 text-white text-xs focus:outline-none cursor-pointer"
-          >
-            <option value={5}>5</option>
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-          </select>
+          <span>Available Roles:</span>
+          <span className="font-semibold text-white bg-slate-800 px-2 py-0.5 rounded-md text-[11px]">
+            {filteredRoles.length}
+          </span>
         </div>
 
-        <div className="flex items-center gap-4">
-          <span>
-            {(currentPage - 1) * rowsPerPage + 1} - {Math.min(currentPage * rowsPerPage, filteredRoles.length)} of {filteredRoles.length}
+        <div className="flex items-center gap-2">
+          <span className="text-slate-400">Status:</span>
+          <span className="px-2.5 py-0.5 rounded-md bg-sky-500/15 text-sky-300 font-semibold text-[11px] border border-sky-500/30">
+            {assignedCount} {assignedCount === 1 ? 'Role Assigned' : 'Roles Assigned'}
           </span>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              disabled={currentPage <= 1}
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              className="px-2.5 py-1 rounded-lg border border-white/10 text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white/5 transition"
-            >
-              ‹
-            </button>
-            <span className="px-2 text-slate-300 font-mono text-[11px]">
-              Page {currentPage} of {totalPages}
-            </span>
-            <button
-              type="button"
-              disabled={currentPage >= totalPages}
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              className="px-2.5 py-1 rounded-lg border border-white/10 text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white/5 transition"
-            >
-              ›
-            </button>
-          </div>
         </div>
       </div>
 

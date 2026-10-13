@@ -72,6 +72,13 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
       if (lowerFt === 'jpg' || lowerFt === 'jpeg' || lowerFt === 'png') return 'image';
       if (lowerFt === 'docx' || lowerFt === 'xlsx' || lowerFt === 'pdf' || lowerFt === 'image') return lowerFt;
     }
+    if (file instanceof Blob) {
+      const mime = (file.type || '').toLowerCase();
+      if (mime.includes('pdf')) return 'pdf';
+      if (mime.includes('image')) return 'image';
+      if (mime.includes('spreadsheet') || mime.includes('excel') || mime.includes('csv')) return 'xlsx';
+      if (mime.includes('word')) return 'docx';
+    }
     const lower = (filename || '').toLowerCase();
     if (lower.endsWith('.docx')) return 'docx';
     if (lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.csv')) return 'xlsx';
@@ -79,11 +86,11 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
     if (/\.(jpe?g|png|webp|gif|bmp|svg)$/i.test(lower)) return 'image';
     if (typeof file === 'string') {
       if (file.startsWith('data:image/')) return 'image';
-      if (file.startsWith('data:application/pdf')) return 'pdf';
+      if (file.startsWith('data:application/pdf') || file.startsWith('blob:')) return 'pdf';
       if (file.startsWith('data:application/vnd.openxmlformats-officedocument.wordprocessingml.document')) return 'docx';
       if (file.startsWith('data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) return 'xlsx';
     }
-    return 'docx';
+    return 'pdf';
   }, [fileType, filename, file]);
 
   // Extension label for UI badge
@@ -123,7 +130,8 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
 
         if (file instanceof ArrayBuffer) {
           arrayBuffer = file;
-          const blob = new Blob([arrayBuffer]);
+          const mime = detectedFormat === 'pdf' ? 'application/pdf' : undefined;
+          const blob = new Blob([arrayBuffer], mime ? { type: mime } : undefined);
           url = URL.createObjectURL(blob);
           createdBlobUrl = url;
         } else if (file instanceof Blob || file instanceof File) {
@@ -143,15 +151,23 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
           }
         } else if (typeof file === 'string') {
           if (file.startsWith('data:')) {
-            url = file;
-            if (detectedFormat === 'docx' || detectedFormat === 'xlsx') {
-              const base64Data = file.split(',')[1];
+            if (detectedFormat === 'pdf' || detectedFormat === 'docx' || detectedFormat === 'xlsx') {
+              const base64Data = file.split(',')[1] || '';
               const binaryString = atob(base64Data);
               const bytes = new Uint8Array(binaryString.length);
               for (let i = 0; i < binaryString.length; i++) {
                 bytes[i] = binaryString.charCodeAt(i);
               }
               arrayBuffer = bytes.buffer;
+              if (detectedFormat === 'pdf') {
+                const pdfBlob = new Blob([bytes], { type: 'application/pdf' });
+                url = URL.createObjectURL(pdfBlob);
+                createdBlobUrl = url;
+              } else {
+                url = file;
+              }
+            } else {
+              url = file;
             }
           } else if (file.startsWith('blob:') || file.startsWith('http://') || file.startsWith('https://')) {
             url = file;

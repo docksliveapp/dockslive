@@ -12,7 +12,6 @@ import {
 } from '../services/categoryTariffService';
 import { saveClientToFirestore, saveUserToFirestore } from '../services/dbService';
 import { compressAndPrepareFile } from '../services/fileUtils';
-import { AdminRolesAndPrivilegesTable } from './AdminRolesAndPrivilegesTable';
 
 export const CASE_CATEGORIES_LIST = [
   "Bonded Carrier",
@@ -1166,18 +1165,6 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
               </p>
             </div>
 
-            {!isClientView && (
-              <div className="pt-2 border-t border-white/10">
-                <AdminRolesAndPrivilegesTable
-                  assignedRoles={roles}
-                  userName={name || 'this client'}
-                  allowedCompanies={['docks', 'truckit', 'muhib', 'vantage']}
-                  onRolesChange={(newRoles) => {
-                    setRoles(newRoles.length > 0 ? newRoles : [UserRole.CLIENT]);
-                  }}
-                />
-              </div>
-            )}
           </div>
 
         </div>

@@ -480,13 +480,12 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
       doc.setFontSize(7.5);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(148, 163, 184);
-      doc.text(`MAK Group of Companies • vehicle.makpk.online • Plate ${targetVehicle.registrationNumber || ''}`, pageWidth / 2, 287, { align: 'center' });
+      doc.text(`MAK Group of Companies | vehicle.makpk.online | Plate ${targetVehicle.registrationNumber || ''}`, pageWidth / 2, 287, { align: 'center' });
 
       const safeFilename = `Vehicle_${(targetVehicle.registrationNumber || 'Plate').replace(/[^a-zA-Z0-9_-]/g, '_')}_Status.pdf`;
       doc.save(safeFilename);
     } catch (err) {
       console.error('Error generating vehicle PDF:', err);
-      alert('Could not generate PDF. Please try again.');
     } finally {
       setIsGeneratingPdf(false);
     }

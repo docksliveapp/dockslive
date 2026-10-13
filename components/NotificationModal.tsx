@@ -56,7 +56,25 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
     );
 
   const getIcon = () => {
-    switch (notification.notificationSubType as string) {
+    const subType = String(notification.notificationSubType || '');
+    const text = `${notification.title || ''} ${notification.description || ''} ${notification.category || ''} ${subType}`.toLowerCase();
+
+    if (
+      subType === 'VEHICLE_GATE_PASS' ||
+      subType === 'TRANSPORTER_ASSIGNED' ||
+      notification.category === 'TRANSPORTER' ||
+      text.includes('vehicle') ||
+      text.includes('truck') ||
+      text.includes('trailer') ||
+      text.includes('transporter') ||
+      text.includes('fleet') ||
+      text.includes('noc') ||
+      text.includes('veh_')
+    ) {
+      return <Truck size={28} className="text-amber-500" />;
+    }
+
+    switch (subType) {
       case 'PAYMENT_APPROVAL':
         return <DollarSign size={28} className="text-emerald-400" />;
       case 'CLIENT_REGISTRATION_APPROVAL':
@@ -75,9 +93,6 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
         return <FileText size={28} className="text-blue-400" />;
       case 'BUYING':
         return <DollarSign size={28} className="text-emerald-400" />;
-      case 'VEHICLE_GATE_PASS':
-      case 'TRANSPORTER_ASSIGNED':
-        return <Truck size={28} className="text-amber-400" />;
       case 'WAREHOUSE_ENTRY':
         return <Warehouse size={28} className="text-indigo-400" />;
       default:
@@ -194,71 +209,68 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
           isPearl ? 'bg-white' : 'bg-slate-900'
         }`}>
           {/* Main Description Card */}
-          <div className={`rounded-2xl p-4 border space-y-1.5 ${
+          <div className={`rounded-2xl p-4 border ${
             isPearl 
               ? 'bg-slate-50 border-slate-200' 
               : 'bg-slate-950/70 border-white/10'
           }`}>
-            <h4 className={`text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 ${
-              isPearl ? 'text-slate-500' : 'text-gray-400'
-            }`}>
-              <ShieldAlert size={14} className="text-amber-500" />
-              Notification Message
-            </h4>
             <p className={`text-sm leading-relaxed whitespace-pre-wrap break-words ${
               isPearl ? 'text-slate-800' : 'text-gray-200'
             }`}>
-              {notification.description || 'No description provided.'}
+              {notification.description || 'No additional details.'}
             </p>
           </div>
 
-          {/* Structured Approval Context if present */}
+          {/* Concise Approval Context if present */}
           {approval && (
             <div className="grid grid-cols-2 gap-2.5">
-              <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
-                <span className="text-[11px] text-gray-400 block font-medium">Target Entity</span>
-                <span className="text-sm font-bold text-white font-mono mt-0.5 block truncate">
+              <div className={`p-3 rounded-2xl border ${
+                isPearl ? 'bg-slate-50 border-slate-200' : 'bg-white/5 border-white/10'
+              }`}>
+                <span className={`text-[11px] block font-medium ${isPearl ? 'text-slate-500' : 'text-gray-400'}`}>Target</span>
+                <span className={`text-sm font-bold font-mono mt-0.5 block truncate ${isPearl ? 'text-slate-900' : 'text-white'}`}>
                   {approval.entityName || `${approval.entityType.toUpperCase()} #${approval.entityId}`}
-                </span>
-                <span className="text-[10px] text-brand-400 uppercase font-semibold">
-                  {approval.entityType}
                 </span>
               </div>
 
-              <div className="bg-white/5 p-3 rounded-2xl border border-white/5">
-                <span className="text-[11px] text-gray-400 block font-medium">Action Requested</span>
-                <span className={`text-sm font-bold mt-0.5 block ${
-                  approval.actionType === 'DELETE' ? 'text-red-400' :
-                  approval.actionType === 'CANCEL' ? 'text-amber-400' : 'text-cyan-400'
-                }`}>
-                  {approval.actionType}
-                </span>
-                <span className="text-[10px] text-gray-400 truncate block">
-                  By {approval.requestedBy || 'Staff Member'}
+              <div className={`p-3 rounded-2xl border ${
+                isPearl ? 'bg-slate-50 border-slate-200' : 'bg-white/5 border-white/10'
+              }`}>
+                <span className={`text-[11px] block font-medium ${isPearl ? 'text-slate-500' : 'text-gray-400'}`}>Requested By</span>
+                <span className={`text-sm font-bold mt-0.5 block truncate ${isPearl ? 'text-slate-900' : 'text-white'}`}>
+                  {approval.requestedBy || 'Staff Member'}
                 </span>
               </div>
 
               {approval.reason && (
-                <div className="col-span-2 bg-amber-500/10 border border-amber-500/20 p-3 rounded-2xl">
-                  <span className="text-[11px] text-amber-300 font-semibold block uppercase tracking-wider">
-                    Stated Reason:
+                <div className={`col-span-2 p-3 rounded-2xl border ${
+                  isPearl ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-amber-500/10 border-amber-500/20 text-amber-100'
+                }`}>
+                  <span className={`text-[11px] font-semibold block uppercase tracking-wider ${
+                    isPearl ? 'text-amber-700' : 'text-amber-300'
+                  }`}>
+                    Reason:
                   </span>
-                  <p className="text-xs text-amber-100 mt-1 italic leading-relaxed break-words">
+                  <p className="text-xs mt-1 italic leading-relaxed break-words">
                     &quot;{approval.reason}&quot;
                   </p>
                 </div>
               )}
 
               {approval.proposedChanges && Object.keys(approval.proposedChanges).length > 0 && (
-                <div className="col-span-2 bg-white/5 border border-white/10 p-3 rounded-2xl space-y-1.5">
-                  <span className="text-[11px] text-gray-400 font-semibold block uppercase tracking-wider">
+                <div className={`col-span-2 p-3 rounded-2xl border space-y-1.5 ${
+                  isPearl ? 'bg-slate-50 border-slate-200' : 'bg-white/5 border-white/10'
+                }`}>
+                  <span className={`text-[11px] font-semibold block uppercase tracking-wider ${
+                    isPearl ? 'text-slate-500' : 'text-gray-400'
+                  }`}>
                     Proposed Modifications:
                   </span>
                   <div className="max-h-28 overflow-y-auto space-y-1 text-xs font-mono">
                     {Object.entries(approval.proposedChanges).map(([k, v]) => (
-                      <div key={k} className="flex justify-between py-1 border-b border-white/5 text-[11px]">
-                        <span className="text-gray-400">{k}:</span>
-                        <span className="text-emerald-300 font-semibold truncate max-w-[220px]">{String(v)}</span>
+                      <div key={k} className="flex justify-between py-1 border-b border-slate-200/40 dark:border-white/5 text-[11px]">
+                        <span className={isPearl ? 'text-slate-600' : 'text-gray-400'}>{k}:</span>
+                        <span className={`font-semibold truncate max-w-[220px] ${isPearl ? 'text-emerald-700' : 'text-emerald-300'}`}>{String(v)}</span>
                       </div>
                     ))}
                   </div>

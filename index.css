@@ -1,301 +1,395 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-50: #eff6ff;
-  --color-brand-100: #dbeafe;
-  --color-brand-200: #bfdbfe;
-  --color-brand-300: #93c5fd;
-  --color-brand-400: #60a5fa;
-  --color-brand-500: #3b82f6;
-  --color-brand-600: #2563eb;
-  --color-brand-700: #1d4ed8;
-  --color-brand-800: #1e40af;
-  --color-brand-900: #1e3a8a;
-  --color-brand-950: #172554;
-  
-  --color-brand-accent: #06b6d4;
+  --font-sans: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  /* Luxury Charcoal & Pearl Tokens matching MAK Logo */
-  --color-charcoal-50: #f8fafc;
-  --color-charcoal-100: #f1f5f9;
-  --color-charcoal-200: #e2e8f0;
-  --color-charcoal-300: #cbd5e1;
-  --color-charcoal-400: #94a3b8;
-  --color-charcoal-500: #64748b;
-  --color-charcoal-600: #475569;
-  --color-charcoal-700: #334155;
-  --color-charcoal-800: #1e293b;
-  --color-charcoal-900: #0f172a;
-  --color-charcoal-950: #090d16;
+  --color-brand-50: #f0f9ff;
+  --color-brand-100: #e0f2fe;
+  --color-brand-200: #bae6fd;
+  --color-brand-300: #7dd3fc;
+  --color-brand-400: #38bdf8;
+  --color-brand-500: #0ea5e9;
+  --color-brand-600: #0284c7;
+  --color-brand-700: #0369a1;
+  --color-brand-800: #075985;
+  --color-brand-900: #0c4a6e;
+  --color-brand-950: #082f49;
 
-  --color-pearl-50: #ffffff;
-  --color-pearl-100: #fafbfc;
-  --color-pearl-200: #f4f6f8;
-  --color-pearl-300: #edf1f5;
-  --color-pearl-400: #e2e7ec;
-  --color-pearl-500: #cbd3dc;
-  
-  --font-sans: "Inter", "Montserrat", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --color-accent-400: #fbbf24;
+  --color-accent-500: #f59e0b;
+  --color-accent-600: #d97706;
 }
 
 /* ==========================================================================
-   LUXURY BUSINESS CLASS THEME: GREY CHARCOAL & PEARL WHITE
+   1. EXECUTIVE TYPOGRAPHY, SMOOTH SCROLLING & BASE RESET
    ========================================================================== */
+:root,
+html,
+body {
+  color-scheme: only light !important;
+  forced-color-adjust: none !important;
+  -webkit-forced-color-adjust: none !important;
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  height: 100%;
+  width: 100%;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  margin: 0;
+  padding: 0;
+}
 
-/* 1. Deep Executive Charcoal Canvas with Pearl White Sheen */
-body,
-body.theme-charcoal,
-.theme-charcoal {
+#root {
+  min-height: 100%;
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.font-mono,
+[class*="font-mono"] {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace !important;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* ==========================================================================
+   2. THEME 1: CHARCOAL DARK (DEFAULT EXECUTIVE OBSIDIAN SLATE)
+   ========================================================================== */
+:root,
+html.theme-charcoal,
+body.theme-charcoal {
+  --bg-primary: #0B0F17;
+  --bg-secondary: #111827;
+  --bg-elevated: #161F30;
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+  --glass-bg: rgba(20, 28, 44, 0.85);
+  --glass-card-bg: linear-gradient(145deg, rgba(24, 34, 52, 0.92) 0%, rgba(15, 22, 34, 0.96) 100%);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.45);
+  --input-bg: rgba(15, 23, 42, 0.75);
+  --input-border: rgba(255, 255, 255, 0.12);
+}
+
+html.theme-charcoal body,
+body.theme-charcoal {
   background-color: #0B0F17;
-  background-image: 
-    radial-gradient(ellipse 90% 45% at 50% 0%, rgba(241, 245, 249, 0.07) 0%, transparent 60%),
-    radial-gradient(ellipse 70% 50% at 50% 50%, rgba(248, 250, 252, 0.03) 0%, transparent 70%),
-    linear-gradient(180deg, #0B0F17 0%, #111827 40%, #1A2234 75%, #0B0E17 100%);
+  background-image:
+    radial-gradient(circle at 15% 0%, rgba(14, 165, 233, 0.08) 0%, transparent 45%),
+    radial-gradient(circle at 85% 100%, rgba(99, 102, 241, 0.06) 0%, transparent 45%),
+    linear-gradient(180deg, #0B0F17 0%, #111827 100%);
+  color: #F8FAFC;
   background-attachment: fixed;
-  background-size: cover;
-  color: #F8FAFC;
-}
-
-body.theme-pearl,
-.theme-pearl {
-  background-color: #FAF6EE;
-  background-image: 
-    radial-gradient(ellipse 90% 55% at 50% 8%, #FFFFFF 0%, rgba(255, 255, 255, 0.95) 28%, #FAF5EC 50%, #EFE7DA 80%, #E3D7C5 100%),
-    radial-gradient(circle at 12% 92%, rgba(255, 255, 255, 0.75) 0%, transparent 45%),
-    radial-gradient(circle at 88% 92%, rgba(226, 215, 197, 0.45) 0%, transparent 45%);
-  background-attachment: fixed;
-  background-size: cover;
-  color: #1E293B;
-}
-
-/* 2. Executive Frosted Glass ("Glassi") Utilities - Charcoal vs True Pearl White */
-.glass-card {
-  background: rgba(17, 24, 39, 0.88);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border: 1px solid rgba(241, 245, 249, 0.14);
-  box-shadow: 0 20px 45px -15px rgba(0, 0, 0, 0.6), 0 0 1px 1px rgba(255, 255, 255, 0.05) inset;
-  color: #F8FAFC;
-}
-
-.theme-charcoal .glass-card,
-.glass-card-charcoal {
-  background: rgba(15, 23, 42, 0.90);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 25px 50px -15px rgba(0, 0, 0, 0.65), 0 0 1px 1px rgba(255, 255, 255, 0.05) inset;
-  color: #F8FAFC;
-}
-
-/* True Pearl White Glass Card matching MAK Logo Medallion */
-body.theme-pearl .glass-card,
-.theme-pearl .glass-card {
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(220, 210, 195, 0.82);
-  box-shadow: 0 18px 40px -10px rgba(120, 105, 85, 0.12), 0 0 1px 1px rgba(255, 255, 255, 0.95) inset;
-  color: #1E293B;
 }
 
 .glass-panel {
-  background: rgba(15, 23, 42, 0.82);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.45);
-  color: #F8FAFC;
-}
-
-.theme-charcoal .glass-panel {
-  background: rgba(11, 16, 27, 0.85);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.5);
-  color: #F8FAFC;
-}
-
-body.theme-pearl .glass-panel,
-.theme-pearl .glass-panel {
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--glass-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(220, 210, 195, 0.75);
-  box-shadow: 0 10px 25px -8px rgba(120, 105, 85, 0.08);
-  color: #1E293B;
+  border: 1px solid var(--glass-border);
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.glass-card {
+  background: var(--glass-card-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .glass-input {
-  background: rgba(15, 23, 42, 0.85);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #F8FAFC;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text-primary);
   transition: all 0.2s ease;
 }
 
 .glass-input:focus {
-  background: rgba(15, 23, 42, 0.98);
-  border-color: rgba(241, 245, 249, 0.4);
-  box-shadow: 0 0 0 2px rgba(241, 245, 249, 0.12);
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.18);
   outline: none;
-  color: #FFFFFF;
-}
-
-.theme-charcoal .glass-input {
-  background: rgba(11, 16, 27, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: #FFFFFF;
-}
-
-.theme-charcoal .glass-input:focus {
-  background: rgba(15, 23, 42, 0.98);
-  border-color: rgba(255, 255, 255, 0.45);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
-}
-
-body.theme-pearl .glass-input,
-.theme-pearl .glass-input {
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(205, 195, 178, 0.85);
-  color: #0F172A;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04) inset;
-}
-
-body.theme-pearl .glass-input:focus,
-.theme-pearl .glass-input:focus {
-  background: #FFFFFF;
-  border-color: #2D3748;
-  box-shadow: 0 0 0 2px rgba(45, 55, 72, 0.15);
-  color: #0F172A;
 }
 
 /* ==========================================================================
-   PEARL WHITE THEME DEEP STRUCTURAL OVERRIDES (LOGO MATCHED)
+   3. THEME 2: PEARL WHITE (EYE-FRIENDLY WARM ALABASTER & SATIN IVORY)
    ========================================================================== */
-
-/* Header in Pearl White */
-body.theme-pearl header {
-  background: rgba(255, 255, 255, 0.92) !important;
-  backdrop-filter: blur(20px) !important;
-  -webkit-backdrop-filter: blur(20px) !important;
-  border-bottom: 1px solid rgba(220, 210, 195, 0.85) !important;
-  box-shadow: 0 4px 20px -2px rgba(120, 105, 90, 0.07) !important;
-  color: #1E293B !important;
+html.theme-pearl,
+body.theme-pearl {
+  --bg-primary: #F4F6F9;
+  --bg-secondary: #EDF1F7;
+  --bg-elevated: #FFFFFF;
+  --text-primary: #0F172A;
+  --text-secondary: #334155;
+  --text-muted: #64748B;
+  --glass-bg: #FFFFFF;
+  --glass-card-bg: #FFFFFF;
+  --glass-border: #E2E8F0;
+  --glass-shadow: 0 2px 12px -2px rgba(15, 23, 42, 0.05), 0 1px 3px 0 rgba(15, 23, 42, 0.03);
+  --input-bg: #FFFFFF;
+  --input-border: #CBD5E1;
 }
 
-body.theme-pearl header .bg-slate-800,
-body.theme-pearl header .bg-slate-800\/80,
-body.theme-pearl header .bg-slate-800\/90,
-body.theme-pearl header .bg-slate-900 {
-  background: rgba(248, 244, 236, 0.92) !important;
-  border-color: rgba(215, 205, 190, 0.75) !important;
-  color: #1E293B !important;
-}
-
-body.theme-pearl header .bg-slate-800\/80:hover,
-body.theme-pearl header .bg-slate-700\/80:hover,
-body.theme-pearl header .bg-slate-700:hover {
-  background: rgba(240, 234, 222, 0.95) !important;
+html.theme-pearl body,
+body.theme-pearl {
+  background-color: #F4F6F9 !important;
+  background-image:
+    radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.9) 0%, transparent 50%),
+    linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%) !important;
   color: #0F172A !important;
 }
 
-body.theme-pearl header .text-slate-200,
-body.theme-pearl header .text-slate-300,
-body.theme-pearl header .text-white {
-  color: #1E293B !important;
+/* Primary Cards & Panels in Pearl White */
+body.theme-pearl .glass-panel,
+body.theme-pearl .glass-card {
+  background: #FFFFFF !important;
+  border: 1px solid #E2E8F0 !important;
+  box-shadow: 0 2px 12px -2px rgba(15, 23, 42, 0.05), 0 1px 3px 0 rgba(15, 23, 42, 0.03) !important;
+  color: #0F172A;
 }
 
-body.theme-pearl header .text-slate-400 {
-  color: #64748B !important;
+/* App Shell & Navigation Surfaces in Pearl White */
+body.theme-pearl aside.glass-panel,
+body.theme-pearl header.glass-panel {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: #E2E8F0 !important;
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05) !important;
 }
 
-/* Sidebar in Pearl White */
-body.theme-pearl aside {
-  background: rgba(253, 251, 247, 0.97) !important;
-  backdrop-filter: blur(20px) !important;
-  -webkit-backdrop-filter: blur(20px) !important;
-  border-right: 1px solid rgba(220, 210, 195, 0.85) !important;
-  box-shadow: 4px 0 25px -5px rgba(120, 105, 85, 0.08) !important;
-  color: #1E293B !important;
+/* Modal Backdrops in Pearl White */
+body.theme-pearl .fixed.inset-0[class*="bg-black/"] {
+  background-color: rgba(15, 23, 42, 0.45) !important;
+  backdrop-filter: blur(6px) !important;
 }
 
-body.theme-pearl aside .bg-slate-900,
-body.theme-pearl aside .bg-slate-900\/90,
-body.theme-pearl aside .bg-slate-950,
-body.theme-pearl aside .bg-slate-950\/90,
-body.theme-pearl aside .bg-slate-950\/98 {
-  background: rgba(247, 242, 233, 0.95) !important;
-  border-color: rgba(220, 210, 195, 0.7) !important;
-}
-
-body.theme-pearl aside .text-white,
-body.theme-pearl aside .text-slate-100,
-body.theme-pearl aside .text-slate-200,
-body.theme-pearl aside .text-slate-300 {
-  color: #1E293B !important;
-}
-
-body.theme-pearl aside .text-slate-400,
-body.theme-pearl aside .text-gray-400 {
-  color: #64748B !important;
-}
-
-body.theme-pearl aside .border-white\/10,
-body.theme-pearl aside .border-white\/15,
-body.theme-pearl aside .border-white\/20 {
-  border-color: rgba(220, 210, 195, 0.75) !important;
-}
-
-/* Modal Backdrops & Cards in Pearl White */
-body.theme-pearl .fixed.inset-0.bg-black\/60,
-body.theme-pearl .fixed.inset-0.bg-black\/50,
-body.theme-pearl .fixed.inset-0.bg-black\/40,
-body.theme-pearl .fixed.inset-0.bg-black\/30 {
-  background-color: rgba(30, 41, 59, 0.40) !important;
-  backdrop-filter: blur(8px) !important;
-}
-
-/* Generic Dark Containers Adapted to Pearl White */
+/* Dark Slate, Hex & Dark Gradient Containers Adapted to Crisp Pearl Surfaces */
 body.theme-pearl [class*="bg-slate-900"],
-body.theme-pearl [class*="bg-slate-950"] {
-  background-color: rgba(255, 255, 255, 0.92) !important;
-  border-color: rgba(220, 210, 195, 0.8) !important;
+body.theme-pearl [class*="bg-slate-950"],
+body.theme-pearl [class*="bg-slate-850"],
+body.theme-pearl [class*="bg-gray-900"],
+body.theme-pearl [class*="bg-[#090C12]"],
+body.theme-pearl [class*="bg-[#0B0E14]"],
+body.theme-pearl [class*="bg-[#0B0F17]"],
+body.theme-pearl [class*="bg-[#0E121B]"],
+body.theme-pearl [class*="bg-[#0F1115]"],
+body.theme-pearl [class*="bg-[#0F1420]"],
+body.theme-pearl [class*="bg-[#0F172A]"],
+body.theme-pearl [class*="bg-[#111318]"],
+body.theme-pearl [class*="bg-[#11141D]"],
+body.theme-pearl [class*="bg-[#111724]"],
+body.theme-pearl [class*="bg-[#111827]"],
+body.theme-pearl [class*="bg-[#121620]"],
+body.theme-pearl [class*="bg-[#131722]"],
+body.theme-pearl [class*="bg-[#151922]"],
+body.theme-pearl [class*="bg-[#161920]"],
+body.theme-pearl [class*="from-slate-850"],
+body.theme-pearl [class*="from-slate-900"],
+body.theme-pearl [class*="from-slate-950"],
+body.theme-pearl [class*="via-slate-800"],
+body.theme-pearl [class*="via-slate-850"],
+body.theme-pearl [class*="via-slate-900"],
+body.theme-pearl [class*="via-slate-950"],
+body.theme-pearl [class*="to-slate-800"],
+body.theme-pearl [class*="to-slate-850"],
+body.theme-pearl [class*="to-slate-900"],
+body.theme-pearl [class*="to-slate-950"],
+body.theme-pearl [class*="to-[#0e1626]"],
+body.theme-pearl [class*="to-[#10141D]"],
+body.theme-pearl [class*="to-[#111724]"],
+body.theme-pearl [class*="via-[#111724]"],
+body.theme-pearl [class*="via-[#161A24]"] {
+  background-color: #FFFFFF !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #F8FAFC 100%) !important;
+  border-color: #E2E8F0 !important;
+  color: #0F172A;
+}
+
+body.theme-pearl [class*="bg-slate-800"]:not(button),
+body.theme-pearl [class*="bg-gray-800"]:not(button),
+body.theme-pearl [class*="bg-[#161B26]"],
+body.theme-pearl [class*="bg-[#1B2230]"],
+body.theme-pearl [class*="bg-[#10141D]"],
+body.theme-pearl :not(.fixed)[class*="bg-black/10"],
+body.theme-pearl :not(.fixed)[class*="bg-black/15"],
+body.theme-pearl :not(.fixed)[class*="bg-black/20"],
+body.theme-pearl :not(.fixed)[class*="bg-black/25"],
+body.theme-pearl :not(.fixed)[class*="bg-black/30"],
+body.theme-pearl :not(.fixed)[class*="bg-black/40"],
+body.theme-pearl :not(.fixed)[class*="bg-black/50"],
+body.theme-pearl :not(.fixed)[class*="bg-black/60"],
+body.theme-pearl [class*="bg-white/[0.02]"],
+body.theme-pearl [class*="bg-white/[0.03]"],
+body.theme-pearl [class*="bg-white/[0.04]"],
+body.theme-pearl [class*="bg-white/5"],
+body.theme-pearl [class*="bg-white/10"]:not(button),
+body.theme-pearl [class*="from-white/5"] {
+  background-color: #F8FAFC !important;
+  background-image: none !important;
+  border-color: #E2E8F0 !important;
   color: #1E293B;
 }
 
-body.theme-pearl [class*="bg-slate-800"] {
-  background-color: rgba(248, 244, 236, 0.92) !important;
-  border-color: rgba(220, 210, 195, 0.75) !important;
-  color: #1E293B;
+body.theme-pearl button[class*="bg-slate-800"],
+body.theme-pearl button[class*="bg-gray-800"] {
+  background-color: #F1F5F9 !important;
+  background-image: none !important;
+  border-color: #CBD5E1 !important;
+  color: #0F172A !important;
 }
 
-body.theme-pearl [class*="border-white/"] {
-  border-color: rgba(215, 205, 190, 0.65) !important;
+body.theme-pearl button[class*="bg-slate-800"]:hover,
+body.theme-pearl button[class*="bg-gray-800"]:hover {
+  background-color: #E2E8F0 !important;
+  color: #0F172A !important;
 }
 
+/* Soft Tinted Card & Gradient Backgrounds in Pearl White */
+body.theme-pearl [class*="bg-emerald-950"],
+body.theme-pearl [class*="bg-emerald-900/"],
+body.theme-pearl [class*="bg-emerald-500/10"],
+body.theme-pearl [class*="bg-emerald-500/15"],
+body.theme-pearl [class*="bg-emerald-500/20"],
+body.theme-pearl [class*="from-emerald-950"],
+body.theme-pearl [class*="from-emerald-900"],
+body.theme-pearl [class*="to-emerald-950"],
+body.theme-pearl [class*="from-emerald-500/10"],
+body.theme-pearl [class*="from-teal-950"],
+body.theme-pearl [class*="from-teal-900"],
+body.theme-pearl [class*="from-lime-950"],
+body.theme-pearl [class*="from-lime-900"] {
+  background-color: #ECFDF5 !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #ECFDF5 100%) !important;
+  border-color: #A7F3D0 !important;
+}
+
+body.theme-pearl [class*="bg-amber-950"],
+body.theme-pearl [class*="bg-amber-900/"],
+body.theme-pearl [class*="bg-amber-500/10"],
+body.theme-pearl [class*="bg-amber-500/15"],
+body.theme-pearl [class*="bg-amber-500/20"],
+body.theme-pearl [class*="from-amber-950"],
+body.theme-pearl [class*="from-amber-900"],
+body.theme-pearl [class*="to-amber-950"],
+body.theme-pearl [class*="from-amber-500/10"],
+body.theme-pearl [class*="from-amber-500/15"],
+body.theme-pearl [class*="from-amber-500/20"],
+body.theme-pearl [class*="from-yellow-950"],
+body.theme-pearl [class*="from-yellow-900"],
+body.theme-pearl [class*="from-orange-950"],
+body.theme-pearl [class*="from-orange-900"] {
+  background-color: #FFFBEB !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #FFFBEB 100%) !important;
+  border-color: #FDE68A !important;
+}
+
+body.theme-pearl [class*="bg-blue-950"],
+body.theme-pearl [class*="bg-blue-900/"],
+body.theme-pearl [class*="bg-blue-500/10"],
+body.theme-pearl [class*="bg-blue-500/15"],
+body.theme-pearl [class*="bg-blue-500/20"],
+body.theme-pearl [class*="bg-sky-500/10"],
+body.theme-pearl [class*="bg-sky-500/15"],
+body.theme-pearl [class*="bg-sky-500/20"],
+body.theme-pearl [class*="bg-brand-500/10"],
+body.theme-pearl [class*="bg-brand-500/15"],
+body.theme-pearl [class*="bg-brand-500/20"],
+body.theme-pearl [class*="from-blue-950"],
+body.theme-pearl [class*="from-blue-900"],
+body.theme-pearl [class*="to-blue-950"],
+body.theme-pearl [class*="from-brand-950"],
+body.theme-pearl [class*="via-brand-950"],
+body.theme-pearl [class*="to-brand-950"],
+body.theme-pearl [class*="from-cyan-950"],
+body.theme-pearl [class*="from-cyan-900"],
+body.theme-pearl [class*="from-sky-950"],
+body.theme-pearl [class*="from-sky-900"],
+body.theme-pearl [class*="from-blue-500/10"],
+body.theme-pearl [class*="from-brand-500/10"] {
+  background-color: #EFF6FF !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #EFF6FF 100%) !important;
+  border-color: #BFDBFE !important;
+}
+
+body.theme-pearl [class*="bg-rose-950"],
+body.theme-pearl [class*="bg-rose-900/"],
+body.theme-pearl [class*="bg-rose-500/10"],
+body.theme-pearl [class*="bg-rose-500/15"],
+body.theme-pearl [class*="bg-rose-500/20"],
+body.theme-pearl [class*="bg-red-500/10"],
+body.theme-pearl [class*="bg-red-500/15"],
+body.theme-pearl [class*="bg-red-500/20"],
+body.theme-pearl [class*="from-rose-950"],
+body.theme-pearl [class*="from-rose-900"],
+body.theme-pearl [class*="to-rose-950"],
+body.theme-pearl [class*="from-red-950"],
+body.theme-pearl [class*="from-red-900"],
+body.theme-pearl [class*="from-red-500/10"] {
+  background-color: #FFF1F2 !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #FFF1F2 100%) !important;
+  border-color: #FECDD3 !important;
+}
+
+body.theme-pearl [class*="bg-purple-950"],
+body.theme-pearl [class*="bg-purple-900/"],
+body.theme-pearl [class*="bg-purple-500/10"],
+body.theme-pearl [class*="bg-purple-500/15"],
+body.theme-pearl [class*="bg-purple-500/20"],
+body.theme-pearl [class*="bg-indigo-500/10"],
+body.theme-pearl [class*="bg-indigo-500/15"],
+body.theme-pearl [class*="bg-indigo-500/20"],
+body.theme-pearl [class*="from-purple-950"],
+body.theme-pearl [class*="from-purple-900"],
+body.theme-pearl [class*="to-purple-950"],
+body.theme-pearl [class*="from-indigo-950"],
+body.theme-pearl [class*="from-indigo-900"],
+body.theme-pearl [class*="to-indigo-950"],
+body.theme-pearl [class*="from-violet-950"],
+body.theme-pearl [class*="from-violet-900"] {
+  background-color: #F5F3FF !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #F5F3FF 100%) !important;
+  border-color: #DDD6FE !important;
+}
+
+/* Borders in Pearl White */
+body.theme-pearl [class*="border-white/"],
 body.theme-pearl [class*="border-slate-800"],
 body.theme-pearl [class*="border-slate-700"] {
-  border-color: rgba(220, 210, 195, 0.75) !important;
+  border-color: #E2E8F0 !important;
 }
 
 /* Inputs, Selects & Textareas in Pearl White */
-body.theme-pearl input,
+body.theme-pearl input:not([type="checkbox"]):not([type="radio"]),
 body.theme-pearl select,
-body.theme-pearl textarea {
+body.theme-pearl textarea,
+body.theme-pearl .glass-input {
   background-color: #FFFFFF !important;
-  border-color: rgba(205, 195, 178, 0.85) !important;
+  border: 1px solid #CBD5E1 !important;
   color: #0F172A !important;
+  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.03);
 }
 
-body.theme-pearl input:focus,
+body.theme-pearl input:not([type="checkbox"]):not([type="radio"]):focus,
 body.theme-pearl select:focus,
-body.theme-pearl textarea:focus {
-  border-color: #2D3748 !important;
-  box-shadow: 0 0 0 2px rgba(45, 55, 72, 0.15) !important;
+body.theme-pearl textarea:focus,
+body.theme-pearl .glass-input:focus {
+  border-color: #0284C7 !important;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.14) !important;
 }
 
 body.theme-pearl input::placeholder,
@@ -305,18 +399,19 @@ body.theme-pearl textarea::placeholder {
 
 /* Tables in Pearl White */
 body.theme-pearl table th {
-  background-color: rgba(243, 237, 226, 0.95) !important;
-  color: #334155 !important;
-  border-color: rgba(220, 210, 195, 0.8) !important;
+  background-color: #F8FAFC !important;
+  color: #475569 !important;
+  border-color: #E2E8F0 !important;
+  font-weight: 700;
 }
 
 body.theme-pearl table td {
-  border-color: rgba(225, 217, 203, 0.6) !important;
+  border-color: #F1F5F9 !important;
   color: #1E293B !important;
 }
 
 body.theme-pearl table tbody tr:hover {
-  background-color: rgba(255, 255, 255, 0.85) !important;
+  background-color: #F8FAFC !important;
 }
 
 /* Typography Hierarchy in Pearl White */
@@ -326,7 +421,7 @@ body.theme-pearl h3,
 body.theme-pearl h4,
 body.theme-pearl h5,
 body.theme-pearl h6 {
-  color: #0F172A !important;
+  color: #0F172A;
 }
 
 body.theme-pearl .text-white {
@@ -343,583 +438,258 @@ body.theme-pearl .text-gray-300 {
 }
 
 body.theme-pearl .text-slate-400,
-body.theme-pearl .text-gray-400 {
+body.theme-pearl .text-gray-400,
+body.theme-pearl .text-slate-500,
+body.theme-pearl .text-gray-500 {
   color: #64748B !important;
 }
 
-body.theme-pearl .text-slate-500,
-body.theme-pearl .text-gray-500 {
-  color: #475569 !important;
+/* High-Contrast Semantic Ink in Pearl White */
+body.theme-pearl .text-amber-200,
+body.theme-pearl .text-amber-300,
+body.theme-pearl .text-amber-400,
+body.theme-pearl .text-amber-500 {
+  color: #B45309 !important;
 }
 
-/* Ensure colored status buttons, badges and primary actions preserve white text */
-body.theme-pearl button[class*="bg-blue-"],
-body.theme-pearl button[class*="bg-indigo-"],
-body.theme-pearl button[class*="bg-emerald-"],
-body.theme-pearl button[class*="bg-green-"],
-body.theme-pearl button[class*="bg-red-"],
-body.theme-pearl button[class*="bg-rose-"],
-body.theme-pearl button[class*="bg-amber-"],
-body.theme-pearl button[class*="bg-cyan-"],
-body.theme-pearl button[class*="bg-brand-"],
-body.theme-pearl button[class*="bg-purple-"],
+body.theme-pearl .text-emerald-200,
+body.theme-pearl .text-emerald-300,
+body.theme-pearl .text-emerald-400,
+body.theme-pearl .text-emerald-500 {
+  color: #047857 !important;
+}
+
+body.theme-pearl .text-rose-200,
+body.theme-pearl .text-rose-300,
+body.theme-pearl .text-rose-400,
+body.theme-pearl .text-red-300,
+body.theme-pearl .text-red-400,
+body.theme-pearl .text-red-500 {
+  color: #BE123C !important;
+}
+
+body.theme-pearl .text-sky-200,
+body.theme-pearl .text-sky-300,
+body.theme-pearl .text-sky-400,
+body.theme-pearl .text-blue-300,
+body.theme-pearl .text-blue-400,
+body.theme-pearl .text-cyan-300,
+body.theme-pearl .text-cyan-400,
+body.theme-pearl .text-brand-300,
+body.theme-pearl .text-brand-400 {
+  color: #0369A1 !important;
+}
+
+body.theme-pearl .text-purple-200,
+body.theme-pearl .text-purple-300,
+body.theme-pearl .text-purple-400,
+body.theme-pearl .text-indigo-300,
+body.theme-pearl .text-indigo-400 {
+  color: #6D28D9 !important;
+}
+
+/* ==========================================================================
+   4. CRITICAL FIX: SOLID FILLED BUTTONS, ACTIVE TABS & BADGES IN PEARL WHITE
+      Always preserve crisp #FFFFFF text & icons on solid colored backgrounds!
+   ========================================================================== */
+body.theme-pearl .bg-slate-700 {
+  background-color: #1E293B !important;
+  border-color: #0F172A !important;
+  color: #FFFFFF !important;
+}
+
+body.theme-pearl .bg-blue-500,
+body.theme-pearl .bg-blue-600,
+body.theme-pearl .bg-blue-700,
+body.theme-pearl .bg-sky-500,
+body.theme-pearl .bg-sky-600,
+body.theme-pearl .bg-sky-700,
+body.theme-pearl .bg-indigo-500,
+body.theme-pearl .bg-indigo-600,
+body.theme-pearl .bg-indigo-700,
+body.theme-pearl .bg-emerald-500,
+body.theme-pearl .bg-emerald-600,
+body.theme-pearl .bg-emerald-700,
+body.theme-pearl .bg-green-500,
+body.theme-pearl .bg-green-600,
+body.theme-pearl .bg-green-700,
+body.theme-pearl .bg-teal-500,
+body.theme-pearl .bg-teal-600,
+body.theme-pearl .bg-teal-700,
+body.theme-pearl .bg-red-500,
+body.theme-pearl .bg-red-600,
+body.theme-pearl .bg-red-700,
+body.theme-pearl .bg-rose-500,
+body.theme-pearl .bg-rose-600,
+body.theme-pearl .bg-rose-700,
+body.theme-pearl .bg-amber-600,
+body.theme-pearl .bg-amber-700,
+body.theme-pearl .bg-orange-500,
+body.theme-pearl .bg-orange-600,
+body.theme-pearl .bg-cyan-500,
+body.theme-pearl .bg-cyan-600,
+body.theme-pearl .bg-brand-500,
+body.theme-pearl .bg-brand-600,
+body.theme-pearl .bg-brand-700,
+body.theme-pearl .bg-purple-500,
+body.theme-pearl .bg-purple-600,
+body.theme-pearl .bg-purple-700,
+body.theme-pearl .bg-slate-700,
 body.theme-pearl .btn-charcoal-primary,
-body.theme-pearl [class*="bg-gradient-to-r"].text-white,
-body.theme-pearl span[class*="bg-blue-"],
-body.theme-pearl span[class*="bg-emerald-"],
-body.theme-pearl span[class*="bg-green-"],
-body.theme-pearl span[class*="bg-red-"],
-body.theme-pearl span[class*="bg-rose-"],
-body.theme-pearl span[class*="bg-amber-"] {
+body.theme-pearl .from-blue-500,
+body.theme-pearl .from-blue-600,
+body.theme-pearl .from-brand-500,
+body.theme-pearl .from-brand-600,
+body.theme-pearl .from-emerald-500,
+body.theme-pearl .from-emerald-600,
+body.theme-pearl .from-teal-500,
+body.theme-pearl .from-teal-600,
+body.theme-pearl .from-purple-500,
+body.theme-pearl .from-purple-600,
+body.theme-pearl .from-indigo-500,
+body.theme-pearl .from-indigo-600,
+body.theme-pearl .from-rose-500,
+body.theme-pearl .from-rose-600,
+body.theme-pearl .from-red-500,
+body.theme-pearl .from-red-600 {
   color: #FFFFFF !important;
 }
 
-body.theme-pearl button[class*="bg-blue-"] *,
-body.theme-pearl button[class*="bg-indigo-"] *,
-body.theme-pearl button[class*="bg-emerald-"] *,
-body.theme-pearl button[class*="bg-green-"] *,
-body.theme-pearl button[class*="bg-red-"] *,
-body.theme-pearl button[class*="bg-rose-"] *,
-body.theme-pearl button[class*="bg-brand-"] *,
-body.theme-pearl button[class*="bg-purple-"] *,
-body.theme-pearl .btn-charcoal-primary * {
+body.theme-pearl .bg-blue-500 *,
+body.theme-pearl .bg-blue-600 *,
+body.theme-pearl .bg-blue-700 *,
+body.theme-pearl .bg-sky-500 *,
+body.theme-pearl .bg-sky-600 *,
+body.theme-pearl .bg-sky-700 *,
+body.theme-pearl .bg-indigo-500 *,
+body.theme-pearl .bg-indigo-600 *,
+body.theme-pearl .bg-indigo-700 *,
+body.theme-pearl .bg-emerald-500 *,
+body.theme-pearl .bg-emerald-600 *,
+body.theme-pearl .bg-emerald-700 *,
+body.theme-pearl .bg-green-500 *,
+body.theme-pearl .bg-green-600 *,
+body.theme-pearl .bg-green-700 *,
+body.theme-pearl .bg-teal-500 *,
+body.theme-pearl .bg-teal-600 *,
+body.theme-pearl .bg-teal-700 *,
+body.theme-pearl .bg-red-500 *,
+body.theme-pearl .bg-red-600 *,
+body.theme-pearl .bg-red-700 *,
+body.theme-pearl .bg-rose-500 *,
+body.theme-pearl .bg-rose-600 *,
+body.theme-pearl .bg-rose-700 *,
+body.theme-pearl .bg-amber-600 *,
+body.theme-pearl .bg-amber-700 *,
+body.theme-pearl .bg-orange-500 *,
+body.theme-pearl .bg-orange-600 *,
+body.theme-pearl .bg-cyan-500 *,
+body.theme-pearl .bg-cyan-600 *,
+body.theme-pearl .bg-brand-500 *,
+body.theme-pearl .bg-brand-600 *,
+body.theme-pearl .bg-brand-700 *,
+body.theme-pearl .bg-purple-500 *,
+body.theme-pearl .bg-purple-600 *,
+body.theme-pearl .bg-purple-700 *,
+body.theme-pearl .bg-slate-700 *,
+body.theme-pearl .btn-charcoal-primary *,
+body.theme-pearl .from-blue-500 *,
+body.theme-pearl .from-blue-600 *,
+body.theme-pearl .from-brand-500 *,
+body.theme-pearl .from-brand-600 *,
+body.theme-pearl .from-emerald-500 *,
+body.theme-pearl .from-emerald-600 *,
+body.theme-pearl .from-teal-500 *,
+body.theme-pearl .from-teal-600 *,
+body.theme-pearl .from-purple-500 *,
+body.theme-pearl .from-purple-600 *,
+body.theme-pearl .from-indigo-500 *,
+body.theme-pearl .from-indigo-600 *,
+body.theme-pearl .from-rose-500 *,
+body.theme-pearl .from-rose-600 *,
+body.theme-pearl .from-red-500 *,
+body.theme-pearl .from-red-600 * {
   color: #FFFFFF !important;
 }
 
-/* Pearl White Scrollbar Styling */
-body.theme-pearl .custom-scrollbar {
-  scrollbar-color: rgba(180, 165, 145, 0.5) rgba(245, 240, 230, 0.5);
-}
-
-body.theme-pearl .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(245, 240, 230, 0.6);
-}
-
-body.theme-pearl .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(180, 165, 145, 0.55);
-  border: 2px solid rgba(255, 255, 255, 0.8);
-}
-
-/* 3. Luxury Animated Buttons ("Animiated Buttons") */
-@keyframes luxuryShimmerSweep {
-  0% { transform: translateX(-160%) skewX(-20deg); }
-  50% { transform: translateX(260%) skewX(-20deg); }
-  100% { transform: translateX(260%) skewX(-20deg); }
-}
-
-@keyframes pearlRimGlow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(226, 232, 240, 0.5); }
-  50% { box-shadow: 0 0 0 6px rgba(226, 232, 240, 0); }
-}
-
-.btn-animated-luxury,
-.btn-luxury {
-  position: relative;
-  overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  transform: translateY(0);
-}
-
-.btn-animated-luxury:hover,
-.btn-luxury:hover {
-  transform: translateY(-2px);
-}
-
-.btn-animated-luxury:active,
-.btn-luxury:active {
-  transform: translateY(0) scale(0.98);
-}
-
-.btn-animated-luxury::after,
-.btn-luxury::after {
-  content: '';
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.35) 50%,
-    transparent 100%
-  );
-  transform: translateX(-160%) skewX(-20deg);
-  pointer-events: none;
-}
-
-.btn-animated-luxury:hover::after,
-.btn-luxury:hover::after {
-  animation: luxuryShimmerSweep 1.6s infinite ease-in-out;
-}
-
-/* Charcoal Primary Button matching MAK Logo */
+/* ==========================================================================
+   5. LUXURY INTERACTIVE BUTTONS & SCROLLBARS
+   ========================================================================== */
 .btn-charcoal-primary {
-  background: linear-gradient(135deg, #2D3748 0%, #1A202C 100%);
+  background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
   color: #FFFFFF;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 8px 24px -5px rgba(15, 23, 42, 0.3), 0 0 1px 1px rgba(255, 255, 255, 0.1) inset;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 4px 14px -2px rgba(15, 23, 42, 0.25);
+  transition: all 0.2s ease;
 }
 
 .btn-charcoal-primary:hover {
-  background: linear-gradient(135deg, #3C4858 0%, #222B38 100%);
-  border-color: rgba(255, 255, 255, 0.3);
-  box-shadow: 0 14px 28px -5px rgba(15, 23, 42, 0.45);
+  background: linear-gradient(135deg, #334155 0%, #1E293B 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px -3px rgba(15, 23, 42, 0.35);
 }
 
-/* Pearl White Satin Light Button */
 .btn-pearl-light {
-  background: linear-gradient(135deg, #FFFFFF 0%, #F1F5F9 100%);
+  background: #FFFFFF;
   color: #1E293B;
-  border: 1px solid rgba(226, 232, 240, 0.95);
-  box-shadow: 0 8px 20px -6px rgba(15, 23, 42, 0.08), 0 0 1px 1px rgba(255, 255, 255, 0.95) inset;
+  border: 1px solid #CBD5E1;
+  box-shadow: 0 2px 6px -1px rgba(15, 23, 42, 0.06);
+  transition: all 0.2s ease;
 }
 
 .btn-pearl-light:hover {
-  background: linear-gradient(135deg, #FFFFFF 0%, #FFFFFF 100%);
-  border-color: #CBD5E1;
-  box-shadow: 0 14px 28px -6px rgba(15, 23, 42, 0.12);
-}
-
-/* Fluid Scrollbar & High-Performance Touch/Wheel Scrolling */
-html, body, #root {
-  height: 100%;
-  width: 100%;
-  max-width: 100% !important;
-  overflow-x: hidden !important;
-  -webkit-overflow-scrolling: touch;
-  scroll-behavior: auto !important; /* Prevents wheel lag */
-}
-
-body {
-  position: relative;
-  overflow-x: hidden !important;
-  width: 100%;
-  max-width: 100% !important;
-  margin: 0;
-  padding: 0;
+  background: #F8FAFC;
+  border-color: #94A3B8;
 }
 
 .custom-scrollbar {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.25) rgba(255, 255, 255, 0.02);
-  touch-action: pan-y;
-  overscroll-behavior-y: contain;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
 }
 
-.custom-scrollbar-x {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.25) rgba(255, 255, 255, 0.02);
-  touch-action: pan-x pan-y;
-  overscroll-behavior-x: contain;
+.custom-scrollbar::-webkit-scrollbar,
+.overflow-x-auto::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track,
+.overflow-x-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb,
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover,
+.overflow-x-auto::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
 }
 
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-x pan-y;
 }
 
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
-  border-radius: 4px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.35);
-}
-
-/* Animations */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.5s ease-out forwards;
-}
-
-.animate-in {
-  animation-duration: 0.3s;
-  animation-timing-function: ease-out;
-  animation-fill-mode: forwards;
-}
-
-.slide-in-from-bottom-2 {
-  animation-name: slideInFromBottom;
-}
-
-@keyframes slideInFromBottom {
-  from { transform: translateY(0.5rem); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-
-.slide-in-from-left-2 {
-  animation-name: slideInFromLeft;
-}
-
-@keyframes slideInFromLeft {
-  from { transform: translateX(-0.5rem); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
-
 /* ==========================================================================
-   UNIFIED PRINT STYLESHEET CONFIGURATION (ISO A4 STANDARDIZED)
-   Supports: Invoices, Customs Documents, Case Reports, Container Bills & Ledgers
-   Ensures clean A4 formatting without displaying dashboard-specific UI elements.
+   6. PRINT & A4 REPORT HELPERS
    ========================================================================== */
 @media print {
-  /* 1. Page Configuration */
   @page {
     size: A4 portrait;
-    margin: 12mm 14mm 15mm 14mm;
-  }
-
-  @page :first {
-    margin-top: 10mm;
-  }
-
-  @page landscape {
-    size: A4 landscape;
     margin: 10mm;
   }
 
-  .print-landscape {
-    page: landscape;
-  }
-
-  /* 2. Global Layout Reset - Allow natural multi-page flow without clipping */
-  html,
-  body,
-  #root,
-  #root > div,
-  main,
-  .overflow-hidden,
-  .overflow-y-auto,
-  .custom-scrollbar {
-    width: 100% !important;
-    height: auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
-    overflow: visible !important;
-    position: static !important;
-    display: block !important;
-    background: #ffffff !important;
-    color: #111827 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    box-shadow: none !important;
-    border: none !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-
-  /* 3. Dashboard-Specific UI Suppression */
-  /* Hide application sidebar, top navigation, search bars, action buttons, notifications, switchers */
-  header,
-  aside,
-  nav,
-  .no-print,
-  .print\:hidden,
-  [data-no-print="true"],
-  button:not(.print-keep),
-  input[type="checkbox"],
-  input[type="file"],
-  input[type="search"],
-  .search-bar,
-  .filter-bar,
-  .top-mode-switcher,
-  #action-center,
-  .toast,
-  .modal-close-btn,
-  .modal-footer,
-  /* Backdrop blur and translucent masks */
-  .backdrop-blur-sm,
-  .backdrop-blur-md,
-  .backdrop-blur-xl {
+  .no-print {
     display: none !important;
-  }
-
-  /* Scrollbars removal */
-  ::-webkit-scrollbar {
-    display: none !important;
-  }
-
-  /* Hide background dashboard when a printable modal is active */
-  body:has(.fixed.inset-0:not(.no-print)) aside,
-  body:has(.fixed.inset-0:not(.no-print)) header,
-  body:has(.fixed.inset-0:not(.no-print)) .dashboard-main-content {
-    display: none !important;
-  }
-
-  /* 4. Modal Overlays Flattening for Print */
-  /* Unpack modal containers into flat clean documents */
-  .fixed.inset-0:not(.no-print) {
-    position: static !important;
-    inset: auto !important;
-    width: 100% !important;
-    height: auto !important;
-    max-width: 100% !important;
-    overflow: visible !important;
-    background: #ffffff !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    display: block !important;
-    z-index: auto !important;
-  }
-
-  .fixed.inset-0:not(.no-print) > div {
-    position: static !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    min-height: 0 !important;
-    max-height: none !important;
-    overflow: visible !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #ffffff !important;
-    color: #111827 !important;
-    border: none !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-  }
-
-  /* Specific rule for statistics report printable document */
-  #station-stats-report-print,
-  #station-stats-report-print * {
-    visibility: visible !important;
-  }
-
-  #station-stats-report-print {
-    display: block !important;
-    width: 100% !important;
-    background: #ffffff !important;
-    color: #111827 !important;
-  }
-
-  /* 5. Document Containers & Card Styling */
-  .printable-content,
-  .printable-area,
-  #printable-area,
-  #container-invoice-sheet,
-  .print-sheet {
-    display: block !important;
-    width: 100% !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #ffffff !important;
-    color: #111827 !important;
-    border: none !important;
-    box-shadow: none !important;
-  }
-
-  .glass-card,
-  .glass-panel {
-    background: #ffffff !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    border: 1px solid #d1d5db !important;
-    box-shadow: none !important;
-    color: #111827 !important;
-    border-radius: 4px !important;
-  }
-
-  .glass-input,
-  input,
-  select,
-  textarea {
-    border: none !important;
-    background: transparent !important;
-    color: #111827 !important;
-    padding: 0 !important;
-    box-shadow: none !important;
-  }
-
-  /* 6. High-Contrast Typography */
-  body, p, span, h1, h2, h3, h4, h5, h6, td, th, div, label {
-    color: #111827 !important;
-    text-shadow: none !important;
-  }
-
-  .text-white,
-  .text-gray-100,
-  .text-gray-200 {
-    color: #111827 !important;
-  }
-
-  .text-gray-300,
-  .text-gray-400,
-  .text-gray-500 {
-    color: #4b5563 !important;
-  }
-
-  .text-brand-300,
-  .text-brand-400,
-  .text-brand-500,
-  .text-brand-600 {
-    color: #1e3a8a !important;
-    font-weight: 600 !important;
-  }
-
-  .text-green-400,
-  .text-green-500,
-  .text-emerald-400 {
-    color: #065f46 !important;
-    font-weight: 600 !important;
-  }
-
-  .text-red-400,
-  .text-red-500 {
-    color: #991b1b !important;
-    font-weight: 600 !important;
-  }
-
-  .text-amber-300,
-  .text-amber-400,
-  .text-yellow-400 {
-    color: #92400e !important;
-    font-weight: 600 !important;
-  }
-
-  /* 7. Tables Formatting (Invoices, Customs GDs, Ledgers, Manifests, Reports) */
-  table {
-    width: 100% !important;
-    border-collapse: collapse !important;
-    page-break-inside: auto !important;
-    break-inside: auto !important;
-    margin-top: 8px !important;
-    margin-bottom: 12px !important;
-  }
-
-  thead {
-    display: table-header-group !important; /* Repeats table header across multiple pages */
-    background: #f9fafb !important;
-  }
-
-  tfoot {
-    display: table-footer-group !important;
-  }
-
-  tr {
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-
-  th {
-    background: #f3f4f6 !important;
-    color: #111827 !important;
-    font-weight: 700 !important;
-    border: 1px solid #d1d5db !important;
-    padding: 6px 10px !important;
-    font-size: 11px !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.05em !important;
-  }
-
-  td {
-    border: 1px solid #e5e7eb !important;
-    padding: 6px 10px !important;
-    font-size: 11px !important;
-    color: #1f2937 !important;
-  }
-
-  /* 8. Page Breaks & Block Rules */
-  .break-before-page,
-  .print-page-break {
-    page-break-before: always !important;
-    break-before: page !important;
-  }
-
-  .break-inside-avoid,
-  .print-avoid-break,
-  .signature-box,
-  .invoice-summary-box,
-  .cargo-specs-card {
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-
-  /* 9. Customs Document Scans & Images */
-  img {
-    max-width: 100% !important;
-    height: auto !important;
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-
-  .document-scan,
-  .attached-doc-preview {
-    max-height: 235mm !important;
-    display: block !important;
-    margin: 0 auto !important;
-    border: 1px solid #d1d5db !important;
-    border-radius: 4px !important;
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-
-  /* 10. Status Badges in Print */
-  .badge,
-  span[class*="rounded"] {
-    background: transparent !important;
-    border: 1px solid #6b7280 !important;
-    color: #111827 !important;
-    font-weight: 600 !important;
-    box-shadow: none !important;
-  }
-
-  /* 11. Official Document Header & Footer Utilities */
-  .print-official-header {
-    display: block !important;
-    border-bottom: 2px solid #111827 !important;
-    padding-bottom: 12px !important;
-    margin-bottom: 16px !important;
-  }
-
-  .print-official-footer {
-    display: block !important;
-    border-top: 1px solid #d1d5db !important;
-    padding-top: 10px !important;
-    margin-top: 24px !important;
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-
-  .print-signatures-row {
-    display: flex !important;
-    justify-content: space-between !important;
-    align-items: flex-end !important;
-    margin-top: 36px !important;
-    padding-top: 24px !important;
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-
-  .print-signature-line {
-    width: 180px !important;
-    border-top: 1px dashed #4b5563 !important;
-    text-align: center !important;
-    font-size: 10px !important;
-    color: #374151 !important;
-    padding-top: 4px !important;
   }
 }

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FolderKanban, Users, Truck, Settings, FileText, Bell, LogOut, Menu,
   X, Check, AlertCircle, AlertTriangle, Info, Trash2, Loader2, Maximize2, Minimize2, Upload,
   ShieldCheck, UserCircle, RefreshCw, HardDrive, MapPin, FolderArchive, Building2, ChevronDown, Package, ShieldAlert,
-  Sparkles, Crown
+  Sparkles, Crown, Sun, Moon
 } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import CaseManagement from './components/CaseManagement';
@@ -42,6 +42,7 @@ import { VirtualizedList } from './components/VirtualizedList';
 import PublicContainerTrackingPortal from './components/PublicContainerTrackingPortal';
 import PublicVehicleTrackingPortal from './components/PublicVehicleTrackingPortal';
 import { initAuditSchedulerService } from './services/auditSchedulerService';
+import { ThemeToggleSwitch, useAppTheme } from './components/ThemeToggleSwitch';
 
 const isVehicleTrackingDomainOrRoute = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -282,7 +283,6 @@ const App: React.FC = () => {
     return safeAppStorage.getItem('dpl_is_global_admin') === 'true';
   });
   const [isGroupAdminPortalOpen, setIsGroupAdminPortalOpen] = useState<boolean>(false);
-  const effectiveIsGlobalAdmin = isGlobalAdmin || currentRole === UserRole.ADMIN;
   const [allowedCompanies, setAllowedCompanies] = useState<string[]>(() => {
     const saved = safeAppStorage.getItem('dpl_allowed_companies');
     if (saved) {
@@ -293,23 +293,18 @@ const App: React.FC = () => {
     }
     return ['docks', 'muhib', 'vantage', 'truckit'];
   });
+  const effectiveIsGlobalAdmin = Boolean(
+    isGlobalAdmin ||
+    ((currentRole === UserRole.ADMIN || currentRoles.includes(UserRole.ADMIN)) && allowedCompanies.length >= 4)
+  );
+  const isCompanyAdmin = Boolean(
+    effectiveIsGlobalAdmin ||
+    currentRole === UserRole.ADMIN ||
+    currentRoles.includes(UserRole.ADMIN)
+  );
 
   // Luxury Business Class Theme: Pearl White vs Charcoal (matching MAK Logo)
-  const [appTheme, setAppTheme] = useState<'pearl' | 'charcoal'>(() => {
-    const saved = safeAppStorage.getItem('dpl_app_theme');
-    return (saved === 'charcoal' || saved === 'pearl') ? saved : 'charcoal';
-  });
-
-  useEffect(() => {
-    if (appTheme === 'charcoal') {
-      document.body.classList.remove('theme-pearl');
-      document.body.classList.add('theme-charcoal');
-    } else {
-      document.body.classList.remove('theme-charcoal');
-      document.body.classList.add('theme-pearl');
-    }
-    safeAppStorage.setItem('dpl_app_theme', appTheme);
-  }, [appTheme]);
+  const [appTheme, setAppTheme] = useAppTheme();
 
   // Session Toast for workflow restoration feedback
   const [sessionToast, setSessionToast] = useState<string | null>(null);
@@ -371,19 +366,21 @@ const App: React.FC = () => {
   
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
-  // Admin Navigation Items (Dashboard removed from sidebar; clicking Logo at top opens Dashboard)
+  // Admin Navigation Items with Dashboard Overview at top
   const adminNavItems = [
+    { id: 'dashboard', label: 'Dashboard Overview', icon: LayoutDashboard },
     { id: 'cases', label: 'Case Management', icon: FolderKanban },
     { id: 'company_documents', label: 'Company Documents', icon: FolderArchive },
-    { id: 'finance', label: 'Finance', icon: FileText },
-    { id: 'vehicles', label: 'Vehicles', icon: Truck },
+    { id: 'finance', label: 'Finance & Accounts', icon: FileText },
+    { id: 'vehicles', label: 'Fleet & Vehicles', icon: Truck },
     { id: 'available_vehicles', label: 'Available Fleet', icon: MapPin },
     { id: 'users', label: 'User Management', icon: Users },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
-  // Client Role Navigation Items (ONLY Cases and Finance as requested)
+  // Client Role Navigation Items
   const clientNavItems = [
+    { id: 'dashboard', label: 'Client Overview', icon: LayoutDashboard },
     { id: 'cases', label: 'Cases & Shipments', icon: FolderKanban },
     { id: 'finance', label: 'Finance & Invoices', icon: FileText },
     { id: 'available_vehicles', label: 'Available Fleet', icon: MapPin },
@@ -400,6 +397,7 @@ const App: React.FC = () => {
     }
     if (currentRole === UserRole.TRANSPORTER) {
       return [
+        { id: 'dashboard', label: 'Transporter Overview', icon: LayoutDashboard },
         { id: 'vehicles', label: 'Fleet & Vehicles', icon: Truck },
         { id: 'available_vehicles', label: 'Available Fleet', icon: MapPin },
         { id: 'cases', label: 'Assigned Shipments', icon: FolderKanban },
@@ -1000,14 +998,6 @@ const App: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden" onClick={() => setMobileSidebarOpen(false)}></div>
       )}
       
-      {/* Action Center Overlay */}
-      {isActionCenterOpen && (
-        <div 
-            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]" 
-            onClick={() => setIsActionCenterOpen(false)}
-        ></div>
-      )}
-
       {/* Notification Modal */}
       <NotificationModal 
         isOpen={isNotificationModalOpen}
@@ -1015,51 +1005,6 @@ const App: React.FC = () => {
         onClose={() => setIsNotificationModalOpen(false)}
         onAction={handleNotificationAction}
       />
-
-      {/* Action Center Sidebar */}
-      <div 
-        className={`fixed top-0 right-0 h-full w-80 sm:w-96 bg-slate-900/95 backdrop-blur-xl border-l border-white/10 z-50 transform transition-transform duration-300 shadow-2xl flex flex-col ${isActionCenterOpen ? 'translate-x-0' : 'translate-x-full'}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-4 border-b border-white/10 flex justify-between items-center bg-slate-900">
-          <h3 className="font-semibold text-lg text-white flex items-center gap-2"><Bell size={20} className="text-brand-400" /> Action Center</h3>
-          <button onClick={() => setIsActionCenterOpen(false)} className="text-gray-400 hover:text-white p-1 rounded-full hover:bg-white/10"><X size={20} /></button>
-        </div>
-        <div className="flex-1 overflow-hidden p-3 flex flex-col min-h-0">
-          <VirtualizedList
-            items={notifications}
-            itemHeight={120}
-            maxHeight={window.innerHeight ? window.innerHeight - 100 : 700}
-            getItemKey={(n, idx) => `act_notif_${n.id || idx}_${idx}`}
-            emptyPlaceholder={
-              <div className="text-center text-gray-500 py-10">
-                <Check size={48} className="mx-auto mb-2 opacity-50" />
-                <p>All caught up!</p>
-              </div>
-            }
-            renderItem={(n) => (
-              <div 
-                onClick={() => handleNotificationClick(n)}
-                className="p-3.5 mb-2.5 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 transition-colors cursor-pointer group"
-              >
-                <h4 className="text-sm font-semibold text-gray-200 group-hover:text-brand-300 transition-colors truncate">{n.title}</h4>
-                <p className="text-xs text-gray-400 mt-1 line-clamp-2">{n.description}</p>
-                {n.actionLabel && (
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleNotificationClick(n);
-                    }}
-                    className="w-full mt-2.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-medium py-1.5 rounded-lg transition-colors shadow-lg shadow-brand-600/20"
-                  >
-                    {n.actionLabel}
-                  </button>
-                )}
-              </div>
-            )}
-          />
-        </div>
-      </div>
 
       {/* Main Sidebar */}
       <aside className={`fixed top-0 left-0 h-full bg-slate-950/98 backdrop-blur-2xl border-r border-white/10 transition-all duration-300 flex flex-col z-40 shadow-2xl ${mobileSidebarOpen ? 'w-72 sm:w-80 translate-x-0' : 'w-72 sm:w-80 -translate-x-full'} lg:static lg:translate-x-0 lg:h-auto ${desktopSidebarExpanded ? 'lg:w-64' : 'lg:w-20'} overflow-hidden select-none`}>
@@ -1081,158 +1026,230 @@ const App: React.FC = () => {
           </button>
         </div>
 
-        {/* Company Identity Header in Sidebar (Compact, Beautiful, Safe) */}
+        {/* Company Identity Header in Sidebar (Transparent Logo, Elegant & Clean) */}
         <div 
           onClick={() => {
             setActiveView('dashboard');
             setNavigationFilter(null);
             setMobileSidebarOpen(false);
           }}
-          className="p-3 mx-3 my-2.5 rounded-2xl bg-slate-900/90 border border-white/10 flex items-center gap-2.5 cursor-pointer hover:border-slate-300/40 transition-all group shadow-md shrink-0"
+          className={`p-3 mx-3 my-2.5 rounded-2xl border flex items-center gap-3 cursor-pointer transition-all group shadow-sm shrink-0 ${
+            appTheme === 'pearl'
+              ? 'bg-slate-100/80 hover:bg-slate-200/90 border-slate-300/80 text-slate-800'
+              : 'bg-white/5 hover:bg-white/10 border-white/10 text-white'
+          }`}
           title={`${activeCompany.name} Dashboard`}
         >
-          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-black/60 border border-white/15 flex items-center justify-center p-2 shrink-0 group-hover:scale-105 transition-transform shadow-lg">
-            <Logo variant="icon" className="max-h-full max-w-full object-contain" customSrc={getCompanyLogoUrl(activeCompany.id)} />
+          {/* Logo with Pure Transparent Background - No Black Container Box */}
+          <div className="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center p-0 shrink-0 group-hover:scale-105 transition-transform bg-transparent">
+            <Logo variant="icon" className="max-h-full max-w-full object-contain drop-shadow" customSrc={getCompanyLogoUrl(activeCompany.id)} />
           </div>
           <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} min-w-0 flex-1`}>
-            <h3 className="font-extrabold text-xs sm:text-sm text-white group-hover:text-slate-100 transition-colors uppercase leading-tight truncate">
+            <h3 className={`font-extrabold text-xs sm:text-sm tracking-wide uppercase leading-tight truncate ${
+              appTheme === 'pearl' ? 'text-slate-900 group-hover:text-amber-800' : 'text-white group-hover:text-amber-300'
+            }`}>
               {activeCompany.name}
             </h3>
-            <p className="text-[10px] font-mono text-slate-400 tracking-wider uppercase truncate mt-0.5">
-              {activeCompany.shortName} • {activeCompany.prefix}
-            </p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className={`text-[10px] font-mono tracking-wider uppercase truncate ${
+                appTheme === 'pearl' ? 'text-slate-500' : 'text-slate-400'
+              }`}>
+                {activeCompany.shortName} • {activeCompany.prefix}
+              </span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Active Entity" />
+            </div>
           </div>
         </div>
 
-        {/* Switch Company Workspace Button in Sidebar */}
-        <div className="w-full px-3 pb-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setMobileSidebarOpen(false);
-              setIsCompanyModalOpen(true);
-            }}
-            className="w-full flex items-center justify-between gap-1.5 px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-white/15 text-slate-200 transition-all text-xs font-bold cursor-pointer group shadow-sm active:scale-95"
-            title="Switch Subsidiary / Company Workspace"
-          >
-            <div className="flex items-center gap-2 truncate">
-              <Building2 size={14} className="text-slate-300 shrink-0" />
-              <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} truncate text-[11px]`}>
-                Switch Company
+        {/* Quick Workspace Actions: Switch Company / Portal & Main Admin Panel */}
+        <div className="w-full px-3 pb-2 space-y-1.5 shrink-0">
+          {/* Switch Company / Portal Workspace Button (Shown if Admin or multiple companies) */}
+          {(isCompanyAdmin || allowedCompanies.length > 1) && (
+            <button
+              type="button"
+              onClick={() => {
+                setMobileSidebarOpen(false);
+                setIsCompanyModalOpen(true);
+              }}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer group shadow-sm active:scale-95 ${
+                appTheme === 'pearl'
+                  ? 'bg-white hover:bg-slate-50 text-slate-800 border-slate-300'
+                  : 'bg-slate-900/90 hover:bg-slate-800 border-white/10 text-slate-200'
+              }`}
+              title="Switch Subsidiary or Portal Workspace"
+            >
+              <div className="flex items-center gap-2 truncate">
+                <Building2 size={15} className={appTheme === 'pearl' ? "text-slate-600" : "text-slate-300"} />
+                <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} truncate text-[11px]`}>
+                  {allowedCompanies.length > 1 || effectiveIsGlobalAdmin ? 'Switch Company' : 'Change Portal'}
+                </span>
+              </div>
+              <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold uppercase ${
+                appTheme === 'pearl' ? 'bg-slate-200 text-slate-800' : 'bg-white/10 text-slate-300'
+              } ${!desktopSidebarExpanded ? 'lg:hidden' : ''}`}>
+                {effectiveIsGlobalAdmin ? '4 Entities' : `${allowedCompanies.length} ${allowedCompanies.length === 1 ? 'Entity' : 'Entities'}`}
               </span>
-            </div>
-            <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[9px] px-1.5 py-0.5 rounded bg-white/10 text-slate-300 font-bold uppercase font-mono`}>
-              4 Entities
-            </span>
-          </button>
-        </div>
+            </button>
+          )}
 
-        {/* Group Admin Executive Portal Button in Sidebar */}
-        {effectiveIsGlobalAdmin && (
-          <div className="w-full px-3 pb-2 shrink-0">
+          {/* Main Admin Panel Button (Renamed from Group Admin Portal) */}
+          {effectiveIsGlobalAdmin && (
             <button
               type="button"
               onClick={() => {
                 setMobileSidebarOpen(false);
                 setIsGroupAdminPortalOpen(true);
               }}
-              className="w-full flex items-center justify-between gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-950/40 via-amber-900/30 to-slate-900/90 hover:from-amber-900/50 hover:to-slate-800/90 border border-amber-500/30 text-amber-200 transition-all text-xs font-bold cursor-pointer group shadow-sm active:scale-95"
-              title="Open Group Admin Executive Portal (Consolidated Total Data & Settings)"
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer group shadow-sm active:scale-95 ${
+                appTheme === 'pearl'
+                  ? 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-400/60 text-amber-950'
+                  : 'bg-gradient-to-r from-amber-950/40 via-amber-900/30 to-slate-900/90 hover:from-amber-900/50 hover:to-slate-800 border-amber-500/30 text-amber-200'
+              }`}
+              title="Open Main Admin Panel (Consolidated Group Controls)"
             >
               <div className="flex items-center gap-2 truncate">
-                <Crown size={14} className="text-amber-400 shrink-0" />
+                <Crown size={15} className={appTheme === 'pearl' ? "text-amber-700" : "text-amber-400"} />
                 <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} truncate text-[11px]`}>
-                  Group Admin Portal
+                  Main Admin Panel
                 </span>
               </div>
-              <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold uppercase font-mono`}>
-                Executive
+              <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold uppercase ${
+                appTheme === 'pearl' ? 'bg-amber-600/20 text-amber-900' : 'bg-amber-500/20 text-amber-300'
+              } ${!desktopSidebarExpanded ? 'lg:hidden' : ''}`}>
+                Admin
               </span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Navigation items (Strictly Cases & Finance only for Client) */}
-        <nav className="flex-1 overflow-y-auto py-2 space-y-1 px-3 custom-scrollbar">
-          {currentNavItems.map((item, idx) => (
-            <button 
-              key={`nav_item_${item.id}_${idx}`} 
-              onClick={() => { 
-                setActiveView(item.id); 
-                setNavigationFilter(null); 
-                setMobileSidebarOpen(false); 
-              }} 
-              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl transition-all ${
-                activeView === item.id 
-                  ? 'bg-brand-600/20 text-white border border-brand-500/20 shadow-lg shadow-brand-500/10' 
-                  : 'text-gray-400 hover:bg-white/5 hover:text-white'
-              } ${!desktopSidebarExpanded && 'lg:justify-center'}`}
-            >
-              <div className="flex items-center gap-3 min-w-0 truncate">
-                <item.icon size={20} className={`${activeView === item.id ? 'text-brand-400' : 'text-gray-500'} group-hover:text-white shrink-0`} />
-                <span className={`${!desktopSidebarExpanded && 'lg:hidden'} font-medium text-xs sm:text-sm truncate`}>{item.label}</span>
-              </div>
+        {/* Section Header */}
+        <div className={`px-4 pt-2 pb-1 flex items-center justify-between border-t border-white/5 shrink-0 ${!desktopSidebarExpanded ? 'lg:hidden' : ''}`}>
+          <span className={`text-[10px] font-mono font-bold uppercase tracking-wider ${
+            appTheme === 'pearl' ? 'text-slate-500' : 'text-slate-400'
+          }`}>
+            Operations Menu
+          </span>
+          <span className={`text-[9px] font-mono ${appTheme === 'pearl' ? 'text-slate-400' : 'text-slate-500'}`}>
+            {currentNavItems.length} Tabs
+          </span>
+        </div>
 
-              {/* Total Amount Available Counter directly beside Finance in sidebar */}
-              {item.id === 'finance' && (
-                <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} shrink-0 ml-1`}>
-                  <GoldenAmountWidget 
-                    variant="sidebar"
-                    onOpenFinance={() => {
-                      setActiveView('finance');
-                      setMobileSidebarOpen(false);
-                    }}
-                  />
+        {/* Navigation items - Polished, High-Contrast & Clearly Highlighted */}
+        <nav className="flex-1 overflow-y-auto py-1.5 space-y-1 px-2.5 custom-scrollbar">
+          {currentNavItems.map((item, idx) => {
+            const isActive = activeView === item.id;
+            const Icon = item.icon;
+
+            return (
+              <button 
+                key={`nav_item_${item.id}_${idx}`} 
+                onClick={() => { 
+                  setActiveView(item.id); 
+                  setNavigationFilter(null); 
+                  setMobileSidebarOpen(false); 
+                }} 
+                className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-xl transition-all group cursor-pointer text-left ${
+                  isActive 
+                    ? appTheme === 'pearl'
+                      ? 'bg-amber-500/15 text-slate-900 font-bold border-l-4 border-amber-600 shadow-sm'
+                      : 'bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-transparent text-white font-bold border-l-4 border-amber-400 shadow-md'
+                    : appTheme === 'pearl'
+                      ? 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border-l-4 border-transparent font-medium'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-white border-l-4 border-transparent font-medium'
+                } ${!desktopSidebarExpanded ? 'lg:justify-center' : ''}`}
+                title={item.label}
+              >
+                <div className="flex items-center gap-2.5 min-w-0 flex-1 truncate">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all ${
+                    isActive
+                      ? appTheme === 'pearl'
+                        ? 'bg-amber-600/20 text-amber-800 border border-amber-600/30'
+                        : 'bg-amber-400/20 text-amber-300 border border-amber-400/30 shadow-sm'
+                      : appTheme === 'pearl'
+                        ? 'bg-slate-200/70 text-slate-600 group-hover:bg-slate-200 group-hover:text-slate-900'
+                        : 'bg-white/5 text-slate-400 group-hover:bg-white/10 group-hover:text-slate-200'
+                  }`}>
+                    <Icon size={17} />
+                  </div>
+                  <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-xs sm:text-[13px] tracking-wide truncate`}>
+                    {item.label}
+                  </span>
                 </div>
-              )}
-            </button>
-          ))}
+
+                {/* Right side: Finance widget or active indicator */}
+                {item.id === 'finance' ? (
+                  <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} shrink-0 ml-1`}>
+                    <GoldenAmountWidget 
+                      variant="sidebar"
+                      onOpenFinance={() => {
+                        setActiveView('finance');
+                        setMobileSidebarOpen(false);
+                      }}
+                    />
+                  </div>
+                ) : (
+                  isActive && (
+                    <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} shrink-0 flex items-center pr-1`}>
+                      <span className={`w-2 h-2 rounded-full ${
+                        appTheme === 'pearl' ? 'bg-amber-600' : 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]'
+                      }`} />
+                    </div>
+                  )
+                )}
+              </button>
+            );
+          })}
         </nav>
 
-        {/* Active Session Info */}
-        <div className={`px-3 py-2 border-t border-white/5 shrink-0 ${!desktopSidebarExpanded && 'lg:hidden'}`}>
-          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center gap-2.5">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+        {/* Active Session Info Card */}
+        <div className={`px-3 py-2 border-t border-white/5 shrink-0 ${!desktopSidebarExpanded ? 'lg:hidden' : ''}`}>
+          <div className={`p-2.5 rounded-xl border flex items-center gap-2.5 ${
+            appTheme === 'pearl'
+              ? 'bg-white/80 border-slate-200 shadow-sm'
+              : 'bg-white/5 border-white/10'
+          }`}>
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" title="Online & Synced" />
             <div className="min-w-0 flex-1">
               {currentDesignation && (
-                <span className="text-[10px] text-brand-300 font-medium block truncate">
+                <span className={`text-[10px] font-medium block truncate ${
+                  appTheme === 'pearl' ? 'text-amber-800' : 'text-amber-300'
+                }`}>
                   {currentDesignation}
                 </span>
               )}
-              <span className="text-[10px] text-amber-400 font-mono uppercase block truncate">
+              <span className={`text-[9px] font-mono uppercase block truncate ${
+                appTheme === 'pearl' ? 'text-slate-500' : 'text-amber-400/80'
+              }`}>
                 {currentRoles && currentRoles.length > 1 
                   ? `${currentRoles.length} Roles Assigned` 
                   : `Role: ${currentRole}`}
               </span>
-              <span className="text-[11px] text-gray-300 font-bold block truncate">
-                {(currentRole as string) === UserRole.CLIENT ? currentClientName : 'Active User'}
+              <span className={`text-[11px] font-bold block truncate ${
+                appTheme === 'pearl' ? 'text-slate-900' : 'text-gray-200'
+              }`}>
+                {(currentRole as string) === UserRole.CLIENT
+                  ? currentClientName
+                  : (safeAppStorage.getItem('dpl_current_user_name') || firebaseUser?.displayName || 'Admin')}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Theme Toggle in Sidebar */}
-        <div className="px-3 pb-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => setAppTheme(prev => prev === 'pearl' ? 'charcoal' : 'pearl')}
-            className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition shadow-sm active:scale-95 cursor-pointer ${
-              appTheme === 'pearl'
-                ? 'bg-gradient-to-r from-amber-100 via-white to-amber-50 text-slate-900 border-amber-300'
-                : 'bg-white/10 hover:bg-white/15 text-slate-200 border-white/15'
-            } ${!desktopSidebarExpanded ? 'lg:justify-center' : ''}`}
-            title="Toggle Theme"
-          >
-            <div className="flex items-center gap-2 truncate">
-              <Sparkles size={14} className={appTheme === 'pearl' ? "text-amber-600" : "text-amber-400"} />
-              <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[11px]`}>
-                Theme: {appTheme === 'pearl' ? 'Pearl White' : 'Charcoal'}
-              </span>
-            </div>
-            <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} text-[9px] px-1.5 py-0.5 rounded bg-black/10 font-bold uppercase font-mono`}>
-              {appTheme === 'pearl' ? 'Light' : 'Dark'}
+        {/* Theme Switcher Control (Left = Charcoal Dark, Right = Pearl White) for ALL Users on ALL Pages */}
+        <div className="px-3 py-2 border-t border-white/5 shrink-0">
+          <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} flex items-center justify-between gap-2`}>
+            <span className={`text-[10px] font-mono font-bold uppercase tracking-wider ${
+              appTheme === 'pearl' ? 'text-slate-600' : 'text-slate-400'
+            }`}>
+              Theme
             </span>
-          </button>
+            <ThemeToggleSwitch />
+          </div>
+
+          {/* Compact Toggle for Collapsed Desktop Sidebar */}
+          <div className={`hidden lg:flex justify-center ${desktopSidebarExpanded ? 'lg:hidden' : ''}`}>
+            <ThemeToggleSwitch compact />
+          </div>
         </div>
 
         {/* Logout at Sidebar Bottom */}
@@ -1240,27 +1257,30 @@ const App: React.FC = () => {
           <button 
             type="button"
             onClick={handleSignOut}
-            className={`w-full flex items-center gap-3 text-red-400 hover:bg-red-500/10 px-3 py-2 rounded-xl transition text-xs cursor-pointer ${!desktopSidebarExpanded && 'lg:justify-center'}`}
+            className={`w-full flex items-center gap-2.5 text-red-400 hover:bg-red-500/10 px-3 py-2 rounded-xl transition text-xs font-semibold cursor-pointer ${
+              !desktopSidebarExpanded && 'lg:justify-center'
+            }`}
             title="Sign Out"
           >
-            <LogOut size={16} /> <span className={`${!desktopSidebarExpanded && 'lg:hidden'}`}>Logout</span>
+            <LogOut size={16} /> 
+            <span className={`${!desktopSidebarExpanded && 'lg:hidden'}`}>Logout</span>
           </button>
         </div>
       </aside>
 
       {/* Content Area */}
       <main className="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden relative">
-        {/* Top Header - Exact Clean Proportions:
-            Left: Sidebar Menu Button
-            Center: Company Logo Centered with clean boundaries
-            Right: Notifications & LogOut (+ Desktop Quick Actions)
+        {/* Top Header - Clean, Uncluttered Proportions:
+            Left: Sidebar Menu Button & View Title
+            Center: Company Logo Centered
+            Right: Notifications & LogOut (+ Desktop Quick Trackers)
         */}
         <header className={`h-14 sm:h-16 md:h-20 border-b flex items-center justify-between px-2 sm:px-4 md:px-6 z-20 flex-shrink-0 sticky top-0 shadow-md gap-1.5 sm:gap-3 transition-colors duration-200 ${
           appTheme === 'pearl' 
-            ? 'bg-white/95 border-amber-900/10 shadow-slate-200/50 text-slate-800' 
+            ? 'bg-white/95 border-slate-200 shadow-slate-200/50 text-slate-800' 
             : 'bg-slate-900/98 border-white/10 shadow-black/40 text-slate-100'
         }`}>
-          {/* Left: Sidebar Menu Toggle & Active Entity Pill */}
+          {/* Left: Sidebar Menu Toggle & Page Context */}
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 shrink-0">
             <button 
               type="button"
@@ -1275,15 +1295,7 @@ const App: React.FC = () => {
               <Menu size={18} className={appTheme === 'pearl' ? "text-slate-800" : "text-slate-200"} />
             </button>
 
-            <span className={`px-2 py-1 rounded-lg border font-mono font-bold text-xs shrink-0 shadow-sm ${
-              appTheme === 'pearl'
-                ? 'bg-amber-500/15 border-amber-500/30 text-amber-950'
-                : 'bg-white/10 border-white/20 text-slate-200'
-            }`}>
-              {activeCompany.prefix || activeCompany.shortName}
-            </span>
-
-            <div className="hidden xl:flex items-center gap-1.5 min-w-0">
+            <div className="hidden sm:flex items-center gap-1.5 min-w-0">
               <span className={`text-xs font-bold uppercase tracking-wider truncate ${
                 appTheme === 'pearl' ? 'text-slate-600' : 'text-slate-300'
               }`}>
@@ -1310,7 +1322,7 @@ const App: React.FC = () => {
           </div>
 
           {/* Right: Actions, Notifications & Sign Out */}
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0 justify-end">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 justify-end">
             {/* Quick Public Trackers Preview Buttons for Staff (Desktop) */}
             <div className="hidden 2xl:flex items-center gap-1.5 mr-1">
               <button
@@ -1357,54 +1369,8 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            {/* Group Admin Executive Portal Button in Header */}
-            {effectiveIsGlobalAdmin && (
-              <button
-                type="button"
-                onClick={() => setIsGroupAdminPortalOpen(true)}
-                className={`h-9 px-2 sm:px-2.5 md:px-3 rounded-xl border font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer shrink-0 ${
-                  appTheme === 'pearl'
-                    ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-900 border-amber-400/60'
-                    : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-400/40'
-                }`}
-                title="Open Group Admin Executive Portal"
-              >
-                <Crown size={14} className={appTheme === 'pearl' ? "text-amber-700" : "text-amber-400"} />
-                <span className="font-mono uppercase text-[11px] tracking-wider font-bold hidden sm:inline">Admin</span>
-              </button>
-            )}
-
-            {/* User Account Chip */}
-            <div 
-              className={`h-9 px-2 sm:px-2.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 shrink-0 max-w-[130px] sm:max-w-[170px] ${
-                appTheme === 'pearl'
-                  ? 'bg-slate-100 text-slate-700 border-slate-300'
-                  : 'bg-slate-800 text-slate-300 border-white/10'
-              }`}
-              title={`Active Account: ${safeAppStorage.getItem('dpl_current_user_name') || firebaseUser?.displayName || currentClientName || 'Admin'} (${currentRole})`}
-            >
-              <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-              <span className="truncate text-[11px] font-medium hidden sm:inline">
-                {safeAppStorage.getItem('dpl_current_user_name') || firebaseUser?.displayName || currentClientName || 'Admin'}
-              </span>
-            </div>
-
-            {/* Luxury Theme Toggle Button */}
-            <button
-              type="button"
-              onClick={() => setAppTheme(prev => prev === 'pearl' ? 'charcoal' : 'pearl')}
-              className={`h-9 px-2 sm:px-2.5 md:px-3 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 ${
-                appTheme === 'pearl'
-                  ? 'bg-amber-100 hover:bg-amber-200 text-slate-900 border-amber-300'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-white/15'
-              }`}
-              title={appTheme === 'pearl' ? "Switch to Charcoal Luxury" : "Switch to Pearl White"}
-            >
-              <Sparkles size={14} className={appTheme === 'pearl' ? "text-amber-600" : "text-amber-400"} />
-              <span className="font-mono text-[11px] uppercase tracking-wider font-bold hidden md:inline">
-                {appTheme === 'pearl' ? 'Pearl' : 'Charcoal'}
-              </span>
-            </button>
+            {/* Header Theme Switcher (Left = Charcoal Dark, Right = Pearl White) */}
+            <ThemeToggleSwitch compact />
 
             {/* Live Real-time Notification Center */}
             <LiveNotificationCenter
@@ -1445,10 +1411,12 @@ const App: React.FC = () => {
 
         <div 
           id="main-scroll-container"
-          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-32 sm:pb-12 custom-scrollbar overscroll-contain touch-pan-y"
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 md:p-6 lg:p-8 2xl:p-10 pb-28 sm:pb-14 custom-scrollbar"
           style={{ WebkitOverflowScrolling: 'touch' }}
         >
-          {renderContent()}
+          <div className="w-full max-w-[1920px] mx-auto">
+            {renderContent()}
+          </div>
         </div>
 
         {/* Session & Draft Restoration Toast Banner */}

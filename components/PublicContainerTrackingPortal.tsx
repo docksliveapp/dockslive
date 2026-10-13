@@ -319,13 +319,12 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
       doc.setFontSize(7.5);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(148, 163, 184);
-      doc.text(`MAK Group of Companies • status.makpk.online • Container ${targetContainer.containerNumber}`, pageWidth / 2, 287, { align: 'center' });
+      doc.text(`MAK Group of Companies | status.makpk.online | Container ${targetContainer.containerNumber}`, pageWidth / 2, 287, { align: 'center' });
 
       const safeFilename = `Container_${targetContainer.containerNumber}_Status.pdf`;
       doc.save(safeFilename);
     } catch (err) {
       console.error('Error generating PDF:', err);
-      alert('Could not generate PDF. Please try again.');
     } finally {
       setIsGeneratingPdf(false);
     }

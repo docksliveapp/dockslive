@@ -2397,24 +2397,7 @@ const UserManagement: React.FC = () => {
                     />
                   </div>
 
-                  {/* Admin Roles & Privileges Assignment Table (Google Workspace Admin Console Style) */}
-                  <div className="sm:col-span-2">
-                    <AdminRolesAndPrivilegesTable
-                      assignedRoles={formData.roles}
-                      userName={formData.name || 'this transporter / broker'}
-                      allowedCompanies={formData.allowedCompanies}
-                      isGlobalAdmin={formData.isGlobalAdmin}
-                      onRolesChange={(newRoles, primaryRole) => {
-                        setFormData(prev => ({
-                          ...prev,
-                          roles: newRoles,
-                          role: primaryRole,
-                          isGlobalAdmin: newRoles.includes(UserRole.ADMIN) ? prev.isGlobalAdmin : false
-                        }));
-                      }}
-                    />
                   </div>
-                </div>
 
                 {/* Transporter User ID & Password */}
                 <div className="bg-white/5 p-3.5 rounded-xl border border-white/10 space-y-2">

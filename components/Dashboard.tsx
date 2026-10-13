@@ -471,20 +471,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
             </div>
           </div>
 
-          <div className="bg-black/20 rounded-xl p-4 border border-white/5">
+          <div className="glass-panel rounded-xl p-4 border border-white/10">
              <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Cash Breakdown</h4>
              <div className="space-y-3">
                <div className="flex justify-between text-sm items-center">
-                 <span className="text-gray-300 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-gray-500"></div> Office Cash</span>
-                 <span className="text-white font-mono">PKR {officeCash.toLocaleString()}</span>
+                 <span className="text-gray-300 flex items-center gap-2.5 font-medium"><span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span> Office Cash</span>
+                 <span className="text-white font-semibold font-mono">PKR {officeCash.toLocaleString()}</span>
                </div>
                <div className="flex justify-between text-sm items-center">
-                 <span className="text-gray-300 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-brand-500"></div> HBL Corporate</span>
-                 <span className="text-white font-mono">PKR {hblCorporate.toLocaleString()}</span>
+                 <span className="text-gray-300 flex items-center gap-2.5 font-medium"><span className="w-2 h-2 rounded-full bg-slate-400 shrink-0"></span> HBL Corporate</span>
+                 <span className="text-white font-semibold font-mono">PKR {hblCorporate.toLocaleString()}</span>
                </div>
                <div className="flex justify-between text-sm items-center">
-                 <span className="text-gray-300 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div> Meezan Active</span>
-                 <span className="text-white font-mono">PKR {meezanActive.toLocaleString()}</span>
+                 <span className="text-gray-300 flex items-center gap-2.5 font-medium"><span className="w-2 h-2 rounded-full bg-slate-500 shrink-0"></span> Meezan Active</span>
+                 <span className="text-white font-semibold font-mono">PKR {meezanActive.toLocaleString()}</span>
                </div>
              </div>
           </div>
@@ -495,10 +495,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
           <div>
             <div className="flex justify-between items-center mb-4">
               <SectionHeader title="Operational Action Radar" icon={Activity} />
-              <span className="text-xs text-emerald-400 font-mono flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                Live Network Active
-              </span>
             </div>
 
             {liveCases.filter(c => c.approvalStatus === 'PENDING').length > 0 && (
@@ -537,7 +533,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
             </div>
           </div>
 
-          <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between text-xs">
+          <div className="p-3.5 rounded-xl glass-panel border border-white/5 flex items-center justify-between text-xs">
             <span className="text-gray-400">Transit Deliveries in Progress:</span>
             <span className="font-bold text-white font-mono">{inTransitCases} Shipments Active</span>
           </div>
@@ -547,39 +543,35 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
       {/* ========================================================================= */}
       {/* 6. DEDICATED FULL-WIDTH SECTION: ALL USERS & ROLES LIVE ACTIVITY STREAM */}
       {/* ========================================================================= */}
-      <div className="glass-card rounded-3xl p-6 sm:p-7 border border-white/10 shadow-2xl space-y-5 bg-slate-900/90 backdrop-blur-xl">
+      <div className="glass-card rounded-3xl p-5 sm:p-6 lg:p-8 border border-white/10 shadow-xl space-y-5">
         
         {/* Section Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-white/10 border border-white/15 text-slate-200 flex items-center justify-center font-bold text-xl shadow-lg">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+          <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-brand-500/15 border border-brand-500/30 text-brand-400 flex items-center justify-center shrink-0 shadow-sm">
               <Activity size={22} />
             </div>
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h3 className="text-base sm:text-lg font-extrabold text-white tracking-wide">
-                  All Users & Roles Live Activity Stream
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h3 className="text-base sm:text-lg lg:text-xl font-bold text-white tracking-tight">
+                  All Users & Roles Activity Stream
                 </h3>
-                <span className="text-[10px] font-mono font-bold bg-white/10 text-slate-200 border border-white/15 px-2 py-0.5 rounded-full">
-                  {filteredLiveLogs.length} Records
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-mono font-bold bg-brand-500/15 text-brand-300 border border-brand-500/30 px-3 py-1 rounded-full whitespace-nowrap shrink-0 shadow-xs">
+                  <Layers size={12} className="text-brand-400 shrink-0" />
+                  <span>{filteredLiveLogs.length} {filteredLiveLogs.length === 1 ? 'Record' : 'Records'}</span>
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Real-time operational audit log tracking Transporters, Port Staff, Finance, Operations, and Clients
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Real-time operational audit log tracking Fleet & Vehicles, Port Staff, Finance, Operations, and Clients
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 self-end md:self-auto">
-            <span className="text-xs text-emerald-400 font-medium flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-xl">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              Live Firestore Feed
-            </span>
-
+          <div className="flex items-center gap-2.5 self-start sm:self-auto shrink-0">
             <button
               type="button"
               onClick={() => setShowAllLogs(!showAllLogs)}
-              className="text-xs text-slate-200 hover:text-white font-semibold px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 transition active:scale-95 flex items-center gap-1"
+              className="text-xs text-slate-200 hover:text-white font-semibold px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 transition active:scale-95 flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
               <span>{showAllLogs ? 'Show Latest 10' : 'View All Activities'}</span>
               <ArrowRight size={13} />
@@ -587,102 +579,170 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
           </div>
         </div>
 
-        {/* Filter Controls Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        {/* Filter Controls Bar - Adaptive for Mobile, Tablet, Desktop & Big Screens */}
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
           {/* Role Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1 text-xs">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
             {[
-              { id: 'ALL', label: 'All Roles' },
-              { id: 'TRANSPORTER', label: '🚛 Transporters' },
-              { id: 'VEHICLE_MANAGER', label: '🚚 Fleet & Vehicles' },
-              { id: 'LOADING_PORT_STAFF', label: '⚓ Port Loading' },
-              { id: 'DESTINATION_PORT_STAFF', label: '🏁 Destination' },
-              { id: 'FINANCE', label: '💰 Finance' },
-              { id: 'OPERATIONS', label: '📦 Operations' },
-              { id: 'CLIENT', label: '🏢 Clients' },
-              { id: 'ADMIN', label: '⚡ Admin' }
-            ].map((tab, tIdx) => (
-              <button
-                key={`act_role_tab_${tab.id}_${tIdx}`}
-                type="button"
-                onClick={() => setActivityRoleFilter(tab.id)}
-                className={`px-3 py-1.5 rounded-xl font-semibold whitespace-nowrap transition text-[11px] ${
-                  activityRoleFilter === tab.id
-                    ? 'bg-slate-700 text-white font-bold shadow-md border border-white/20'
-                    : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 border border-white/5'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+              { id: 'ALL', label: 'All Roles', Icon: Layers },
+              { id: 'VEHICLE_MANAGER', label: 'Fleet & Vehicles', Icon: Truck },
+              { id: 'TRANSPORTER', label: 'Transporters', Icon: Truck },
+              { id: 'LOADING_PORT_STAFF', label: 'Port Loading', Icon: Anchor },
+              { id: 'DESTINATION_PORT_STAFF', label: 'Destination', Icon: MapPin },
+              { id: 'FINANCE', label: 'Finance & Accounts', Icon: DollarSign },
+              { id: 'OPERATIONS', label: 'Operations & Cases', Icon: Boxes },
+              { id: 'CLIENT', label: 'Clients', Icon: Building2 },
+              { id: 'ADMIN', label: 'Management', Icon: ShieldCheck }
+            ].map((tab, tIdx) => {
+              const TabIcon = tab.Icon;
+              const isSelected = activityRoleFilter === tab.id;
+              return (
+                <button
+                  key={`act_role_tab_${tab.id}_${tIdx}`}
+                  type="button"
+                  onClick={() => setActivityRoleFilter(tab.id)}
+                  className={`px-3.5 py-2 rounded-xl font-semibold whitespace-nowrap transition-all text-xs flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                    isSelected
+                      ? 'bg-brand-600 text-white font-bold shadow-md border border-brand-500'
+                      : 'bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 border border-white/10'
+                  }`}
+                >
+                  <TabIcon size={13} className="shrink-0" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
 
           {/* Search Box */}
-          <div className="relative min-w-[200px] sm:w-64">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <div className="relative w-full lg:w-72 shrink-0">
+            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="Search user, action, case #..."
+              placeholder="Search user, vehicle, case #..."
               value={activitySearchQuery}
               onChange={(e) => setActivitySearchQuery(e.target.value)}
-              className="w-full bg-slate-950 border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-gray-500 focus:border-amber-500/50 outline-none"
+              className="w-full bg-slate-950 border border-white/10 rounded-xl pl-9 pr-3.5 py-2 text-xs text-white placeholder-gray-500 focus:border-brand-500 outline-none"
             />
           </div>
         </div>
 
         {/* Live Activity Stream List */}
-        <div className="space-y-2.5 max-h-[500px] overflow-y-auto custom-scrollbar pr-1">
+        <div className="space-y-2.5 max-h-[540px] overflow-y-auto custom-scrollbar pr-1">
           {filteredLiveLogs.length === 0 ? (
             <div className="p-8 text-center bg-slate-950/60 rounded-2xl border border-white/5 text-gray-500 space-y-2">
-              <Clock size={32} className="mx-auto text-gray-600 opacity-60" />
+              <Clock size={32} className="mx-auto text-gray-500 opacity-60" />
               <h4 className="text-xs font-semibold text-gray-400">No activities recorded for this filter</h4>
               <p className="text-[11px] text-gray-500">
-                New user transactions, workflow advancements, and vehicle requests will automatically appear here live.
+                New user transactions, workflow advancements, and vehicle updates will automatically appear here.
               </p>
             </div>
           ) : (
             (showAllLogs ? filteredLiveLogs : filteredLiveLogs.slice(0, 10)).map((item, idx) => {
               const roleUpper = String(item.role || item.userRole || '').toUpperCase();
-              const isTransporter = roleUpper.includes('TRANSPORTER');
-              const isPort = roleUpper.includes('LOADING') || roleUpper.includes('DESTINATION') || roleUpper.includes('PORT');
-              const isFinance = roleUpper.includes('FINANCE');
-              const isClient = roleUpper.includes('CLIENT');
-              const isAdmin = roleUpper.includes('ADMIN');
+              const combinedText = `${item.title || ''} ${item.action || ''} ${item.description || ''} ${item.details || ''}`.toLowerCase();
+
+              // Content-first semantic detection so vehicle notifications ALWAYS show a Truck icon
+              const isVehicleActivity =
+                combinedText.includes('truck') ||
+                combinedText.includes('vehicle') ||
+                combinedText.includes('trailer') ||
+                combinedText.includes('transporter') ||
+                combinedText.includes('fleet') ||
+                combinedText.includes('noc') ||
+                combinedText.includes('veh_') ||
+                roleUpper.includes('TRANSPORTER') ||
+                roleUpper.includes('VEHICLE');
+
+              const isPortActivity =
+                !isVehicleActivity && (
+                  combinedText.includes('port') ||
+                  combinedText.includes('vessel') ||
+                  combinedText.includes('wharfage') ||
+                  combinedText.includes('customs') ||
+                  combinedText.includes('loading') ||
+                  combinedText.includes('destination') ||
+                  roleUpper.includes('LOADING') ||
+                  roleUpper.includes('DESTINATION') ||
+                  roleUpper.includes('PORT')
+                );
+
+              const isFinanceActivity =
+                !isVehicleActivity && !isPortActivity && (
+                  combinedText.includes('finance') ||
+                  combinedText.includes('invoice') ||
+                  combinedText.includes('payment') ||
+                  combinedText.includes('ledger') ||
+                  combinedText.includes('voucher') ||
+                  combinedText.includes('cash') ||
+                  combinedText.includes('expense') ||
+                  combinedText.includes('fund') ||
+                  combinedText.includes('pkr') ||
+                  roleUpper.includes('FINANCE')
+                );
+
+              const isCaseActivity =
+                !isVehicleActivity && !isPortActivity && !isFinanceActivity && (
+                  combinedText.includes('case') ||
+                  combinedText.includes('container') ||
+                  combinedText.includes('shipment') ||
+                  combinedText.includes('bl ') ||
+                  combinedText.includes('dossier') ||
+                  roleUpper.includes('CASE') ||
+                  roleUpper.includes('OPERATION')
+                );
+
+              const isClientActivity =
+                !isVehicleActivity && !isPortActivity && !isFinanceActivity && !isCaseActivity && (
+                  combinedText.includes('client') ||
+                  combinedText.includes('consignee') ||
+                  roleUpper.includes('CLIENT')
+                );
+
+              const formattedRoleLabel = String(item.role || item.userRole || 'System')
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, (char) => char.toUpperCase());
 
               return (
                 <div 
                   key={`live_log_${item.id || idx}_${idx}`} 
-                  className="p-3.5 rounded-2xl bg-slate-950/70 border border-white/5 hover:border-white/15 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
+                  className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-white/5 hover:border-white/15 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
                 >
-                  <div className="flex items-start gap-3 min-w-0 flex-1">
-                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 ${
-                      isTransporter ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' :
-                      isPort ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30' :
-                      isFinance ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' :
-                      isClient ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30' :
-                      isAdmin ? 'bg-purple-500/15 text-purple-300 border border-purple-500/30' :
-                      'bg-gray-500/15 text-gray-300 border border-gray-500/30'
+                  <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 border ${
+                      isVehicleActivity ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' :
+                      isPortActivity ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' :
+                      isFinanceActivity ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' :
+                      isCaseActivity ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
+                      isClientActivity ? 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30' :
+                      'bg-purple-500/15 text-purple-400 border-purple-500/30'
                     }`}>
-                      {isTransporter ? '🚛' : isPort ? '⚓' : isFinance ? '💰' : isClient ? '🏢' : '⚡'}
+                      {isVehicleActivity ? <Truck size={18} /> :
+                       isPortActivity ? <Anchor size={18} /> :
+                       isFinanceActivity ? <DollarSign size={18} /> :
+                       isCaseActivity ? <Boxes size={18} /> :
+                       isClientActivity ? <Building2 size={18} /> :
+                       <ShieldCheck size={18} />}
                     </div>
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded-md ${
-                          isTransporter ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30' :
-                          isPort ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/30' :
-                          isFinance ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30' :
-                          isClient ? 'bg-blue-500/10 text-blue-300 border border-blue-500/30' :
-                          'bg-purple-500/10 text-purple-300 border border-purple-500/30'
+                        <span className={`text-[10px] font-mono font-bold uppercase px-2.5 py-0.5 rounded-md border ${
+                          isVehicleActivity ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' :
+                          isPortActivity ? 'bg-sky-500/10 text-sky-300 border-sky-500/30' :
+                          isFinanceActivity ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
+                          isCaseActivity ? 'bg-blue-500/10 text-blue-300 border-blue-500/30' :
+                          isClientActivity ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30' :
+                          'bg-purple-500/10 text-purple-300 border-purple-500/30'
                         }`}>
-                          {item.role || item.userRole || 'System'}
+                          {formattedRoleLabel}
                         </span>
                         <strong className="text-xs text-white font-semibold truncate">
                           {item.performedBy || item.userId || 'Operations'}
                         </strong>
                       </div>
 
-                      <h4 className="text-xs sm:text-sm font-bold text-gray-100 mt-1 leading-snug group-hover:text-amber-300 transition-colors">
+                      <h4 className="text-xs sm:text-sm font-bold text-gray-100 mt-1 leading-snug group-hover:text-brand-400 transition-colors">
                         {item.title || item.action}
                       </h4>
 
@@ -694,11 +754,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
                     </div>
                   </div>
 
-                  <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1.5 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
-                    <span className="text-[11px] text-gray-400 font-mono">
+                  <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                    <span className="text-[11px] text-gray-400 font-mono font-medium">
                       {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </span>
-                    <span className="text-[10px] text-gray-500">
+                    <span className="text-[10px] text-gray-500 font-mono">
                       {new Date(item.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
                     </span>
                   </div>

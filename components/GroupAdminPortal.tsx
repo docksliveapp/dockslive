@@ -74,6 +74,7 @@ import { safeAppStorage } from '../services/storage';
 import { exportTableToExcel } from '../services/excelExportService';
 import GroupAdminManagementModal, { AdminSettingsTab } from './GroupAdminManagementModal';
 import Dashboard from './Dashboard';
+import { ThemeToggleSwitch } from './ThemeToggleSwitch';
 
 export interface GroupAdminPortalProps {
   onExitPortal: () => void;
@@ -472,19 +473,17 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
       }`}>
         
         {/* Header / Conglomerate Branding */}
-        <div className="p-4 border-b border-white/10 flex items-center justify-between bg-[#111724]">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center p-1.5 shadow-md shadow-amber-500/20 shrink-0">
+        <div className="px-3.5 py-3 border-b border-white/10 flex items-center justify-between bg-[#111724] gap-2 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center p-1.5 shadow-md shadow-amber-500/20 shrink-0">
               <Crown className="w-5 h-5 text-slate-950" />
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <h1 className="font-extrabold text-sm text-white tracking-wide uppercase truncate">
-                  MAK Group Portal
-                </h1>
-              </div>
-              <p className="text-xs font-mono text-amber-400 uppercase tracking-wider truncate">
-                Main Admin Control Panel
+            <div className="min-w-0 flex-1">
+              <h1 className="font-extrabold text-xs sm:text-sm text-white tracking-wide uppercase truncate leading-tight">
+                MAK Group Portal
+              </h1>
+              <p className="text-[10px] sm:text-xs font-mono text-amber-400 uppercase tracking-wider truncate mt-0.5">
+                Main Admin Panel
               </p>
             </div>
           </div>
@@ -497,11 +496,10 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 setSidebarCollapsed(true);
               }
             }}
-            className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition cursor-pointer flex items-center gap-1.5 text-xs font-semibold border border-white/10 shrink-0"
-            title="Hide Sidebar"
+            className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition cursor-pointer flex items-center justify-center text-xs font-semibold border border-white/10 shrink-0"
+            title="Close / Hide Sidebar"
           >
-            <span>Hide</span>
-            <X size={15} />
+            <X size={16} />
           </button>
         </div>
 
@@ -556,11 +554,11 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1 truncate">
-                      <div className="w-7 h-7 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center p-1 shrink-0">
+                      <div className="w-7 h-7 flex items-center justify-center p-0.5 shrink-0 bg-transparent">
                         <img 
                           src={getCompanyLogoUrl(comp.id)} 
                           alt={comp.name} 
-                          className="max-h-full max-w-full object-contain" 
+                          className="max-h-full max-w-full object-contain drop-shadow-sm" 
                         />
                       </div>
                       <div className="min-w-0 flex-1 truncate">
@@ -677,6 +675,12 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
             </div>
           </div>
 
+          {/* Theme Switcher */}
+          <div className="flex items-center justify-between px-1 py-1">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold">Theme</span>
+            <ThemeToggleSwitch />
+          </div>
+
           {/* Return to Subsidiary Workspace Button */}
           <button
             type="button"
@@ -782,6 +786,8 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 <span className="hidden md:inline">Open Workspace</span>
               </button>
             )}
+
+            <ThemeToggleSwitch compact />
 
             <button
               type="button"

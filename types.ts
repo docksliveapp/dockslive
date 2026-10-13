@@ -935,8 +935,14 @@ export interface Client {
   ntn?: string;
   strn?: string;
   businessCardUrl?: string; // Business Card photo / doc
+  businessCardName?: string;
   contractLetterUrl?: string; // Contract Letter document
   nicDocUrl?: string; // Owner CNIC copy
+  nicDocName?: string;
+  cnicFrontUrl?: string;
+  cnicFrontName?: string;
+  cnicBackUrl?: string;
+  cnicBackName?: string;
   ntnDocUrl?: string; // NTN certificate photo / doc
   ntnDocName?: string;
   defaultCaseCategory?: string;
@@ -1268,6 +1274,8 @@ export interface AppUser {
   secondaryPhoneRelation?: string;
   cnicFront?: string;
   cnicBack?: string;
+  ntnDoc?: string;
+  businessCard?: string;
   baseSalary?: number;
   allowances?: {
     mobile?: number;

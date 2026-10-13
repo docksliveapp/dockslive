@@ -2361,40 +2361,42 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
   const StatCard = ({ title, amount, type, icon: Icon, subtitle, badge, onClick }: any) => (
     <div 
       onClick={onClick}
-      className={`glass-card p-5 rounded-2xl flex items-center justify-between hover:bg-white/10 active:scale-[0.99] transition-all cursor-pointer no-print group border ${
+      className={`glass-card p-4 sm:p-5 2xl:p-6 rounded-2xl flex items-center justify-between gap-3.5 hover:border-brand-500/40 active:scale-[0.99] transition-all cursor-pointer no-print group border ${
         type === 'pos' 
-          ? 'hover:border-emerald-500/40 border-white/5' 
+          ? 'border-emerald-500/20 hover:border-emerald-500/40' 
           : type === 'neg' 
-          ? 'hover:border-red-500/40 border-white/5' 
-          : 'hover:border-purple-500/40 border-white/5'
+          ? 'border-rose-500/20 hover:border-rose-500/40' 
+          : 'border-white/10'
       }`}
       title="Click to view full breakdown list and details"
     >
-      <div className="min-w-0 flex-1 pr-2">
-        <div className="flex items-center gap-2 mb-1">
-          <p className="text-gray-400 text-xs uppercase font-semibold tracking-wider truncate">{title}</p>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 mb-1.5">
+          <p className="text-gray-400 text-[11px] sm:text-xs uppercase font-bold tracking-wider truncate">{title}</p>
           {badge && (
-            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-purple-300 border border-white/10 font-bold uppercase tracking-wider">
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-brand-500/15 text-brand-300 border border-brand-500/30 font-bold uppercase tracking-wider shrink-0">
               {badge}
             </span>
           )}
         </div>
-        <h4 className={`text-2xl font-bold font-mono drop-shadow-sm truncate ${type === 'pos' ? 'text-green-400' : type === 'neg' ? 'text-red-400' : 'text-white'}`}>
+        <h4 className={`text-lg sm:text-xl lg:text-2xl font-extrabold font-mono tracking-tight truncate ${
+          type === 'pos' ? 'text-emerald-400' : type === 'neg' ? 'text-rose-400' : 'text-white'
+        }`}>
           PKR {(Number(amount) || 0).toLocaleString()}
         </h4>
-        <div className="flex items-center justify-between gap-2 mt-1">
+        <div className="flex items-center justify-between gap-2 mt-1.5 pt-1.5 border-t border-white/5">
           {subtitle && <p className="text-[11px] text-gray-400 truncate">{subtitle}</p>}
-          <span className="text-[10px] text-purple-400 font-semibold group-hover:underline flex items-center gap-0.5 shrink-0">
-            View list →
+          <span className="text-[11px] text-brand-400 font-semibold group-hover:underline flex items-center gap-0.5 shrink-0 whitespace-nowrap">
+            Details →
           </span>
         </div>
       </div>
-      <div className={`p-3 rounded-xl backdrop-blur-md shadow-lg shrink-0 transition-transform group-hover:scale-110 ${
-        type === 'pos' ? 'bg-green-500/10 text-green-400 shadow-green-500/10' : 
-        type === 'neg' ? 'bg-red-500/10 text-red-400 shadow-red-500/10' : 
-        'bg-white/5 text-gray-300 shadow-white/5'
+      <div className={`w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center shrink-0 border transition-transform group-hover:scale-105 ${
+        type === 'pos' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 
+        type === 'neg' ? 'bg-rose-500/15 text-rose-400 border-rose-500/30' : 
+        'bg-brand-500/15 text-brand-400 border-brand-500/30'
       }`}>
-        <Icon size={24} />
+        <Icon size={22} />
       </div>
     </div>
   );
@@ -6128,8 +6130,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         </div>
       )}
 
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 no-print">
+      {/* Stats Overview - Adaptive for Mobile (1 col), Tablet (2 cols), Desktop & Big Screen (4 cols) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5 sm:gap-4 2xl:gap-6 no-print">
         <StatCard 
           title="Cash in Hand" 
           amount={cashbookSummary.netCashBalance} 
@@ -6184,23 +6186,44 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         />
       </div>
 
-      {/* Action Buttons: Payable, Receivable, Payment Received, Payment Paid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 no-print">
+      {/* Executive Quick Action Bar: Payable, Receivable, Payment Received, Payment Paid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 2xl:gap-5 no-print">
         <button 
+          type="button"
           onClick={() => { setTransactionType('PAYABLE'); setShowAddModal(true); }}
-          className="glass-panel hover:bg-red-500/10 border-red-500/20 text-red-400 p-4 rounded-2xl flex flex-col items-center gap-2 transition-all shadow-sm"
+          className="glass-panel hover:border-rose-500/40 p-3.5 sm:p-4 rounded-2xl flex items-center justify-between gap-3 transition-all shadow-sm group cursor-pointer text-left"
         >
-          <ArrowUpRight size={24} />
-          <span className="font-medium text-sm">Add Payable</span>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <ArrowUpRight size={20} />
+            </div>
+            <div className="min-w-0">
+              <span className="font-bold text-xs sm:text-sm text-white block truncate">Add Payable</span>
+              <span className="text-[11px] text-gray-400 block truncate">Record vendor or port bill</span>
+            </div>
+          </div>
+          <Plus size={16} className="text-rose-400 shrink-0 opacity-75 group-hover:opacity-100" />
         </button>
+
         <button 
+          type="button"
           onClick={() => { setTransactionType('RECEIVABLE'); setShowAddModal(true); }}
-          className="glass-panel hover:bg-green-500/10 border-green-500/20 text-green-400 p-4 rounded-2xl flex flex-col items-center gap-2 transition-all shadow-sm"
+          className="glass-panel hover:border-emerald-500/40 p-3.5 sm:p-4 rounded-2xl flex items-center justify-between gap-3 transition-all shadow-sm group cursor-pointer text-left"
         >
-          <ArrowDownLeft size={24} />
-          <span className="font-medium text-sm">Add Receivable</span>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <ArrowDownLeft size={20} />
+            </div>
+            <div className="min-w-0">
+              <span className="font-bold text-xs sm:text-sm text-white block truncate">Add Receivable</span>
+              <span className="text-[11px] text-gray-400 block truncate">Create client invoice charge</span>
+            </div>
+          </div>
+          <Plus size={16} className="text-emerald-400 shrink-0 opacity-75 group-hover:opacity-100" />
         </button>
+
         <button 
+          type="button"
           onClick={() => { 
             setTransactionType('INCOME'); 
             setNewTransaction({
@@ -6215,12 +6238,22 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             setOtherClientName('');
             setShowAddModal(true); 
           }}
-          className="glass-panel bg-brand-600/25 hover:bg-brand-600/40 border-brand-500/40 text-white p-4 rounded-2xl flex flex-col items-center gap-2 transition-all shadow-[0_0_20px_rgba(37,99,235,0.2)] hover:scale-[1.02]"
+          className="glass-panel hover:border-brand-500/40 p-3.5 sm:p-4 rounded-2xl flex items-center justify-between gap-3 transition-all shadow-sm group cursor-pointer text-left"
         >
-          <Banknote size={24} className="text-emerald-400" />
-          <span className="font-semibold text-sm">Payment Received</span>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-brand-500/15 border border-brand-500/30 text-brand-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <Banknote size={20} />
+            </div>
+            <div className="min-w-0">
+              <span className="font-bold text-xs sm:text-sm text-white block truncate">Payment Received</span>
+              <span className="text-[11px] text-gray-400 block truncate">Log incoming cash or bank</span>
+            </div>
+          </div>
+          <Plus size={16} className="text-brand-400 shrink-0 opacity-75 group-hover:opacity-100" />
         </button>
+
         <button 
+          type="button"
           onClick={() => { 
             setTransactionType('EXPENSE'); 
             setNewTransaction({
@@ -6235,10 +6268,18 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             setOtherClientName('');
             setShowAddModal(true); 
           }}
-          className="glass-panel bg-brand-600/20 hover:bg-brand-600/30 border-brand-500/30 text-white p-4 rounded-2xl flex flex-col items-center gap-2 transition-all shadow-sm"
+          className="glass-panel hover:border-amber-500/40 p-3.5 sm:p-4 rounded-2xl flex items-center justify-between gap-3 transition-all shadow-sm group cursor-pointer text-left"
         >
-          <CreditCard size={24} className="text-brand-400" />
-          <span className="font-medium text-sm">Payment Paid</span>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+              <CreditCard size={20} />
+            </div>
+            <div className="min-w-0">
+              <span className="font-bold text-xs sm:text-sm text-white block truncate">Payment Paid</span>
+              <span className="text-[11px] text-gray-400 block truncate">Disburse expense or voucher</span>
+            </div>
+          </div>
+          <Plus size={16} className="text-amber-400 shrink-0 opacity-75 group-hover:opacity-100" />
         </button>
       </div>
 

@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParentGroup, isUploadedLogo } from '../services/companyService';
 import { useBranding } from '../services/brandingService';
 import { safeAppStorage } from '../services/storage';
-import { Crown } from 'lucide-react';
 
 interface SplashScreenProps {
   onComplete: () => void;
@@ -25,12 +24,10 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
   };
 
   useEffect(() => {
-    // Trigger entrance animation immediately
     const enterTimer = requestAnimationFrame(() => {
       setMounted(true);
     });
 
-    // Snappy splash presentation duration (~1.4s) then transition smoothly
     const exitTimer = setTimeout(() => {
       handleFinish();
     }, 1400);
@@ -46,13 +43,13 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
   const adminUploadedLogo = isUploadedLogo(candidateLogo) ? candidateLogo : null;
 
   return (
-    <div 
+    <div
       onClick={handleFinish}
       onTouchStart={handleFinish}
       role="button"
       tabIndex={0}
       aria-label="Welcome screen - Click or tap to continue to login"
-      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center p-6 select-none bg-[#030712] transition-all duration-300 ease-out overflow-hidden cursor-pointer ${
+      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center p-6 select-none bg-gradient-to-b from-[#FFFFFF] via-[#F8FAFC] to-[#F1F5F9] text-slate-900 transition-all duration-300 ease-out overflow-hidden cursor-pointer ${
         fadingOut ? 'opacity-0 scale-105 pointer-events-none' : 'opacity-100 scale-100'
       }`}
     >
@@ -62,49 +59,17 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             transform: translateY(0px);
           }
           50% {
-            transform: translateY(-8px);
+            transform: translateY(-6px);
           }
         }
-        @keyframes dplPulseGlow {
+        @keyframes dplPulsePearl {
           0%, 100% {
-            opacity: 0.35;
+            opacity: 0.45;
             transform: scale(1);
           }
           50% {
-            opacity: 0.65;
-            transform: scale(1.12);
-          }
-        }
-        @keyframes dplOrbDrift1 {
-          0%, 100% {
-            transform: translate(0px, 0px) scale(1);
-          }
-          50% {
-            transform: translate(40px, -30px) scale(1.18);
-          }
-        }
-        @keyframes dplOrbDrift2 {
-          0%, 100% {
-            transform: translate(0px, 0px) scale(1);
-          }
-          50% {
-            transform: translate(-45px, 35px) scale(1.15);
-          }
-        }
-        @keyframes dplDustDrift {
-          0% {
-            transform: translateY(110vh) scale(0.6);
-            opacity: 0;
-          }
-          20% {
-            opacity: 0.7;
-          }
-          80% {
-            opacity: 0.7;
-          }
-          100% {
-            transform: translateY(-10vh) scale(1.1);
-            opacity: 0;
+            opacity: 0.75;
+            transform: scale(1.08);
           }
         }
         @keyframes dplSpinSlow {
@@ -126,124 +91,56 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
       `}</style>
 
       {/* ============================================================ */}
-      {/* 1. BEAUTIFULLY ANIMATED AMBIENT BACKGROUND                    */}
+      {/* 1. LUXURY PEARL WHITE AMBIENT CANVAS (NO DOTS OR CLUTTER)     */}
       {/* ============================================================ */}
-      
-      {/* Subtle fine cyber-geometric constellation mesh */}
-      <div 
-        className="absolute inset-0 pointer-events-none opacity-20"
+      <div
+        className="absolute inset-0 pointer-events-none"
         style={{
           backgroundImage: `
-            radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.08) 0%, transparent 60%),
-            linear-gradient(to right, rgba(56, 189, 248, 0.06) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(56, 189, 248, 0.06) 1px, transparent 1px)
-          `,
-          backgroundSize: '100% 100%, 48px 48px, 48px 48px',
-          maskImage: 'radial-gradient(ellipse at 50% 50%, black 50%, transparent 85%)'
+            radial-gradient(ellipse 85% 60% at 50% 45%, #FFFFFF 0%, rgba(248, 250, 252, 0.96) 55%, #F1F5F9 100%)
+          `
         }}
       />
 
-      {/* Deep Ambient Moving Orbs */}
-      <div 
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] h-[520px] sm:w-[640px] sm:h-[640px] rounded-full pointer-events-none"
-        style={{
-          background: 'radial-gradient(circle, rgba(245, 158, 11, 0.16) 0%, rgba(217, 119, 6, 0.08) 40%, transparent 70%)',
-          animation: 'dplOrbDrift1 14s ease-in-out infinite'
-        }}
-      />
-
-      <div 
-        className="absolute -bottom-24 -left-20 w-[420px] h-[420px] rounded-full pointer-events-none"
-        style={{
-          background: 'radial-gradient(circle, rgba(6, 182, 212, 0.12) 0%, rgba(14, 116, 144, 0.04) 50%, transparent 70%)',
-          animation: 'dplOrbDrift2 18s ease-in-out infinite'
-        }}
-      />
-
-      <div 
-        className="absolute -top-20 -right-20 w-[440px] h-[440px] rounded-full pointer-events-none"
-        style={{
-          background: 'radial-gradient(circle, rgba(37, 99, 235, 0.13) 0%, rgba(30, 58, 138, 0.04) 50%, transparent 70%)',
-          animation: 'dplOrbDrift1 20s ease-in-out infinite reverse'
-        }}
-      />
-
-      {/* Rotating Ultra-Subtle Background Compass Rings */}
-      <div 
-        className="absolute w-[360px] h-[360px] sm:w-[500px] sm:h-[500px] rounded-full border border-amber-500/10 border-dashed pointer-events-none"
+      {/* Soft Architectural Pearl Rings */}
+      <div
+        className="absolute w-[320px] h-[320px] sm:w-[460px] sm:h-[460px] lg:w-[540px] lg:h-[540px] rounded-full border border-slate-200/80 pointer-events-none"
         style={{ animation: 'dplSpinSlow 60s linear infinite' }}
       />
-      <div 
-        className="absolute w-[300px] h-[300px] sm:w-[420px] sm:h-[420px] rounded-full border border-cyan-500/10 pointer-events-none"
+      <div
+        className="absolute w-[250px] h-[250px] sm:w-[360px] sm:h-[360px] lg:w-[420px] lg:h-[420px] rounded-full border border-slate-200/60 border-dashed pointer-events-none"
         style={{ animation: 'dplReverseSpinSlow 45s linear infinite' }}
       />
 
-      {/* Floating Luminous Particle Stars */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        {[
-          { left: '12%', size: '3px', delay: '0s', duration: '7s' },
-          { left: '25%', size: '2px', delay: '2.5s', duration: '9s' },
-          { left: '38%', size: '3px', delay: '1s', duration: '6.5s' },
-          { left: '52%', size: '2px', delay: '3.8s', duration: '8s' },
-          { left: '68%', size: '3px', delay: '0.8s', duration: '7.5s' },
-          { left: '82%', size: '2.5px', delay: '2.2s', duration: '8.5s' },
-          { left: '92%', size: '3px', delay: '4s', duration: '6s' },
-        ].map((dust, idx) => (
-          <div
-            key={idx}
-            className="absolute rounded-full bg-amber-300 shadow-[0_0_8px_#fde047]"
-            style={{
-              left: dust.left,
-              bottom: 0,
-              width: dust.size,
-              height: dust.size,
-              animation: `dplDustDrift ${dust.duration} ease-in-out infinite`,
-              animationDelay: dust.delay
-            }}
-          />
-        ))}
-      </div>
-
       {/* ============================================================ */}
-      {/* 2. DIRECT ANIMATED LOGO ONLY - NO TEXT                       */}
+      {/* 2. CENTERED EXECUTIVE EMBLEM                                  */}
       {/* ============================================================ */}
       <div className="relative flex flex-col items-center justify-center z-10 px-4 text-center">
-        
-        {/* Soft Radial Gold Halo Aura Directly Behind Logo */}
-        <div 
-          className="absolute w-72 sm:w-96 h-72 sm:h-96 rounded-full pointer-events-none -z-10"
+        {/* Soft Pearl & Champagne Aura Behind Logo */}
+        <div
+          className="absolute w-64 sm:w-80 lg:w-96 h-64 sm:h-80 lg:h-96 rounded-full pointer-events-none -z-10"
           style={{
-            background: 'radial-gradient(circle, rgba(251, 191, 36, 0.22) 0%, rgba(245, 158, 11, 0.08) 50%, transparent 70%)',
-            animation: 'dplPulseGlow 3s ease-in-out infinite'
+            background: 'radial-gradient(circle, rgba(226, 232, 240, 0.65) 0%, rgba(241, 245, 249, 0.3) 55%, transparent 75%)',
+            animation: 'dplPulsePearl 3.5s ease-in-out infinite'
           }}
         />
 
-        {/* Animated Logo Container - Sits directly on the screen's canvas */}
-        <div 
-          className={`relative transition-all duration-1000 ease-out transform ${
-            mounted 
-              ? 'opacity-100 scale-100 translate-y-0' 
-              : 'opacity-0 scale-90 translate-y-3'
+        <div
+          className={`relative transition-all duration-700 ease-out transform ${
+            mounted
+              ? 'opacity-100 scale-100 translate-y-0'
+              : 'opacity-0 scale-95 translate-y-2'
           }`}
           style={{
             animation: mounted ? 'dplFloat 4s ease-in-out infinite' : undefined
           }}
         >
-          {adminUploadedLogo ? (
-            <img 
-              src={adminUploadedLogo} 
-              alt="Logo" 
-              className="w-56 sm:w-80 max-h-64 object-contain drop-shadow-[0_12px_40px_rgba(245,158,11,0.65)] filter brightness-110 select-none mx-auto"
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center">
-              <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-3xl bg-gradient-to-br from-amber-500/25 via-yellow-500/15 to-amber-600/30 border border-amber-400/50 flex items-center justify-center shadow-[0_0_50px_rgba(245,158,11,0.45)]">
-                <Crown size={56} className="text-amber-400 animate-pulse sm:w-16 sm:h-16" />
-              </div>
-            </div>
-          )}
+          <img
+            src={adminUploadedLogo || '/logos/mak_pearl_white_emblem.svg'}
+            alt={parentGroup?.name || 'MAK Group'}
+            className="w-48 sm:w-64 md:w-72 lg:w-80 max-h-56 sm:max-h-64 lg:max-h-72 object-contain drop-shadow-[0_14px_34px_rgba(15,23,42,0.12)] select-none mx-auto"
+          />
         </div>
-
       </div>
     </div>
   );

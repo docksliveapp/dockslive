@@ -16,12 +16,19 @@ import {
   ShieldCheck, 
   Loader2, 
   Sparkles,
-  FileText
+  FileText,
+  Upload,
+  Trash2,
+  Paperclip,
+  FileCheck,
+  CreditCard,
+  Check
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { saveClientToFirestore, saveUserToFirestore } from '../services/dbService';
 import { sendAppNotification } from '../services/notificationService';
-import { AdminRolesAndPrivilegesTable } from './AdminRolesAndPrivilegesTable';
+import { compressAndPrepareFile } from '../services/fileUtils';
+import { useAppTheme } from './ThemeToggleSwitch';
 
 interface NewRegistrationModalProps {
   isOpen: boolean;
@@ -32,6 +39,8 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
   isOpen,
   onClose
 }) => {
+  const [appTheme] = useAppTheme();
+  const isPearl = appTheme === 'pearl';
   const [selectedType, setSelectedType] = useState<'client' | 'transporter' | null>(null);
 
   // Client Form State
@@ -44,7 +53,18 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
     address: '',
     password: ''
   });
-  const [clientRoles, setClientRoles] = useState<UserRole[]>([UserRole.CLIENT]);
+
+  // Client Documents State
+  const [clientDocs, setClientDocs] = useState({
+    ntnDocUrl: '',
+    ntnDocName: '',
+    cnicFrontUrl: '',
+    cnicFrontName: '',
+    cnicBackUrl: '',
+    cnicBackName: '',
+    businessCardUrl: '',
+    businessCardName: ''
+  });
 
   // Transporter Form State
   const [transporterForm, setTransporterForm] = useState({
@@ -57,7 +77,20 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
     fleetCount: '',
     password: ''
   });
-  const [transporterRoles, setTransporterRoles] = useState<UserRole[]>([UserRole.TRANSPORTER]);
+
+  // Transporter Documents State
+  const [transporterDocs, setTransporterDocs] = useState({
+    cnicFrontUrl: '',
+    cnicFrontName: '',
+    cnicBackUrl: '',
+    cnicBackName: '',
+    ntnDocUrl: '',
+    ntnDocName: '',
+    businessCardUrl: '',
+    businessCardName: ''
+  });
+
+  const [uploadingDocKey, setUploadingDocKey] = useState<string | null>(null);
 
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -68,6 +101,42 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
     phone: string;
     type: 'client' | 'transporter';
   } | null>(null);
+
+  const handleDocUpload = async (
+    file: File,
+    formType: 'client' | 'transporter',
+    docKey: 'ntn' | 'cnicFront' | 'cnicBack' | 'businessCard'
+  ) => {
+    const keyId = `${formType}_${docKey}`;
+    setUploadingDocKey(keyId);
+    try {
+      const processed = await compressAndPrepareFile(file);
+      const url = processed.dataUrl || (processed.base64 ? `data:${processed.type};base64,${processed.base64}` : '');
+      const name = processed.name || file.name;
+
+      if (formType === 'client') {
+        setClientDocs(prev => ({
+          ...prev,
+          ...(docKey === 'ntn' && { ntnDocUrl: url, ntnDocName: name }),
+          ...(docKey === 'cnicFront' && { cnicFrontUrl: url, cnicFrontName: name }),
+          ...(docKey === 'cnicBack' && { cnicBackUrl: url, cnicBackName: name }),
+          ...(docKey === 'businessCard' && { businessCardUrl: url, businessCardName: name }),
+        }));
+      } else {
+        setTransporterDocs(prev => ({
+          ...prev,
+          ...(docKey === 'ntn' && { ntnDocUrl: url, ntnDocName: name }),
+          ...(docKey === 'cnicFront' && { cnicFrontUrl: url, cnicFrontName: name }),
+          ...(docKey === 'cnicBack' && { cnicBackUrl: url, cnicBackName: name }),
+          ...(docKey === 'businessCard' && { businessCardUrl: url, businessCardName: name }),
+        }));
+      }
+    } catch (err) {
+      console.warn('Document processing warning:', err);
+    } finally {
+      setUploadingDocKey(null);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -85,15 +154,25 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
       address: '',
       password: ''
     });
-    setTransporterForm({
-      transportName: '',
-      ownerName: '',
-      phone: '',
-      email: '',
-      address: '',
-      fleetType: '20ft & 40ft Trailers / Flatbeds',
-      fleetCount: '',
-      password: ''
+    setClientDocs({
+      ntnDocUrl: '',
+      ntnDocName: '',
+      cnicFrontUrl: '',
+      cnicFrontName: '',
+      cnicBackUrl: '',
+      cnicBackName: '',
+      businessCardUrl: '',
+      businessCardName: ''
+    });
+    setTransporterDocs({
+      cnicFrontUrl: '',
+      cnicFrontName: '',
+      cnicBackUrl: '',
+      cnicBackName: '',
+      ntnDocUrl: '',
+      ntnDocName: '',
+      businessCardUrl: '',
+      businessCardName: ''
     });
   };
 
@@ -122,7 +201,7 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
       const clientId = `client_${Date.now()}`;
       const userId = cleanPhone.replace(/[^0-9]/g, '') || cleanPhone;
 
-      // 1. Save Client Record
+      // 1. Save Client Record (with persistent verification docs)
       await saveClientToFirestore({
         id: clientId,
         name: cleanCompany,
@@ -132,31 +211,45 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
         email: clientForm.email.trim(),
         ntn: clientForm.ntn.trim(),
         officeAddress: clientForm.address.trim(),
-        status: 'PENDING_APPROVAL' as any
+        status: 'PENDING_APPROVAL' as any,
+        businessCardUrl: clientDocs.businessCardUrl,
+        businessCardName: clientDocs.businessCardName,
+        nicDocUrl: clientDocs.cnicFrontUrl,
+        nicDocName: clientDocs.cnicFrontName,
+        cnicFrontUrl: clientDocs.cnicFrontUrl,
+        cnicFrontName: clientDocs.cnicFrontName,
+        cnicBackUrl: clientDocs.cnicBackUrl,
+        cnicBackName: clientDocs.cnicBackName,
+        ntnDocUrl: clientDocs.ntnDocUrl,
+        ntnDocName: clientDocs.ntnDocName
       });
 
-      // 2. Save User Account for Credentials Login
+      // 2. Save User Account for Credentials Login (Auto-assign CLIENT role + persistent docs)
       const newUserIdNum = Date.now() % 10000000;
-      const primaryRole = clientRoles[0] || UserRole.CLIENT;
       await saveUserToFirestore({
         id: newUserIdNum,
         userId: userId,
         password: cleanPass,
         name: cleanPerson,
         clientName: cleanCompany,
-        role: primaryRole,
-        roles: clientRoles.length > 0 ? clientRoles : [UserRole.CLIENT],
+        role: UserRole.CLIENT,
+        roles: [UserRole.CLIENT],
         designation: 'Corporate Importer / Client',
         contact: cleanPhone,
         email: clientForm.email.trim(),
         status: 'PENDING_APPROVAL',
-        authProvider: 'database'
+        authProvider: 'database',
+        cnicDoc: clientDocs.cnicFrontUrl,
+        cnicFront: clientDocs.cnicFrontUrl,
+        cnicBack: clientDocs.cnicBackUrl,
+        ntnDoc: clientDocs.ntnDocUrl,
+        businessCard: clientDocs.businessCardUrl
       });
 
       // 3. Notify Admins
       await sendAppNotification({
         title: 'New Client Registration Request',
-        description: `${cleanCompany} (${cleanPerson}, ${cleanPhone}) has submitted a registration request for approval.`,
+        description: `${cleanCompany} (${cleanPerson}, ${cleanPhone}) has submitted a registration request with verification documents for approval.`,
         type: 'ALERT',
         targetRole: UserRole.ADMIN,
         priority: 'HIGH',
@@ -203,21 +296,25 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
       const userId = cleanPhone.replace(/[^0-9]/g, '') || cleanPhone;
       const newUserIdNum = Date.now() % 10000000;
 
-      // Save User Account with Transporter Role and Pending Status
-      const primaryRole = transporterRoles[0] || UserRole.TRANSPORTER;
+      // Save User Account (Auto-assign TRANSPORTER role + persistent docs)
       await saveUserToFirestore({
         id: newUserIdNum,
         userId: userId,
         password: cleanPass,
         name: cleanOwner,
         clientName: cleanTransport,
-        role: primaryRole,
-        roles: transporterRoles.length > 0 ? transporterRoles : [UserRole.TRANSPORTER],
+        role: UserRole.TRANSPORTER,
+        roles: [UserRole.TRANSPORTER],
         designation: `Transporter / Fleet Partner (${transporterForm.fleetType})`,
         contact: cleanPhone,
         email: transporterForm.email.trim(),
         status: 'PENDING_APPROVAL',
-        authProvider: 'database'
+        authProvider: 'database',
+        cnicDoc: transporterDocs.cnicFrontUrl,
+        cnicFront: transporterDocs.cnicFrontUrl,
+        cnicBack: transporterDocs.cnicBackUrl,
+        ntnDoc: transporterDocs.ntnDocUrl,
+        businessCard: transporterDocs.businessCardUrl
       });
 
       // Notify Admins
@@ -251,52 +348,86 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md overflow-hidden animate-fade-in">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 backdrop-blur-md overflow-hidden animate-fade-in ${
+      isPearl ? 'bg-slate-900/45' : 'bg-black/80'
+    }`}>
       <div 
-        className="relative w-full max-w-xl bg-slate-900 border border-amber-500/40 rounded-3xl shadow-[0_0_50px_rgba(245,158,11,0.2)] max-h-[92vh] flex flex-col overflow-hidden text-left"
+        className={`relative w-full max-w-xl rounded-3xl max-h-[92vh] flex flex-col overflow-hidden text-left transition-colors ${
+          isPearl
+            ? 'bg-white border border-slate-200/90 text-slate-900 shadow-[0_24px_60px_-12px_rgba(15,23,42,0.18)] ring-1 ring-slate-100'
+            : 'bg-[#121620] border border-white/12 text-white shadow-[0_24px_60px_rgba(0,0,0,0.75)]'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="bg-gradient-to-r from-amber-950/60 via-slate-900 to-slate-950 px-6 py-4 border-b border-amber-500/30 flex items-center justify-between shrink-0">
+        <div className={`px-5 sm:px-6 py-4 border-b flex items-center justify-between shrink-0 ${
+          isPearl
+            ? 'bg-slate-50/90 border-slate-200/90'
+            : 'bg-[#161B26] border-white/10'
+        }`}>
           <div className="flex items-center gap-3">
             {selectedType && !isSuccess && (
               <button
                 type="button"
                 onClick={() => { setSelectedType(null); setErrorMessage(null); }}
-                className="p-1.5 rounded-lg text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition cursor-pointer"
+                className={`p-1.5 rounded-xl border transition cursor-pointer ${
+                  isPearl
+                    ? 'text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border-slate-200'
+                    : 'text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border-white/10'
+                }`}
                 title="Back to options"
               >
                 <ArrowLeft size={16} />
               </button>
             )}
-            <div>
-              <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <Sparkles className="text-amber-400" size={18} />
-                <span>Enterprise Account Registration</span>
-              </h3>
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                {selectedType === 'client' 
-                  ? 'Corporate Client & Importer Account Request'
-                  : selectedType === 'transporter'
-                  ? 'Transporter & Fleet Operator Account Request'
-                  : 'Select your account category to register'}
-              </p>
+            <div className="flex items-center gap-2.5">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                isPearl
+                  ? 'bg-amber-50 border-amber-200 text-amber-600'
+                  : 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+              }`}>
+                <Sparkles size={17} />
+              </div>
+              <div>
+                <h3 className={`text-base sm:text-lg font-bold tracking-tight ${
+                  isPearl ? 'text-slate-900' : 'text-white'
+                }`}>
+                  Enterprise Account Registration
+                </h3>
+                <p className={`text-[11px] mt-0.5 ${
+                  isPearl ? 'text-slate-500' : 'text-gray-400'
+                }`}>
+                  {selectedType === 'client' 
+                    ? 'Corporate Client & Importer Account Request'
+                    : selectedType === 'transporter'
+                    ? 'Transporter & Fleet Operator Account Request'
+                    : 'Select your account category to register'}
+                </p>
+              </div>
             </div>
           </div>
 
           <button
             type="button"
             onClick={handleClose}
-            className="p-2 rounded-xl text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition cursor-pointer"
+            className={`p-2 rounded-xl border transition cursor-pointer ${
+              isPearl
+                ? 'text-slate-500 hover:text-slate-900 bg-white hover:bg-slate-100 border-slate-200'
+                : 'text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border-white/10'
+            }`}
           >
             <X size={18} />
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0 overscroll-contain">
+        <div className="p-5 sm:p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0 overscroll-contain">
           {errorMessage && (
-            <div className="mb-4 p-3 rounded-xl bg-red-500/20 border border-red-500/40 text-red-300 text-xs flex items-center gap-2">
+            <div className={`mb-4 p-3 rounded-xl border text-xs flex items-center gap-2 ${
+              isPearl
+                ? 'bg-rose-50 border-rose-200 text-rose-700'
+                : 'bg-red-500/20 border-red-500/40 text-red-300'
+            }`}>
               <AlertCircle size={16} className="shrink-0" />
               <span>{errorMessage}</span>
             </div>
@@ -305,58 +436,78 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
           {/* SUCCESS RECEIPT STATE */}
           {isSuccess && submittedDetails ? (
             <div className="text-center py-6 px-3 space-y-5 animate-scale-up">
-              <div className="w-16 h-16 rounded-full bg-emerald-500/20 border-2 border-emerald-500/50 text-emerald-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/20">
+              <div className={`w-16 h-16 rounded-full border-2 flex items-center justify-center mx-auto shadow-md ${
+                isPearl
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-600'
+                  : 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
+              }`}>
                 <CheckCircle2 size={36} />
               </div>
 
               <div>
-                <h4 className="text-xl font-bold text-white">
+                <h4 className={`text-xl font-bold ${isPearl ? 'text-slate-900' : 'text-white'}`}>
                   Registration Request Submitted!
                 </h4>
-                <p className="text-xs text-emerald-400 font-semibold mt-1">
+                <p className={`text-xs font-semibold mt-1 ${isPearl ? 'text-emerald-700' : 'text-emerald-400'}`}>
                   Awaiting Central Administration Verification
                 </p>
               </div>
 
-              <div className="p-4 rounded-2xl bg-black/40 border border-white/10 text-xs text-left space-y-2 max-w-md mx-auto">
-                <div className="flex justify-between border-b border-white/5 pb-2">
-                  <span className="text-gray-400">Account Type:</span>
-                  <span className="font-bold text-white capitalize">
+              <div className={`p-4 rounded-2xl border text-xs text-left space-y-2.5 max-w-md mx-auto ${
+                isPearl
+                  ? 'bg-slate-50 border-slate-200 text-slate-700'
+                  : 'bg-black/40 border-white/10 text-gray-300'
+              }`}>
+                <div className={`flex justify-between border-b pb-2 ${isPearl ? 'border-slate-200' : 'border-white/5'}`}>
+                  <span className={isPearl ? 'text-slate-500' : 'text-gray-400'}>Account Type:</span>
+                  <span className={`font-bold capitalize ${isPearl ? 'text-slate-900' : 'text-white'}`}>
                     {submittedDetails.type === 'client' ? 'Corporate Client / Importer' : 'Transporter / Fleet Partner'}
                   </span>
                 </div>
-                <div className="flex justify-between border-b border-white/5 pb-2">
-                  <span className="text-gray-400">Company Name:</span>
-                  <span className="font-bold text-white">{submittedDetails.name}</span>
+                <div className={`flex justify-between border-b pb-2 ${isPearl ? 'border-slate-200' : 'border-white/5'}`}>
+                  <span className={isPearl ? 'text-slate-500' : 'text-gray-400'}>Company Name:</span>
+                  <span className={`font-bold ${isPearl ? 'text-slate-900' : 'text-white'}`}>{submittedDetails.name}</span>
                 </div>
-                <div className="flex justify-between border-b border-white/5 pb-2">
-                  <span className="text-gray-400">Login User ID (Phone):</span>
-                  <span className="font-mono font-bold text-amber-300">{submittedDetails.phone}</span>
+                <div className={`flex justify-between border-b pb-2 ${isPearl ? 'border-slate-200' : 'border-white/5'}`}>
+                  <span className={isPearl ? 'text-slate-500' : 'text-gray-400'}>Login User ID (Phone):</span>
+                  <span className={`font-mono font-bold ${isPearl ? 'text-amber-700' : 'text-amber-300'}`}>{submittedDetails.phone}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Status:</span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                <div className="flex justify-between items-center">
+                  <span className={isPearl ? 'text-slate-500' : 'text-gray-400'}>Status:</span>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                    isPearl
+                      ? 'bg-amber-50 text-amber-800 border-amber-300'
+                      : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  }`}>
                     PENDING ADMIN APPROVAL
                   </span>
                 </div>
               </div>
 
-              <p className="text-xs text-gray-300 max-w-md mx-auto leading-relaxed">
+              <p className={`text-xs max-w-md mx-auto leading-relaxed ${
+                isPearl ? 'text-slate-600' : 'text-gray-300'
+              }`}>
                 Your registration request has been submitted to the System Administrator for verification. Upon administrative review and approval, your account login will be activated with your registered phone number and chosen password.
               </p>
 
               <button
                 type="button"
                 onClick={handleClose}
-                className="w-full sm:w-auto px-8 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs uppercase tracking-wider shadow-lg transition cursor-pointer"
+                className={`w-full sm:w-auto px-8 py-3 rounded-xl font-bold text-xs uppercase tracking-wider shadow-md transition cursor-pointer ${
+                  isPearl
+                    ? 'btn-charcoal-primary text-white'
+                    : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950'
+                }`}
               >
                 Back to Sign In
               </button>
             </div>
           ) : selectedType === null ? (
             /* STEP 1: CHOOSE REGISTRATION TYPE */
-            <div className="space-y-4 py-2">
-              <p className="text-xs text-gray-300 text-center mb-4">
+            <div className="space-y-4 py-1">
+              <p className={`text-xs text-center mb-3 font-medium ${
+                isPearl ? 'text-slate-600' : 'text-gray-300'
+              }`}>
                 Please select how you wish to register with MAK Group of Companies:
               </p>
 
@@ -364,24 +515,44 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
                 {/* Option 1: Transporter */}
                 <div
                   onClick={() => setSelectedType('transporter')}
-                  className="group relative p-5 rounded-2xl bg-gradient-to-b from-slate-950/90 to-slate-900 border border-amber-500/30 hover:border-amber-400 hover:shadow-[0_0_30px_rgba(245,158,11,0.25)] transition-all cursor-pointer flex flex-col justify-between"
+                  className={`group relative p-5 rounded-2xl border transition-all duration-200 cursor-pointer flex flex-col justify-between ${
+                    isPearl
+                      ? 'bg-white hover:bg-amber-50/40 border-slate-200 hover:border-amber-400 shadow-sm hover:shadow-md'
+                      : 'bg-[#161B26] hover:bg-[#1B2230] border-amber-500/30 hover:border-amber-400 shadow-lg'
+                  }`}
                 >
                   <div>
-                    <div className="w-12 h-12 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                    <div className={`w-12 h-12 rounded-xl border flex items-center justify-center mb-3.5 group-hover:scale-105 transition-transform ${
+                      isPearl
+                        ? 'bg-amber-50 border-amber-200 text-amber-600'
+                        : 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                    }`}>
                       <Truck size={24} />
                     </div>
-                    <h4 className="text-base font-bold text-white group-hover:text-amber-300 transition-colors">
+                    <h4 className={`text-base font-bold transition-colors ${
+                      isPearl
+                        ? 'text-slate-900 group-hover:text-amber-800'
+                        : 'text-white group-hover:text-amber-300'
+                    }`}>
                       Transporter / Fleet
                     </h4>
-                    <p className="text-xs text-amber-400 font-medium mt-0.5">
+                    <p className={`text-xs font-semibold mt-0.5 ${
+                      isPearl ? 'text-amber-700' : 'text-amber-400'
+                    }`}>
                       Commercial Fleet Operator &amp; Haulage Partner
                     </p>
-                    <p className="text-xs text-gray-400 mt-2.5 leading-relaxed">
+                    <p className={`text-xs mt-2.5 leading-relaxed ${
+                      isPearl ? 'text-slate-600' : 'text-gray-400'
+                    }`}>
                       For goods transport companies, trailer owners &amp; logistics operators to receive container assignments and diesel/trip vouchers.
                     </p>
                   </div>
 
-                  <div className="mt-5 pt-3 border-t border-white/10 flex items-center justify-between text-xs text-amber-400 font-bold">
+                  <div className={`mt-5 pt-3 border-t flex items-center justify-between text-xs font-bold ${
+                    isPearl
+                      ? 'border-slate-200 text-amber-700 group-hover:text-amber-800'
+                      : 'border-white/10 text-amber-400'
+                  }`}>
                     <span>Register Fleet ➔</span>
                   </div>
                 </div>
@@ -389,24 +560,44 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
                 {/* Option 2: Client */}
                 <div
                   onClick={() => setSelectedType('client')}
-                  className="group relative p-5 rounded-2xl bg-gradient-to-b from-slate-950/90 to-slate-900 border border-blue-500/30 hover:border-blue-400 hover:shadow-[0_0_30px_rgba(37,99,235,0.25)] transition-all cursor-pointer flex flex-col justify-between"
+                  className={`group relative p-5 rounded-2xl border transition-all duration-200 cursor-pointer flex flex-col justify-between ${
+                    isPearl
+                      ? 'bg-white hover:bg-sky-50/40 border-slate-200 hover:border-sky-400 shadow-sm hover:shadow-md'
+                      : 'bg-[#161B26] hover:bg-[#1B2230] border-blue-500/30 hover:border-blue-400 shadow-lg'
+                  }`}
                 >
                   <div>
-                    <div className="w-12 h-12 rounded-xl bg-blue-500/20 border border-blue-500/40 text-blue-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                    <div className={`w-12 h-12 rounded-xl border flex items-center justify-center mb-3.5 group-hover:scale-105 transition-transform ${
+                      isPearl
+                        ? 'bg-sky-50 border-sky-200 text-sky-600'
+                        : 'bg-blue-500/20 border-blue-500/40 text-blue-400'
+                    }`}>
                       <Building size={24} />
                     </div>
-                    <h4 className="text-base font-bold text-white group-hover:text-blue-300 transition-colors">
+                    <h4 className={`text-base font-bold transition-colors ${
+                      isPearl
+                        ? 'text-slate-900 group-hover:text-sky-800'
+                        : 'text-white group-hover:text-blue-300'
+                    }`}>
                       Corporate Client / Importer
                     </h4>
-                    <p className="text-xs text-blue-400 font-medium mt-0.5">
+                    <p className={`text-xs font-semibold mt-0.5 ${
+                      isPearl ? 'text-sky-700' : 'text-blue-400'
+                    }`}>
                       Commercial Importer, Exporter &amp; Clearing Client
                     </p>
-                    <p className="text-xs text-gray-400 mt-2.5 leading-relaxed">
+                    <p className={`text-xs mt-2.5 leading-relaxed ${
+                      isPearl ? 'text-slate-600' : 'text-gray-400'
+                    }`}>
                       For importers, exporters &amp; clearing clients to track live customs transit cases, access financial ledgers, and view invoices.
                     </p>
                   </div>
 
-                  <div className="mt-5 pt-3 border-t border-white/10 flex items-center justify-between text-xs text-blue-400 font-bold">
+                  <div className={`mt-5 pt-3 border-t flex items-center justify-between text-xs font-bold ${
+                    isPearl
+                      ? 'border-slate-200 text-sky-700 group-hover:text-sky-800'
+                      : 'border-white/10 text-blue-400'
+                  }`}>
                     <span>Register Importer ➔</span>
                   </div>
                 </div>
@@ -510,22 +701,208 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
                 </div>
               </div>
 
-              <div className="pt-2">
-                <AdminRolesAndPrivilegesTable
-                  assignedRoles={clientRoles}
-                  userName={clientForm.companyName || 'this corporate client'}
-                  allowedCompanies={['docks', 'truckit', 'muhib', 'vantage']}
-                  onRolesChange={(newRoles) => {
-                    setClientRoles(newRoles.length > 0 ? newRoles : [UserRole.CLIENT]);
-                  }}
-                />
+              {/* Company & Owner Verification Documents */}
+              <div className="pt-2 border-t border-white/10 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+                    <FileText size={14} className="text-amber-400" />
+                    <span>Upload Verification Documents</span>
+                  </label>
+                  <span className="text-[10px] text-gray-400 font-mono">Images &amp; PDF</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* 1. NTN / STRN Certificate */}
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1">
+                        <FileCheck size={13} className="text-amber-400" /> NTN Certificate
+                      </span>
+                      {clientDocs.ntnDocUrl && (
+                        <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/30 flex items-center gap-0.5">
+                          <Check size={10} /> Attached
+                        </span>
+                      )}
+                    </div>
+                    {clientDocs.ntnDocUrl ? (
+                      <div className="flex items-center justify-between gap-1 text-[11px] bg-white/5 p-1.5 rounded-lg border border-white/10">
+                        <span className="truncate text-slate-200 font-mono text-[10px]">{clientDocs.ntnDocName || 'ntn_doc'}</span>
+                        <button
+                          type="button"
+                          onClick={() => setClientDocs(prev => ({ ...prev, ntnDocUrl: '', ntnDocName: '' }))}
+                          className="text-red-400 hover:text-red-300 p-0.5 cursor-pointer"
+                          title="Remove"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-dashed border-white/20 hover:border-amber-400 bg-white/5 hover:bg-white/10 cursor-pointer text-[11px] text-gray-300 hover:text-white transition">
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleDocUpload(f, 'client', 'ntn');
+                          }}
+                        />
+                        {uploadingDocKey === 'client_ntn' ? (
+                          <Loader2 size={12} className="animate-spin text-amber-400" />
+                        ) : (
+                          <Upload size={12} className="text-amber-400" />
+                        )}
+                        <span>Upload NTN</span>
+                      </label>
+                    )}
+                  </div>
+
+                  {/* 2. Business Card / Visiting Card */}
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1">
+                        <CreditCard size={13} className="text-amber-400" /> Business Card
+                      </span>
+                      {clientDocs.businessCardUrl && (
+                        <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/30 flex items-center gap-0.5">
+                          <Check size={10} /> Attached
+                        </span>
+                      )}
+                    </div>
+                    {clientDocs.businessCardUrl ? (
+                      <div className="flex items-center justify-between gap-1 text-[11px] bg-white/5 p-1.5 rounded-lg border border-white/10">
+                        <span className="truncate text-slate-200 font-mono text-[10px]">{clientDocs.businessCardName || 'business_card'}</span>
+                        <button
+                          type="button"
+                          onClick={() => setClientDocs(prev => ({ ...prev, businessCardUrl: '', businessCardName: '' }))}
+                          className="text-red-400 hover:text-red-300 p-0.5 cursor-pointer"
+                          title="Remove"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-dashed border-white/20 hover:border-amber-400 bg-white/5 hover:bg-white/10 cursor-pointer text-[11px] text-gray-300 hover:text-white transition">
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleDocUpload(f, 'client', 'businessCard');
+                          }}
+                        />
+                        {uploadingDocKey === 'client_businessCard' ? (
+                          <Loader2 size={12} className="animate-spin text-amber-400" />
+                        ) : (
+                          <Upload size={12} className="text-amber-400" />
+                        )}
+                        <span>Upload Card</span>
+                      </label>
+                    )}
+                  </div>
+
+                  {/* 3. Owner NIC / CNIC Front */}
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1">
+                        <ShieldCheck size={13} className="text-amber-400" /> Owner CNIC Front
+                      </span>
+                      {clientDocs.cnicFrontUrl && (
+                        <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/30 flex items-center gap-0.5">
+                          <Check size={10} /> Attached
+                        </span>
+                      )}
+                    </div>
+                    {clientDocs.cnicFrontUrl ? (
+                      <div className="flex items-center justify-between gap-1 text-[11px] bg-white/5 p-1.5 rounded-lg border border-white/10">
+                        <span className="truncate text-slate-200 font-mono text-[10px]">{clientDocs.cnicFrontName || 'cnic_front'}</span>
+                        <button
+                          type="button"
+                          onClick={() => setClientDocs(prev => ({ ...prev, cnicFrontUrl: '', cnicFrontName: '' }))}
+                          className="text-red-400 hover:text-red-300 p-0.5 cursor-pointer"
+                          title="Remove"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-dashed border-white/20 hover:border-amber-400 bg-white/5 hover:bg-white/10 cursor-pointer text-[11px] text-gray-300 hover:text-white transition">
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleDocUpload(f, 'client', 'cnicFront');
+                          }}
+                        />
+                        {uploadingDocKey === 'client_cnicFront' ? (
+                          <Loader2 size={12} className="animate-spin text-amber-400" />
+                        ) : (
+                          <Upload size={12} className="text-amber-400" />
+                        )}
+                        <span>Upload CNIC Front</span>
+                      </label>
+                    )}
+                  </div>
+
+                  {/* 4. Owner NIC / CNIC Back */}
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1">
+                        <ShieldCheck size={13} className="text-amber-400" /> Owner CNIC Back
+                      </span>
+                      {clientDocs.cnicBackUrl && (
+                        <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/30 flex items-center gap-0.5">
+                          <Check size={10} /> Attached
+                        </span>
+                      )}
+                    </div>
+                    {clientDocs.cnicBackUrl ? (
+                      <div className="flex items-center justify-between gap-1 text-[11px] bg-white/5 p-1.5 rounded-lg border border-white/10">
+                        <span className="truncate text-slate-200 font-mono text-[10px]">{clientDocs.cnicBackName || 'cnic_back'}</span>
+                        <button
+                          type="button"
+                          onClick={() => setClientDocs(prev => ({ ...prev, cnicBackUrl: '', cnicBackName: '' }))}
+                          className="text-red-400 hover:text-red-300 p-0.5 cursor-pointer"
+                          title="Remove"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-dashed border-white/20 hover:border-amber-400 bg-white/5 hover:bg-white/10 cursor-pointer text-[11px] text-gray-300 hover:text-white transition">
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleDocUpload(f, 'client', 'cnicBack');
+                          }}
+                        />
+                        {uploadingDocKey === 'client_cnicBack' ? (
+                          <Loader2 size={12} className="animate-spin text-amber-400" />
+                        ) : (
+                          <Upload size={12} className="text-amber-400" />
+                        )}
+                        <span>Upload CNIC Back</span>
+                      </label>
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div className="pt-3 border-t border-white/10">
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50"
+                  className={`w-full py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider shadow-md flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 ${
+                    isPearl
+                      ? 'btn-charcoal-primary text-white'
+                      : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950'
+                  }`}
                 >
                   {isSubmitting ? (
                     <>
@@ -656,22 +1033,208 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
                 </div>
               </div>
 
-              <div className="pt-2">
-                <AdminRolesAndPrivilegesTable
-                  assignedRoles={transporterRoles}
-                  userName={transporterForm.transportName || 'this transporter / fleet'}
-                  allowedCompanies={['docks', 'truckit', 'muhib', 'vantage']}
-                  onRolesChange={(newRoles) => {
-                    setTransporterRoles(newRoles.length > 0 ? newRoles : [UserRole.TRANSPORTER]);
-                  }}
-                />
+              {/* Fleet & Transporter Verification Documents */}
+              <div className="pt-2 border-t border-white/10 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+                    <FileText size={14} className="text-amber-400" />
+                    <span>Transporter &amp; Fleet Verification Documents</span>
+                  </label>
+                  <span className="text-[10px] text-gray-400 font-mono">Images &amp; PDF</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* 1. Owner NIC / CNIC Front */}
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1">
+                        <ShieldCheck size={13} className="text-amber-400" /> Owner CNIC Front
+                      </span>
+                      {transporterDocs.cnicFrontUrl && (
+                        <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/30 flex items-center gap-0.5">
+                          <Check size={10} /> Attached
+                        </span>
+                      )}
+                    </div>
+                    {transporterDocs.cnicFrontUrl ? (
+                      <div className="flex items-center justify-between gap-1 text-[11px] bg-white/5 p-1.5 rounded-lg border border-white/10">
+                        <span className="truncate text-slate-200 font-mono text-[10px]">{transporterDocs.cnicFrontName || 'cnic_front'}</span>
+                        <button
+                          type="button"
+                          onClick={() => setTransporterDocs(prev => ({ ...prev, cnicFrontUrl: '', cnicFrontName: '' }))}
+                          className="text-red-400 hover:text-red-300 p-0.5 cursor-pointer"
+                          title="Remove"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-dashed border-white/20 hover:border-amber-400 bg-white/5 hover:bg-white/10 cursor-pointer text-[11px] text-gray-300 hover:text-white transition">
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleDocUpload(f, 'transporter', 'cnicFront');
+                          }}
+                        />
+                        {uploadingDocKey === 'transporter_cnicFront' ? (
+                          <Loader2 size={12} className="animate-spin text-amber-400" />
+                        ) : (
+                          <Upload size={12} className="text-amber-400" />
+                        )}
+                        <span>Upload CNIC Front</span>
+                      </label>
+                    )}
+                  </div>
+
+                  {/* 2. Owner NIC / CNIC Back */}
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1">
+                        <ShieldCheck size={13} className="text-amber-400" /> Owner CNIC Back
+                      </span>
+                      {transporterDocs.cnicBackUrl && (
+                        <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/30 flex items-center gap-0.5">
+                          <Check size={10} /> Attached
+                        </span>
+                      )}
+                    </div>
+                    {transporterDocs.cnicBackUrl ? (
+                      <div className="flex items-center justify-between gap-1 text-[11px] bg-white/5 p-1.5 rounded-lg border border-white/10">
+                        <span className="truncate text-slate-200 font-mono text-[10px]">{transporterDocs.cnicBackName || 'cnic_back'}</span>
+                        <button
+                          type="button"
+                          onClick={() => setTransporterDocs(prev => ({ ...prev, cnicBackUrl: '', cnicBackName: '' }))}
+                          className="text-red-400 hover:text-red-300 p-0.5 cursor-pointer"
+                          title="Remove"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-dashed border-white/20 hover:border-amber-400 bg-white/5 hover:bg-white/10 cursor-pointer text-[11px] text-gray-300 hover:text-white transition">
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleDocUpload(f, 'transporter', 'cnicBack');
+                          }}
+                        />
+                        {uploadingDocKey === 'transporter_cnicBack' ? (
+                          <Loader2 size={12} className="animate-spin text-amber-400" />
+                        ) : (
+                          <Upload size={12} className="text-amber-400" />
+                        )}
+                        <span>Upload CNIC Back</span>
+                      </label>
+                    )}
+                  </div>
+
+                  {/* 3. NTN / Transport License / STRN */}
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1">
+                        <FileCheck size={13} className="text-amber-400" /> NTN / Fleet License
+                      </span>
+                      {transporterDocs.ntnDocUrl && (
+                        <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/30 flex items-center gap-0.5">
+                          <Check size={10} /> Attached
+                        </span>
+                      )}
+                    </div>
+                    {transporterDocs.ntnDocUrl ? (
+                      <div className="flex items-center justify-between gap-1 text-[11px] bg-white/5 p-1.5 rounded-lg border border-white/10">
+                        <span className="truncate text-slate-200 font-mono text-[10px]">{transporterDocs.ntnDocName || 'license_doc'}</span>
+                        <button
+                          type="button"
+                          onClick={() => setTransporterDocs(prev => ({ ...prev, ntnDocUrl: '', ntnDocName: '' }))}
+                          className="text-red-400 hover:text-red-300 p-0.5 cursor-pointer"
+                          title="Remove"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-dashed border-white/20 hover:border-amber-400 bg-white/5 hover:bg-white/10 cursor-pointer text-[11px] text-gray-300 hover:text-white transition">
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleDocUpload(f, 'transporter', 'ntn');
+                          }}
+                        />
+                        {uploadingDocKey === 'transporter_ntn' ? (
+                          <Loader2 size={12} className="animate-spin text-amber-400" />
+                        ) : (
+                          <Upload size={12} className="text-amber-400" />
+                        )}
+                        <span>Upload NTN / License</span>
+                      </label>
+                    )}
+                  </div>
+
+                  {/* 4. Business Card / Fleet Letterhead */}
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1">
+                        <CreditCard size={13} className="text-amber-400" /> Card / Letterhead
+                      </span>
+                      {transporterDocs.businessCardUrl && (
+                        <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/30 flex items-center gap-0.5">
+                          <Check size={10} /> Attached
+                        </span>
+                      )}
+                    </div>
+                    {transporterDocs.businessCardUrl ? (
+                      <div className="flex items-center justify-between gap-1 text-[11px] bg-white/5 p-1.5 rounded-lg border border-white/10">
+                        <span className="truncate text-slate-200 font-mono text-[10px]">{transporterDocs.businessCardName || 'letterhead'}</span>
+                        <button
+                          type="button"
+                          onClick={() => setTransporterDocs(prev => ({ ...prev, businessCardUrl: '', businessCardName: '' }))}
+                          className="text-red-400 hover:text-red-300 p-0.5 cursor-pointer"
+                          title="Remove"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-dashed border-white/20 hover:border-amber-400 bg-white/5 hover:bg-white/10 cursor-pointer text-[11px] text-gray-300 hover:text-white transition">
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleDocUpload(f, 'transporter', 'businessCard');
+                          }}
+                        />
+                        {uploadingDocKey === 'transporter_businessCard' ? (
+                          <Loader2 size={12} className="animate-spin text-amber-400" />
+                        ) : (
+                          <Upload size={12} className="text-amber-400" />
+                        )}
+                        <span>Upload Card / Slip</span>
+                      </label>
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div className="pt-3 border-t border-white/10">
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50"
+                  className={`w-full py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider shadow-md flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 ${
+                    isPearl
+                      ? 'btn-charcoal-primary text-white'
+                      : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950'
+                  }`}
                 >
                   {isSubmitting ? (
                     <>

@@ -15,8 +15,10 @@ export interface PdfExportOptions {
   onlyInvoice?: boolean;
   withInvoice?: boolean;
   withAttachments?: boolean;
+  includeAttachments?: boolean;
   previewOnly?: boolean;
   onlyCaseDetails?: boolean;
+  accentColor?: [number, number, number];
 }
 
 export interface BrandingInfo {
@@ -51,13 +53,13 @@ export async function getMakGroupLetterheadLogoPngUrl(): Promise<string> {
   return new Promise((resolve) => {
     try {
       const canvas = document.createElement('canvas');
-      canvas.width = 1000;
+      canvas.width = 1120;
       canvas.height = 500;
       const ctx = canvas.getContext('2d');
       if (!ctx) return resolve('');
 
       // Premium Charcoal Gradient matching MAK Logo
-      const grad = ctx.createLinearGradient(0, 0, 1000, 500);
+      const grad = ctx.createLinearGradient(0, 0, 1120, 500);
       grad.addColorStop(0, '#1E293B');
       grad.addColorStop(0.5, '#0F172A');
       grad.addColorStop(1, '#020617');
@@ -176,7 +178,11 @@ export async function resolvePdfLogoUrl(customLogo?: string | null): Promise<str
  */
 export function cleanPdfText(str?: string | null): string {
   if (!str) return '';
-  return String(str).replace(/[^\x20-\x7E]/g, '').trim();
+  return String(str)
+    .replace(/[•·]/g, '|')
+    .replace(/[—–]/g, '-')
+    .replace(/[^\x20-\x7E]/g, '')
+    .trim();
 }
 
 /**
@@ -261,14 +267,14 @@ export async function drawPdfCorporateHeader(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(5.4);
   doc.setTextColor(71, 85, 105);
-  const entitiesLine = 'DOCKS (PVT) LTD  •  TRUCKIT (PVT) LTD  •  MUHIB INTL  •  VANTAGE SHIPPING';
+  const entitiesLine = 'DOCKS (PVT) LTD  |  TRUCKIT (PVT) LTD  |  MUHIB INTL  |  VANTAGE SHIPPING';
   doc.text(entitiesLine, textStartX, startY + 11.5, { maxWidth: maxLeftWidth });
 
   // Customs Bonded & Intermodal Freight Operations note
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(5.0);
   doc.setTextColor(100, 116, 139);
-  doc.text('Customs Bonded Carrier  •  Fleet Haulage  •  Ocean Freight  •  Forwarding', textStartX, startY + 14.5, { maxWidth: maxLeftWidth });
+  doc.text('Customs Bonded Carrier  |  Fleet Haulage  |  Ocean Freight  |  Forwarding', textStartX, startY + 14.5, { maxWidth: maxLeftWidth });
 
   const currLeftY = startY + 15.0;
 
@@ -384,8 +390,8 @@ export function drawPdfCorporateFooter(
   doc.setTextColor(148, 163, 184);
   const isSinglePage = !cleanRight || cleanRight.toLowerCase() === 'page 1 of 1' || cleanRight.toLowerCase().endsWith('of 1');
   const pageNotice = isSinglePage 
-    ? 'MAK Group of Companies • DOCKS | TRUCKIT | MUHIB | VANTAGE • Official ERP Record' 
-    : `${cleanRight}  •  MAK Group of Companies Official ERP Record`;
+    ? 'MAK Group of Companies  |  DOCKS - TRUCKIT - MUHIB - VANTAGE  |  Official ERP Record' 
+    : `${cleanRight}  |  MAK Group of Companies Official ERP Record`;
   doc.text(pageNotice, centerX, dividerY + 11.2, { align: 'center' });
 }
 
@@ -551,7 +557,13 @@ export async function downloadCasePdf(
 ): Promise<{ success: boolean; filename: string; blobUrl?: string }> {
   try {
     const isOptions = (obj: any): obj is PdfExportOptions => {
-      return !!obj && ('onlyInvoice' in obj || 'accentColor' in obj);
+      return !!obj && (
+        'onlyInvoice' in obj ||
+        'onlyCaseDetails' in obj ||
+        'includeAttachments' in obj ||
+        'previewOnly' in obj ||
+        'accentColor' in obj
+      );
     };
 
     const branding: BrandingInfo = (!brandingOrOptions || isOptions(brandingOrOptions))
@@ -684,74 +696,100 @@ export async function downloadCasePdf(
 
       currentY = formBoxY + formBoxHeight + 5;
 
-      // Section 2: INVOICE (Itemized Service Charges & Bottom Total Amount)
-      doc.setFillColor(15, 23, 42); // slate-900
-      doc.rect(margin, currentY, pageWidth - (margin * 2), 6, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7.5);
-      doc.setTextColor(255, 255, 255);
-      doc.text('INVOICE', margin + 4, currentY + 4.2);
-      doc.text('AMOUNT (PKR)', pageWidth - margin - 4, currentY + 4.2, { align: 'right' });
-      currentY += 6;
+      // Section 2: INVOICE (Render unless onlyCaseDetails is explicitly requested)
+      if (!options.onlyCaseDetails) {
+        doc.setFillColor(15, 23, 42); // slate-900
+        doc.rect(margin, currentY, pageWidth - (margin * 2), 6, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(255, 255, 255);
+        doc.text('INVOICE BREAKDOWN', margin + 4, currentY + 4.2);
+        doc.text('AMOUNT (PKR)', pageWidth - margin - 4, currentY + 4.2, { align: 'right' });
+        currentY += 6;
 
-      const charges = targetCase.charges && targetCase.charges.length > 0
-        ? targetCase.charges
-        : [
-            { description: 'Terminal Handling & Customs Examination Charges', amount: 45000 },
-            { description: 'Bonded Transportation & Transit Clearance Fee', amount: 85000 },
-            { description: 'Port Documentation, EDI & Gate Pass Surcharge', amount: 12500 }
-          ];
+        const fallbackTotal = Number(targetCase.totalCost || (targetCase as any).amount || 0);
+        const charges = targetCase.charges && targetCase.charges.length > 0
+          ? targetCase.charges
+          : fallbackTotal > 0
+            ? [{ description: 'Logistics, Customs Clearance & Freight Charges', amount: fallbackTotal }]
+            : [{ description: 'No charges billed yet', amount: 0 }];
 
-      let totalAmount = 0;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.2);
-      doc.setTextColor(30, 41, 59);
+        let totalAmount = 0;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.2);
+        doc.setTextColor(30, 41, 59);
 
-      charges.slice(0, 4).forEach((ch: any, idx: number) => {
-        totalAmount += Number(ch.amount) || 0;
-        if (idx % 2 === 1) {
-          doc.setFillColor(248, 250, 252);
-          doc.rect(margin, currentY, pageWidth - (margin * 2), 5, 'F');
-        }
-        doc.text(String(idx + 1), margin + 3, currentY + 3.6);
-        doc.text(ch.description || 'Logistics Service', margin + 10, currentY + 3.6);
-        doc.text(Number(ch.amount || 0).toLocaleString(), pageWidth - margin - 4, currentY + 3.6, { align: 'right' });
-        currentY += 5;
-      });
-
-      if (charges.length > 4) {
-        charges.slice(4).forEach((ch: any) => {
-          totalAmount += Number(ch.amount) || 0;
+        charges.forEach((ch: any, idx: number) => {
+          if (currentY > pageHeight - 38) {
+            renderFooter(doc.getNumberOfPages(), doc.getNumberOfPages() + 1);
+            doc.addPage();
+            currentY = 20;
+          }
+          const amt = Number(ch.amount) || 0;
+          totalAmount += amt;
+          if (idx % 2 === 1) {
+            doc.setFillColor(248, 250, 252);
+            doc.rect(margin, currentY, pageWidth - (margin * 2), 5.2, 'F');
+          }
+          doc.setTextColor(30, 41, 59);
+          doc.text(String(idx + 1), margin + 3, currentY + 3.7);
+          doc.text(cleanPdfText(ch.description || 'Logistics Service'), margin + 10, currentY + 3.7);
+          doc.text(amt.toLocaleString(), pageWidth - margin - 4, currentY + 3.7, { align: 'right' });
+          currentY += 5.2;
         });
+
+        // Total Row (at bottom of invoice section)
+        doc.setFillColor(241, 245, 249);
+        doc.rect(margin, currentY, pageWidth - (margin * 2), 6.5, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(15, 23, 42);
+        doc.text('TOTAL INVOICE AMOUNT DUE:', margin + 4, currentY + 4.5);
+        doc.setTextColor(180, 83, 9); // gold / amber
+        doc.text(`PKR ${totalAmount.toLocaleString()}`, pageWidth - margin - 4, currentY + 4.5, { align: 'right' });
+        currentY += 9.5;
+
+        // Invoice details & terms in short
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text(
+          `Invoice Ref: INV-${cleanPdfText(targetCase.caseNo)}  |  Terms: Immediate upon receipt  |  Currency: PKR  |  Status: ${targetCase.status === 'Completed' ? 'Fully Settled' : 'Payment Due'}`,
+          margin + 4,
+          currentY
+        );
+        currentY += 3;
       }
-
-      // Total Row (at bottom of invoice section)
-      doc.setFillColor(241, 245, 249);
-      doc.rect(margin, currentY, pageWidth - (margin * 2), 6.5, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8);
-      doc.setTextColor(15, 23, 42);
-      doc.text('TOTAL INVOICE AMOUNT DUE:', margin + 4, currentY + 4.5);
-      doc.setTextColor(180, 83, 9); // gold / amber
-      doc.text(`PKR ${totalAmount.toLocaleString()}`, pageWidth - margin - 4, currentY + 4.5, { align: 'right' });
-      currentY += 9.5;
-
-      // Invoice details & terms in short
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(6.5);
-      doc.setTextColor(100, 116, 139);
-      doc.text(
-        `Invoice Ref: INV-${targetCase.caseNo}  •  Terms: Immediate upon receipt  •  Currency: PKR  •  Status: ${targetCase.status === 'Completed' ? 'Fully Settled' : 'Payment Due'}`,
-        margin + 4,
-        currentY
-      );
-      currentY += 3;
 
       // Official Company Seal Stamp
       const sigX = pageWidth - margin - 52;
-      drawOfficialCompanyStampOnly(doc, sigX, currentY, 'OFFICIAL INVOICE STAMP');
+      drawOfficialCompanyStampOnly(doc, sigX, currentY, 'OFFICIAL RECORD STAMP');
 
       renderFooter(1, 1);
+
+      // Optional: Append Attached Document Scans if includeAttachments is true
+      if ((options.includeAttachments || options.withAttachments) && Array.isArray(targetCase.documents) && targetCase.documents.length > 0) {
+        for (const docItem of targetCase.documents) {
+          const itemAny = docItem as any;
+          const url = itemAny?.url || itemAny?.fileData || '';
+          if (typeof url === 'string' && url.startsWith('data:image/')) {
+            try {
+              doc.addPage();
+              let attY = await drawPdfCorporateHeader(doc, {
+                title: 'ATTACHED DOCUMENT',
+                refNo: `Case: ${targetCase.caseNo}`,
+                date: itemAny.uploadedAt || targetCase.createdAt || new Date().toLocaleDateString(),
+                subRef: cleanPdfText(itemAny.name || itemAny.type || 'Attachment'),
+                branding: b,
+                accentColor: [234, 179, 8]
+              });
+              const imgFormat = url.includes('image/png') ? 'PNG' : 'JPEG';
+              doc.addImage(url, imgFormat, margin, attY + 2, pageWidth - margin * 2, pageHeight - attY - 26, undefined, 'FAST');
+              drawPdfCorporateFooter(doc, `Attachment - ${cleanPdfText(itemAny.name || 'Document')}`, b);
+            } catch (_) {}
+          }
+        }
+      }
     }
 
     // --- STANDALONE INVOICE PAGE (Only when user explicitly requests standalone Commercial Invoice) ---
@@ -766,14 +804,14 @@ export async function downloadCasePdf(
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.setTextColor(15, 23, 42);
-      doc.text(`INVOICE NO: ${targetCase.caseNo}`, margin + 4, currentY + 6);
-      doc.text(`BILL TO: ${targetCase.clientName || 'General Freight Client'}`, margin + 4, currentY + 12);
+      doc.text(`INVOICE NO: ${cleanPdfText(targetCase.caseNo)}`, margin + 4, currentY + 6);
+      doc.text(`BILL TO: ${cleanPdfText(targetCase.clientName || 'General Freight Client')}`, margin + 4, currentY + 12);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(71, 85, 105);
-      doc.text(`Associated Case: ${targetCase.caseNo} (${targetCase.category || 'Customs Clearance'})`, margin + 4, currentY + 17);
+      doc.text(`Associated Case: ${cleanPdfText(targetCase.caseNo)} (${cleanPdfText(targetCase.category || 'Customs Clearance')})`, margin + 4, currentY + 17);
 
-      doc.text(`Issue Date: ${targetCase.createdAt || new Date().toLocaleDateString()}`, pageWidth - margin - 4, currentY + 6, { align: 'right' });
+      doc.text(`Issue Date: ${cleanPdfText(targetCase.createdAt || new Date().toLocaleDateString())}`, pageWidth - margin - 4, currentY + 6, { align: 'right' });
       doc.text('Payment Terms: Immediate upon receipt', pageWidth - margin - 4, currentY + 12, { align: 'right' });
       doc.text('Currency: PKR (Pakistani Rupee)', pageWidth - margin - 4, currentY + 17, { align: 'right' });
 
@@ -792,13 +830,12 @@ export async function downloadCasePdf(
       currentY += 7;
 
       // Charges Rows
+      const fallbackTotal = Number(targetCase.totalCost || (targetCase as any).amount || 0);
       const charges = targetCase.charges && targetCase.charges.length > 0
         ? targetCase.charges
-        : [
-            { description: 'Terminal Handling & Customs Examination Charges', amount: 45000 },
-            { description: 'Bonded Transportation & Transit Clearance Fee', amount: 85000 },
-            { description: 'Port Documentation, EDI & Gate Pass Surcharge', amount: 12500 }
-          ];
+        : fallbackTotal > 0
+          ? [{ description: 'Logistics, Customs Clearance & Freight Charges', amount: fallbackTotal }]
+          : [{ description: 'No charges billed yet', amount: 0 }];
 
       let totalAmount = 0;
       doc.setFont('helvetica', 'normal');
@@ -806,14 +843,21 @@ export async function downloadCasePdf(
       doc.setTextColor(30, 41, 59);
 
       charges.forEach((ch: any, idx: number) => {
-        totalAmount += Number(ch.amount) || 0;
+        if (currentY > pageHeight - 38) {
+          renderFooter(doc.getNumberOfPages(), doc.getNumberOfPages() + 1);
+          doc.addPage();
+          currentY = 20;
+        }
+        const amt = Number(ch.amount) || 0;
+        totalAmount += amt;
         if (idx % 2 === 1) {
           doc.setFillColor(248, 250, 252);
           doc.rect(margin, currentY, pageWidth - (margin * 2), 6.5, 'F');
         }
+        doc.setTextColor(30, 41, 59);
         doc.text(String(idx + 1), margin + 3, currentY + 4.5);
-        doc.text(ch.description || 'Logistics Service', margin + 12, currentY + 4.5);
-        doc.text(Number(ch.amount || 0).toLocaleString(), pageWidth - margin - 4, currentY + 4.5, { align: 'right' });
+        doc.text(cleanPdfText(ch.description || 'Logistics Service'), margin + 12, currentY + 4.5);
+        doc.text(amt.toLocaleString(), pageWidth - margin - 4, currentY + 4.5, { align: 'right' });
         currentY += 6.5;
       });
 

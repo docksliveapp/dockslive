@@ -20,14 +20,15 @@ export default defineConfig(({ mode }) => {
         tailwindcss(),
         VitePWA({
           registerType: 'autoUpdate',
+          selfDestroying: true,
+          injectRegister: null,
           includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
           workbox: {
             cleanupOutdatedCaches: true,
             skipWaiting: true,
             clientsClaim: true,
             navigateFallback: null,
-            maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
-            globPatterns: ['**/*.{js,css,svg,png,ico,txt,json}']
+            globPatterns: []
           },
           manifest: {
             id: '/',

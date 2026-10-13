@@ -38,6 +38,7 @@ import { AvailableVehiclesView } from './AvailableVehiclesView';
 import { LiveNotificationCenter } from './LiveNotificationCenter';
 import { PWAInstallButton } from './PWAInstallButton';
 import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
+import { ThemeToggleSwitch } from './ThemeToggleSwitch';
 
 // Standard Route Pricing Matrix
 export const DEFAULT_ROUTE_RATES: Record<string, number> = {
@@ -1180,6 +1181,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             {/* Install Mobile / Play Store App */}
             <PWAInstallButton variant="header" />
 
+            {/* Theme Switcher */}
+            <ThemeToggleSwitch compact />
+
             {/* Live Notification Center */}
             <LiveNotificationCenter 
               currentRole={UserRole.CLIENT}
@@ -1223,6 +1227,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Theme Switcher */}
+            <ThemeToggleSwitch compact />
+
             {/* Live Notification Center */}
             <LiveNotificationCenter 
               currentRole={UserRole.CLIENT}

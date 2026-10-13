@@ -32,6 +32,7 @@ import { AvailableVehiclesView } from './AvailableVehiclesView';
 import { LiveNotificationCenter } from './LiveNotificationCenter';
 import { PWAInstallButton } from './PWAInstallButton';
 import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
+import { ThemeToggleSwitch } from './ThemeToggleSwitch';
 import { UserRole } from '../types';
 import { sendAppNotification } from '../services/notificationService';
 
@@ -741,6 +742,9 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               {/* Install Mobile / Play Store App */}
               <PWAInstallButton variant="header" />
+
+              {/* Theme Switcher */}
+              <ThemeToggleSwitch compact />
 
               {/* Live Notification Center */}
               <LiveNotificationCenter 

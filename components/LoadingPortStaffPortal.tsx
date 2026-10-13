@@ -17,6 +17,7 @@ import { DownloadLoadingBillSearchModal, DownloadClientLedgerModal, AddStaffPaym
 import { downloadLoadingBillPdf } from '../services/pdfExportService';
 import { LiveNotificationCenter } from './LiveNotificationCenter';
 import { PWAInstallButton } from './PWAInstallButton';
+import { ThemeToggleSwitch } from './ThemeToggleSwitch';
 
 interface LoadingPortStaffPortalProps {
   onSignOut: () => void;
@@ -494,6 +495,7 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
           </div>
           <div className="flex items-center gap-3">
             <PWAInstallButton variant="header" />
+            <ThemeToggleSwitch compact />
             <LiveNotificationCenter
               currentRole={userRole}
               currentRoles={userRoles}
@@ -536,6 +538,7 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <ThemeToggleSwitch compact />
             <LiveNotificationCenter
               currentRole={userRole}
               currentRoles={userRoles}

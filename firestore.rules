@@ -133,6 +133,22 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Personal Ledger Accounts & Entries (Private Per-User Ledgers)
+    match /personal_ledger_accounts/{accountId} {
+      allow read, write: if true;
+    }
+    match /personal_ledger_entries/{entryId} {
+      allow read, write: if true;
+    }
+
+    // Payables & Receivables Ledgers
+    match /payables/{payableId} {
+      allow read, write: if true;
+    }
+    match /receivables/{receivableId} {
+      allow read, write: if true;
+    }
+
     // Admin Authorizations
     match /admins/{adminId} {
       allow read: if true;

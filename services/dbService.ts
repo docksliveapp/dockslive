@@ -99,39 +99,34 @@ export function subscribeToCases(
       } as Case);
     });
 
-    // Intelligent Anti-Data-Loss Merge:
-    // Read local cache to ensure locally added cases that are not yet in Firestore (or rejected by size) are NEVER deleted!
+    // Authoritative Firestore Sync:
+    // Firestore snapshot is the single source of truth so updates/deletions reflect immediately across all browsers.
+    // Only preserve locally cached base64 file content for cases that exist in Firestore if stripped for size limits.
     const localCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
-    const mergedMap = new Map<string, Case>();
-
-    // 1. Seed with local cases
+    const localMap = new Map<string, Case>();
     localCases.forEach(c => {
       const k = c.caseNo || c.id;
-      if (k) mergedMap.set(k, c);
+      if (k) localMap.set(k, c);
     });
 
-    // 2. Merge with Firestore cases without overwriting richer local document data
-    firestoreList.forEach(fc => {
+    const mergedList: Case[] = firestoreList.map(fc => {
       const k = fc.caseNo || fc.id;
-      if (!k) return;
-      const existing = mergedMap.get(k);
-      if (!existing) {
-        mergedMap.set(k, fc);
-      } else {
-        // Keep documents from existing if existing has actual base64/attachments
-        const existingDocsCount = existing.documents?.length || 0;
-        const firestoreDocsCount = fc.documents?.length || 0;
-        const bestDocs = (existingDocsCount >= firestoreDocsCount) ? existing.documents : fc.documents;
-        mergedMap.set(k, {
-          ...existing,
-          ...fc,
-          documents: bestDocs || []
-        });
-      }
+      const existing = k ? localMap.get(k) : undefined;
+      if (!existing) return fc;
+
+      const existingHasBase64 = existing.documents?.some((d: any) => d?.url && String(d.url).startsWith('data:'));
+      const firestoreHasBase64 = fc.documents?.some((d: any) => d?.url && String(d.url).startsWith('data:'));
+      const bestDocs = (!firestoreHasBase64 && existingHasBase64 && (existing.documents?.length || 0) >= (fc.documents?.length || 0))
+        ? existing.documents
+        : (fc.documents || []);
+
+      return {
+        ...fc,
+        documents: bestDocs
+      };
     });
 
-    const finalCases = dedupeArrayById(Array.from(mergedMap.values()));
-    // Persist merged cases to storage and IndexedDB
+    const finalCases = dedupeArrayById(mergedList);
     safeAppStorage.setJSON('dpl_live_cases', finalCases);
     backupCasesToIndexedDB(finalCases).catch(() => {});
     
@@ -657,31 +652,8 @@ export function subscribeToVehicles(
       firestoreItems.push({ ...data, id: numId } as Vehicle);
     });
 
-    // Intelligent Anti-Data-Loss Merge for Vehicles
-    const localVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
-    const mergedMap = new Map<string, Vehicle>();
-
-    // 1. Seed with local vehicles
-    localVehicles.forEach(v => {
-      const reg = v.registrationNumber?.trim().toUpperCase();
-      if (reg) mergedMap.set(reg, v);
-      else if (v.id) mergedMap.set(String(v.id), v);
-    });
-
-    // 2. Merge with Firestore vehicles
-    firestoreItems.forEach(fv => {
-      const reg = fv.registrationNumber?.trim().toUpperCase();
-      const k = reg || String(fv.id);
-      if (!k) return;
-      const existing = mergedMap.get(k);
-      if (!existing) {
-        mergedMap.set(k, fv);
-      } else {
-        mergedMap.set(k, { ...existing, ...fv });
-      }
-    });
-
-    const finalVehicles = dedupeArrayById(Array.from(mergedMap.values()));
+    // Authoritative Firestore Sync for Vehicles
+    const finalVehicles = dedupeArrayById(firestoreItems);
     safeAppStorage.setJSON('dpl_live_vehicles', finalVehicles);
     backupVehiclesToIndexedDB(finalVehicles).catch(() => {});
     onData(finalVehicles);
@@ -1457,8 +1429,28 @@ export async function authenticateDatabaseUser(
     }
 
     // 5. Update lastLogin and persist active database session
+    const userRoles = (matchedUser.roles && matchedUser.roles.length > 0) ? matchedUser.roles : [matchedUser.role];
+    const hasAdminRole = Boolean(
+      matchedUser.isGlobalAdmin ||
+      matchedUser.isAdmin ||
+      matchedUser.role === UserRole.ADMIN ||
+      userRoles.includes(UserRole.ADMIN)
+    );
+    const rawAllowed = (matchedUser as any).allowedCompanies;
+    const effectiveAllowedCompanies: string[] = Array.isArray(rawAllowed) && rawAllowed.length > 0
+      ? rawAllowed
+      : (matchedUser.isGlobalAdmin ? ['docks', 'truckit', 'muhib', 'vantage'] : ['docks']);
+
+    const effectiveIsGlobalAdmin = Boolean(
+      matchedUser.isGlobalAdmin ||
+      (hasAdminRole && effectiveAllowedCompanies.length >= 4)
+    );
+
     const updatedUser: AppUser = {
       ...matchedUser,
+      isAdmin: hasAdminRole,
+      isGlobalAdmin: effectiveIsGlobalAdmin,
+      allowedCompanies: effectiveAllowedCompanies,
       lastLogin: new Date().toISOString(),
       authProvider: 'database'
     };
@@ -1581,10 +1573,20 @@ export function subscribeToClients(
 
   const emit = () => {
     const active = getActiveCompanyId();
+    const localDocsMap = safeAppStorage.getJSON<Record<string, Partial<Client>>>('dpl_persistent_client_docs', {}) || {};
     const list: Client[] = [];
     cachedDocs.forEach((docData) => {
       if (matchesActiveCompany(docData.companyId, active)) {
-        list.push(docData as Client);
+        const localBackup = localDocsMap[String(docData.id)] || {};
+        list.push({
+          ...docData,
+          businessCardUrl: docData.businessCardUrl || localBackup.businessCardUrl || '',
+          contractLetterUrl: docData.contractLetterUrl || localBackup.contractLetterUrl || '',
+          nicDocUrl: docData.nicDocUrl || localBackup.nicDocUrl || '',
+          cnicFrontUrl: docData.cnicFrontUrl || localBackup.cnicFrontUrl || docData.nicDocUrl || localBackup.nicDocUrl || '',
+          cnicBackUrl: docData.cnicBackUrl || localBackup.cnicBackUrl || '',
+          ntnDocUrl: docData.ntnDocUrl || (localBackup as any).ntnDocUrl || ''
+        } as Client);
       }
     });
     onData(list);
@@ -1629,6 +1631,21 @@ export async function saveClientToFirestore(client: Partial<Client>): Promise<st
   const docId = client.id || `client_${Date.now()}`;
   const activeCompany = getActiveCompanyId();
   try {
+    // Preserve large base64 documents in localStorage backup before sanitizeForFirestore strips >150KB strings
+    try {
+      const localDocsMap = safeAppStorage.getJSON<Record<string, any>>('dpl_persistent_client_docs', {}) || {};
+      localDocsMap[String(docId)] = {
+        ...(localDocsMap[String(docId)] || {}),
+        businessCardUrl: client.businessCardUrl || localDocsMap[String(docId)]?.businessCardUrl || '',
+        contractLetterUrl: client.contractLetterUrl || localDocsMap[String(docId)]?.contractLetterUrl || '',
+        nicDocUrl: client.nicDocUrl || (client as any).cnicFrontUrl || localDocsMap[String(docId)]?.nicDocUrl || '',
+        cnicFrontUrl: (client as any).cnicFrontUrl || client.nicDocUrl || localDocsMap[String(docId)]?.cnicFrontUrl || '',
+        cnicBackUrl: (client as any).cnicBackUrl || localDocsMap[String(docId)]?.cnicBackUrl || '',
+        ntnDocUrl: (client as any).ntnDocUrl || localDocsMap[String(docId)]?.ntnDocUrl || ''
+      };
+      safeAppStorage.setJSON('dpl_persistent_client_docs', localDocsMap);
+    } catch (_) {}
+
     const payload = sanitizeForFirestore({
       ...client,
       companyId: (client as any).companyId || activeCompany,
@@ -1644,8 +1661,17 @@ export async function saveClientToFirestore(client: Partial<Client>): Promise<st
       ntn: client.ntn || '',
       strn: client.strn || '',
       businessCardUrl: client.businessCardUrl || '',
+      businessCardName: (client as any).businessCardName || '',
       contractLetterUrl: client.contractLetterUrl || '',
-      nicDocUrl: client.nicDocUrl || '',
+      contractLetterName: (client as any).contractLetterName || '',
+      nicDocUrl: client.nicDocUrl || (client as any).cnicFrontUrl || '',
+      nicDocName: (client as any).nicDocName || '',
+      cnicFrontUrl: (client as any).cnicFrontUrl || client.nicDocUrl || '',
+      cnicFrontName: (client as any).cnicFrontName || '',
+      cnicBackUrl: (client as any).cnicBackUrl || '',
+      cnicBackName: (client as any).cnicBackName || '',
+      ntnDocUrl: (client as any).ntnDocUrl || '',
+      ntnDocName: (client as any).ntnDocName || '',
       defaultCaseCategory: client.defaultCaseCategory || 'Bonded Carrier',
       defaultServiceArrangements: client.defaultServiceArrangements || {},
       defaultCharges: client.defaultCharges || [],
@@ -1668,6 +1694,21 @@ export async function updateClientInFirestore(client: Partial<Client>): Promise<
   const path = 'clients';
   if (!client.id) return;
   try {
+    try {
+      const localDocsMap = safeAppStorage.getJSON<Record<string, any>>('dpl_persistent_client_docs', {}) || {};
+      const existing = localDocsMap[String(client.id)] || {};
+      localDocsMap[String(client.id)] = {
+        ...existing,
+        businessCardUrl: client.businessCardUrl || existing.businessCardUrl || '',
+        contractLetterUrl: client.contractLetterUrl || existing.contractLetterUrl || '',
+        nicDocUrl: client.nicDocUrl || (client as any).cnicFrontUrl || existing.nicDocUrl || '',
+        cnicFrontUrl: (client as any).cnicFrontUrl || client.nicDocUrl || existing.cnicFrontUrl || '',
+        cnicBackUrl: (client as any).cnicBackUrl || existing.cnicBackUrl || '',
+        ntnDocUrl: (client as any).ntnDocUrl || existing.ntnDocUrl || ''
+      };
+      safeAppStorage.setJSON('dpl_persistent_client_docs', localDocsMap);
+    } catch (_) {}
+
     const payload = sanitizeForFirestore({
       ...client,
       updatedAt: new Date().toISOString()
@@ -3033,47 +3074,6 @@ export async function deletePersonalLedgerEntry(entryId: string): Promise<void> 
 
   const current = safeAppStorage.getJSON<PersonalLedgerEntry[]>(PERSONAL_LEDGER_ENTRIES_KEY, []);
   safeAppStorage.setJSON(PERSONAL_LEDGER_ENTRIES_KEY, current.filter(e => e.id !== entryId));
-}
-
-// Self-healing bootstrap: restore cases and vehicles from IndexedDB if memory/localStorage was wiped
-if (typeof window !== 'undefined') {
-  setTimeout(async () => {
-    try {
-      const storedCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
-      const idbCases = await restoreCasesFromIndexedDB();
-      if (idbCases.length > 0) {
-        const mergedMap = new Map<string, Case>();
-        storedCases.forEach(c => { if (c.caseNo || c.id) mergedMap.set(c.caseNo || c.id, c); });
-        idbCases.forEach(c => {
-          const k = c.caseNo || c.id;
-          if (k && !mergedMap.has(k)) mergedMap.set(k, c);
-        });
-        const final = Array.from(mergedMap.values());
-        if (final.length > storedCases.length) {
-          safeAppStorage.setJSON('dpl_live_cases', final);
-          window.dispatchEvent(new CustomEvent('dpl_cases_updated', { detail: final }));
-        }
-      }
-
-      const storedVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
-      const idbVehicles = await restoreVehiclesFromIndexedDB();
-      if (idbVehicles.length > 0) {
-        const mergedMap = new Map<string, Vehicle>();
-        storedVehicles.forEach(v => {
-          const reg = v.registrationNumber?.trim().toUpperCase() || String(v.id);
-          if (reg) mergedMap.set(reg, v);
-        });
-        idbVehicles.forEach(v => {
-          const reg = v.registrationNumber?.trim().toUpperCase() || String(v.id);
-          if (reg && !mergedMap.has(reg)) mergedMap.set(reg, v);
-        });
-        const final = Array.from(mergedMap.values());
-        if (final.length > storedVehicles.length) {
-          safeAppStorage.setJSON('dpl_live_vehicles', final);
-        }
-      }
-    } catch (_) {}
-  }, 100);
 }
 
 

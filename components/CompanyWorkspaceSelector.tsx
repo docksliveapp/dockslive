@@ -35,6 +35,7 @@ import {
 import { UserRole } from '../types';
 import { safeAppStorage } from '../services/storage';
 import { GroupAdminManagementModal, AdminSettingsTab } from './GroupAdminManagementModal';
+import { ThemeToggleSwitch, useAppTheme } from './ThemeToggleSwitch';
 
 export interface PortalOption {
   id: string;
@@ -219,13 +220,26 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch (_) {}
-    return ['docks', 'muhib', 'vantage', 'truckit'];
+    return ['docks'];
   }, [allowedCompanies]);
 
   const effectiveIsGlobalAdmin = useMemo<boolean>(() => {
     if (typeof isGlobalAdmin === 'boolean') return isGlobalAdmin;
     return safeAppStorage.getItem('dpl_is_global_admin') === 'true';
   }, [isGlobalAdmin]);
+
+  const isCompanyAdmin = useMemo<boolean>(() => {
+    if (effectiveIsGlobalAdmin) return true;
+    if (currentRole === UserRole.ADMIN) return true;
+    try {
+      const storedRoles = safeAppStorage.getItem('dpl_user_roles');
+      if (storedRoles) {
+        const parsed = JSON.parse(storedRoles);
+        if (Array.isArray(parsed) && parsed.includes(UserRole.ADMIN)) return true;
+      }
+    } catch (_) {}
+    return false;
+  }, [effectiveIsGlobalAdmin, currentRole]);
 
   useEffect(() => {
     const handleBrandingChange = () => setBrandingVersion(v => v + 1);
@@ -280,7 +294,21 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
     }
   };
 
+  const [appTheme] = useAppTheme();
+  const isPearl = appTheme === 'pearl';
+
   const getCompanyCardStyles = (id: CompanyId, isCurrentActive: boolean) => {
+    if (isPearl) {
+      return {
+        cardBorder: isCurrentActive 
+          ? 'border-slate-900 ring-2 ring-slate-900/20 shadow-[0_14px_35px_rgba(15,23,42,0.12)] bg-white' 
+          : 'border-slate-200 hover:border-slate-400 hover:shadow-[0_14px_30px_rgba(15,23,42,0.08)] bg-white',
+        bgGradient: 'from-white via-[#F8FAFC] to-[#F1F5F9]',
+        accentText: 'text-slate-900',
+        badgeBg: 'bg-slate-100 text-slate-800 border-slate-300',
+        glowPulse: 'group-hover:border-slate-400',
+      };
+    }
     return {
       cardBorder: isCurrentActive 
         ? 'border-slate-200 ring-2 ring-slate-300/50 shadow-[0_0_30px_rgba(255,255,255,0.08)] bg-slate-800/95' 
@@ -306,115 +334,143 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   };
 
   const content = (
-    <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-4 sm:py-6 flex flex-col justify-start">
-      {/* 1. TOP EXECUTIVE ACTION BAR (Clean Business-Class: Portal Dropdown, Settings & Logout) */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 mb-4 sm:mb-6 border-b border-white/10 shrink-0">
+    <div className="w-full max-w-4xl mx-auto px-3 sm:px-6 py-3 sm:py-5 flex flex-col justify-start">
+      {/* 1. COMPACT SINGLE-LINE EXECUTIVE ACTION BAR */}
+      <div className={`flex items-center justify-between gap-2 pb-2.5 mb-4 sm:mb-5 border-b shrink-0 ${
+        isPearl ? 'border-slate-200' : 'border-white/10'
+      }`}>
         
-        {/* Left Side: Change Portal Dropdown Menu */}
-        <div className="relative" ref={portalDropdownRef}>
-          <button
-            type="button"
-            id="btn-change-portal-dropdown"
-            onClick={() => setIsPortalDropdownOpen(!isPortalDropdownOpen)}
-            className="group px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold tracking-wide transition-all duration-200 border border-white/20 bg-slate-800/95 hover:bg-slate-700 text-white shadow-md flex items-center gap-2 cursor-pointer hover:border-amber-400/50"
-            title="Change Destination Portal (Admin, Operations, Case Manager, Finance, Port Staff, Client, etc.)"
-          >
-            <LayoutGrid size={14} className="text-amber-400 shrink-0" />
-            <span className="text-slate-300 font-normal">Change Portal:</span>
-            <span className="text-white font-semibold">{activePortal.name}</span>
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-amber-300 font-bold border border-white/10">
-              {activePortal.badge}
-            </span>
-            <ChevronDown size={14} className={`text-slate-400 transition-transform ${isPortalDropdownOpen ? 'rotate-180 text-white' : ''}`} />
-          </button>
+        {/* Left Side: Change Portal Dropdown Menu (Strictly for Admins: Main Admin or Company Admin) */}
+        {isCompanyAdmin ? (
+          <div className="relative shrink-0" ref={portalDropdownRef}>
+            <button
+              type="button"
+              id="btn-change-portal-dropdown"
+              onClick={() => setIsPortalDropdownOpen(!isPortalDropdownOpen)}
+              className={`group px-2.5 py-1.5 rounded-lg text-[11px] font-semibold tracking-wide transition-all duration-200 border shadow-xs flex items-center gap-1.5 cursor-pointer ${
+                isPearl
+                  ? 'bg-white hover:bg-slate-100 text-slate-900 border-slate-300'
+                  : 'border-white/15 bg-slate-800/95 hover:bg-slate-700 text-white'
+              }`}
+              title="Change Portal (Admin, Operations, Case Manager, Finance, Port Staff, Client, etc.)"
+            >
+              <LayoutGrid size={12} className={isPearl ? "text-slate-600 shrink-0" : "text-slate-300 shrink-0"} />
+              <span className={`${isPearl ? 'text-slate-500' : 'text-slate-400'} font-normal hidden sm:inline`}>Change Portal:</span>
+              <span className={`${isPearl ? 'text-slate-900' : 'text-white'} font-bold truncate max-w-[120px] sm:max-w-[170px]`}>{activePortal.name}</span>
+              <ChevronDown size={12} className={`transition-transform shrink-0 ${isPortalDropdownOpen ? 'rotate-180' : ''} ${isPearl ? 'text-slate-600' : 'text-slate-400'}`} />
+            </button>
 
-          {/* Dropdown Menu Popover */}
-          {isPortalDropdownOpen && (
-            <div className="absolute left-0 top-full mt-2 w-80 sm:w-96 rounded-2xl bg-slate-900 border border-white/20 shadow-2xl p-2 z-50 backdrop-blur-2xl animate-fade-in max-h-[75vh] overflow-y-auto custom-scrollbar">
-              <div className="p-2 border-b border-white/10 mb-1 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                    <LayoutGrid size={13} className="text-amber-400" />
-                    <span>Select Portal Workspace</span>
-                  </p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    Choose which portal role to activate for this session
-                  </p>
+            {/* Dropdown Menu Popover */}
+            {isPortalDropdownOpen && (
+              <div className={`absolute left-0 top-full mt-1.5 w-72 sm:w-88 rounded-2xl border shadow-2xl p-2 z-50 backdrop-blur-2xl animate-fade-in max-h-[75vh] overflow-y-auto custom-scrollbar ${
+                isPearl ? 'bg-white border-slate-200 text-slate-900' : 'bg-slate-900 border-white/20 text-white'
+              }`}>
+                <div className={`p-2 border-b mb-1 flex items-center justify-between ${isPearl ? 'border-slate-200' : 'border-white/10'}`}>
+                  <div>
+                    <p className={`text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${isPearl ? 'text-slate-900' : 'text-white'}`}>
+                      <LayoutGrid size={12} className={isPearl ? "text-slate-600" : "text-slate-300"} />
+                      <span>Select Portal Workspace</span>
+                    </p>
+                    <p className={`text-[10px] mt-0.5 ${isPearl ? 'text-slate-500' : 'text-slate-400'}`}>
+                      {effectiveIsGlobalAdmin 
+                        ? 'Main Admin: Switch into any portal across any company' 
+                        : 'Company Admin: Switch into any portal in your company'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsPortalDropdownOpen(false)}
+                    className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                      isPearl ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-100' : 'text-slate-400 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    <X size={13} />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setIsPortalDropdownOpen(false)}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                >
-                  <X size={14} />
-                </button>
-              </div>
 
-              <div className="space-y-1">
-                {PORTAL_OPTIONS.map((p) => {
-                  const isSelected = p.id === selectedPortalId;
-                  const IconComp = getPortalIcon(p.id);
-                  return (
-                    <div
-                      key={p.id}
-                      className={`p-2 rounded-xl transition-all flex items-center justify-between gap-2 ${
-                        isSelected 
-                          ? 'bg-amber-400/15 border border-amber-400/40 text-white shadow-md' 
-                          : 'hover:bg-white/5 border border-transparent text-slate-300 hover:text-white'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleSelectPortalOption(p)}
-                        className="flex items-start gap-2.5 flex-1 min-w-0 text-left cursor-pointer"
+                <div className="space-y-1">
+                  {PORTAL_OPTIONS.map((p) => {
+                    const isSelected = p.id === selectedPortalId;
+                    const IconComp = getPortalIcon(p.id);
+                    return (
+                      <div
+                        key={p.id}
+                        className={`p-2 rounded-xl transition-all flex items-center justify-between gap-2 ${
+                          isSelected 
+                            ? isPearl
+                              ? 'bg-slate-100 border border-slate-300 text-slate-900 shadow-xs'
+                              : 'bg-white/12 border border-white/25 text-white shadow-xs' 
+                            : isPearl
+                              ? 'hover:bg-slate-50 border border-transparent text-slate-700 hover:text-slate-900'
+                              : 'hover:bg-white/5 border border-transparent text-slate-300 hover:text-white'
+                        }`}
                       >
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
-                          isSelected ? 'bg-amber-400/25 text-amber-300' : 'bg-white/5 text-slate-400'
-                        }`}>
-                          <IconComp size={16} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-bold truncate text-white">{p.name}</span>
-                            <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold shrink-0 ${
-                              isSelected ? 'bg-amber-400/30 text-amber-200' : 'bg-white/10 text-slate-400'
-                            }`}>
-                              {p.badge}
-                            </span>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPortalOption(p)}
+                          className="flex items-start gap-2 flex-1 min-w-0 text-left cursor-pointer"
+                        >
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+                            isSelected
+                              ? isPearl ? 'bg-slate-900 text-white' : 'bg-white/20 text-white'
+                              : isPearl ? 'bg-slate-100 text-slate-600' : 'bg-white/5 text-slate-400'
+                          }`}>
+                            <IconComp size={14} />
                           </div>
-                          <p className="text-[10px] text-slate-400 truncate mt-0.5 leading-snug">
-                            {p.description}
-                          </p>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-xs font-bold truncate ${isPearl ? 'text-slate-900' : 'text-white'}`}>{p.name}</span>
+                              <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold shrink-0 ${
+                                isPearl ? 'bg-slate-200 text-slate-700' : 'bg-white/10 text-slate-300'
+                              }`}>
+                                {p.badge}
+                              </span>
+                            </div>
+                            <p className={`text-[10px] truncate mt-0.5 leading-snug ${isPearl ? 'text-slate-500' : 'text-slate-400'}`}>
+                              {p.description}
+                            </p>
+                          </div>
+                        </button>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          {isSelected && (
+                            <Check size={13} className={`${isPearl ? 'text-slate-900' : 'text-white'} shrink-0 mr-1`} />
+                          )}
+                          {onSwitchPortal && (
+                            <button
+                              type="button"
+                              onClick={() => handleLaunchPortalDirectly(p)}
+                              className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition cursor-pointer border ${
+                                isPearl
+                                  ? 'bg-slate-900 hover:bg-slate-800 text-white border-slate-900'
+                                  : 'bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white border-white/10'
+                              }`}
+                              title="Directly launch this portal immediately"
+                            >
+                              Open
+                            </button>
+                          )}
                         </div>
-                      </button>
-
-                      <div className="flex items-center gap-1 shrink-0">
-                        {isSelected && (
-                          <Check size={14} className="text-amber-400 shrink-0 mr-1" />
-                        )}
-                        {onSwitchPortal && (
-                          <button
-                            type="button"
-                            onClick={() => handleLaunchPortalDirectly(p)}
-                            className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white text-[10px] font-semibold transition cursor-pointer border border-white/10"
-                            title="Directly launch this portal immediately"
-                          >
-                            Open
-                          </button>
-                        )}
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        ) : (
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] truncate ${
+            isPearl ? 'bg-white border-slate-200 text-slate-700' : 'bg-white/5 border-white/10 text-slate-300'
+          }`}>
+            <ShieldCheck size={12} className="text-emerald-500 shrink-0" />
+            <span className="truncate">{activePortal.name}</span>
+          </div>
+        )}
 
-        {/* Right side: strictly Admin Settings & Logout only */}
-        <div className="flex items-center gap-2">
-          {/* Main Admin Settings Button - Visible ONLY to Main Group Admin */}
-          {effectiveIsGlobalAdmin ? (
+        {/* Right side: Main Admin Panel, Logout & Theme Switch in one compact single line */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Main Admin Panel Button - Visible ONLY to Main Group Admin */}
+          {effectiveIsGlobalAdmin && (
             <button
               type="button"
               onClick={() => {
@@ -424,17 +480,16 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
                   openAdminModal('users');
                 }
               }}
-              className="group relative px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold tracking-wide transition-all duration-300 cursor-pointer overflow-hidden border border-white/20 bg-slate-800/90 hover:bg-slate-700/90 text-slate-100 shadow-md hover:shadow-lg transform hover:scale-105 active:scale-95 flex items-center gap-2"
-              title="Open Group Admin Executive Portal & Settings"
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold tracking-wide transition-all duration-200 cursor-pointer border shadow-xs flex items-center gap-1.5 whitespace-nowrap ${
+                isPearl
+                  ? 'bg-slate-900 hover:bg-slate-800 text-white border-slate-900'
+                  : 'border-white/20 bg-slate-800/90 hover:bg-slate-700 text-white'
+              }`}
+              title="Open Main Admin Panel"
             >
-              <Crown size={14} className="text-amber-400 group-hover:text-amber-300 shrink-0" />
-              <span className="font-sans font-semibold">Group Admin Settings</span>
+              <Crown size={12} className="text-white shrink-0" />
+              <span>Main Admin Panel</span>
             </button>
-          ) : (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[11px] text-gray-300">
-              <ShieldCheck size={13} className="text-emerald-400" />
-              <span>Assigned Scope: {userAllowed.length} Company</span>
-            </div>
           )}
 
           {/* Sign Out Button */}
@@ -442,22 +497,33 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
             <button
               type="button"
               onClick={onSignOut}
-              className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-slate-900/90 hover:bg-slate-800 border border-white/10 hover:border-white/20 transition-all flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95"
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 cursor-pointer shadow-xs whitespace-nowrap ${
+                isPearl
+                  ? 'bg-white hover:bg-slate-100 text-slate-700 hover:text-slate-900 border-slate-300'
+                  : 'text-gray-300 hover:text-white bg-slate-900/90 hover:bg-slate-800 border-white/12 hover:border-white/25'
+              }`}
               title="Sign Out / Switch Account"
             >
-              <LogOut size={13} className="text-slate-400" />
+              <LogOut size={12} className={isPearl ? "text-slate-500 shrink-0" : "text-slate-400 shrink-0"} />
               <span>Logout</span>
             </button>
           )}
+
+          {/* Unified Theme Switcher (Left = Charcoal Dark, Right = Pearl White) */}
+          <ThemeToggleSwitch />
 
           {isModal && onClose && (
             <button
               type="button"
               onClick={onClose}
-              className="p-2 rounded-xl text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors border border-white/10 cursor-pointer"
+              className={`p-1.5 rounded-lg transition-colors border cursor-pointer ${
+                isPearl
+                  ? 'text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border-slate-300'
+                  : 'text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border-white/10'
+              }`}
               title="Close Switcher"
             >
-              <X size={16} />
+              <X size={14} />
             </button>
           )}
         </div>
@@ -467,80 +533,100 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
       <div className="text-center mb-5 sm:mb-7 shrink-0">
         <div className="inline-flex items-center justify-center mb-2 transform hover:scale-105 transition-transform duration-300">
           <img 
-            src={parentGroup.logo || "/logos/mak_group_logo.svg"} 
+            src={parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? parentGroup.logo : (isPearl ? "/logos/mak_pearl_white_emblem.svg" : (parentGroup.logo || "/logos/mak_group_logo.svg"))} 
             alt={parentGroup.name} 
-            className="h-20 sm:h-28 w-auto max-w-[340px] sm:max-w-[420px] object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.8)]" 
+            className="h-20 sm:h-28 w-auto max-w-[340px] sm:max-w-[420px] object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.22)]" 
           />
         </div>
 
-        <h1 className="text-xl sm:text-2xl font-bold text-white tracking-wide font-sans mb-1 drop-shadow-md">
+        <h1 className={`text-xl sm:text-2xl font-bold tracking-wide font-sans mb-1 ${
+          isPearl ? 'text-slate-900' : 'text-white drop-shadow-md'
+        }`}>
           {parentGroup.title || 'MAK GROUP OF COMPANIES'}
         </h1>
-        <p className="text-[11px] sm:text-xs text-slate-400 font-mono tracking-widest uppercase">
+        <p className={`text-[11px] sm:text-xs font-mono tracking-widest uppercase ${
+          isPearl ? 'text-slate-500' : 'text-slate-400'
+        }`}>
           Select Company Workspace
         </p>
 
-        {/* Prominent Active Portal Status & Switcher Bar */}
-        <div className="mt-3.5 inline-flex items-center justify-center">
-          <div className="px-4 py-2 rounded-2xl bg-slate-900/90 border border-white/15 flex flex-wrap items-center justify-center gap-2 shadow-lg backdrop-blur-md">
-            <span className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold flex items-center gap-1.5">
-              <LayoutGrid size={13} className="text-amber-400" />
-              <span>Target Portal:</span>
-            </span>
-            <span className="text-xs font-bold text-white px-2.5 py-0.5 rounded-lg bg-white/10 border border-white/10">
-              {activePortal.name}
-            </span>
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-bold border border-amber-400/30">
-              {activePortal.badge}
-            </span>
-            <button
-              type="button"
-              onClick={() => setIsPortalDropdownOpen(true)}
-              className="text-[11px] text-amber-400 hover:text-amber-300 underline font-semibold cursor-pointer ml-1.5"
-            >
-              Change Portal ▾
-            </button>
-            {onSwitchPortal && (
+        {/* Active Portal Status & Switcher Bar */}
+        {isCompanyAdmin && (
+          <div className="mt-3 inline-flex items-center justify-center">
+            <div className={`px-3.5 py-1.5 rounded-xl border flex flex-wrap items-center justify-center gap-2 shadow-sm backdrop-blur-md ${
+              isPearl ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900/90 border-white/15 text-white'
+            }`}>
+              <span className={`text-[11px] uppercase tracking-wider font-semibold flex items-center gap-1 ${
+                isPearl ? 'text-slate-500' : 'text-slate-400'
+              }`}>
+                <LayoutGrid size={12} className={isPearl ? "text-slate-600" : "text-slate-300"} />
+                <span>Target Portal:</span>
+              </span>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-md border ${
+                isPearl ? 'text-slate-900 bg-slate-100 border-slate-200' : 'text-white bg-white/10 border-white/10'
+              }`}>
+                {activePortal.name}
+              </span>
               <button
                 type="button"
-                onClick={() => handleLaunchPortalDirectly(activePortal)}
-                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] shadow transition cursor-pointer flex items-center gap-1 ml-2"
-                title={`Launch into ${activePortal.name} directly`}
+                onClick={() => setIsPortalDropdownOpen(true)}
+                className={`text-[11px] underline font-semibold cursor-pointer ml-1 ${
+                  isPearl ? 'text-slate-600 hover:text-slate-900' : 'text-slate-300 hover:text-white'
+                }`}
               >
-                <span>Launch Direct</span>
-                <ArrowRight size={12} />
+                Change Portal ▾
               </button>
-            )}
+              {onSwitchPortal && (
+                <button
+                  type="button"
+                  onClick={() => handleLaunchPortalDirectly(activePortal)}
+                  className={`px-2.5 py-0.5 rounded-md font-bold text-[11px] shadow-xs transition cursor-pointer flex items-center gap-1 ml-1 ${
+                    isPearl
+                      ? 'bg-slate-900 hover:bg-slate-800 text-white'
+                      : 'bg-white hover:bg-slate-200 text-slate-950'
+                  }`}
+                  title={`Launch into ${activePortal.name} directly`}
+                >
+                  <span>Open</span>
+                  <ArrowRight size={11} />
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* 3. FOUR COMPANIES IN 2x2 SQUARE-SHAPED ANIMATED BUTTONS (Only Name & Uploaded Logo) */}
+      {/* 3. FOUR COMPANIES IN 2x2 SQUARE-SHAPED ANIMATED BUTTONS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
         {COMPANIES_LIST.map((comp) => {
           const isCurrentActive = comp.id === currentActiveId;
           const isAllowed = effectiveIsGlobalAdmin || userAllowed.includes(comp.id);
-          const uploadedLogo = getCompanyUploadedLogo(comp.id);
           const styles = getCompanyCardStyles(comp.id, isCurrentActive);
 
           if (!isAllowed) {
             return (
               <div
                 key={comp.id}
-                className="relative rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center opacity-45 bg-slate-950/60 border border-white/5 shadow-inner min-h-[190px] sm:min-h-[220px] select-none"
+                className={`relative rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center opacity-50 border shadow-inner min-h-[190px] sm:min-h-[220px] select-none ${
+                  isPearl ? 'bg-slate-100 border-slate-200' : 'bg-slate-950/60 border-white/5'
+                }`}
               >
-                <div className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-[10px] font-bold">
-                  <Lock size={11} className="text-red-400" />
+                <div className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-500 text-[10px] font-bold">
+                  <Lock size={11} />
                   <span>Restricted</span>
                 </div>
 
                 <div className="h-20 sm:h-24 w-full flex items-center justify-center p-2 mb-3 grayscale opacity-60">
-                  <div className="w-14 h-14 rounded-2xl bg-black/40 border border-white/5 flex items-center justify-center">
+                  <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center ${
+                    isPearl ? 'bg-slate-200 border-slate-300' : 'bg-black/40 border-white/5'
+                  }`}>
                     <Lock className="w-6 h-6 text-gray-500" />
                   </div>
                 </div>
 
-                <h3 className="text-base sm:text-lg font-bold text-gray-400 tracking-wide max-w-xs leading-tight">
+                <h3 className={`text-base sm:text-lg font-bold tracking-wide max-w-xs leading-tight ${
+                  isPearl ? 'text-slate-500' : 'text-gray-400'
+                }`}>
                   {comp.name}
                 </h3>
                 <p className="text-[11px] text-gray-500 mt-2 font-mono">
@@ -562,30 +648,38 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 
               {/* Active Badge */}
               {isCurrentActive && (
-                <div className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold shadow-md">
-                  <CheckCircle2 size={11} className="text-emerald-400" />
+                <div className={`absolute top-3 right-3 flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold shadow-sm border ${
+                  isPearl
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                    : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                }`}>
+                  <CheckCircle2 size={11} className="text-emerald-500" />
                   <span>Active</span>
                 </div>
               )}
 
-              {/* Company Logo Display (Doubled Size - Crisp Official Subsidiary Logo) */}
+              {/* Company Logo Display */}
               <div className="h-28 sm:h-36 w-full flex items-center justify-center p-2 mb-3 transform group-hover:scale-105 transition-transform duration-300">
                 <img 
                   src={getCompanyLogoUrl(comp.id)} 
                   alt={comp.name} 
-                  className="max-h-full max-w-[260px] sm:max-w-[320px] object-contain filter drop-shadow-[0_6px_20px_rgba(0,0,0,0.8)]" 
+                  className="max-h-full max-w-[260px] sm:max-w-[320px] object-contain filter drop-shadow-[0_6px_16px_rgba(0,0,0,0.25)]" 
                 />
               </div>
 
               {/* Only Company Name (Clean & Prominent) */}
-              <h3 className="text-base sm:text-lg font-bold text-white group-hover:text-slate-100 transition-colors tracking-wide max-w-xs leading-tight">
+              <h3 className={`text-base sm:text-lg font-bold transition-colors tracking-wide max-w-xs leading-tight ${
+                isPearl ? 'text-slate-900 group-hover:text-slate-700' : 'text-white group-hover:text-slate-100'
+              }`}>
                 {comp.name}
               </h3>
 
               {/* Subtle Animated Indicator displaying target portal */}
-              <div className="mt-3 flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 group-hover:text-white transition-colors">
+              <div className={`mt-3 flex items-center gap-1.5 text-[11px] font-semibold transition-colors ${
+                isPearl ? 'text-slate-600 group-hover:text-slate-900' : 'text-slate-400 group-hover:text-white'
+              }`}>
                 <span>Enter Workspace • {activePortal.name}</span>
-                <ArrowRight size={13} className="transform group-hover:translate-x-1 transition-transform text-amber-400" />
+                <ArrowRight size={13} className="transform group-hover:translate-x-1 transition-transform" />
               </div>
             </button>
           );
@@ -609,8 +703,10 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 
   if (isModal) {
     return (
-      <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
-        <div className="relative w-full max-w-4xl bg-[#11141D] border border-white/10 rounded-3xl shadow-2xl my-6 flex flex-col overflow-visible">
+      <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-md overflow-y-auto">
+        <div className={`relative w-full max-w-4xl border rounded-3xl shadow-2xl my-6 flex flex-col overflow-visible transition-colors duration-300 ${
+          isPearl ? 'bg-[#F8FAFC] border-slate-200 text-slate-900' : 'bg-[#11141D] border-white/10 text-slate-100'
+        }`}>
           {content}
         </div>
       </div>
@@ -618,17 +714,23 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   }
 
   return (
-    <div className="min-h-screen w-full bg-[#0B0E14] text-slate-100 flex flex-col overflow-y-auto relative touch-pan-y">
+    <div className={`min-h-screen w-full flex flex-col overflow-y-auto relative touch-pan-y transition-colors duration-300 ${
+      isPearl
+        ? 'bg-gradient-to-b from-[#FFFFFF] via-[#F8FAFC] to-[#F1F5F9] text-slate-900'
+        : 'bg-[#0B0E14] text-slate-100'
+    }`}>
       {/* Background pearl charcoal ambience */}
-      <div 
-        className="absolute inset-0 pointer-events-none opacity-25"
-        style={{
-          backgroundImage: `
-            radial-gradient(circle at 50% 15%, rgba(255, 255, 255, 0.05) 0%, transparent 60%),
-            radial-gradient(circle at 50% 85%, rgba(30, 41, 59, 0.5) 0%, transparent 60%)
-          `
-        }}
-      />
+      {!isPearl && (
+        <div 
+          className="absolute inset-0 pointer-events-none opacity-25"
+          style={{
+            backgroundImage: `
+              radial-gradient(circle at 50% 15%, rgba(255, 255, 255, 0.05) 0%, transparent 60%),
+              radial-gradient(circle at 50% 85%, rgba(30, 41, 59, 0.5) 0%, transparent 60%)
+            `
+          }}
+        />
+      )}
       {content}
     </div>
   );

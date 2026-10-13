@@ -362,144 +362,161 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     }
   };
 
-  const getNotificationIcon = (subType?: string) => {
+  const getNotificationIcon = (n: AppNotification) => {
+    const subType = n.notificationSubType || '';
+    const text = `${n.title || ''} ${n.description || ''} ${subType}`.toLowerCase();
+
+    if (
+      subType === 'VEHICLE_GATE_PASS' ||
+      subType === 'TRANSPORTER_ASSIGNED' ||
+      text.includes('vehicle') ||
+      text.includes('truck') ||
+      text.includes('trailer') ||
+      text.includes('transporter') ||
+      text.includes('fleet') ||
+      text.includes('noc') ||
+      text.includes('veh_')
+    ) {
+      return <Truck size={18} className="text-amber-500" />;
+    }
+
     switch (subType) {
       case 'PAYMENT_APPROVAL':
       case 'BUYING':
-        return <DollarSign size={16} className="text-emerald-500" />;
+        return <DollarSign size={18} className="text-emerald-500" />;
       case 'CLIENT_REGISTRATION_APPROVAL':
-        return <ShieldCheck size={16} className="text-purple-500" />;
+        return <ShieldCheck size={18} className="text-purple-500" />;
       case 'WORKFLOW_TASK':
       case 'CASE_APPROVAL':
-        return <FileText size={16} className="text-amber-500" />;
+        return <FileText size={18} className="text-sky-500" />;
       case 'FINANCE_RECORDED':
-        return <CheckCircle2 size={16} className="text-teal-500" />;
+        return <CheckCircle2 size={18} className="text-teal-500" />;
       case 'DELETION_APPROVAL':
       case 'CANCELLATION_APPROVAL':
-        return <AlertTriangle size={16} className="text-rose-500" />;
+        return <AlertTriangle size={18} className="text-rose-500" />;
       case 'EDIT_APPROVAL':
-        return <Info size={16} className="text-sky-500" />;
-      case 'VEHICLE_GATE_PASS':
-      case 'TRANSPORTER_ASSIGNED':
-        return <Truck size={16} className="text-amber-500" />;
+        return <Info size={18} className="text-sky-500" />;
       default:
-        return <Bell size={16} className="text-amber-500" />;
+        return <Bell size={18} className="text-amber-500" />;
     }
   };
 
   return (
     <>
-      {/* Trigger Button with Clean Badge */}
+      {/* Trigger Button with Properly Anchored Count Badge */}
       <button 
         type="button"
         onClick={() => setIsOpen(!isOpen)} 
-        className={buttonClassName ? `${buttonClassName} relative` : "relative h-9 w-9 p-2 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 border border-white/10 transition active:scale-95 shrink-0 flex items-center justify-center cursor-pointer"}
+        style={{ position: 'relative', overflow: 'visible' }}
+        className={buttonClassName ? `${buttonClassName} relative inline-flex items-center justify-center shrink-0` : "relative h-9 w-9 p-2 rounded-xl text-gray-300 hover:text-white hover:bg-white/10 border border-white/10 transition active:scale-95 shrink-0 inline-flex items-center justify-center cursor-pointer"}
         title={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : "Notifications"}
         aria-label="Notifications"
       >
-        <Bell size={18} />
+        <Bell size={18} className={unreadCount > 0 ? 'text-amber-500' : ''} />
         {unreadCount > 0 && (
           <span 
-            className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-600 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow ring-2 ${
+            style={{
+              position: 'absolute',
+              top: '-5px',
+              right: '-5px',
+              backgroundColor: '#e11d48',
+              color: '#ffffff',
+              lineHeight: 1,
+              zIndex: 30
+            }}
+            className={`min-w-[18px] h-[18px] px-1 text-[10px] font-extrabold rounded-full flex items-center justify-center shadow-md ring-2 ${
               isPearl ? 'ring-white' : 'ring-slate-900'
-            } pointer-events-none z-30`}
-            style={{ lineHeight: 1 }}
+            } pointer-events-none`}
           >
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
 
-      {/* Slide-Over Notification Drawer */}
+      {/* Clean, Spacious Notification Center Dialog */}
       {isOpen && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[99990] overflow-hidden" style={{ isolation: 'isolate' }}>
-          {/* Backdrop */}
+        <div 
+          className="fixed inset-0 z-[99990] flex items-center justify-center p-3 sm:p-6 bg-black/65 backdrop-blur-xs animate-fade-in"
+          style={{ isolation: 'isolate' }}
+          onClick={() => setIsOpen(false)}
+        >
           <div 
-            className="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity animate-fade-in"
-            onClick={() => setIsOpen(false)}
-            aria-hidden="true"
-          />
-
-          {/* Drawer Panel */}
-          <div 
-            className={`fixed top-0 right-0 bottom-0 z-[99995] w-full sm:w-[420px] max-w-full h-full h-[100dvh] shadow-2xl flex flex-col transform transition-transform duration-300 animate-slide-left ${
+            className={`w-full max-w-2xl max-h-[86vh] rounded-3xl shadow-2xl border flex flex-col overflow-hidden transition-colors duration-200 ${
               isPearl 
-                ? 'bg-white text-slate-900 border-l border-slate-200' 
-                : 'bg-slate-950 text-slate-100 border-l border-slate-800'
+                ? 'bg-white text-slate-900 border-slate-200' 
+                : 'bg-slate-900 text-slate-100 border-slate-700/80'
             }`}
             style={{ isolation: 'isolate' }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header: Clean, Uncluttered */}
-            <div className={`p-4 sm:p-5 border-b flex items-center justify-between shrink-0 ${
-              isPearl ? 'border-slate-200 bg-slate-50/50' : 'border-slate-800 bg-slate-900/50'
+            {/* Clean Header */}
+            <div className={`px-5 py-4 border-b flex items-center justify-between shrink-0 ${
+              isPearl ? 'border-slate-200 bg-slate-50' : 'border-slate-800 bg-slate-950'
             }`}>
-              <div className="flex items-center gap-2.5">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                   isPearl 
                     ? 'bg-amber-100 text-amber-700 border border-amber-300/60' 
                     : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
                 }`}>
-                  <Bell size={18} />
+                  <Bell size={20} />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className={`text-base font-bold ${isPearl ? 'text-slate-900' : 'text-white'}`}>
-                      Notifications
-                    </h3>
-                    {unreadCount > 0 && (
-                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/20">
-                        {unreadCount} new
-                      </span>
-                    )}
-                  </div>
-                  <p className={`text-xs ${isPearl ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Stay updated with tasks, alerts & shipments
-                  </p>
+                <div className="flex items-center gap-2.5">
+                  <h3 className={`text-base sm:text-lg font-bold ${isPearl ? 'text-slate-900' : 'text-white'}`}>
+                    Notifications
+                  </h3>
+                  {unreadCount > 0 && (
+                    <span 
+                      style={{ backgroundColor: '#e11d48', color: '#ffffff' }}
+                      className="text-xs font-bold px-2.5 py-0.5 rounded-full"
+                    >
+                      {unreadCount} New
+                    </span>
+                  )}
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 {unreadCount > 0 && (
                   <button
                     type="button"
                     onClick={handleMarkAllRead}
-                    className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg transition cursor-pointer ${
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1.5 ${
                       isPearl 
-                        ? 'text-amber-800 hover:bg-amber-100/70' 
-                        : 'text-amber-400 hover:bg-white/10'
+                        ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100' 
+                        : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
                     }`}
-                    title="Mark all notifications as read"
                   >
-                    Mark all read
+                    <CheckCheck size={14} className="text-emerald-500" />
+                    <span>Mark all read</span>
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
-                  className={`p-1.5 rounded-lg transition cursor-pointer ${
+                  className={`p-2 rounded-xl transition cursor-pointer ${
                     isPearl 
-                      ? 'text-slate-400 hover:text-slate-700 hover:bg-slate-100' 
+                      ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/70' 
                       : 'text-slate-400 hover:text-white hover:bg-white/10'
                   }`}
                   aria-label="Close"
                 >
-                  <X size={18} />
+                  <X size={20} />
                 </button>
               </div>
             </div>
 
-            {/* Filter Tabs: Simple, Clean Pills */}
-            <div className={`px-4 py-2.5 border-b flex items-center gap-2 shrink-0 select-none ${
-              isPearl ? 'border-slate-200 bg-white' : 'border-slate-800 bg-slate-950'
+            {/* Simple Filter Tabs */}
+            <div className={`px-5 py-3 border-b flex items-center gap-2 shrink-0 select-none ${
+              isPearl ? 'border-slate-200 bg-white' : 'border-slate-800 bg-slate-900'
             }`}>
               <button
                 type="button"
                 onClick={() => setActiveFilter('ALL')}
-                className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                className={`py-2 px-4 rounded-xl text-xs font-bold transition cursor-pointer ${
                   activeFilter === 'ALL'
-                    ? (isPearl ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'bg-amber-500 text-slate-950 font-bold shadow-xs')
-                    : (isPearl ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-400 hover:text-white hover:bg-white/5')
+                    ? 'bg-amber-500 text-slate-950 shadow-xs'
+                    : (isPearl ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10')
                 }`}
               >
                 All ({relevantNotifications.length})
@@ -508,23 +525,23 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveFilter('UNREAD')}
-                className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                className={`py-2 px-4 rounded-xl text-xs font-bold transition cursor-pointer ${
                   activeFilter === 'UNREAD'
-                    ? (isPearl ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'bg-amber-500 text-slate-950 font-bold shadow-xs')
-                    : (isPearl ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-400 hover:text-white hover:bg-white/5')
+                    ? 'bg-amber-500 text-slate-950 shadow-xs'
+                    : (isPearl ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10')
                 }`}
               >
                 Unread ({unreadCount})
               </button>
 
-              {pendingApprovalsCount > 0 && currentRole !== UserRole.CLIENT && (
+              {currentRole !== UserRole.CLIENT && (
                 <button
                   type="button"
                   onClick={() => setActiveFilter('APPROVALS')}
-                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  className={`py-2 px-4 rounded-xl text-xs font-bold transition cursor-pointer ${
                     activeFilter === 'APPROVALS'
-                      ? (isPearl ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'bg-amber-500 text-slate-950 font-bold shadow-xs')
-                      : (isPearl ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-400 hover:text-white hover:bg-white/5')
+                      ? 'bg-amber-500 text-slate-950 shadow-xs'
+                      : (isPearl ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10')
                   }`}
                 >
                   Approvals ({pendingApprovalsCount})
@@ -532,36 +549,29 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
               )}
             </div>
 
-            {/* Notifications List */}
-            <div className={`flex-1 overflow-y-auto p-3 sm:p-4 space-y-2.5 custom-scrollbar ${
-              isPearl ? 'bg-slate-50/50' : 'bg-slate-950'
+            {/* Spacious, Uncluttered Notifications List */}
+            <div className={`flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 custom-scrollbar ${
+              isPearl ? 'bg-slate-50/70' : 'bg-slate-950/60'
             }`}>
               {filteredNotifications.length === 0 ? (
-                <div className={`h-full min-h-[300px] flex flex-col items-center justify-center text-center p-6 space-y-3 rounded-2xl border ${
-                  isPearl 
-                    ? 'border-slate-200 bg-white text-slate-400' 
-                    : 'border-slate-800 bg-slate-900/40 text-slate-500'
-                }`}>
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border ${
-                    isPearl ? 'bg-slate-100 border-slate-200 text-slate-400' : 'bg-white/5 border-white/5 text-slate-400'
+                <div className="py-16 flex flex-col items-center justify-center text-center px-4">
+                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border mb-3 ${
+                    isPearl ? 'bg-white border-slate-200' : 'bg-white/5 border-white/10'
                   }`}>
-                    <CheckCircle2 size={24} className="text-emerald-500" />
+                    <CheckCircle2 size={26} className="text-emerald-500" />
                   </div>
-                  <div>
-                    <h4 className={`text-sm font-semibold ${isPearl ? 'text-slate-700' : 'text-slate-200'}`}>
-                      All caught up!
-                    </h4>
-                    <p className={`text-xs mt-1 ${isPearl ? 'text-slate-400' : 'text-slate-400'}`}>
-                      {activeFilter === 'UNREAD' 
-                        ? 'No unread notifications at the moment.' 
-                        : 'No notifications to display right now.'}
-                    </p>
-                  </div>
+                  <h4 className={`text-sm font-bold ${isPearl ? 'text-slate-800' : 'text-slate-200'}`}>
+                    No notifications
+                  </h4>
+                  <p className={`text-xs mt-1 ${isPearl ? 'text-slate-500' : 'text-slate-400'}`}>
+                    {activeFilter === 'UNREAD' 
+                      ? 'You have no unread notifications.' 
+                      : 'Nothing to show right now.'}
+                  </p>
                 </div>
               ) : (
                 filteredNotifications.map((n, idx) => {
                   const isPending = n.status === 'PENDING';
-
                   const isPaymentApproval = 
                     n.notificationSubType === 'PAYMENT_APPROVAL' ||
                     n.approvalData?.actionType === 'VERIFY_PAYMENT';
@@ -579,162 +589,119 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                     <div 
                       key={`live_notif_${n.id || idx}_${idx}`}
                       onClick={() => handleCardClick(n)}
-                      className={`p-3 sm:p-3.5 rounded-xl border transition-all cursor-pointer group space-y-2 relative shadow-xs ${
+                      className={`p-4 rounded-2xl border transition-all cursor-pointer ${
                         isPearl
                           ? isPending
-                            ? 'bg-white border-amber-300/80 hover:border-amber-400 shadow-sm'
-                            : 'bg-white/80 border-slate-200 hover:border-slate-300 opacity-80 hover:opacity-100'
+                            ? 'bg-white border-amber-300 shadow-xs hover:border-amber-400'
+                            : 'bg-white/80 border-slate-200 hover:bg-white opacity-80'
                           : isPending
-                            ? 'bg-slate-900 border-amber-500/30 hover:border-amber-400/50 shadow-sm'
-                            : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 opacity-75 hover:opacity-100'
+                            ? 'bg-slate-900 border-amber-500/35 hover:border-amber-400/60'
+                            : 'bg-slate-900/50 border-white/10 hover:bg-slate-900 opacity-75'
                       }`}
                     >
-                      {/* Top Header Row */}
-                      <div className="flex items-start justify-between gap-2.5">
-                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                          {/* Clean Icon Box */}
-                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border mt-0.5 ${
-                            isPearl
-                              ? 'bg-slate-100 border-slate-200'
-                              : 'bg-white/5 border-white/10'
-                          }`}>
-                            {getNotificationIcon(n.notificationSubType)}
-                          </div>
+                      <div className="flex items-start gap-3.5">
+                        {/* Icon */}
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border mt-0.5 ${
+                          isPearl
+                            ? 'bg-slate-50 border-slate-200'
+                            : 'bg-white/5 border-white/10'
+                        }`}>
+                          {getNotificationIcon(n)}
+                        </div>
 
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5">
+                        {/* Content */}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
                               {isPending && (
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                                <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
                               )}
-                              <h4 className={`text-xs sm:text-sm font-semibold truncate transition ${
-                                isPearl 
-                                  ? 'text-slate-900 group-hover:text-amber-800' 
-                                  : 'text-slate-100 group-hover:text-amber-300'
+                              <h4 className={`text-sm font-bold leading-snug ${
+                                isPearl ? 'text-slate-900' : 'text-white'
                               }`}>
                                 {n.title}
                               </h4>
                             </div>
-                            <span className={`text-[11px] block mt-0.5 font-mono ${
-                              isPearl ? 'text-slate-400' : 'text-slate-500'
-                            }`}>
-                              {n.timestamp || 'Recent'}
-                            </span>
-                          </div>
-                        </div>
 
-                        {/* Status / Quick Read Check */}
-                        <div className="flex items-center gap-1 shrink-0">
-                          {isPending ? (
-                            <button
-                              type="button"
-                              onClick={(e) => handleMarkAsRead(n, e)}
-                              className={`text-xs p-1 rounded-md transition cursor-pointer ${
-                                isPearl 
-                                  ? 'text-slate-400 hover:text-emerald-600 hover:bg-slate-100' 
-                                  : 'text-slate-400 hover:text-emerald-400 hover:bg-white/10'
-                              }`}
-                              title="Mark as Read"
-                            >
-                              <Check size={14} />
-                            </button>
-                          ) : (
-                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                              isPearl ? 'text-slate-400 bg-slate-100' : 'text-slate-500 bg-white/5'
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className={`text-[11px] whitespace-nowrap ${
+                                isPearl ? 'text-slate-500' : 'text-slate-400'
+                              }`}>
+                                {n.timestamp || 'Recent'}
+                              </span>
+                              {isPending && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleMarkAsRead(n, e)}
+                                  className={`p-1 rounded-lg transition cursor-pointer ${
+                                    isPearl 
+                                      ? 'text-slate-400 hover:text-emerald-600 hover:bg-slate-100' 
+                                      : 'text-slate-400 hover:text-emerald-400 hover:bg-white/10'
+                                  }`}
+                                  title="Mark as Read"
+                                >
+                                  <Check size={15} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {n.description && (
+                            <p className={`text-xs mt-1 leading-relaxed line-clamp-2 ${
+                              isPearl ? 'text-slate-600' : 'text-slate-300'
                             }`}>
-                              Read
-                            </span>
+                              {n.description}
+                            </p>
+                          )}
+
+                          {/* Action Buttons Only When Needed */}
+                          {((isApproval && isPending) || n.targetFilter?.caseNo) && (
+                            <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-200/60 dark:border-white/10 flex-wrap">
+                              {n.targetFilter?.caseNo ? (
+                                <span className={`text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-lg border ${
+                                  isPearl ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-white/5 text-slate-300 border-white/10'
+                                }`}>
+                                  Case: {n.targetFilter.caseNo}
+                                </span>
+                              ) : <span />}
+
+                              {isApproval && isPending ? (
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleQuickApprove(n, e)}
+                                    style={{ backgroundColor: '#059669', color: '#ffffff' }}
+                                    className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+                                  >
+                                    <Check size={13} />
+                                    <span>{isPaymentApproval ? 'Verify' : 'Approve'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleQuickReject(n, e)}
+                                    style={{ backgroundColor: '#e11d48', color: '#ffffff' }}
+                                    className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+                                  >
+                                    <X size={13} />
+                                    <span>Reject</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className={`text-xs font-semibold flex items-center gap-1 ${
+                                  isPearl ? 'text-amber-700' : 'text-amber-400'
+                                }`}>
+                                  <span>Open</span>
+                                  <ArrowRight size={12} />
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
-
-                      {/* Clean Message Body */}
-                      <p className={`text-xs line-clamp-2 leading-relaxed ${
-                        isPearl ? 'text-slate-600' : 'text-slate-300'
-                      }`}>
-                        {n.description}
-                      </p>
-
-                      {/* Action Row */}
-                      {(isApproval && isPending) || (n.targetFilter?.caseNo && onNavigateToCase) || (onNavigateToTab && n.targetView === 'finance') ? (
-                        <div className={`flex items-center justify-between gap-2 pt-2 border-t ${
-                          isPearl ? 'border-slate-100' : 'border-white/5'
-                        }`}>
-                          {isApproval && isPending ? (
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={(e) => handleQuickApprove(n, e)}
-                                className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 transition shadow-xs active:scale-95 cursor-pointer"
-                              >
-                                <Check size={13} />
-                                <span>{isPaymentApproval ? 'Verify' : 'Approve'}</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => handleQuickReject(n, e)}
-                                className={`px-2.5 py-1 rounded-lg border font-semibold text-xs flex items-center gap-1 transition active:scale-95 cursor-pointer ${
-                                  isPearl 
-                                    ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100' 
-                                    : 'bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25'
-                                }`}
-                              >
-                                <X size={13} />
-                                <span>Reject</span>
-                              </button>
-                            </div>
-                          ) : (n.targetFilter?.caseNo && onNavigateToCase) ? (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onNavigateToCase(n.targetFilter.caseNo, n.targetFilter);
-                                setIsOpen(false);
-                              }}
-                              className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
-                            >
-                              <span>Open Case</span>
-                              <ExternalLink size={12} />
-                            </button>
-                          ) : onNavigateToTab && n.targetView === 'finance' ? (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onNavigateToTab('finance');
-                                setIsOpen(false);
-                              }}
-                              className="text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
-                            >
-                              <span>View Finance</span>
-                              <ExternalLink size={12} />
-                            </button>
-                          ) : null}
-
-                          <span className={`text-[11px] font-medium flex items-center gap-1 ml-auto ${
-                            isPearl ? 'text-amber-700' : 'text-amber-400'
-                          }`}>
-                            <span>Details</span>
-                            <ArrowRight size={11} />
-                          </span>
-                        </div>
-                      ) : null}
                     </div>
                   );
                 })
               )}
-            </div>
-
-            {/* Footer Summary: Clean & Minimal */}
-            <div className={`p-3 px-4 border-t text-xs flex items-center justify-between shrink-0 ${
-              isPearl 
-                ? 'border-slate-200 bg-slate-50 text-slate-500' 
-                : 'border-slate-800 bg-slate-900/50 text-slate-400'
-            }`}>
-              <span>Role: <strong className={isPearl ? 'text-slate-800 capitalize' : 'text-white capitalize'}>{String(currentRole).replace(/_/g, ' ')}</strong></span>
-              <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Live Cloud Sync
-              </span>
             </div>
           </div>
         </div>,
@@ -753,3 +720,5 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     </>
   );
 };
+
+export default LiveNotificationCenter;

@@ -19,6 +19,7 @@ import {
 import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
 import { useActiveCompany } from '../services/companyService';
+import { ThemeToggleSwitch } from './ThemeToggleSwitch';
 
 interface VendorPortalProps {
   onSignOut: () => void;
@@ -159,11 +160,12 @@ export const VendorPortal: React.FC<VendorPortalProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:gap-3">
           <div className="text-right hidden md:block">
             <div className="text-xs font-bold text-gray-200">{vendorName}</div>
             <div className="text-[10px] text-amber-400 font-mono">ID: {vendorId}</div>
           </div>
+          <ThemeToggleSwitch compact />
           <button
             type="button"
             onClick={onSignOut}
