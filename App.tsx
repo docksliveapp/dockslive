@@ -839,7 +839,10 @@ const App: React.FC = () => {
       <ErrorBoundary>
         <GroupAdminPortal 
           currentUserName={safeAppStorage.getItem('dpl_current_user_name') || firebaseUser?.displayName || 'Main Admin'}
-          onExitPortal={() => setIsGroupAdminPortalOpen(false)}
+          onExitPortal={() => {
+            setIsGroupAdminPortalOpen(false);
+            setShowCompanySelection(true);
+          }}
           onSignOut={handleSignOut}
           onSelectCompanyWorkspace={(selectedId) => {
             setActiveCompany(selectedId);
@@ -1061,7 +1064,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Quick Workspace Actions: Switch Company / Portal & Main Admin Panel */}
+        {/* Quick Workspace Actions: Switch Company / Portal */}
         <div className="w-full px-3 pb-2 space-y-1.5 shrink-0">
           {/* Switch Company / Portal Workspace Button (Shown if Admin or multiple companies) */}
           {(isCompanyAdmin || allowedCompanies.length > 1) && (
@@ -1088,35 +1091,6 @@ const App: React.FC = () => {
                 appTheme === 'pearl' ? 'bg-slate-200 text-slate-800' : 'bg-white/10 text-slate-300'
               } ${!desktopSidebarExpanded ? 'lg:hidden' : ''}`}>
                 {effectiveIsGlobalAdmin ? '4 Entities' : `${allowedCompanies.length} ${allowedCompanies.length === 1 ? 'Entity' : 'Entities'}`}
-              </span>
-            </button>
-          )}
-
-          {/* Main Admin Panel Button (Renamed from Group Admin Portal) */}
-          {effectiveIsGlobalAdmin && (
-            <button
-              type="button"
-              onClick={() => {
-                setMobileSidebarOpen(false);
-                setIsGroupAdminPortalOpen(true);
-              }}
-              className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer group shadow-sm active:scale-95 ${
-                appTheme === 'pearl'
-                  ? 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-400/60 text-amber-950'
-                  : 'bg-gradient-to-r from-amber-950/40 via-amber-900/30 to-slate-900/90 hover:from-amber-900/50 hover:to-slate-800 border-amber-500/30 text-amber-200'
-              }`}
-              title="Open Main Admin Panel (Consolidated Group Controls)"
-            >
-              <div className="flex items-center gap-2 truncate">
-                <Crown size={15} className={appTheme === 'pearl' ? "text-amber-700" : "text-amber-400"} />
-                <span className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} truncate text-[11px]`}>
-                  Main Admin Panel
-                </span>
-              </div>
-              <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold uppercase ${
-                appTheme === 'pearl' ? 'bg-amber-600/20 text-amber-900' : 'bg-amber-500/20 text-amber-300'
-              } ${!desktopSidebarExpanded ? 'lg:hidden' : ''}`}>
-                Admin
               </span>
             </button>
           )}

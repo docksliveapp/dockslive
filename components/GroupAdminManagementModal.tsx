@@ -61,7 +61,8 @@ import {
   DEFAULT_PARENT_GROUP, 
   COMPANIES_LIST,
   useActiveCompany,
-  isUploadedLogo
+  isUploadedLogo,
+  applyDynamicFaviconToDOM
 } from '../services/companyService';
 import { useBranding, optimizeLogoImage } from '../services/brandingService';
 import { 
@@ -302,7 +303,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
   };
 
   // ----------------------------------------------------
-  // 2. LOGO & BRANDING STATE
+  // 2. LOGO & BRANDING STATE (INCLUDING FAVICON SVG)
   // ----------------------------------------------------
   const [groupName, setGroupName] = useState(parentGroup.name);
   const [groupTitle, setGroupTitle] = useState(parentGroup.title);
@@ -316,9 +317,16 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
   const [groupLogoPreview, setGroupLogoPreview] = useState<string>(parentGroup.logo);
   const [groupLogoFile, setGroupLogoFile] = useState<File | null>(null);
   const [isOptimizingLogo, setIsOptimizingLogo] = useState(false);
+
+  // Favicon SVG / Icon State
+  const [groupFaviconPreview, setGroupFaviconPreview] = useState<string>(parentGroup.favicon || '');
+  const [groupFaviconFile, setGroupFaviconFile] = useState<File | null>(null);
+  const [isOptimizingFavicon, setIsOptimizingFavicon] = useState(false);
+
   const [brandingSaving, setBrandingSaving] = useState(false);
   const [brandingSuccess, setBrandingSuccess] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const faviconInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setGroupName(parentGroup.name);
@@ -333,7 +341,10 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     if (!groupLogoFile) {
       setGroupLogoPreview(parentGroup.logo);
     }
-  }, [parentGroup, groupLogoFile]);
+    if (!groupFaviconFile) {
+      setGroupFaviconPreview(parentGroup.favicon || '');
+    }
+  }, [parentGroup, groupLogoFile, groupFaviconFile]);
 
   const handleLogoFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -354,9 +365,37 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
       setGroupLogoPreview(optimizedBase64);
     } catch (err) {
       console.error("Failed to process logo:", err);
-      alert("Could not process this image file. Please ensure it is a valid PNG or JPG.");
+      alert("Could not process this image file. Please ensure it is a valid SVG, PNG, or JPG.");
     } finally {
       setIsOptimizingLogo(false);
+    }
+  };
+
+  const handleFaviconFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const isSupported = ['svg', 'png', 'ico', 'webp', 'jpg', 'jpeg'].includes(ext || '') || file.type.startsWith('image/');
+
+    if (!isSupported) {
+      alert("Unsupported file format. Please upload an SVG or PNG file for the Favicon.");
+      return;
+    }
+
+    setIsOptimizingFavicon(true);
+    try {
+      // optimizeLogoImage preserves SVG files directly as sharp vector data:image/svg+xml Data URLs
+      const optimizedFavicon = await optimizeLogoImage(file, 512, 512);
+      setGroupFaviconFile(file);
+      setGroupFaviconPreview(optimizedFavicon);
+      // Immediately preview in browser tab
+      applyDynamicFaviconToDOM(optimizedFavicon);
+    } catch (err) {
+      console.error("Failed to process favicon:", err);
+      alert("Could not process this favicon file. Please upload a valid SVG or PNG.");
+    } finally {
+      setIsOptimizingFavicon(false);
     }
   };
 
@@ -366,7 +405,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     setBrandingSuccess(false);
 
     try {
-      // 1. Update Master Conglomerate Parent Group in Firestore (settings/parent_group)
+      // 1. Update Master Conglomerate Parent Group (including Logo & Favicon SVG) in Firestore (settings/parent_group)
       await saveParentGroup({
         name: groupName.trim(),
         title: groupTitle.trim(),
@@ -377,9 +416,16 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
         cell: groupCell.trim(),
         email: groupEmail.trim(),
         web: groupWeb.trim(),
-        logo: groupLogoPreview
+        logo: groupLogoPreview,
+        favicon: groupFaviconPreview
       }, currentUserName || 'System Administrator');
 
+      if (groupFaviconPreview && isUploadedLogo(groupFaviconPreview)) {
+        applyDynamicFaviconToDOM(groupFaviconPreview);
+      }
+
+      setGroupLogoFile(null);
+      setGroupFaviconFile(null);
       setBrandingSuccess(true);
       setTimeout(() => setBrandingSuccess(false), 4000);
     } catch (err: any) {
@@ -391,7 +437,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
   };
 
   const handleResetLogo = async () => {
-    const confirmReset = window.confirm("Reset company logo and group settings back to factory default?");
+    const confirmReset = window.confirm("Reset company logo, favicon, and group settings back to factory default?");
     if (!confirmReset) return;
 
     setBrandingSaving(true);
@@ -399,7 +445,10 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
       await resetParentGroup();
       await resetBrandingToDefault();
       setGroupLogoFile(null);
+      setGroupFaviconFile(null);
       setGroupLogoPreview(DEFAULT_PARENT_GROUP.logo);
+      setGroupFaviconPreview('');
+      applyDynamicFaviconToDOM(null);
       setBrandingSuccess(true);
       setTimeout(() => setBrandingSuccess(false), 3000);
     } catch (err) {
@@ -617,8 +666,12 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
         {/* Top Executive Header Bar */}
         <div className="flex items-center justify-between px-5 sm:px-7 py-4 border-b border-white/10 bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-950">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500 to-yellow-600 flex items-center justify-center shadow-lg shadow-amber-500/30 border border-amber-300/40 shrink-0">
-              <Crown className="w-5 h-5 text-slate-950" />
+            <div className="w-11 h-11 rounded-full flex items-center justify-center shrink-0 bg-transparent">
+              <img 
+                src={(parentGroup?.logo && isUploadedLogo(parentGroup.logo)) ? parentGroup.logo : '/logos/mak_pearl_white_emblem.svg'} 
+                alt={parentGroup?.name || 'MAK Group of Companies'} 
+                className="w-full h-full object-contain drop-shadow" 
+              />
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -918,16 +971,23 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
 
                   <button
                     type="submit"
-                    disabled={brandingSaving || isOptimizingLogo}
+                    disabled={brandingSaving || isOptimizingLogo || isOptimizingFavicon}
                     className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 transition shadow-lg shadow-amber-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
                   >
                     {brandingSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                    <span>{brandingSaving ? 'Saving...' : 'Save & Apply Logo'}</span>
+                    <span>{brandingSaving ? 'Saving...' : 'Save & Apply Logo & Favicon'}</span>
                   </button>
                 </div>
               </div>
 
-              {/* Logo Upload & Live Preview Card */}
+              {brandingSuccess && (
+                <div className="p-3.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 animate-fade-in">
+                  <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                  <span>Main App Logo, Favicon SVG Icon, and Conglomerate Branding updated and applied across the system!</span>
+                </div>
+              )}
+
+              {/* 1. Main Company Logo Upload & Live Preview Card */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 {/* Upload Box */}
                 <div className="md:col-span-2 p-5 rounded-2xl bg-white/5 border border-white/10 flex flex-col justify-between">
@@ -936,14 +996,14 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                       <Upload size={14} /> Upload Main Company Logo
                     </h4>
                     <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-                      Upload high-resolution logo (PNG, SVG, or JPG). Transparent PNG is recommended for optimal rendering across dark interfaces and printed PDF dossiers.
+                      Upload high-resolution logo (PNG, SVG, or JPG). Transparent PNG or SVG is recommended for optimal rendering across dark interfaces and printed PDF dossiers.
                     </p>
 
                     <input
                       type="file"
                       ref={logoInputRef}
                       onChange={handleLogoFileSelect}
-                      accept="image/png,image/svg+xml,image/jpeg,image/webp"
+                      accept="image/png,image/svg+xml,image/jpeg,image/webp,.svg"
                       className="hidden"
                     />
 
@@ -952,8 +1012,8 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                       className="border-2 border-dashed border-amber-500/40 hover:border-amber-400 rounded-2xl p-6 text-center cursor-pointer bg-black/30 hover:bg-amber-500/5 transition-all"
                     >
                       <Upload className="w-8 h-8 mx-auto text-amber-400 mb-2 animate-bounce" />
-                      <p className="text-xs font-bold text-white">Click to Select New Logo File</p>
-                      <p className="text-xs text-gray-400 mt-1">PNG, SVG, JPG (Max 5MB)</p>
+                      <p className="text-xs font-bold text-white">Click to Select New Main Logo File</p>
+                      <p className="text-xs text-gray-400 mt-1">SVG, PNG, JPG (Max 5MB)</p>
                       {isOptimizingLogo && (
                         <p className="text-xs text-amber-300 mt-2 flex items-center justify-center gap-1.5">
                           <Loader2 size={13} className="animate-spin" /> Optimizing image for crisp HD rendering...
@@ -973,25 +1033,112 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                 {/* Live Preview Card */}
                 <div className="p-5 rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center justify-center text-center">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">
-                    Active Logo Preview
+                    Active Main Logo Preview
                   </h4>
                   <div className="h-32 w-full flex items-center justify-center p-3 rounded-2xl bg-black/60 border border-white/10 mb-3 shadow-inner">
-                    {groupLogoPreview && isUploadedLogo(groupLogoPreview) ? (
-                      <img 
-                        src={groupLogoPreview} 
-                        alt="Company Logo Preview" 
-                        className="max-h-full max-w-full object-contain filter drop-shadow-[0_4px_16px_rgba(245,158,11,0.3)]"
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center justify-center gap-1.5 text-gray-500">
-                        <ImageIcon size={28} className="text-gray-600" />
-                        <span className="text-xs font-medium">No Logo Uploaded Yet</span>
-                      </div>
-                    )}
+                    <img 
+                      src={(groupLogoPreview && isUploadedLogo(groupLogoPreview)) ? groupLogoPreview : '/logos/mak_pearl_white_emblem.svg'} 
+                      alt="Company Logo Preview" 
+                      className="max-h-full max-w-full object-contain filter drop-shadow-[0_4px_16px_rgba(245,158,11,0.3)]"
+                    />
                   </div>
                   <span className="text-xs font-mono text-gray-400">
-                    Live Display Sample
+                    Live Main Logo Sample
                   </span>
+                </div>
+              </div>
+
+              {/* 2. Favicon Logo (SVG / Browser Tab & App Install Icon) Upload & Live Preview Card */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {/* Favicon Upload Box */}
+                <div className="md:col-span-2 p-5 rounded-2xl bg-white/5 border border-cyan-500/25 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-300 flex items-center gap-2">
+                        <Globe size={14} /> Upload Favicon Logo (SVG / Browser & App Icon)
+                      </h4>
+                      <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                        SVG Recommended
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 mb-4 leading-relaxed">
+                      Jo bhi SVG (ya PNG) file yahan upload ki jayegi, wahi browser tab ka official <strong>Favicon icon</strong> aur app shortcut icon ban jayega. Click <strong>Save & Apply Logo & Favicon</strong> to save permanently across all devices.
+                    </p>
+
+                    <input
+                      type="file"
+                      ref={faviconInputRef}
+                      onChange={handleFaviconFileSelect}
+                      accept="image/svg+xml,.svg,image/png,image/x-icon,image/webp"
+                      className="hidden"
+                    />
+
+                    <div 
+                      onClick={() => faviconInputRef.current?.click()}
+                      className="border-2 border-dashed border-cyan-500/40 hover:border-cyan-400 rounded-2xl p-6 text-center cursor-pointer bg-black/30 hover:bg-cyan-500/5 transition-all"
+                    >
+                      <Upload className="w-8 h-8 mx-auto text-cyan-400 mb-2" />
+                      <p className="text-xs font-bold text-white">Click to Upload Favicon SVG / Icon</p>
+                      <p className="text-xs text-gray-400 mt-1">Supports .SVG (Vector Icon) & .PNG</p>
+                      {isOptimizingFavicon && (
+                        <p className="text-xs text-cyan-300 mt-2 flex items-center justify-center gap-1.5">
+                          <Loader2 size={13} className="animate-spin" /> Processing Favicon SVG...
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {groupFaviconFile && (
+                    <div className="mt-4 p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-xs text-cyan-200 flex items-center justify-between">
+                      <span className="truncate">Selected Favicon: {groupFaviconFile.name} ({Math.round(groupFaviconFile.size / 1024)} KB)</span>
+                      <span className="text-xs font-bold text-emerald-400">Live Preview Active • Click Save</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Live Favicon Preview Card */}
+                <div className="p-5 rounded-2xl bg-white/5 border border-cyan-500/25 flex flex-col items-center justify-center text-center">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-300 mb-3">
+                    Active Favicon Icon
+                  </h4>
+                  <div className="h-32 w-full flex flex-col items-center justify-center gap-3 p-3 rounded-2xl bg-black/60 border border-white/10 mb-3 shadow-inner">
+                    <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center p-1.5 shadow-md">
+                      <img 
+                        src={(groupFaviconPreview && isUploadedLogo(groupFaviconPreview)) ? groupFaviconPreview : '/favicon.svg'} 
+                        alt="Favicon Preview" 
+                        className="w-full h-full object-contain drop-shadow"
+                      />
+                    </div>
+                    {/* Browser Tab Simulation */}
+                    <div className="px-3 py-1 rounded-lg bg-slate-900 border border-white/10 flex items-center gap-2 max-w-[180px]">
+                      <img 
+                        src={(groupFaviconPreview && isUploadedLogo(groupFaviconPreview)) ? groupFaviconPreview : '/favicon.svg'} 
+                        alt="Tab Icon" 
+                        className="w-4 h-4 object-contain shrink-0"
+                      />
+                      <span className="text-[10px] font-medium text-slate-200 truncate">
+                        {groupName || 'MAK Group'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-gray-400">
+                      {(groupFaviconPreview && isUploadedLogo(groupFaviconPreview)) ? 'Custom SVG Favicon Active' : 'Default Favicon Active'}
+                    </span>
+                    {groupFaviconPreview && isUploadedLogo(groupFaviconPreview) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGroupFaviconFile(null);
+                          setGroupFaviconPreview('');
+                          applyDynamicFaviconToDOM(null);
+                        }}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 underline cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 

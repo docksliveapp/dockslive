@@ -22,7 +22,26 @@ export default defineConfig(({ mode }) => {
           registerType: 'autoUpdate',
           selfDestroying: true,
           injectRegister: null,
-          includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
+          includeAssets: [
+            'favicon.svg',
+            'favicon.png',
+            'favicon-32x32.png',
+            'favicon-16x16.png',
+            'apple-touch-icon.png',
+            'apple-touch-icon-v2.png',
+            'apple-touch-icon-v3.png',
+            'pwa-192x192.png',
+            'pwa-192x192-v2.png',
+            'pwa-192x192-v3.png',
+            'pwa-512x512.png',
+            'pwa-512x512-v2.png',
+            'pwa-512x512-v3.png',
+            'pwa-maskable-192x192-v3.png',
+            'pwa-maskable-512x512.png',
+            'pwa-maskable-512x512-v2.png',
+            'pwa-maskable-512x512-v3.png',
+            'mak_pearl_grey_edge.png'
+          ],
           workbox: {
             cleanupOutdatedCaches: true,
             skipWaiting: true,
@@ -35,30 +54,42 @@ export default defineConfig(({ mode }) => {
             name: 'MAK Group of Companies',
             short_name: 'MAK Group',
             description: 'MAK Group of Companies - Docks, Truckit, Muhib & Vantage Unified Logistics & Customs Enterprise Portal',
-            theme_color: '#0f172a',
-            background_color: '#020617',
+            theme_color: '#F8FAFC',
+            background_color: '#F8FAFC',
             display: 'standalone',
             orientation: 'portrait',
             start_url: '/',
             scope: '/',
             icons: [
               {
-                src: '/pwa-192x192.png',
+                src: '/pwa-192x192-v3.png',
                 sizes: '192x192',
                 type: 'image/png',
                 purpose: 'any'
               },
               {
-                src: '/pwa-512x512.png',
+                src: '/pwa-512x512-v3.png',
                 sizes: '512x512',
                 type: 'image/png',
                 purpose: 'any'
               },
               {
-                src: '/pwa-maskable-512x512.png',
+                src: '/pwa-maskable-192x192-v3.png',
+                sizes: '192x192',
+                type: 'image/png',
+                purpose: 'maskable'
+              },
+              {
+                src: '/pwa-maskable-512x512-v3.png',
                 sizes: '512x512',
                 type: 'image/png',
                 purpose: 'maskable'
+              },
+              {
+                src: '/apple-touch-icon-v3.png',
+                sizes: '180x180',
+                type: 'image/png',
+                purpose: 'any'
               }
             ]
           },

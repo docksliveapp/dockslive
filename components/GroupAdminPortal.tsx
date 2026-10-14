@@ -43,16 +43,6 @@ import {
   Check,
   UserCheck
 } from 'lucide-react';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  Tooltip, 
-  ResponsiveContainer, 
-  CartesianGrid,
-  Legend
-} from 'recharts';
 import { Case, Vehicle, FinanceEntry, AppUser, CaseStatus, UserRole } from '../types';
 import { 
   subscribeToCases, 
@@ -67,7 +57,8 @@ import {
   GROUP_COMPANIES, 
   COMPANIES_LIST, 
   useParentGroup, 
-  getCompanyLogoUrl 
+  getCompanyLogoUrl,
+  isUploadedLogo
 } from '../services/companyService';
 import { useBranding } from '../services/brandingService';
 import { safeAppStorage } from '../services/storage';
@@ -132,6 +123,9 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
   // Parent Group & Branding
   const { parentGroup } = useParentGroup();
   const { branding } = useBranding();
+  const mainAdminLogoUrl = (parentGroup?.logo && isUploadedLogo(parentGroup.logo))
+    ? parentGroup.logo
+    : '/logos/mak_pearl_white_emblem.svg';
 
   // All Companies Live Data
   const [allCases, setAllCases] = useState<Case[]>([]);
@@ -269,23 +263,6 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
       bankLiquidity: Math.max(0, bankLiquidity)
     };
   }, [allCases, allVehicles, allFinances]);
-
-  // Chart Data: Cases & Finance comparison by subsidiary
-  const chartData = useMemo(() => {
-    return COMPANIES_LIST.map(comp => {
-      const s = statsByCompany[comp.id];
-      return {
-        name: comp.shortName,
-        fullName: comp.name,
-        Cases: s.totalCases,
-        Active: s.activeCases,
-        Containers: s.containersCount,
-        Revenue: Math.round(s.receivables / 1000), // In thousands
-        Expenses: Math.round(s.payables / 1000), // In thousands
-        Profit: Math.round(s.netProfit / 1000)
-      };
-    });
-  }, [statsByCompany]);
 
   // Filtered recent cases feed
   const recentCasesFeed = useMemo(() => {
@@ -474,13 +451,20 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
         
         {/* Header / Conglomerate Branding */}
         <div className="px-3.5 py-3 border-b border-white/10 flex items-center justify-between bg-[#111724] gap-2 shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center p-1.5 shadow-md shadow-amber-500/20 shrink-0">
-              <Crown className="w-5 h-5 text-slate-950" />
+          <div 
+            onClick={() => handleSelectView('overview')}
+            className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer group"
+          >
+            <div className="w-11 h-11 rounded-full flex items-center justify-center p-0.5 shrink-0 bg-transparent group-hover:scale-105 transition-transform">
+              <img 
+                src={mainAdminLogoUrl} 
+                alt={parentGroup.name || 'MAK Group of Companies'} 
+                className="w-full h-full object-contain drop-shadow" 
+              />
             </div>
             <div className="min-w-0 flex-1">
               <h1 className="font-extrabold text-xs sm:text-sm text-white tracking-wide uppercase truncate leading-tight">
-                MAK Group Portal
+                {parentGroup.name || 'MAK Group of Companies'}
               </h1>
               <p className="text-[10px] sm:text-xs font-mono text-amber-400 uppercase tracking-wider truncate mt-0.5">
                 Main Admin Panel
@@ -738,12 +722,13 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
               </span>
             </button>
 
-            {/* Badge & Title */}
-            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-              <span className="h-7 px-2 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono font-bold text-[10px] sm:text-xs uppercase tracking-wider shrink-0 flex items-center gap-1">
-                <Crown size={11} className="text-amber-400 shrink-0" />
-                <span>Admin</span>
-              </span>
+            {/* Main App Logo & Title */}
+            <div className="flex items-center gap-2 min-w-0">
+              <img 
+                src={mainAdminLogoUrl} 
+                alt={parentGroup.name || 'MAK Group of Companies'} 
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-full object-contain drop-shadow shrink-0" 
+              />
               <div className="min-w-0 truncate hidden xs:block sm:block">
                 <h2 className="text-xs sm:text-sm font-semibold text-white tracking-wide truncate">
                   {activeView === 'overview' && 'MAK Group Overview'}
@@ -759,6 +744,25 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 </h2>
               </div>
             </div>
+          </div>
+
+          {/* Center Main Admin / App Logo */}
+          <div className="hidden md:flex items-center justify-center px-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleSelectView('overview')}
+              className="flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-white/5 transition cursor-pointer group"
+              title={parentGroup.name || 'MAK Group of Companies'}
+            >
+              <img 
+                src={mainAdminLogoUrl} 
+                alt={parentGroup.name || 'MAK Group of Companies'} 
+                className="h-10 sm:h-11 w-auto object-contain drop-shadow group-hover:scale-105 transition-transform" 
+              />
+              <span className="text-xs font-bold tracking-wider uppercase text-slate-200 hidden xl:inline">
+                {parentGroup.title || 'MAK GROUP OF COMPANIES'}
+              </span>
+            </button>
           </div>
 
           {/* Quick Actions Right */}
@@ -813,21 +817,30 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
               {/* Executive Welcome & Group Headline Banner */}
               <div className="relative rounded-2xl sm:rounded-3xl p-4 sm:p-6 bg-gradient-to-br from-amber-950/30 via-slate-900 to-[#0e1626] border border-amber-500/25 shadow-xl overflow-hidden">
                 <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-3.5">
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="px-2.5 py-0.5 rounded-md bg-amber-400/15 border border-amber-400/30 text-amber-300 text-[10px] sm:text-xs font-semibold uppercase tracking-wider">
-                        Enterprise Conglomerate Intelligence
-                      </span>
-                      <span className="text-slate-400 text-[11px] sm:text-xs font-medium">
-                        Live Cross-Entity Aggregate
-                      </span>
+                  <div className="flex items-center gap-3.5 sm:gap-4">
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center shrink-0 bg-transparent">
+                      <img 
+                        src={mainAdminLogoUrl} 
+                        alt={parentGroup.name || 'MAK Group of Companies'} 
+                        className="w-full h-full object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.4)]" 
+                      />
                     </div>
-                    <h2 className="text-lg sm:text-2xl font-bold text-white tracking-tight">
-                      {parentGroup.name}
-                    </h2>
-                    <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-                      Real-time consolidated tracking, financial reconciliation, and fleet oversight aggregating all 4 corporate subsidiaries: <span className="text-amber-300 font-semibold">Docks</span>, <span className="text-blue-300 font-semibold">Muhib International</span>, <span className="text-cyan-300 font-semibold">Vantage Shipping Line</span>, and <span className="text-red-300 font-semibold">Truckit</span>.
-                    </p>
+                    <div className="space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="px-2.5 py-0.5 rounded-md bg-amber-400/15 border border-amber-400/30 text-amber-300 text-[10px] sm:text-xs font-semibold uppercase tracking-wider">
+                          Enterprise Conglomerate Intelligence
+                        </span>
+                        <span className="text-slate-400 text-[11px] sm:text-xs font-medium">
+                          Live Cross-Entity Aggregate
+                        </span>
+                      </div>
+                      <h2 className="text-lg sm:text-2xl font-bold text-white tracking-tight">
+                        {parentGroup.name}
+                      </h2>
+                      <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+                        Real-time consolidated tracking, financial reconciliation, and fleet oversight aggregating all 4 corporate subsidiaries: <span className="text-amber-300 font-semibold">Docks</span>, <span className="text-blue-300 font-semibold">Muhib International</span>, <span className="text-cyan-300 font-semibold">Vantage Shipping Line</span>, and <span className="text-red-300 font-semibold">Truckit</span>.
+                      </p>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0 pt-1 md:pt-0">
@@ -1043,45 +1056,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 </div>
               </div>
 
-              {/* 4. VISUAL COMPARISON CHART: VOLUME BY SUBSIDIARY */}
-              <div className="p-5 sm:p-6 rounded-2xl bg-[#111724] border border-white/10 shadow-xl">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                      <BarChart3 size={16} className="text-amber-400" />
-                      <span>Consignment Volume by Subsidiary</span>
-                    </h3>
-                    <p className="text-xs text-slate-400">
-                      Comparison of total cases, active shipments, and containers across the 4 corporate entities.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="h-64 sm:h-72 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
-                      <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} />
-                      <YAxis stroke="#94a3b8" fontSize={11} />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: '#0F172A', 
-                          borderColor: '#334155', 
-                          borderRadius: '12px',
-                          color: '#fff',
-                          fontSize: '12px' 
-                        }} 
-                      />
-                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                      <Bar dataKey="Cases" fill="#F59E0B" radius={[4, 4, 0, 0]} name="Total Cases" />
-                      <Bar dataKey="Active" fill="#3B82F6" radius={[4, 4, 0, 0]} name="In-Transit" />
-                      <Bar dataKey="Containers" fill="#10B981" radius={[4, 4, 0, 0]} name="Containers" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* 5. CROSS-ENTITY LIVE CONSIGNMENTS FEED */}
+              {/* 4. CROSS-ENTITY LIVE CONSIGNMENTS FEED */}
               <div className="p-5 sm:p-6 rounded-2xl bg-[#111724] border border-white/10 shadow-xl">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                   <div>
@@ -1265,8 +1240,12 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
               {/* Header Card */}
               <div className="p-6 rounded-3xl bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-950 border border-amber-500/30 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shadow-amber-500/30 border border-amber-300/40 shrink-0">
-                    <Crown size={28} />
+                  <div className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 bg-transparent">
+                    <img 
+                      src={mainAdminLogoUrl} 
+                      alt={parentGroup.name || 'MAK Group of Companies'} 
+                      className="w-full h-full object-contain drop-shadow" 
+                    />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">

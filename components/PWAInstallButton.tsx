@@ -126,15 +126,19 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
             {/* Header */}
             <div className="flex justify-between items-start">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 shrink-0">
-                  <Package size={24} />
+                <div className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center shadow-lg shrink-0 border border-slate-300/60 bg-white">
+                  <img
+                    src="/pwa-192x192-v3.png"
+                    alt="MAK Group of Companies"
+                    className="w-full h-full object-contain"
+                  />
                 </div>
                 <div>
                   <h3 className="text-base sm:text-lg font-bold text-white leading-tight">
-                    DPL Port Android APK & App Center
+                    MAK Group Android APK &amp; App Center
                   </h3>
                   <p className="text-xs text-emerald-400 font-medium mt-0.5">
-                    Official Android APK File (.apk) & Google Play Store Package
+                    Official Android APK File (.apk) &amp; Browser Shortcut Installer
                   </p>
                 </div>
               </div>

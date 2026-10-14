@@ -116,6 +116,7 @@ export interface ParentGroupInfo {
   tagline: string;
   subtitle: string;
   logo: string;
+  favicon?: string;
   address: string;
   phone: string;
   cell: string;
@@ -146,6 +147,7 @@ export const DEFAULT_PARENT_GROUP: ParentGroupInfo = {
   tagline: 'Premier Multi-Entity Logistics, Customs & International Trade Conglomerate',
   subtitle: 'DOCKS • TRUCKIT • MUHIB • VANTAGE',
   logo: '/logos/mak_group_logo.svg',
+  favicon: '/favicon.svg',
   address: 'Office No. 14-B, First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi.',
   phone: '+92-21-32330103, +92-21-32330104',
   cell: '+92-321-9222883, +92-321-8496006',
@@ -156,13 +158,138 @@ export const DEFAULT_PARENT_GROUP: ParentGroupInfo = {
 export const PARENT_GROUP_STORAGE_KEY = 'mak_parent_group_branding';
 export const PARENT_GROUP_EVENT = 'mak_parent_group_updated';
 
+let lastAppliedFaviconHref: string | null = null;
+let dynamicManifestBlobUrl: string | null = null;
+
+/**
+ * Dynamically updates the browser tab favicon, shortcut icon, Apple touch icon,
+ * and Web App Manifest icons whenever a custom Favicon SVG/image is uploaded in Admin Settings.
+ */
+export function applyDynamicFaviconToDOM(faviconUrl?: string | null): void {
+  if (typeof document === 'undefined') return;
+  try {
+    const hasCustomFavicon = Boolean(faviconUrl && isUploadedLogo(faviconUrl));
+    const effectiveHref = hasCustomFavicon ? faviconUrl!.trim() : '/favicon.svg';
+    if (lastAppliedFaviconHref === effectiveHref) return;
+    lastAppliedFaviconHref = effectiveHref;
+
+    const isSvg = effectiveHref.startsWith('data:image/svg+xml') || effectiveHref.toLowerCase().endsWith('.svg');
+    const mimeType = isSvg ? 'image/svg+xml' : 'image/png';
+
+    // Update all existing icon & apple-touch-icon links in <head>
+    const iconLinks = document.head.querySelectorAll<HTMLLinkElement>(
+      'link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"], link[rel="apple-touch-icon-precomposed"]'
+    );
+
+    if (iconLinks.length > 0) {
+      iconLinks.forEach((link) => {
+        link.href = effectiveHref;
+        if (link.rel === 'icon' || link.rel === 'shortcut icon') {
+          link.type = mimeType;
+        }
+      });
+    } else {
+      const newLink = document.createElement('link');
+      newLink.rel = 'icon';
+      newLink.type = mimeType;
+      newLink.href = effectiveHref;
+      document.head.appendChild(newLink);
+    }
+
+    // If a custom favicon (e.g. SVG) was uploaded, also generate crisp PNGs on canvas
+    // for browser install prompt & Apple Touch Icon compatibility
+    if (hasCustomFavicon && typeof Image !== 'undefined') {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const makePng = (size: number): string => {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return effectiveHref;
+            ctx.clearRect(0, 0, size, size);
+            ctx.drawImage(img, 0, 0, size, size);
+            return canvas.toDataURL('image/png');
+          };
+
+          const png192 = makePng(192);
+          const png512 = makePng(512);
+
+          // Update apple-touch-icon links with PNG data URL for iOS/Android
+          document.head.querySelectorAll<HTMLLinkElement>('link[rel="apple-touch-icon"], link[rel="apple-touch-icon-precomposed"]').forEach((link) => {
+            link.href = png192;
+          });
+
+          // Dynamically update Web App Manifest link so "Install App" uses the uploaded SVG/Favicon
+          const manifestLink = document.head.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+          if (manifestLink && typeof Blob !== 'undefined' && typeof URL !== 'undefined') {
+            const dynamicManifest = {
+              id: '/?app=mak-group-erp',
+              name: 'MAK Group of Companies - Logistics & Enterprise Portal',
+              short_name: 'MAK Group',
+              description: 'MAK Group of Companies — Multi-Subsidiary Customs Clearance, Bonded Carrier, Freight Forwarding & Fleet Tracking System.',
+              start_url: `${window.location.origin}/?source=pwa`,
+              scope: `${window.location.origin}/`,
+              display: 'standalone',
+              orientation: 'any',
+              background_color: '#F8FAFC',
+              theme_color: '#F8FAFC',
+              icons: [
+                {
+                  src: effectiveHref,
+                  sizes: 'any',
+                  type: mimeType,
+                  purpose: 'any'
+                },
+                {
+                  src: png192,
+                  sizes: '192x192',
+                  type: 'image/png',
+                  purpose: 'any'
+                },
+                {
+                  src: png512,
+                  sizes: '512x512',
+                  type: 'image/png',
+                  purpose: 'any'
+                },
+                {
+                  src: png512,
+                  sizes: '512x512',
+                  type: 'image/png',
+                  purpose: 'maskable'
+                }
+              ]
+            };
+            if (dynamicManifestBlobUrl) {
+              URL.revokeObjectURL(dynamicManifestBlobUrl);
+            }
+            const blob = new Blob([JSON.stringify(dynamicManifest)], { type: 'application/manifest+json' });
+            dynamicManifestBlobUrl = URL.createObjectURL(blob);
+            manifestLink.href = dynamicManifestBlobUrl;
+          }
+        } catch (err) {
+          console.warn('Dynamic favicon canvas conversion notice:', err);
+        }
+      };
+      img.src = effectiveHref;
+    }
+  } catch (e) {
+    console.warn('Could not apply dynamic favicon to DOM:', e);
+  }
+}
+
 export function getParentGroupInfo(): ParentGroupInfo {
   const stored = safeAppStorage.getJSON<Partial<ParentGroupInfo>>(PARENT_GROUP_STORAGE_KEY, {});
   const cleanLogo = isUploadedLogo(stored.logo) ? stored.logo! : '';
-  return {
+  const cleanFavicon = isUploadedLogo(stored.favicon) ? stored.favicon! : '';
+  const result: ParentGroupInfo = {
     ...DEFAULT_PARENT_GROUP,
     ...stored,
     logo: cleanLogo,
+    favicon: cleanFavicon,
     name: stored.name || DEFAULT_PARENT_GROUP.name,
     title: stored.title || DEFAULT_PARENT_GROUP.title,
     tagline: stored.tagline || DEFAULT_PARENT_GROUP.tagline,
@@ -173,6 +300,10 @@ export function getParentGroupInfo(): ParentGroupInfo {
     email: stored.email || DEFAULT_PARENT_GROUP.email,
     web: stored.web || DEFAULT_PARENT_GROUP.web,
   };
+  if (cleanFavicon) {
+    applyDynamicFaviconToDOM(cleanFavicon);
+  }
+  return result;
 }
 
 export let PARENT_GROUP: ParentGroupInfo = getParentGroupInfo();
@@ -190,6 +321,7 @@ export function subscribeToParentGroup(listener: (group: ParentGroupInfo) => voi
 export function broadcastParentGroupUpdate(newGroup: ParentGroupInfo): void {
   PARENT_GROUP = newGroup;
   safeAppStorage.setJSON(PARENT_GROUP_STORAGE_KEY, newGroup);
+  applyDynamicFaviconToDOM(newGroup.favicon);
   parentGroupListeners.forEach(fn => {
     try { fn(newGroup); } catch (e) { console.warn(e); }
   });
@@ -220,7 +352,13 @@ export async function saveParentGroupInfo(updates: Partial<ParentGroupInfo>, upd
 }
 
 export async function resetParentGroupInfo(): Promise<ParentGroupInfo> {
-  return saveParentGroupInfo(DEFAULT_PARENT_GROUP);
+  lastAppliedFaviconHref = null;
+  applyDynamicFaviconToDOM(null);
+  return saveParentGroupInfo({
+    ...DEFAULT_PARENT_GROUP,
+    logo: '',
+    favicon: ''
+  });
 }
 
 let hasSubscribedParentGroup = false;
@@ -235,7 +373,8 @@ export function initParentGroupFirestoreSync() {
         const merged: ParentGroupInfo = {
           ...DEFAULT_PARENT_GROUP,
           ...data,
-          logo: data.logo || DEFAULT_PARENT_GROUP.logo
+          logo: data.logo || DEFAULT_PARENT_GROUP.logo,
+          favicon: data.favicon || ''
         };
         broadcastParentGroupUpdate(merged);
       }
