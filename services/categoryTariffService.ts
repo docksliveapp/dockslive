@@ -60,8 +60,8 @@ export const CATEGORY_SERVICE_ARRANGEMENTS: Record<string, Record<string, Servic
   },
 
   "Transportation of Private Cargo": {
-    loading_charges: { label: 'Loading / Labor Handling Charges', arrangedBy: 'DPL', amount: 8000, isDefaultDpl: true },
-    unloading_charges: { label: 'Unloading / Offloading Charges', arrangedBy: 'DPL', amount: 8000, isDefaultDpl: true },
+    loading_charges: { label: 'Loading / Labor Handling Charges', arrangedBy: 'DPL', amount: 0, isDefaultDpl: true },
+    unloading_charges: { label: 'Unloading / Offloading Charges', arrangedBy: 'DPL', amount: 0, isDefaultDpl: true },
     vehicle_rent: { label: 'Vehicle Rent / Inland Truck Freight', arrangedBy: 'Client', amount: 0 },
     builty_charges: { label: 'Builty / Consignment Note Documentation Fee', arrangedBy: 'Client', amount: 0 },
     transit_toll: { label: 'Transit Toll & Weigh Station Charges', arrangedBy: 'Client', amount: 0 },
@@ -79,9 +79,9 @@ export const CATEGORY_SERVICE_ARRANGEMENTS: Record<string, Record<string, Servic
   },
 
   "Customs Clearance": {
-    service_charges: { label: 'Customs Agency Service Charges / Commission', arrangedBy: 'DPL', amount: 15000, isDefaultDpl: true },
-    loading_charges: { label: 'Terminal / Port Loading Charges', arrangedBy: 'DPL', amount: 7000, isDefaultDpl: true },
-    unloading_charges: { label: 'Destuffing / Examination Unloading Charges', arrangedBy: 'DPL', amount: 7000, isDefaultDpl: true },
+    service_charges: { label: 'Customs Agency Service Charges / Commission', arrangedBy: 'DPL', amount: 0, isDefaultDpl: true },
+    loading_charges: { label: 'Terminal / Port Loading Charges', arrangedBy: 'DPL', amount: 0, isDefaultDpl: true },
+    unloading_charges: { label: 'Destuffing / Examination Unloading Charges', arrangedBy: 'DPL', amount: 0, isDefaultDpl: true },
     weboc_psw_charges: { label: 'WeBOC / PSW Electronic Declaration Fee', arrangedBy: 'Client', amount: 0 },
     customs_examination_charges: { label: 'Customs Examination Surcharge', arrangedBy: 'Client', amount: 0 },
     wharfage_charges: { label: 'Port Wharfage & Terminal Handling Dues', arrangedBy: 'Client', amount: 0 },
@@ -131,7 +131,7 @@ export const CATEGORY_SERVICE_ARRANGEMENTS: Record<string, Record<string, Servic
 export function normalizeCategoryKey(category: string): string {
   const norm = (category || '').toLowerCase();
   if (norm.includes('bonded')) return 'Bonded Carrier';
-  if (norm.includes('afghan') || norm.includes('transit')) return 'Afghan Transit';
+  if (norm.includes('afghan') || (norm.includes('transit') && !norm.includes('customs'))) return 'Afghan Transit';
   if (norm.includes('import') || norm.includes('export')) return 'Import & Export Services';
   if (norm.includes('private') || norm.includes('cargo') || norm.includes('domestic')) return 'Transportation of Private Cargo';
   if (norm.includes('tir')) return 'TIR';
@@ -142,6 +142,94 @@ export function normalizeCategoryKey(category: string): string {
   if (norm.includes('breakbulk')) return 'Breakbulk/Chartering Services';
   if (norm.includes('warehouse')) return 'Warehousing & Distribution';
   return 'Bonded Carrier';
+}
+
+/**
+ * Checks whether a string is one of the 11 known Case Categories.
+ */
+export function isKnownCaseCategory(cat?: string): boolean {
+  if (!cat) return false;
+  const trimmed = cat.trim();
+  if (Object.prototype.hasOwnProperty.call(CATEGORY_SERVICE_ARRANGEMENTS, trimmed)) return true;
+  const lower = trimmed.toLowerCase();
+  return (
+    lower.includes('bonded carrier') ||
+    lower.includes('afghan transit') ||
+    lower.includes('import & export') ||
+    lower.includes('private cargo') ||
+    lower === 'tir' ||
+    lower.includes('customs clearance') ||
+    lower.includes('iso tank') ||
+    lower.includes('car carrier') ||
+    lower.includes('liner & nvocc') ||
+    lower.includes('breakbulk') ||
+    lower.includes('warehousing')
+  );
+}
+
+/**
+ * Resolves the exact Case Category that a ClientDefaultCharge belongs to.
+ * Supports explicit `caseCategory`, valid `category` values, or falls back to the client's primary category.
+ */
+export function getChargeCaseCategory(ch: ClientDefaultCharge, clientDefaultCategory?: string): string {
+  if (ch.caseCategory && isKnownCaseCategory(ch.caseCategory)) {
+    return normalizeCategoryKey(ch.caseCategory);
+  }
+  if (ch.category && isKnownCaseCategory(ch.category)) {
+    return normalizeCategoryKey(ch.category);
+  }
+  return normalizeCategoryKey(clientDefaultCategory || 'Bonded Carrier');
+}
+
+/**
+ * Smart matcher between a charge description/head and a service arrangement key/label.
+ */
+export function doesChargeMatchArrangement(chargeDesc: string, arrKey: string, arrLabel: string): boolean {
+  const c = (chargeDesc || '').toLowerCase().trim();
+  const k = (arrKey || '').toLowerCase().trim();
+  const l = (arrLabel || '').toLowerCase().trim();
+  if (!c) return false;
+  if (c === l || c.includes(l) || l.includes(c)) return true;
+
+  if ((k.includes('do_charges') || k === 'delivery_order' || k === 'delivery_order_charges' || k === 'line_do') &&
+      (c.includes('delivery order') || c.includes('do charges') || c === 'do fee') && !c.includes('dry port') && !c.includes('deposit')) {
+    return true;
+  }
+  if (k.includes('dryport_do') && c.includes('dry port') && (c.includes('do') || c.includes('delivery order'))) {
+    return true;
+  }
+  if (k.includes('security_deposit') && (c.includes('do deposit') || c.includes('security deposit'))) {
+    return true;
+  }
+  if ((k.includes('loading_charges') || k === 'loading_unloading') && c.includes('loading') && !c.includes('unloading')) {
+    return true;
+  }
+  if (k.includes('unloading_charges') && c.includes('unloading')) {
+    return true;
+  }
+  if (k.includes('seal_charges') && (c.includes('seal') || c.includes('tracker') || c.includes('tracking'))) {
+    return true;
+  }
+  if ((k.includes('vehicle_rent') || k.includes('freight') || k.includes('haulage')) &&
+      (c.includes('vehicle rent') || c.includes('freight') || c.includes('haulage'))) {
+    return true;
+  }
+  if (k.includes('vehicle_detention') && (c.includes('detention') || c.includes('demurrage'))) {
+    return true;
+  }
+  if ((k.includes('wharfage') || k.includes('thc')) && (c.includes('wharfage') || c.includes('thc'))) {
+    return true;
+  }
+  if (k.includes('excise') && c.includes('excise')) {
+    return true;
+  }
+  if (k.includes('manifest') && c.includes('manifest')) {
+    return true;
+  }
+  if (k.includes('tir') && c.includes('tir')) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -158,7 +246,7 @@ export function getCategoryArrangements(category: string): Record<string, Servic
 }
 
 /**
- * Generates CaseCharge array from service arrangements where arrangedBy === 'DPL'.
+ * Generates CaseCharge array from service arrangements where arrangedBy === 'DPL' and amount > 0.
  */
 export function getArrangementCharges(arrangements: Record<string, ServiceArrangementItem>): CaseCharge[] {
   return Object.entries(arrangements)
@@ -174,15 +262,14 @@ export function getArrangementCharges(arrangements: Record<string, ServiceArrang
 }
 
 /**
- * Core business logic resolver:
- * "Default charges woh client vise honge case category wise Nahin.
- * Agar client ke andar koi charges ham bad mein add karte waqt by default per tik laga dete Hain to woh charges uski client per by default lagenge har invoice per har case per."
- *
- * If the client has configured default charges:
- *   -> Apply those client default charges to the case/invoice.
- *   -> Also synchronize matching operational service items.
- * If the client does not have custom default charges:
- *   -> Apply the category-specific operational service arrangements & default charges.
+ * Core Category-Wise Client Default Charges Resolver:
+ * - Default charges are stored per Client AND per Case Category.
+ * - When a client is added, a Primary Case Category is selected (since most of that client's cases belong to that category)
+ *   and default charges are saved with user-entered amounts for that category.
+ * - When registering a case for that client in that category, those default charges automatically apply.
+ * - If the Case Category is changed to another category, default charges from the previous category do NOT apply;
+ *   only default charges saved specifically for the new category apply (or Nil/empty if none are saved yet for that category,
+ *   requiring fresh entry — and any charge ticked as "Save as Default" in the new category is saved for that new category!).
  */
 export function resolveCaseCharges(
   client: Client | undefined,
@@ -194,44 +281,51 @@ export function resolveCaseCharges(
   isClientCustomDefault: boolean;
   clientName?: string;
 } {
-  const baseArrangements = getCategoryArrangements(category);
+  const targetNormCat = normalizeCategoryKey(category || client?.defaultCaseCategory || 'Bonded Carrier');
+  const clientPrimaryCat = normalizeCategoryKey(client?.defaultCaseCategory || 'Bonded Carrier');
+  const baseArrangements = getCategoryArrangements(targetNormCat);
   const mergedArrangements: Record<string, ServiceArrangementItem> = {
     ...baseArrangements,
     ...(existingArrangements || {})
   };
 
-  // Apply client's saved default service arrangements if present
-  if (client?.defaultServiceArrangements) {
-    Object.entries(client.defaultServiceArrangements).forEach(([k, arrangedBy]) => {
+  // Apply client's saved service arrangements for THIS specific category
+  const catSavedArrangements =
+    client?.categoryServiceArrangements?.[targetNormCat] ||
+    (targetNormCat === clientPrimaryCat ? client?.defaultServiceArrangements : undefined);
+
+  if (catSavedArrangements) {
+    Object.entries(catSavedArrangements).forEach(([k, arrangedBy]) => {
       if (mergedArrangements[k]) {
         mergedArrangements[k].arrangedBy = arrangedBy;
       }
     });
   }
 
-  // Check if client has custom default charges configured
-  if (client?.defaultCharges && client.defaultCharges.length > 0) {
-    const clientCharges: CaseCharge[] = client.defaultCharges
-      .filter(ch => (Number(ch.defaultAmount) || 0) > 0)
-      .map((ch, idx) => ({
-        id: ch.id || `ch_clt_${Date.now()}_${idx}`,
-        category: ch.category || category,
-        description: ch.description,
-        amount: Number(ch.defaultAmount) || 0,
-        taxable: ch.taxable ?? false,
-        arrangedBy: 'DPL'
-      }));
+  // Filter client's defaultCharges strictly by the target Case Category and amount > 0
+  const categorySpecificDefaults = (client?.defaultCharges || []).filter(ch => {
+    const chCat = getChargeCaseCategory(ch, client?.defaultCaseCategory);
+    return chCat === targetNormCat && (Number(ch.defaultAmount) || 0) > 0;
+  });
 
-    // If client has default charges, set any corresponding arrangements to DPL
+  if (categorySpecificDefaults.length > 0) {
+    const clientCharges: CaseCharge[] = categorySpecificDefaults.map((ch, idx) => ({
+      id: ch.id || `ch_clt_${Date.now()}_${idx}`,
+      category: targetNormCat,
+      description: ch.description,
+      amount: Number(ch.defaultAmount) || 0,
+      taxable: ch.taxable ?? false,
+      arrangedBy: 'DPL'
+    }));
+
+    // Synchronize matching operational service arrangement items for this category
     Object.keys(mergedArrangements).forEach((k) => {
       const arr = mergedArrangements[k];
-      const match = clientCharges.find(c => 
-        c.description.toLowerCase().includes(arr.label.toLowerCase()) || 
-        arr.label.toLowerCase().includes(c.description.toLowerCase())
-      );
+      const match = clientCharges.find(c => doesChargeMatchArrangement(c.description, k, arr.label));
       if (match) {
         mergedArrangements[k].arrangedBy = 'DPL';
         mergedArrangements[k].amount = match.amount;
+        (match as any).syncKey = k;
       }
     });
 
@@ -239,11 +333,11 @@ export function resolveCaseCharges(
       arrangements: mergedArrangements,
       charges: clientCharges,
       isClientCustomDefault: true,
-      clientName: client.name
+      clientName: client?.name
     };
   }
 
-  // Otherwise, use category-specific defaults
+  // If no default charges exist for this client in this specific category, return Nil (empty charges)
   const categoryCharges = getArrangementCharges(mergedArrangements);
 
   return {
@@ -255,8 +349,8 @@ export function resolveCaseCharges(
 }
 
 /**
- * Saves a charge permanently as a default charge for a client in Firestore.
- * Ensures that this charge will be applied to every future case and invoice for this client.
+ * Saves a charge permanently as a default charge for a client under the specified Case Category in Firestore.
+ * Ensures that this charge & amount will automatically apply to all future cases of this specific category for this client.
  */
 export async function saveChargeAsClientDefault(
   client: Client,
@@ -264,18 +358,29 @@ export async function saveChargeAsClientDefault(
     description: string;
     amount: number;
     category?: string;
+    caseCategory?: string;
+    chargeHead?: string;
     taxable?: boolean;
   }
 ): Promise<Client> {
   const existingDefaults = client.defaultCharges ? [...client.defaultCharges] : [];
-  
-  // Check if already exists by description
   const cleanDesc = charge.description.trim();
-  const existingIdx = existingDefaults.findIndex(d => d.description.toLowerCase() === cleanDesc.toLowerCase());
+  const targetCaseCategory = normalizeCategoryKey(
+    charge.caseCategory ||
+    (isKnownCaseCategory(charge.category) ? charge.category! : (client.defaultCaseCategory || 'Bonded Carrier'))
+  );
+
+  // Match by BOTH description AND Case Category so each category maintains its own independent default tariff
+  const existingIdx = existingDefaults.findIndex(d => {
+    const dCat = getChargeCaseCategory(d, client.defaultCaseCategory);
+    return d.description.toLowerCase() === cleanDesc.toLowerCase() && dCat === targetCaseCategory;
+  });
 
   const newDefaultCharge: ClientDefaultCharge = {
-    id: `clt_def_${Date.now()}`,
-    category: charge.category || client.defaultCaseCategory || 'Bonded Carrier',
+    id: existingIdx >= 0 ? existingDefaults[existingIdx].id : `clt_def_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    category: targetCaseCategory,
+    caseCategory: targetCaseCategory,
+    chargeHead: charge.chargeHead || (!isKnownCaseCategory(charge.category) && charge.category ? charge.category : 'Customs / Transit'),
     description: cleanDesc,
     defaultAmount: Number(charge.amount) || 0,
     taxable: charge.taxable ?? false

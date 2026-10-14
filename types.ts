@@ -959,7 +959,9 @@ export interface LogEntry {
 
 export interface ClientDefaultCharge {
   id: string;
-  category: string;
+  category: string; // Case Category (e.g. 'Bonded Carrier', 'Afghan Transit', etc.)
+  caseCategory?: string; // Explicit Case Category association
+  chargeHead?: string; // Charge Head (e.g. 'Customs / Transit', 'Freight / Haulage', 'Documentation', etc.)
   description: string;
   defaultAmount: number;
   taxable?: boolean;
@@ -991,6 +993,7 @@ export interface Client {
   ntnDocName?: string;
   defaultCaseCategory?: string;
   defaultServiceArrangements?: Record<string, 'DPL' | 'Client'>; // Default Arranged By DPL vs Arranged By Client
+  categoryServiceArrangements?: Record<string, Record<string, 'DPL' | 'Client'>>; // Category-wise Service Arrangements
   defaultCharges?: ClientDefaultCharge[];
   openingBalance?: number;
   userId?: string; // Optional portal login user ID
@@ -1344,23 +1347,23 @@ export interface AppUser {
 }
 
 export const UNIVERSAL_CHARGE_TYPES = [
-  { id: 'tp_charges', name: 'TP Charges', defaultAmount: 18000 },
-  { id: 'loading_unloading', name: 'Loading / Unloading Charges', defaultAmount: 6000 },
-  { id: 'do_charges', name: 'Delivery Order (DO) Charges', defaultAmount: 8500 },
-  { id: 'do_deposit', name: 'DO Deposit', defaultAmount: 25000 },
-  { id: 'excise_payment', name: 'Excise Payment', defaultAmount: 4500 },
+  { id: 'tp_charges', name: 'TP Charges', defaultAmount: 0 },
+  { id: 'loading_unloading', name: 'Loading / Unloading Charges', defaultAmount: 0 },
+  { id: 'do_charges', name: 'Delivery Order (DO) Charges', defaultAmount: 0 },
+  { id: 'do_deposit', name: 'DO Deposit', defaultAmount: 0 },
+  { id: 'excise_payment', name: 'Excise Payment', defaultAmount: 0 },
   { id: 'detention', name: 'Detention Payment', defaultAmount: 0 },
   { id: 'damage_payment', name: 'Damage Payment', defaultAmount: 0 },
-  { id: 'bank_charges', name: 'Bank Charges', defaultAmount: 1200 },
-  { id: 'documentation', name: 'Documentation Charges', defaultAmount: 3500 },
-  { id: 'vehicle_rent', name: 'Vehicle Rent / Freight', defaultAmount: 125000 },
+  { id: 'bank_charges', name: 'Bank Charges', defaultAmount: 0 },
+  { id: 'documentation', name: 'Documentation Charges', defaultAmount: 0 },
+  { id: 'vehicle_rent', name: 'Vehicle Rent / Freight', defaultAmount: 0 },
   { id: 'customs_duty', name: 'Customs Duty', defaultAmount: 0 },
   { id: 'add_customs_duty', name: 'Additional Customs Duty', defaultAmount: 0 },
   { id: 'direct_payment', name: 'Direct Payment', defaultAmount: 0 },
   { id: 'cash_payment', name: 'Cash Payment', defaultAmount: 0 },
-  { id: 'photocopy_stamp', name: 'Photocopy / Stamp Paper', defaultAmount: 800 },
-  { id: 'manifest_charges', name: 'Manifest Charges', defaultAmount: 2500 },
-  { id: 'tir_charges', name: 'TIR Charges', defaultAmount: 15000 }
+  { id: 'photocopy_stamp', name: 'Photocopy / Stamp Paper', defaultAmount: 0 },
+  { id: 'manifest_charges', name: 'Manifest Charges', defaultAmount: 0 },
+  { id: 'tir_charges', name: 'TIR Charges', defaultAmount: 0 }
 ];
 
 export interface AppNotification {

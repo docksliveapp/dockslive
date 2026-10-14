@@ -615,36 +615,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     defaultCaseCategory: 'Bonded Carrier'
   });
 
-  const [clientChargesList, setClientChargesList] = useState<ClientDefaultCharge[]>([
-    {
-      id: 'chg_1',
-      category: 'Freight / Haulage',
-      description: 'Bonded Carrier Transportation Charge',
-      defaultAmount: 75000,
-      taxable: false
-    },
-    {
-      id: 'chg_2',
-      category: 'Documentation',
-      description: 'Customs Clearance & Documentation',
-      defaultAmount: 15000,
-      taxable: true
-    },
-    {
-      id: 'chg_3',
-      category: 'Port & Terminal',
-      description: 'Port Terminal Handling & E-Seal Tracking',
-      defaultAmount: 8500,
-      taxable: false
-    },
-    {
-      id: 'chg_4',
-      category: 'Agency',
-      description: 'Agency & Port Service Charges',
-      defaultAmount: 5000,
-      taxable: true
-    }
-  ]);
+  const [clientChargesList, setClientChargesList] = useState<ClientDefaultCharge[]>([]);
 
   const handleSaveNewClientWithCharges = async () => {
     if (!newClientForm.name.trim()) {
@@ -1220,7 +1191,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       }));
     }
 
-    // If marked as Client Default Charge
+    // If marked as Client Default Charge (strictly scoped to the current Case Category)
     if (isSaveAsClientDefault && formData.client) {
       const clientObj = clientsData.find(c => c.name?.toLowerCase() === formData.client?.toLowerCase());
       if (clientObj) {
@@ -1228,11 +1199,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           const updatedClient = await saveChargeAsClientDefault(clientObj, {
             description: desc.trim(),
             amount: amount,
-            category: formData.category,
+            category: formData.category || 'Bonded Carrier',
+            caseCategory: formData.category || 'Bonded Carrier',
             taxable: true
           });
           setClientsData(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-          setDraftToast(`✓ Saved "${desc.trim()}" as permanent default charge for ${formData.client}!`);
+          setDraftToast(`✓ Saved "${desc.trim()}" (PKR ${amount.toLocaleString()}) as default charge for ${formData.client} in ${formData.category}!`);
         } catch (err) {
           console.warn("Could not save default charge to client:", err);
         }
@@ -5063,22 +5035,40 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     </button>
                   </div>
 
-                  {formData.client && formData.charges && formData.charges.length > 0 && (
-                    <div className="flex items-center justify-between px-3 py-2 bg-emerald-500/10 border border-emerald-500/25 rounded-xl text-xs text-emerald-300">
-                      <div className="flex items-center gap-2 truncate pr-2">
-                        <CheckCircle2 size={14} className="text-emerald-400 shrink-0" />
-                        <span className="truncate">
-                          <strong>{formData.charges.length}</strong> default charges loaded for <strong>{formData.client}</strong> (PKR {formData.charges.reduce((s, c) => s + (Number(c.amount) || 0), 0).toLocaleString()})
-                        </span>
+                  {formData.client && (
+                    formData.charges && formData.charges.length > 0 ? (
+                      <div className="flex items-center justify-between px-3 py-2 bg-emerald-500/10 border border-emerald-500/25 rounded-xl text-xs text-emerald-300">
+                        <div className="flex items-center gap-2 truncate pr-2">
+                          <CheckCircle2 size={14} className="text-emerald-400 shrink-0" />
+                          <span className="truncate">
+                            <strong>{formData.charges.length}</strong> default charges loaded for <strong>{formData.client}</strong> in <strong>{formData.category}</strong> (PKR {formData.charges.reduce((s, c) => s + (Number(c.amount) || 0), 0).toLocaleString()})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowAddClientModal(true)}
+                          className="text-xs text-amber-300 hover:text-amber-200 font-semibold shrink-0 underline cursor-pointer"
+                        >
+                          Edit Tariff
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowAddClientModal(true)}
-                        className="text-xs text-amber-300 hover:text-amber-200 font-semibold shrink-0 underline cursor-pointer"
-                      >
-                        Edit Tariff
-                      </button>
-                    </div>
+                    ) : (
+                      <div className="flex items-center justify-between px-3 py-2 bg-amber-500/10 border border-amber-500/25 rounded-xl text-xs text-amber-200">
+                        <div className="flex items-center gap-2 truncate pr-2">
+                          <AlertCircle size={14} className="text-amber-400 shrink-0" />
+                          <span className="truncate">
+                            No default charges saved for <strong>{formData.client}</strong> in <strong>{formData.category}</strong> (Amount: Nil). Enter charges for this category or click Configure Tariff.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowAddClientModal(true)}
+                          className="text-xs text-amber-300 hover:text-amber-200 font-semibold shrink-0 underline cursor-pointer"
+                        >
+                          Configure Tariff
+                        </button>
+                      </div>
+                    )
                   )}
                 </div>
               )}
@@ -5108,6 +5098,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                         serviceArrangements: resolved.arrangements as any,
                         charges: resolved.charges
                       });
+                      if (formData.client) {
+                        if (resolved.charges.length > 0) {
+                          setDraftToast(`✓ Loaded ${resolved.charges.length} default charges for ${formData.client} (${newCat})`);
+                        } else {
+                          setDraftToast(`Category changed to ${newCat}: Previous category charges cleared. Please enter charges for ${newCat}.`);
+                        }
+                      }
                     }}
                   >
                     <option value="" className="bg-slate-900 text-slate-400">-- Select Category --</option>
@@ -5572,10 +5569,38 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                       </div>
                     </div>
 
-                    <span className="text-xs text-emerald-300 font-mono font-semibold bg-emerald-500/15 px-2.5 py-1 rounded-lg border border-emerald-500/30 whitespace-nowrap flex items-center gap-1.5 self-start sm:self-auto">
-                      <CheckCircle size={12} className="text-emerald-400" />
-                      <span>PKR {Number(item.amount || 0).toLocaleString()}</span>
-                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-emerald-300 font-mono font-semibold bg-emerald-500/15 px-2.5 py-1 rounded-lg border border-emerald-500/30 whitespace-nowrap flex items-center gap-1.5">
+                        <CheckCircle size={12} className="text-emerald-400" />
+                        <span>PKR {Number(item.amount || 0).toLocaleString()}</span>
+                      </span>
+                      {formData.client && Number(item.amount) > 0 && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const clientObj = clientsData.find(c => c.name?.toLowerCase() === formData.client?.toLowerCase());
+                            if (!clientObj) return;
+                            try {
+                              const updatedClient = await saveChargeAsClientDefault(clientObj, {
+                                description: item.label,
+                                amount: Number(item.amount),
+                                category: formData.category || 'Bonded Carrier',
+                                caseCategory: formData.category || 'Bonded Carrier',
+                                taxable: true
+                              });
+                              setClientsData(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+                              setDraftToast(`✓ Saved "${item.label}" (PKR ${Number(item.amount).toLocaleString()}) as default for ${formData.client} in ${formData.category}!`);
+                            } catch (err) {
+                              console.warn("Could not save default arrangement charge:", err);
+                            }
+                          }}
+                          className="text-[11px] px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-semibold transition cursor-pointer whitespace-nowrap"
+                          title={`Save as default charge for ${formData.client} under ${formData.category}`}
+                        >
+                          Save as Default ({formData.category})
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-white/10">
@@ -7421,23 +7446,29 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
             <div className="p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1 min-h-0">
               <div>
-                <label className="text-xs text-slate-300 font-semibold block mb-2">Quick Charge Presets</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-2">Select Charge Head (Amount is Nil — enter below)</label>
                 <div className="flex flex-wrap gap-1.5">
                   {[
-                    { desc: 'TP Charges', amount: 18000 },
-                    { desc: 'Loading / Unloading Charges', amount: 6000 },
-                    { desc: 'Delivery Order (DO) Charges', amount: 8500 },
-                    { desc: 'Vehicle Rent / Freight', amount: 125000 },
-                    { desc: 'Customs Duty / Taxes', amount: 0 }
+                    { desc: 'TP Charges' },
+                    { desc: 'Loading / Unloading Charges' },
+                    { desc: 'Delivery Order (DO) Charges' },
+                    { desc: 'DO Deposit' },
+                    { desc: 'Excise Payment' },
+                    { desc: 'Vehicle Rent / Freight' },
+                    { desc: 'Customs Duty / Taxes' }
                   ].map((preset, pIdx) => (
                     <button
                       key={pIdx}
                       type="button"
                       onClick={() => {
                         setNewRegChargeDesc(preset.desc);
-                        if (preset.amount > 0) setNewRegChargeAmount(String(preset.amount));
+                        setNewRegChargeAmount('');
                       }}
-                      className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border border-white/10 hover:border-amber-500/30 transition-colors flex items-center gap-1 cursor-pointer"
+                      className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors flex items-center gap-1 cursor-pointer ${
+                        newRegChargeDesc === preset.desc
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold'
+                          : 'bg-slate-950 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border-white/10 hover:border-amber-500/30'
+                      }`}
                     >
                       <Plus size={12} /> {preset.desc}
                     </button>
@@ -7458,12 +7489,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               </div>
 
               <div>
-                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Amount (PKR)</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Amount (PKR) <span className="text-red-400">*</span></label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-mono text-slate-400 font-bold">PKR</span>
                   <input
                     type="number"
-                    placeholder="e.g. 15000"
+                    placeholder="Enter charge amount (Required)"
                     value={newRegChargeAmount}
                     onChange={(e) => setNewRegChargeAmount(e.target.value)}
                     className="w-full h-10 pl-12 pr-3.5 rounded-xl text-sm text-emerald-400 font-mono font-bold bg-slate-950 outline-none border border-white/15 focus:border-amber-400"
@@ -7471,7 +7502,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 </div>
               </div>
 
-              {/* Set as Default for Client Checkbox */}
+              {/* Set as Default for Client & Category Checkbox */}
               {formData.client && (
                 <div className="p-3.5 bg-amber-500/10 border border-amber-500/25 rounded-xl">
                   <label className="flex items-start gap-2.5 cursor-pointer">
@@ -7483,10 +7514,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     />
                     <div className="text-xs">
                       <span className="font-semibold text-amber-300 block">
-                        Save as Default Charge for {formData.client}
+                        Save as Default Charge for {formData.client} ({formData.category})
                       </span>
                       <span className="text-slate-300 leading-relaxed block mt-0.5">
-                        Automatically apply this charge on future cases and invoices for {formData.client}.
+                        Automatically apply this charge &amp; amount on all future <strong>{formData.category}</strong> cases and invoices for {formData.client}.
                       </span>
                     </div>
                   </label>
@@ -7643,8 +7674,14 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     setSelectedChargeCategory(val);
                     if (val && val !== '__CUSTOM__') {
                       setNewChargeDesc(val);
+                      // Check if client has a saved default amount for this charge in this case's category; otherwise Nil ('')
+                      const clientObj = clientsData.find(c => c.name?.toLowerCase() === selectedCase?.clientName?.toLowerCase());
+                      const resolved = resolveCaseCharges(clientObj, selectedCase?.category || 'Bonded Carrier');
+                      const matchedDefault = resolved.charges.find(ch => ch.description.toLowerCase() === val.toLowerCase());
+                      setNewChargeAmount(matchedDefault && matchedDefault.amount > 0 ? String(matchedDefault.amount) : '');
                     } else if (val === '__CUSTOM__') {
                       setNewChargeDesc('');
+                      setNewChargeAmount('');
                     }
                   }}
                   className="w-full bg-slate-800 border border-white/15 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500 transition-colors"
@@ -7886,10 +7923,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     />
                     <div className="text-xs">
                       <span className="font-semibold text-brand-300 block">
-                        Set as Default Charge for {selectedCase.clientName}
+                        Set as Default Charge for {selectedCase.clientName} ({selectedCase.category || 'Bonded Carrier'})
                       </span>
                       <span className="text-[11px] text-gray-300 leading-tight">
-                        This charge will automatically apply as default tariff on all future cases and invoices for this client.
+                        This charge &amp; amount will automatically apply as default tariff on all future <strong>{selectedCase.category || 'Bonded Carrier'}</strong> cases and invoices for this client.
                       </span>
                     </div>
                   </label>
@@ -7924,7 +7961,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     ...currentCharges,
                     {
                       id: `chg_${Date.now()}`,
-                      category: selectedChargeCategory || active.category,
+                      category: active.category || 'Bonded Carrier',
                       description: newChargeDesc.trim(),
                       amount: parseFloat(newChargeAmount) || 0,
                       receiptUrl: newChargeReceipt?.url,
@@ -7938,18 +7975,21 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   if (isEditingCase) setEditedCase(updatedCase);
                   updateCaseInFirestore(updatedCase).catch(e => console.warn("Firestore charge error:", e));
 
-                  // If checked, persist as client default
+                  // If checked, persist as client default strictly for this case's category
                   if (saveAsClientDefaultInModal && active.clientName) {
                     const clientObj = clientsData.find(c => c.name?.toLowerCase() === active.clientName?.toLowerCase());
                     if (clientObj) {
+                      const targetCat = active.category || clientObj.defaultCaseCategory || 'Bonded Carrier';
                       saveChargeAsClientDefault(clientObj, {
                         description: newChargeDesc.trim(),
                         amount: parseFloat(newChargeAmount) || 0,
-                        category: selectedChargeCategory || active.category,
+                        category: targetCat,
+                        caseCategory: targetCat,
+                        chargeHead: selectedChargeCategory || 'Customs / Transit',
                         taxable: true
                       }).then(updatedClient => {
                         setClientsData(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-                        setDraftToast(`✓ Saved "${newChargeDesc.trim()}" as permanent default charge for ${active.clientName}!`);
+                        setDraftToast(`✓ Saved "${newChargeDesc.trim()}" as permanent default charge for ${active.clientName} (${targetCat})!`);
                       }).catch(err => console.warn("Could not save client default:", err));
                     }
                   }
@@ -9021,36 +9061,27 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       <ClientRegistrationModal
         isOpen={showAddClientModal}
         onClose={() => setShowAddClientModal(false)}
+        initialClient={clientsData.find(c => c.name?.toLowerCase() === formData.client?.toLowerCase()) || null}
         defaultCategory={formData.category || 'Bonded Carrier'}
-        onSave={(client, appliedCharges) => {
+        onSave={(client) => {
           setClientsData(prev => [client, ...prev.filter(c => c.name.toLowerCase() !== client.name.toLowerCase())]);
           setRegisteredClients(prev => Array.from(new Set([client.name, ...prev])));
 
-          // Apply saved default arrangements to formData
-          const newArrangements = { ...formData.serviceArrangements };
-          if (client.defaultServiceArrangements) {
-            Object.entries(client.defaultServiceArrangements).forEach(([key, val]) => {
-              if (newArrangements[key]) {
-                newArrangements[key] = {
-                  ...newArrangements[key],
-                  arrangedBy: val
-                };
-              }
-            });
-          }
+          const targetCat = client.defaultCaseCategory || formData.category || 'Bonded Carrier';
+          const resolved = resolveCaseCharges(client, targetCat);
 
           setFormData(prev => ({
             ...prev,
             client: client.name,
-            category: client.defaultCaseCategory || prev.category || 'Bonded Carrier',
-            serviceArrangements: newArrangements,
-            charges: appliedCharges.length > 0 ? appliedCharges : prev.charges
+            category: targetCat,
+            serviceArrangements: resolved.arrangements as any,
+            charges: resolved.charges
           }));
 
           setIsOtherClient(false);
           setOtherClientName('');
           setShowAddClientModal(false);
-          setDraftToast(`✓ Client "${client.name}" registered with default tariff and service arrangements applied!`);
+          setDraftToast(`✓ Client "${client.name}" saved with ${resolved.charges.length} default charges for ${targetCat}!`);
         }}
       />
 
