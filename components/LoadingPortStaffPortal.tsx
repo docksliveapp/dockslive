@@ -320,14 +320,77 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
     return result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [staffBills, staffLedger, cases]);
 
-  // Unique clients list for Add Payment modal
+  // Unique clients list for Add Payment & Ledger modals (always includes Company (DPL) + individual clients)
   const uniqueClients = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set<string>(['Company (DPL)']);
     cases.forEach(c => { if (c.clientName) set.add(c.clientName); });
-    staffBills.forEach(b => { if (b.clientName) set.add(b.clientName); });
+    staffBills.forEach(b => {
+      if (b.arrangedBy === 'DPL') set.add('Company (DPL)');
+      if (b.clientName) set.add(b.clientName);
+    });
     staffLedger.forEach(e => { if (e.clientName) set.add(e.clientName); });
-    return Array.from(set).sort();
+    return Array.from(set).sort((a, b) => {
+      if (a === 'Company (DPL)') return -1;
+      if (b === 'Company (DPL)') return 1;
+      return a.localeCompare(b);
+    });
   }, [cases, staffBills, staffLedger]);
+
+  // Separate Ledger Summaries for Company (DPL) and each Client
+  const accountLedgerSummaries = useMemo(() => {
+    const map: Record<string, { accountName: string; isCompany: boolean; totalDebit: number; totalCredit: number; balance: number; entriesCount: number }> = {
+      'Company (DPL)': {
+        accountName: 'Company (DPL)',
+        isCompany: true,
+        totalDebit: 0,
+        totalCredit: 0,
+        balance: 0,
+        entriesCount: 0
+      }
+    };
+
+    staffLedger.forEach(e => {
+      const name = (e.clientName || (e.arrangedBy === 'DPL' ? 'Company (DPL)' : 'General Client')).trim();
+      if (!map[name]) {
+        map[name] = {
+          accountName: name,
+          isCompany: name === 'Company (DPL)' || e.arrangedBy === 'DPL',
+          totalDebit: 0,
+          totalCredit: 0,
+          balance: 0,
+          entriesCount: 0
+        };
+      }
+      map[name].totalDebit += Number(e.debit || 0);
+      map[name].totalCredit += Number(e.credit || 0);
+      map[name].balance = map[name].totalDebit - map[name].totalCredit;
+      map[name].entriesCount += 1;
+    });
+
+    // Also ensure any bills that might not have ledger entries yet are reflected
+    staffBills.forEach(b => {
+      const targetParty = b.arrangedBy === 'DPL' ? 'Company (DPL)' : (b.clientName || 'General Client').trim();
+      if (!map[targetParty]) {
+        map[targetParty] = {
+          accountName: targetParty,
+          isCompany: targetParty === 'Company (DPL)',
+          totalDebit: Number(b.totalAmount || 0),
+          totalCredit: 0,
+          balance: Number(b.totalAmount || 0),
+          entriesCount: 1
+        };
+      } else if (map[targetParty].entriesCount === 0) {
+        map[targetParty].totalDebit += Number(b.totalAmount || 0);
+        map[targetParty].balance = map[targetParty].totalDebit - map[targetParty].totalCredit;
+      }
+    });
+
+    return Object.values(map).sort((a, b) => {
+      if (a.isCompany && !b.isCompany) return -1;
+      if (!a.isCompany && b.isCompany) return 1;
+      return b.balance - a.balance;
+    });
+  }, [staffLedger, staffBills]);
 
   return (
     <div className="flex h-screen h-[100dvh] w-full bg-slate-950 text-slate-100 font-sans overflow-hidden">
@@ -771,11 +834,15 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                     <Ship size={18} />
                   </span>
                   <h2 className="text-base font-bold text-white tracking-wide">
-                    Pending Loading Cases ({pendingCases.length})
+                    {isDestinationStaff
+                      ? `Pending Destination Unloading & Arrival Cases (${pendingCases.length})`
+                      : `Pending Loading Cases (${pendingCases.length})`}
                   </h2>
                 </div>
                 <p className="text-xs text-gray-400 mt-1">
-                  Select a port from the dropdown below to see pending loading cases for that terminal.
+                  {isDestinationStaff
+                    ? 'Select a destination terminal below. Receive arriving vehicles with photo to complete Transit & start Unloading, generate Destination Bill, and download Delivery Order.'
+                    : 'Select a port from the dropdown below to see pending loading cases for that terminal.'}
                 </p>
               </div>
 
@@ -789,7 +856,7 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                       ? 'bg-slate-800 border-amber-400 ring-2 ring-amber-400/20 text-white'
                       : 'bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border-amber-500/30 hover:border-amber-500/60 text-white hover:bg-slate-850'
                   }`}
-                  title="Click to view ports with pending loading"
+                  title="Click to view ports with pending operations"
                 >
                   <div className="flex items-center gap-2.5 text-left min-w-0">
                     <div className="p-1.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0">
@@ -825,14 +892,14 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
                           <MapPin size={13} className="text-amber-400" />
-                          Pending Loading Ports
+                          {isDestinationStaff ? 'Pending Destination Terminals' : 'Pending Loading Ports'}
                         </span>
                         <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
                           {availablePendingPorts.filter(p => p.id !== 'ALL').length} Active
                         </span>
                       </div>
                       <p className="text-[11px] text-gray-400 mt-0.5">
-                        Select a port to filter pending loading operations
+                        Select a port to filter pending operations
                       </p>
                     </div>
 
@@ -869,7 +936,7 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                                 <span className={`text-[10px] block ${
                                   isSelected ? 'text-slate-950/80 font-semibold' : 'text-gray-400'
                                 }`}>
-                                  {isAll ? 'All Active Terminals' : 'Pending Loading Operations'}
+                                  {isAll ? 'All Active Terminals' : isDestinationStaff ? 'Pending Unloading Operations' : 'Pending Loading Operations'}
                                 </span>
                               </div>
                             </div>
@@ -899,14 +966,20 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                 <Ship size={36} className="mx-auto text-gray-500 opacity-60" />
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">No pending cases under this terminal</h3>
                 <p className="text-xs text-gray-400 max-w-sm mx-auto">
-                  All containers under this terminal have finished loading and vehicle gate out.
+                  {isDestinationStaff
+                    ? 'All containers under this terminal have finished unloading, delivery order issuance, and vehicle gate-out.'
+                    : 'All containers under this terminal have finished loading and vehicle gate out.'}
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center justify-between px-1 text-[11px] font-bold text-gray-400 uppercase tracking-wider">
                   <span>Pending Container Shipments ({currentFilteredCases.length})</span>
-                  <span>Click case to open loading workflow & bill</span>
+                  <span>
+                    {isDestinationStaff
+                      ? 'Click case to receive vehicle with photo, open unloading workflow, create bill & download DO'
+                      : 'Click case to open loading workflow & bill'}
+                  </span>
                 </div>
 
                 {currentFilteredCases.map((c, cIdx) => {
@@ -922,7 +995,7 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                           <Ship size={18} />
                         </div>
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-white/10 text-amber-300 border border-white/15 uppercase">
                               {c.companyId ? c.companyId.toUpperCase() : 'DPL'}
                             </span>
@@ -933,6 +1006,11 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                             <span className="font-mono text-amber-400 text-xs font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
                               {c.caseNo}
                             </span>
+                            {isDestinationStaff && c.status === CaseStatus.IN_TRANSIT && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                                In Transit • Ready for Reception Photo
+                              </span>
+                            )}
                           </div>
                           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 mt-1 text-[11px] text-gray-400 font-medium">
                             <span className="text-gray-300 font-semibold">{c.clientName}</span>
@@ -946,7 +1024,7 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
 
                       <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-white/10">
                         <span className="bg-amber-400/10 text-amber-300 border border-amber-400/20 text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1">
-                          <Clock size={12} /> Loading Workflow
+                          <Clock size={12} /> {isDestinationStaff ? 'Receive Vehicle & Unloading Workflow' : 'Loading Workflow'}
                         </span>
                         <ChevronRight size={18} className="text-gray-500 group-hover:text-white group-hover:translate-x-1 transition-all" />
                       </div>
@@ -960,39 +1038,41 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
         )}
 
         {/* ============================================================ */}
-        {/* VIEW 3: FINANCE (Download Bill + Download Ledger + Add Payment + Bill Payment Dues) */}
+        {/* VIEW 3: FINANCE (Separate Company & Client Ledgers + Download Bill + Download Ledger + Add Payment + Bill Payment Dues) */}
         {/* ============================================================ */}
         {activeTab === 'finance' && (
-          <div className="p-3.5 sm:p-6 max-w-7xl w-full mx-auto space-y-4 sm:space-y-6">
+          <div className="p-3.5 sm:p-6 max-w-7xl w-full mx-auto space-y-5 sm:space-y-6">
             
-            {/* Top Bar with 3 Main Actions: Download Loading Bill, Download Client Ledger, Add Payment */}
+            {/* Top Bar with 3 Main Actions: Download Bill, Download Ledger, Add Payment */}
             <div className="bg-slate-900/60 p-4 sm:p-5 rounded-3xl border border-white/10 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 shadow-xl">
               <div>
-                <h2 className="text-base font-bold text-white tracking-wide">Port Operations Private Finance Desk</h2>
+                <h2 className="text-base font-bold text-white tracking-wide">
+                  {isDestinationStaff ? 'Destination Port Staff Separate Finance & Ledgers Desk' : 'Loading Port Staff Separate Finance & Ledgers Desk'}
+                </h2>
                 <p className="text-xs text-gray-400">
-                  Manage port loading bills, client ledgers, and disbursement payments for ID <span className="text-amber-400 font-mono font-bold">{staffUserId}</span>
+                  Separate financial accounting for <span className="text-amber-400 font-mono font-bold">{staffUserId}</span> — maintains dedicated ledgers for <strong>Company (DPL)</strong> and for <strong>each Client</strong>
                 </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-                {/* 1. Download Loading Bill Button */}
+                {/* 1. Download Loading/Destination Bill Button */}
                 <button
                   type="button"
                   onClick={() => setShowDownloadBillModal(true)}
                   className="flex-1 sm:flex-none justify-center bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-3.5 sm:px-4 py-2.5 rounded-2xl text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/20 transition active:scale-95"
                 >
                   <Download size={14} />
-                  <span>Download Loading Bill</span>
+                  <span>{isDestinationStaff ? 'Download Destination Bill' : 'Download Loading Bill'}</span>
                 </button>
 
-                {/* 2. Download Client Ledger Button */}
+                {/* 2. Download Company / Client Ledger Button */}
                 <button
                   type="button"
                   onClick={() => setShowDownloadLedgerModal(true)}
                   className="flex-1 sm:flex-none justify-center bg-brand-600 hover:bg-brand-500 text-white font-bold px-3.5 sm:px-4 py-2.5 rounded-2xl text-xs flex items-center gap-1.5 shadow-lg shadow-brand-600/20 transition active:scale-95"
                 >
                   <FileText size={14} />
-                  <span>Download Client Ledger</span>
+                  <span>Download Account Ledger</span>
                 </button>
 
                 {/* 3. Add Payment Button */}
@@ -1002,8 +1082,72 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                   className="w-full sm:w-auto justify-center bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3.5 sm:px-4 py-2.5 rounded-2xl text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 transition active:scale-95"
                 >
                   <Plus size={14} />
-                  <span>Add Payment</span>
+                  <span>Record Payment Received</span>
                 </button>
+              </div>
+            </div>
+
+            {/* ============================================================ */}
+            {/* SEPARATE LEDGERS DIRECTORY: COMPANY (DPL) LEDGER VS INDIVIDUAL CLIENT LEDGERS */}
+            {/* ============================================================ */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-2">
+                  <BookOpen size={17} className="text-amber-400" />
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                    Separate Account Ledgers (Company & Direct Clients) ({accountLedgerSummaries.length})
+                  </h3>
+                </div>
+                <span className="text-[11px] text-gray-400">
+                  Separate ledger for Company (DPL) and separate ledger for each Client
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                {accountLedgerSummaries.map((acct, idx) => (
+                  <div
+                    key={`acct_ledger_${acct.accountName}_${idx}`}
+                    onClick={() => setShowDownloadLedgerModal(true)}
+                    className={`p-4 rounded-3xl border cursor-pointer transition-all hover:scale-[1.01] shadow-lg ${
+                      acct.isCompany
+                        ? 'bg-gradient-to-br from-emerald-950/50 via-slate-900 to-slate-950 border-emerald-500/40 hover:border-emerald-400'
+                        : 'bg-slate-900/80 border-white/10 hover:border-amber-500/40'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shrink-0 ${
+                          acct.isCompany
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                        }`}>
+                          {acct.isCompany ? 'Company Ledger' : 'Client Ledger'}
+                        </span>
+                        <h4 className="font-bold text-white text-xs truncate">{acct.accountName}</h4>
+                      </div>
+                      <span className="text-[10px] font-mono text-gray-400 shrink-0">
+                        {acct.entriesCount} {acct.entriesCount === 1 ? 'entry' : 'entries'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-[11px] bg-black/40 p-2.5 rounded-2xl border border-white/5">
+                      <div>
+                        <span className="text-gray-400 block text-[10px]">Total Billed</span>
+                        <span className="text-white font-mono font-bold">PKR {acct.totalDebit.toLocaleString()}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block text-[10px]">Received</span>
+                        <span className="text-emerald-400 font-mono font-bold">PKR {acct.totalCredit.toLocaleString()}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block text-[10px]">Balance Due</span>
+                        <span className={`font-mono font-black ${acct.balance > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                          PKR {acct.balance.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -1069,7 +1213,7 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                           <th className="p-3.5">Date</th>
                           <th className="p-3.5">Container Number</th>
                           <th className="p-3.5">Port / Terminal</th>
-                          <th className="p-3.5">Client Name</th>
+                          <th className="p-3.5">Billed To / Client</th>
                           <th className="p-3.5">Bill / Case No</th>
                           <th className="p-3.5 text-right">Total Amount</th>
                           <th className="p-3.5 text-right">Paid Amount</th>
@@ -1094,7 +1238,9 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                               {item.port}
                             </td>
                             <td className="p-3.5 text-gray-200 font-medium">
-                              {item.clientName}
+                              <div className="flex items-center gap-1.5">
+                                <span>{item.bill.arrangedBy === 'DPL' ? `Company (DPL) — ${item.clientName}` : item.clientName}</span>
+                              </div>
                             </td>
                             <td className="p-3.5 font-mono text-amber-300">
                               {item.bill.billNo || item.caseNo}
@@ -1154,22 +1300,26 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
       )}
 
       {/* ============================================================ */}
-      {/* MODAL 2: LOADING WORKFLOW MODAL (Exact same as Case Management) */}
+      {/* MODAL 2: LOADING / DESTINATION WORKFLOW MODAL */}
       {/* ============================================================ */}
       {selectedCaseForWorkflow && (
         <WorkflowStepModal
           isOpen={!!selectedCaseForWorkflow}
           onClose={() => setSelectedCaseForWorkflow(null)}
           targetCase={selectedCaseForWorkflow}
-          stepStatus={CaseStatus.LOADING_PORT_PROCESSING}
-          stepIndex={4}
+          stepStatus={isDestinationStaff ? CaseStatus.DESTINATION_PORT_ARRIVAL : CaseStatus.LOADING_PORT_PROCESSING}
+          stepIndex={isDestinationStaff ? 6 : 4}
           userRole={userRole}
           userRoles={userRoles}
           onSaveCase={async (updatedCase) => {
             setCases(prev => prev.map(c => c.id === updatedCase.id ? updatedCase : c));
             setSelectedCaseForWorkflow(updatedCase);
             await saveCaseToFirestore(updatedCase);
-            showToast(`✓ Case ${updatedCase.caseNo} loading workflow updated successfully!`);
+            showToast(
+              isDestinationStaff
+                ? `✓ Case ${updatedCase.caseNo} destination unloading workflow updated successfully!`
+                : `✓ Case ${updatedCase.caseNo} loading workflow updated successfully!`
+            );
           }}
         />
       )}

@@ -194,7 +194,7 @@ export const ThemeToggleSwitch: React.FC<ThemeToggleSwitchProps> = ({
     <button
       type="button"
       onClick={handleToggle}
-      className={`relative inline-flex items-center h-8 w-[148px] rounded-full p-1 transition-all duration-300 cursor-pointer select-none border shadow-sm ${
+      className={`relative inline-flex items-center h-7 w-[88px] sm:h-8 sm:w-[148px] rounded-full p-0.5 sm:p-1 transition-all duration-300 cursor-pointer select-none border shadow-sm shrink-0 ${
         isPearl
           ? 'bg-[#E2E8F0] border-[#CBD5E1]'
           : 'bg-[#0F172A] border-[#334155]'
@@ -204,30 +204,30 @@ export const ThemeToggleSwitch: React.FC<ThemeToggleSwitchProps> = ({
     >
       {/* Sliding Luxury Pill Thumb */}
       <span
-        className={`absolute top-1 bottom-1 w-[70px] rounded-full transition-all duration-300 ease-out shadow-md ${
+        className={`absolute top-0.5 bottom-0.5 w-[41px] sm:top-1 sm:bottom-1 sm:w-[70px] rounded-full transition-all duration-300 ease-out shadow-md ${
           isPearl
-            ? 'translate-x-[68px] bg-[#1E293B] border border-[#0F172A]'
+            ? 'translate-x-[41px] sm:translate-x-[68px] bg-[#1E293B] border border-[#0F172A]'
             : 'translate-x-0 bg-[#2D3748] border border-[#475569]'
         }`}
       />
 
       {/* Left Option: Charcoal (Dark) */}
       <span
-        className={`relative z-10 flex-1 flex items-center justify-center gap-1 text-[11px] font-bold tracking-wide transition-colors duration-200 ${
+        className={`relative z-10 flex-1 flex items-center justify-center gap-0.5 sm:gap-1 text-[9px] sm:text-[11px] font-bold tracking-tight sm:tracking-wide transition-colors duration-200 ${
           !isPearl ? 'text-[#FFFFFF]' : 'text-[#475569]'
         }`}
       >
-        <Moon size={12} className={!isPearl ? 'text-[#E2E8F0]' : 'text-[#64748B]'} />
+        <Moon className={`w-2.5 h-2.5 sm:w-3 sm:h-3 shrink-0 ${!isPearl ? 'text-[#E2E8F0]' : 'text-[#64748B]'}`} />
         <span>Dark</span>
       </span>
 
       {/* Right Option: Pearl White (Light) */}
       <span
-        className={`relative z-10 flex-1 flex items-center justify-center gap-1 text-[11px] font-bold tracking-wide transition-colors duration-200 ${
+        className={`relative z-10 flex-1 flex items-center justify-center gap-0.5 sm:gap-1 text-[9px] sm:text-[11px] font-bold tracking-tight sm:tracking-wide transition-colors duration-200 ${
           isPearl ? 'text-[#FFFFFF]' : 'text-[#94A3B8]'
         }`}
       >
-        <Sun size={12} className={isPearl ? 'text-[#FFFFFF]' : 'text-[#94A3B8]'} />
+        <Sun className={`w-2.5 h-2.5 sm:w-3 sm:h-3 shrink-0 ${isPearl ? 'text-[#FFFFFF]' : 'text-[#94A3B8]'}`} />
         <span>Pearl</span>
       </span>
     </button>

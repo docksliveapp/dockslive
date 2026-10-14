@@ -9,6 +9,7 @@ import { downloadCasePdf, downloadCustomsDeliveryOrderPdf, downloadLoadingBillPd
 import { useBranding } from '../services/brandingService';
 import { getCategoryWorkflow, getWorkflowStepIndex, isDestinationUnloadedAndGateOut } from '../services/workflowConfig';
 import { updateCaseInFirestore } from '../services/dbService';
+import { CaseTransitHistoryCard } from './CaseTransitHistoryCard';
 
 interface FullCaseDetailModalProps {
   isOpen: boolean;
@@ -300,6 +301,9 @@ export const FullCaseDetailModal: React.FC<FullCaseDetailModalProps> = ({
               </table>
             </div>
           </div>
+
+          {/* Permanent Transit Route Locations & Port Gate-Out / Unloading Duration History */}
+          <CaseTransitHistoryCard targetCase={targetCase} />
 
           {/* Itemized Billing & Service Charges Table */}
           <div className="bg-slate-950/60 rounded-2xl border border-white/5 p-4 space-y-3">

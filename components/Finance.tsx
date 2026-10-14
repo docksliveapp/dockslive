@@ -387,6 +387,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     const desc = transferDescription.trim() || `Internal Cash Transfer: ${sourceLabel} -> ${destLabel}`;
     const timestamp = Date.now();
 
+    const seqOutRef = generateFinanceReference();
     // 1. Outflow from source
     const outflowEntry: FinanceEntry = {
       id: timestamp,
@@ -397,7 +398,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       status: 'PAID',
       party: destLabel,
       category: 'Internal Transfer',
-      reference: `TRF-OUT-${timestamp.toString().slice(-6)}`,
+      reference: `${seqOutRef}-OUT`,
       paymentMethod: transferSource === 'DRAWER' ? 'CASH' : 'BANK',
       bankName: transferSource === 'DRAWER' ? undefined : transferSource
     };
@@ -412,7 +413,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       status: 'PAID',
       party: sourceLabel,
       category: 'Internal Transfer',
-      reference: `TRF-IN-${timestamp.toString().slice(-6)}`,
+      reference: `${seqOutRef}-IN`,
       paymentMethod: transferDestination === 'DRAWER' ? 'CASH' : 'BANK',
       bankName: transferDestination === 'DRAWER' ? undefined : transferDestination
     };
@@ -652,6 +653,12 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     return financeData.filter(f => f.type === 'INCOME' && f.status === 'PENDING');
   }, [financeData]);
 
+  // Income Tax & FBR Report State
+  const [taxFiscalPeriod, setTaxFiscalPeriod] = useState<'ALL' | 'FY25_26' | 'FY26_27' | 'CUSTOM'>('ALL');
+  const [taxStartDate, setTaxStartDate] = useState<string>('');
+  const [taxEndDate, setTaxEndDate] = useState<string>('');
+  const [taxWithholdingRate, setTaxWithholdingRate] = useState<number>(3); // Standard 3% Logistics / Transport WHT u/s 153(1)(b)
+
   const tabs = [
     { id: 'cashbook', label: 'Cashbook' },
     { 
@@ -668,6 +675,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     { id: 'staff_ledger', label: 'Staff Ledger' },
     { id: 'vendor_ledger', label: 'Vendors & Utilities' },
     { id: 'recurring', label: 'Monthly Fixed & Recurring' },
+    { id: 'income_tax', label: 'Income Tax & FBR Report' },
   ];
 
   // Helper to extract all valid invoiced charges for a case (explicit charges, arrangements, or default tariff)
@@ -1611,9 +1619,10 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     const target = list.find(item => item.id === id);
     if (!target) return;
 
+    const seqVoucherRef = generateFinanceReference();
     const paymentMethod = (newTransaction.paymentMethod as any) || 'CASH';
     const bankName = paymentMethod === 'BANK' ? (newTransaction.bankName || 'HBL Corporate') : undefined;
-    const transactionId = newTransaction.transactionId || (paymentMethod === 'BANK' ? `TRX-${Date.now().toString().slice(-6)}` : undefined);
+    const transactionId = newTransaction.transactionId || (paymentMethod === 'BANK' ? `BANK-${seqVoucherRef}` : undefined);
     const paidDate = new Date().toISOString().split('T')[0];
 
     const updatedItem: FinanceEntry = { 
@@ -1641,7 +1650,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         type: 'EXPENSE',
         status: 'PAID',
         category: target.category || 'Operational Expense',
-        reference: target.reference || `PAY-OUT-${target.id}`,
+        reference: target.reference || seqVoucherRef,
         paymentMethod,
         bankName,
         transactionId
@@ -1661,7 +1670,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         type: 'INCOME',
         status: 'PAID',
         category: 'Client Payment',
-        reference: target.reference || `REC-IN-${target.id}`,
+        reference: target.reference || seqVoucherRef,
         caseNo: target.caseNo,
         containerNumber: target.containerNumber,
         paymentMethod,
@@ -1693,7 +1702,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     setReceivePaymentAmount(String(Math.max(0, balance || 0)));
     setReceivePaymentMethod('BANK');
     setReceivePaymentBank('HBL Corporate');
-    setReceivePaymentTrx(`TRX-${Date.now().toString().slice(-6)}`);
+    setReceivePaymentTrx(`BANK-${generateFinanceReference()}`);
     setShowReceivePaymentModal(true);
   };
 
@@ -5844,6 +5853,437 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case 'income_tax': {
+        // Compute effective date window for FBR / Income Tax return
+        let effStart = taxStartDate;
+        let effEnd = taxEndDate;
+        let periodLabel = 'All Recorded Financial History';
+
+        if (taxFiscalPeriod === 'FY25_26') {
+          effStart = '2025-07-01';
+          effEnd = '2026-06-30';
+          periodLabel = 'Tax Year 2026 (01 Jul 2025 – 30 Jun 2026)';
+        } else if (taxFiscalPeriod === 'FY26_27') {
+          effStart = '2026-07-01';
+          effEnd = '2027-06-30';
+          periodLabel = 'Tax Year 2027 (01 Jul 2026 – 30 Jun 2027)';
+        } else if (taxFiscalPeriod === 'CUSTOM') {
+          periodLabel = `${effStart || 'Start'} to ${effEnd || 'Today'}`;
+        }
+
+        const inDateRange = (d?: string) => {
+          if (!d) return true;
+          const cleanDate = d.split('T')[0];
+          if (effStart && cleanDate < effStart) return false;
+          if (effEnd && cleanDate > effEnd) return false;
+          return true;
+        };
+
+        // 1. Gross Invoiced Revenue (Cases + Receivables)
+        const periodCases = cases.filter(c => c.status !== 'CANCELLED' && inDateRange(c.createdAt || c.registrationDate || c.date));
+        const grossCaseInvoiced = periodCases.reduce((sum, c) => sum + getCaseTotalCharges(c).total, 0);
+        const manualReceivables = receivables.filter(r => !r.caseNo && inDateRange(r.date));
+        const grossManualReceivables = manualReceivables.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+        const totalGrossBilledRevenue = grossCaseInvoiced + grossManualReceivables;
+
+        // 2. Actual Revenue Collected (Cashbook INCOME excluding internal transfers)
+        const taxIncomeEntries = financeData.filter(
+          f => f.type === 'INCOME' && f.status !== 'PENDING' && f.category !== 'Internal Transfer' && inDateRange(f.date)
+        );
+        const totalRevenueCollected = taxIncomeEntries.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
+
+        // 3. Deductible Business Expenses (Cashbook EXPENSE excluding internal transfers)
+        const taxExpenseEntries = financeData.filter(
+          f => f.type === 'EXPENSE' && f.category !== 'Internal Transfer' && inDateRange(f.date)
+        );
+        const totalDeductibleExpenses = taxExpenseEntries.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
+
+        // Category-wise Expense Schedule for FBR Return
+        const expenseByCategoryMap = new Map<string, { category: string; count: number; total: number }>();
+        taxExpenseEntries.forEach(exp => {
+          const cat = exp.category || 'General Operational Expense';
+          const existing = expenseByCategoryMap.get(cat) || { category: cat, count: 0, total: 0 };
+          existing.count += 1;
+          existing.total += Number(exp.amount) || 0;
+          expenseByCategoryMap.set(cat, existing);
+        });
+        const expenseSchedule = Array.from(expenseByCategoryMap.values()).sort((a, b) => b.total - a.total);
+
+        // 4. Net Profit & Tax Computations
+        const netTaxableIncome = totalRevenueCollected - totalDeductibleExpenses;
+        const accruedNetIncome = totalGrossBilledRevenue - totalDeductibleExpenses;
+        const estimatedWithholdingTax = Math.round((totalRevenueCollected * (Number(taxWithholdingRate) || 0)) / 100);
+        const netProfitAfterTax = netTaxableIncome - estimatedWithholdingTax;
+
+        const handleDownloadIncomeTaxPdf = async () => {
+          setIsExportingPdf(true);
+          setPdfSuccessMessage(null);
+          setPdfErrorMessage(null);
+          try {
+            // Build an audited ledger statement combining Revenue & Expense rows for FBR filing
+            let running = 0;
+            const combinedTaxEntries = [
+              ...taxIncomeEntries.map(inc => ({
+                date: inc.date,
+                party: inc.party,
+                category: inc.category || 'Revenue / Receipt',
+                reference: inc.reference || '-',
+                description: `[REVENUE COLLECTED] ${inc.description}`,
+                debit: 0,
+                credit: Number(inc.amount) || 0
+              })),
+              ...taxExpenseEntries.map(exp => ({
+                date: exp.date,
+                party: exp.party,
+                category: exp.category || 'Deductible Expense',
+                reference: exp.reference || '-',
+                description: `[DEDUCTIBLE EXPENSE] ${exp.description}`,
+                debit: Number(exp.amount) || 0,
+                credit: 0
+              }))
+            ].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+            const pdfRows = combinedTaxEntries.map(row => {
+              running += row.credit - row.debit;
+              return {
+                ...row,
+                balance: running
+              };
+            });
+
+            const res = await downloadGeneralLedgerPdf({
+              accountFilter: `FBR INCOME TAX & PROFIT/LOSS REPORT (${periodLabel}) — WHT @ ${taxWithholdingRate}%: PKR ${estimatedWithholdingTax.toLocaleString()}`,
+              generatedDate: new Date().toLocaleDateString(),
+              totalDebits: totalDeductibleExpenses,
+              totalCredits: totalRevenueCollected,
+              closingBalance: netTaxableIncome,
+              entries: pdfRows.length > 0 ? pdfRows : [{
+                date: new Date().toISOString().split('T')[0],
+                party: companyName,
+                category: 'Tax Summary',
+                reference: 'FBR-NIL',
+                description: `Nil Return / No Posted Vouchers in Period (${periodLabel})`,
+                debit: 0,
+                credit: 0,
+                balance: 0
+              }],
+              companyName,
+              customLogo: activeLogo,
+              branding
+            });
+            setPdfSuccessMessage(`Official Income Tax & FBR Report generated: ${res.filename}`);
+            setDirectDownloadFilename(res.filename);
+            setDirectDownloadUrl(res.blobUrl);
+          } catch (err) {
+            console.error(err);
+            setPdfErrorMessage('Failed to generate Income Tax PDF report.');
+          } finally {
+            setIsExportingPdf(false);
+          }
+        };
+
+        const handleExportIncomeTaxCSV = () => {
+          const headers = ['Date', 'Type', 'Voucher / Ref', 'Party / NTN Account', 'Tax Category / Head', 'Particulars', 'Revenue Inflow (PKR)', 'Deductible Expense (PKR)'];
+          const rows = [
+            ...taxIncomeEntries.map(inc => [
+              inc.date,
+              'REVENUE_RECEIPT',
+              inc.reference || '',
+              inc.party || '',
+              inc.category || 'Client Freight / Customs Receipt',
+              inc.description || '',
+              Number(inc.amount) || 0,
+              0
+            ]),
+            ...taxExpenseEntries.map(exp => [
+              exp.date,
+              'DEDUCTIBLE_EXPENSE',
+              exp.reference || '',
+              exp.party || '',
+              exp.category || 'Operational Expense',
+              exp.description || '',
+              0,
+              Number(exp.amount) || 0
+            ])
+          ];
+          rows.push(['', 'SUMMARY', '', companyName, `Period: ${periodLabel}`, `Net Taxable Profit: PKR ${netTaxableIncome.toLocaleString()} | Est. WHT (${taxWithholdingRate}%): PKR ${estimatedWithholdingTax.toLocaleString()}`, totalRevenueCollected, totalDeductibleExpenses]);
+          const shortCode = activeCompany?.shortName || activeCompany?.prefix || 'DPL';
+          exportCSVFile(`Income_Tax_FBR_Report_${shortCode}_${new Date().toISOString().split('T')[0]}`, headers, rows);
+        };
+
+        return (
+          <div className="p-4 sm:p-6 space-y-6 animate-fade-in">
+            {/* Top Banner & FBR Controls */}
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    FBR & Corporate Tax Compliance
+                  </span>
+                  <span className="text-xs text-gray-400 font-mono">
+                    NTN: {branding.ntn || activeCompany?.ntn || 'Registered Corporate Entity'}
+                  </span>
+                </div>
+                <h3 className="text-base sm:text-lg font-bold text-white">
+                  Income Tax Return, Withholding (WHT) & Profit/Loss Statement
+                </h3>
+                <p className="text-xs text-gray-400">
+                  Real-time audited computation of Gross Billed Revenue, Cash/Bank Receipts, Deductible Operational Expenses, and Section 153 Withholding Tax for <strong className="text-white">{companyName}</strong>.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleDownloadIncomeTaxPdf}
+                  disabled={isExportingPdf}
+                  className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-brand-600/25 transition cursor-pointer"
+                >
+                  <Download size={15} />
+                  <span>Download Official Tax Report (PDF)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportIncomeTaxCSV}
+                  className="px-4 py-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 text-xs font-bold flex items-center gap-2 transition cursor-pointer"
+                >
+                  <FileSpreadsheet size={15} />
+                  <span>Export FBR Schedule (CSV/Excel)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Bar: Fiscal Year, Custom Dates & WHT Rate */}
+            <div className="p-4 rounded-xl bg-slate-900/70 border border-white/10 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-gray-400 uppercase mr-1">Tax Period:</span>
+                {[
+                  { id: 'ALL', label: 'All History' },
+                  { id: 'FY25_26', label: 'Tax Year 2026 (Jul 25 – Jun 26)' },
+                  { id: 'FY26_27', label: 'Tax Year 2027 (Jul 26 – Jun 27)' },
+                  { id: 'CUSTOM', label: 'Custom Date Range' }
+                ].map(p => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setTaxFiscalPeriod(p.id as any)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                      taxFiscalPeriod === p.id
+                        ? 'bg-brand-600 text-white shadow'
+                        : 'bg-white/5 text-gray-300 hover:bg-white/10 border border-white/10'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {taxFiscalPeriod === 'CUSTOM' && (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <input
+                    type="date"
+                    value={taxStartDate}
+                    onChange={(e) => setTaxStartDate(e.target.value)}
+                    className="bg-slate-950 border border-white/15 rounded-lg px-2.5 py-1.5 text-white text-xs"
+                  />
+                  <span className="text-gray-400">to</span>
+                  <input
+                    type="date"
+                    value={taxEndDate}
+                    onChange={(e) => setTaxEndDate(e.target.value)}
+                    className="bg-slate-950 border border-white/15 rounded-lg px-2.5 py-1.5 text-white text-xs"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 text-xs bg-slate-950/80 px-3 py-1.5 rounded-xl border border-white/10">
+                <span className="text-gray-400 font-medium">Applicable Tax / WHT Rate (%):</span>
+                <select
+                  value={taxWithholdingRate}
+                  onChange={(e) => setTaxWithholdingRate(Number(e.target.value))}
+                  className="bg-slate-900 text-amber-300 font-mono font-bold border border-white/15 rounded-lg px-2 py-1 outline-none"
+                >
+                  <option value={3}>3% (Transport / Bonded Carrier Services u/s 153)</option>
+                  <option value={4}>4% (Corporate Logistics Services)</option>
+                  <option value={8}>8% (Clearing & Forwarding Services)</option>
+                  <option value={10}>10% (Standard Services WHT)</option>
+                  <option value={15}>15% (Active Taxpayer Corporate Rate)</option>
+                  <option value={29}>29% (Corporate Net Profit Tax)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Key Tax & Profit Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+              <div className="p-4 rounded-2xl bg-slate-900/90 border border-white/10">
+                <span className="text-[10px] font-bold uppercase text-gray-400 block">Gross Billed Turnover</span>
+                <span className="text-lg font-extrabold font-mono text-white mt-1 block">
+                  PKR {totalGrossBilledRevenue.toLocaleString()}
+                </span>
+                <span className="text-[10px] text-gray-500 mt-1 block">
+                  {periodCases.length} Registered Cases + Invoices
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25">
+                <span className="text-[10px] font-bold uppercase text-emerald-400 block">Total Revenue Collected</span>
+                <span className="text-lg font-extrabold font-mono text-emerald-300 mt-1 block">
+                  PKR {totalRevenueCollected.toLocaleString()}
+                </span>
+                <span className="text-[10px] text-emerald-400/80 mt-1 block">
+                  {taxIncomeEntries.length} Verified Receipts
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/25">
+                <span className="text-[10px] font-bold uppercase text-rose-400 block">Deductible Expenses</span>
+                <span className="text-lg font-extrabold font-mono text-rose-300 mt-1 block">
+                  PKR {totalDeductibleExpenses.toLocaleString()}
+                </span>
+                <span className="text-[10px] text-rose-400/80 mt-1 block">
+                  {taxExpenseEntries.length} Expense Vouchers
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/25">
+                <span className="text-[10px] font-bold uppercase text-indigo-300 block">Net Taxable Profit</span>
+                <span className={`text-lg font-extrabold font-mono mt-1 block ${netTaxableIncome >= 0 ? 'text-indigo-300' : 'text-rose-400'}`}>
+                  PKR {netTaxableIncome.toLocaleString()}
+                </span>
+                <span className="text-[10px] text-gray-400 mt-1 block">
+                  Accrued Net: PKR {accruedNetIncome.toLocaleString()}
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30">
+                <span className="text-[10px] font-bold uppercase text-amber-400 block">
+                  Est. Tax / WHT ({taxWithholdingRate}%)
+                </span>
+                <span className="text-lg font-extrabold font-mono text-amber-300 mt-1 block">
+                  PKR {estimatedWithholdingTax.toLocaleString()}
+                </span>
+                <span className="text-[10px] text-amber-300/80 mt-1 block">
+                  Net After Tax: PKR {netProfitAfterTax.toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            {/* Two-Column Breakdown: Category-wise Deductible Expenses & Recent Tax Vouchers */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* Left: Deductible Expense Heads Schedule */}
+              <div className="rounded-2xl border border-white/10 bg-slate-900/60 overflow-hidden">
+                <div className="p-4 bg-slate-950/70 border-b border-white/10 flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-white">
+                      FBR Deductible Expense Heads Schedule
+                    </h4>
+                    <p className="text-[11px] text-gray-400">
+                      Breakdown of operational, port, fleet, payroll & utility expenses
+                    </p>
+                  </div>
+                  <span className="text-xs font-mono text-rose-400 font-bold">
+                    Total: PKR {totalDeductibleExpenses.toLocaleString()}
+                  </span>
+                </div>
+                <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                  <table className="w-full text-left text-xs text-gray-300">
+                    <thead className="bg-slate-900 uppercase text-[10px] text-gray-400 border-b border-white/10">
+                      <tr>
+                        <th className="p-3">Expense Head / Category</th>
+                        <th className="p-3 text-center">Vouchers</th>
+                        <th className="p-3 text-right">Amount (PKR)</th>
+                        <th className="p-3 text-right">% Share</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {expenseSchedule.map((item, idx) => {
+                        const pct = totalDeductibleExpenses > 0 ? Math.round((item.total / totalDeductibleExpenses) * 100) : 0;
+                        return (
+                          <tr key={`tax_cat_${idx}`} className="hover:bg-white/5">
+                            <td className="p-3 font-semibold text-white">{item.category}</td>
+                            <td className="p-3 text-center font-mono text-gray-400">{item.count}</td>
+                            <td className="p-3 text-right font-mono font-bold text-rose-300">
+                              PKR {item.total.toLocaleString()}
+                            </td>
+                            <td className="p-3 text-right font-mono text-gray-400">{pct}%</td>
+                          </tr>
+                        );
+                      })}
+                      {expenseSchedule.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="p-6 text-center text-gray-500">
+                            No deductible expenses recorded in this period.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Right: Client Revenue & Withholding Tax Ledger */}
+              <div className="rounded-2xl border border-white/10 bg-slate-900/60 overflow-hidden">
+                <div className="p-4 bg-slate-950/70 border-b border-white/10 flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-white">
+                      Revenue Receipts & Section 153 WHT Schedule
+                    </h4>
+                    <p className="text-[11px] text-gray-400">
+                      Verified client receipts and corresponding tax deduction calculation
+                    </p>
+                  </div>
+                  <span className="text-xs font-mono text-emerald-400 font-bold">
+                    Total: PKR {totalRevenueCollected.toLocaleString()}
+                  </span>
+                </div>
+                <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                  <table className="w-full text-left text-xs text-gray-300">
+                    <thead className="bg-slate-900 uppercase text-[10px] text-gray-400 border-b border-white/10">
+                      <tr>
+                        <th className="p-3">Date / Ref</th>
+                        <th className="p-3">Client / Party</th>
+                        <th className="p-3 text-right">Gross Receipt</th>
+                        <th className="p-3 text-right">WHT ({taxWithholdingRate}%)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {taxIncomeEntries.map((inc, idx) => {
+                        const wht = Math.round(((Number(inc.amount) || 0) * (Number(taxWithholdingRate) || 0)) / 100);
+                        return (
+                          <tr key={`tax_inc_${inc.id || idx}`} className="hover:bg-white/5">
+                            <td className="p-3">
+                              <span className="font-mono text-white block">{inc.date}</span>
+                              <span className="font-mono text-[10px] text-brand-300">{inc.reference || '-'}</span>
+                            </td>
+                            <td className="p-3">
+                              <span className="font-semibold text-white block">{inc.party}</span>
+                              <span className="text-[10px] text-gray-400 truncate block max-w-[180px]">{inc.description}</span>
+                            </td>
+                            <td className="p-3 text-right font-mono font-bold text-emerald-400">
+                              PKR {(Number(inc.amount) || 0).toLocaleString()}
+                            </td>
+                            <td className="p-3 text-right font-mono text-amber-300">
+                              PKR {wht.toLocaleString()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {taxIncomeEntries.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="p-6 text-center text-gray-500">
+                            No revenue receipts recorded in this period.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>

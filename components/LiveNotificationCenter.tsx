@@ -3,10 +3,17 @@ import { createPortal } from 'react-dom';
 import { 
   Bell, X, Check, CheckCircle2, Clock, FileText, DollarSign, 
   Truck, ShieldCheck, ArrowRight, AlertTriangle, Info,
-  ExternalLink, CheckCheck
+  ExternalLink, CheckCheck, Trash2
 } from 'lucide-react';
 import { AppNotification, UserRole } from '../types';
-import { subscribeToNotifications, updateNotificationInFirestore } from '../services/dbService';
+import { 
+  subscribeToNotifications, 
+  updateNotificationInFirestore,
+  deleteNotificationFromFirestore,
+  clearAllNotificationsInFirestore,
+  matchesActiveCompany
+} from '../services/dbService';
+import { useActiveCompany } from '../services/companyService';
 import NotificationModal from './NotificationModal';
 import { approveActionRequest, rejectActionRequest } from '../services/approvalService';
 
@@ -37,6 +44,7 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
   const [selectedNotification, setSelectedNotification] = useState<AppNotification | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'UNREAD' | 'APPROVALS'>('ALL');
+  const { activeCompany } = useActiveCompany();
 
   // Detect active theme
   const isPearl = theme === 'pearl' || (typeof document !== 'undefined' && document.body.classList.contains('theme-pearl'));
@@ -118,81 +126,205 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       currentNorm.includes('CASE') ||
       userRolesNorm.some(r => r.includes('CASE'));
 
-    return notifications.filter(n => {
-      // 1. ADMIN & SUPER ADMIN: See all notifications across the system
-      if (isAdmin) return true;
+    const isClient =
+      currentNorm === 'CLIENT' ||
+      userRolesNorm.includes('CLIENT');
 
-      // 2. Specific client or transporter target check
-      if (n.targetClientName) {
-        const targetClean = n.targetClientName.toLowerCase().trim();
-        const userClean = (userIdentifier || '').toLowerCase().trim();
-        const clientClean = (clientName || '').toLowerCase().trim();
-        if (userClean && (targetClean.includes(userClean) || userClean.includes(targetClean))) return true;
-        if (clientClean && (targetClean.includes(clientClean) || clientClean.includes(targetClean))) return true;
+    const isTransporter =
+      currentNorm === 'TRANSPORTER' ||
+      userRolesNorm.includes('TRANSPORTER');
+
+    const matchesNamedEntity = (targetName?: string): boolean => {
+      if (!targetName) return false;
+      const targetClean = targetName.toLowerCase().trim();
+      const userClean = (userIdentifier || '').toLowerCase().trim();
+      const clientClean = (clientName || '').toLowerCase().trim();
+      if (userClean && (targetClean === userClean || targetClean.includes(userClean) || userClean.includes(targetClean))) {
+        return true;
+      }
+      if (clientClean && (targetClean === clientClean || targetClean.includes(clientClean) || clientClean.includes(targetClean))) {
+        return true;
+      }
+      return false;
+    };
+
+    return notifications.filter(n => {
+      // Company isolation check: if notification belongs to a specific company, match activeCompany (unless shared fleet/transporter)
+      const notifCompany = (n as any).companyId;
+      const isSharedFleetNotif = n.category === 'TRANSPORTER' || n.targetView === 'vehicles';
+      if (notifCompany && activeCompany?.id && !isSharedFleetNotif) {
+        if (!matchesActiveCompany(notifCompany, activeCompany.id)) {
+          return false;
+        }
       }
 
-      // 3. Extract all target roles declared on the notification
+      const subType = (n.notificationSubType || '') as string;
+      const actionType = (n.approvalData?.actionType || '') as string;
+      const approvalStage = n.approvalData?.approvalStage;
+      const titleLower = (n.title || '').toLowerCase();
+      const descLower = (n.description || '').toLowerCase();
       const declaredTargetRoles = extractTargetRoles(n.targetRole, (n as any).targetRoles);
 
-      // If targeted to ALL roles, or no target specified
-      if (declaredTargetRoles.length === 0 || declaredTargetRoles.includes('ALL')) {
+      // =======================================================================
+      // 1. ADMIN FILTER:
+      //    - All Admin-targeted notifications, approvals, finance alerts, document/vehicle expiries, and hearing notices
+      //    - Hide Step 1 Manager Review items until Manager approves Step 1
+      // =======================================================================
+      if (isAdmin) {
+        if (approvalStage === 'MANAGER_REVIEW') return false;
+
+        const targetsAdminOrAll =
+          declaredTargetRoles.includes('ADMIN') ||
+          declaredTargetRoles.includes('SUPERADMIN') ||
+          declaredTargetRoles.includes('ALL');
+
+        const isDocOrVehicleExpiry =
+          subType === 'DOC_EXPIRY_ALERT' ||
+          titleLower.includes('expired') ||
+          titleLower.includes('expiring soon') ||
+          titleLower.includes('expire soon');
+
+        const isPaymentPaidOrReceived =
+          subType === 'FINANCE_RECORDED' ||
+          subType === 'PAYMENT_APPROVAL' ||
+          subType === 'INVOICE_CHARGE_NOTIFICATION' ||
+          titleLower.startsWith('payment paid') ||
+          titleLower.startsWith('payment received');
+
+        const isAdminApproval =
+          subType === 'CANCELLATION_APPROVAL' ||
+          subType === 'EDIT_APPROVAL' ||
+          subType === 'DELETION_APPROVAL' ||
+          subType === 'CLIENT_REGISTRATION_APPROVAL' ||
+          subType === 'CASE_APPROVAL' ||
+          subType === 'URGENT_PAYABLE_APPROVAL' ||
+          actionType === 'CANCEL' ||
+          actionType === 'EDIT' ||
+          actionType === 'DELETE' ||
+          actionType === 'APPROVE_NOC' ||
+          actionType === 'APPROVE_CLIENT' ||
+          actionType === 'VERIFY_PAYMENT' ||
+          actionType === 'APPROVE_URGENT_PAYABLE';
+
+        const isHearingNoticeReminder =
+          subType === 'HEARING_NOTICE_REMINDER' ||
+          titleLower.includes('hearing notice') ||
+          descLower.includes('hearing notice');
+
+        return (
+          targetsAdminOrAll ||
+          isDocOrVehicleExpiry ||
+          isPaymentPaidOrReceived ||
+          isAdminApproval ||
+          isHearingNoticeReminder
+        );
+      }
+
+      // =======================================================================
+      // 2. STRICT CLIENT FILTER:
+      //    - Only notifications explicitly addressed to THIS Client (jis per paisey charge horahey hain / jis client ka case hai)
+      //    - Hide internal approval requests (MANAGER_REVIEW / ADMIN_FINAL)
+      // =======================================================================
+      if (isClient && !isOperationsManager && !isFinanceManager && !isVehicleManager && !isCaseManager) {
+        if (
+          subType === 'DELETION_APPROVAL' ||
+          subType === 'CANCELLATION_APPROVAL' ||
+          subType === 'EDIT_APPROVAL' ||
+          subType === 'URGENT_PAYABLE_APPROVAL' ||
+          subType === 'PAYMENT_APPROVAL'
+        ) {
+          return false;
+        }
+        // Client must ONLY see notifications where targetClientName matches their identity
+        if (!n.targetClientName) return false;
+        return matchesNamedEntity(n.targetClientName);
+      }
+
+      // =======================================================================
+      // 3. STRICT TRANSPORTER FILTER:
+      //    - Vehicle registration confirmed marked
+      //    - Vehicle cancelled marked & NOC generated
+      //    - Vehicle expire soon, expired, renewed
+      //    - Decisions on transporter requests
+      // =======================================================================
+      if (isTransporter && !isVehicleManager && !isOperationsManager && !isFinanceManager) {
+        if (
+          subType === 'DELETION_APPROVAL' ||
+          subType === 'CANCELLATION_APPROVAL' ||
+          subType === 'EDIT_APPROVAL' ||
+          subType === 'URGENT_PAYABLE_APPROVAL' ||
+          subType === 'PAYMENT_APPROVAL'
+        ) {
+          return false;
+        }
+        const targetsTransporterRole = declaredTargetRoles.some(tr => tr.includes('TRANSPORTER'));
+        if (!targetsTransporterRole && n.category !== 'TRANSPORTER') return false;
+        if (n.targetClientName && (userIdentifier || clientName)) {
+          return matchesNamedEntity(n.targetClientName);
+        }
         return true;
       }
 
-      // 4. Role-based matching against current role or any assigned roles
+      // =======================================================================
+      // 4. OPERATIONS MANAGER & VEHICLE MANAGER:
+      //    - Step 1 Manager Review requests from Client/Transporter
+      //    - Admin approval/rejection outcomes for cases & vehicles
+      //    - Fleet expiry, idle vehicle, and transit delay alerts
+      // =======================================================================
+      if (n.targetClientName && matchesNamedEntity(n.targetClientName)) {
+        return true;
+      }
+
       const matchesDirectRole = declaredTargetRoles.some(tr => 
         tr === currentNorm || userRolesNorm.includes(tr)
       );
       if (matchesDirectRole) return true;
 
-      // 5. Special domain routing:
       if (isVehicleManager) {
+        if (approvalStage === 'ADMIN_FINAL' && !declaredTargetRoles.some(tr => tr.includes('VEHICLE'))) {
+          return false;
+        }
         if (
           n.category === 'TRANSPORTER' || 
-          declaredTargetRoles.some(tr => tr.includes('VEHICLE') || tr.includes('FLEET') || tr.includes('TRANSPORT')) ||
-          (n.targetView && (n.targetView.includes('vehicle') || n.targetView.includes('transporter'))) ||
-          (n.title && (n.title.includes('Vehicle') || n.title.includes('Renewal') || n.title.includes('Transporter') || n.title.includes('Trailer') || n.title.includes('Fleet')))
+          declaredTargetRoles.some(tr => tr.includes('VEHICLE') || tr.includes('FLEET'))
         ) return true;
       }
 
-      if (isOperationsManager) {
+      if (isOperationsManager || isCaseManager) {
+        if (approvalStage === 'ADMIN_FINAL' && !declaredTargetRoles.some(tr => tr.includes('OPERATION') || tr.includes('CASE'))) {
+          return false;
+        }
         if (
-          n.category === 'CASE' ||
           declaredTargetRoles.some(tr => tr.includes('OPERATION') || tr.includes('CASE')) ||
-          (n.targetView && n.targetView.includes('case'))
+          subType === 'TRANSIT_DELAY_ALERT' ||
+          subType === 'IDLE_VEHICLE_ALERT'
         ) return true;
       }
 
+      // =======================================================================
+      // 5. FINANCE MANAGER:
+      //    - Client payment verification requests (PAYMENT_APPROVAL / VERIFY_PAYMENT)
+      //    - Any invoice charges anywhere: payable invoice by vendor, receivable invoices in cases (INVOICE_CHARGE_NOTIFICATION)
+      //    - Admin decision confirmation on urgent payable requests
+      //    - Payment paid / received records
+      // =======================================================================
       if (isFinanceManager) {
+        if (subType === 'URGENT_PAYABLE_APPROVAL' && declaredTargetRoles.includes('ADMIN') && !declaredTargetRoles.includes('FINANCEMANAGER')) {
+          return false;
+        }
         if (
           n.category === 'FINANCE' ||
-          declaredTargetRoles.some(tr => tr.includes('FINANCE')) ||
-          (n.targetView && n.targetView.includes('finance')) ||
-          (n.title && (n.title.includes('Finance') || n.title.includes('Invoice') || n.title.includes('Payment') || n.title.includes('Salary') || n.title.includes('Ledger') || n.title.includes('Bill') || n.title.includes('Expense') || n.title.includes('Charges')))
+          subType === 'PAYMENT_APPROVAL' ||
+          subType === 'INVOICE_CHARGE_NOTIFICATION' ||
+          subType === 'FINANCE_RECORDED' ||
+          actionType === 'VERIFY_PAYMENT' ||
+          declaredTargetRoles.some(tr => tr.includes('FINANCE'))
         ) return true;
-      }
-
-      if (isCaseManager) {
-        if (
-          n.category === 'CASE' ||
-          declaredTargetRoles.some(tr => tr.includes('CASE') || tr.includes('OPERATION')) ||
-          (n.targetView && n.targetView.includes('case')) ||
-          (n.title && (n.title.includes('Case') || n.title.includes('Workflow') || n.title.includes('Registration') || n.title.includes('Shipment') || n.title.includes('Transit')))
-        ) return true;
-      }
-
-      // 6. If client role, hide internal administrative deletion/cancellation approvals
-      if (currentNorm === 'CLIENT' || userRolesNorm.includes('CLIENT')) {
-        if (
-          n.notificationSubType === 'DELETION_APPROVAL' ||
-          n.notificationSubType === 'CANCELLATION_APPROVAL' ||
-          n.notificationSubType === 'EDIT_APPROVAL'
-        ) return false;
       }
 
       return false;
     });
-  }, [notifications, currentRole, currentRoles, clientName, userIdentifier]);
+  }, [notifications, currentRole, currentRoles, clientName, userIdentifier, activeCompany?.id]);
 
   // Unread Count
   const unreadCount = useMemo(() => {
@@ -205,12 +337,15 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       if (n.status !== 'PENDING') return false;
       return (
         n.notificationSubType === 'PAYMENT_APPROVAL' ||
+        n.notificationSubType === 'URGENT_PAYABLE_APPROVAL' ||
         n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
         n.notificationSubType === 'CASE_APPROVAL' ||
         n.notificationSubType === 'DELETION_APPROVAL' ||
         n.notificationSubType === 'CANCELLATION_APPROVAL' ||
         n.notificationSubType === 'EDIT_APPROVAL' ||
         n.approvalData?.actionType === 'VERIFY_PAYMENT' ||
+        n.approvalData?.actionType === 'APPROVE_URGENT_PAYABLE' ||
+        n.approvalData?.actionType === 'APPROVE_NOC' ||
         n.approvalData?.actionType === 'APPROVE_CLIENT'
       );
     }).length;
@@ -225,12 +360,15 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       return relevantNotifications.filter(n => {
         return (
           n.notificationSubType === 'PAYMENT_APPROVAL' ||
+          n.notificationSubType === 'URGENT_PAYABLE_APPROVAL' ||
           n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
           n.notificationSubType === 'CASE_APPROVAL' ||
           n.notificationSubType === 'DELETION_APPROVAL' ||
           n.notificationSubType === 'CANCELLATION_APPROVAL' ||
           n.notificationSubType === 'EDIT_APPROVAL' ||
           n.approvalData?.actionType === 'VERIFY_PAYMENT' ||
+          n.approvalData?.actionType === 'APPROVE_URGENT_PAYABLE' ||
+          n.approvalData?.actionType === 'APPROVE_NOC' ||
           n.approvalData?.actionType === 'APPROVE_CLIENT'
         );
       });
@@ -264,27 +402,60 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     }
   };
 
-  const handleCardClick = async (n: AppNotification) => {
-    // 1. Mark as read on tap
+  const handleDeleteNotification = async (n: AppNotification, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    try {
+      await deleteNotificationFromFirestore(n.id, (n as any)._docId);
+    } catch (err) {
+      console.warn("Could not delete notification:", err);
+    }
+  };
+
+  const handleClearAllNotifications = async () => {
+    try {
+      await clearAllNotificationsInFirestore();
+      setNotifications([]);
+    } catch (err) {
+      console.warn("Could not clear all notifications:", err);
+    }
+  };
+
+  const handleDirectNavigate = (n: AppNotification, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (n.status === 'PENDING') {
       handleMarkAsRead(n);
     }
-
-    // 2. Direct 1-tap navigation for cases
     if (n.targetFilter?.caseNo && onNavigateToCase) {
       onNavigateToCase(n.targetFilter.caseNo, n.targetFilter);
       setIsOpen(false);
       return;
     }
-
-    // 3. Direct navigation for tabs
     if (n.targetView && onNavigateToTab) {
       onNavigateToTab(n.targetView);
       setIsOpen(false);
       return;
     }
+    setSelectedNotification(n);
+    setIsModalOpen(true);
+  };
 
-    // 4. Otherwise open detail modal
+  const handleCardClick = async (n: AppNotification) => {
+    // 1. Mark non-approval notifications as read on tap (keep approval notifications pending until decision)
+    const isApprovalItem =
+      n.notificationSubType === 'PAYMENT_APPROVAL' ||
+      n.notificationSubType === 'URGENT_PAYABLE_APPROVAL' ||
+      n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
+      n.notificationSubType === 'CASE_APPROVAL' ||
+      n.notificationSubType === 'DELETION_APPROVAL' ||
+      n.notificationSubType === 'CANCELLATION_APPROVAL' ||
+      n.notificationSubType === 'EDIT_APPROVAL' ||
+      Boolean(n.approvalData?.actionType);
+
+    if (n.status === 'PENDING' && !isApprovalItem) {
+      handleMarkAsRead(n);
+    }
+
+    // 2. Always open the Notification Detail & Action Modal so user can inspect full details, approve/reject, or jump to view
     setSelectedNotification(n);
     setIsModalOpen(true);
   };
@@ -315,15 +486,23 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     }
   };
 
-  const handleNotificationAction = async (action: 'ACCEPT' | 'REJECT' | 'VIEW' | 'MARK_READ') => {
+  const handleNotificationAction = async (action: 'ACCEPT' | 'REJECT' | 'VIEW' | 'MARK_READ' | 'DELETE') => {
     if (!selectedNotification) return;
 
+    if (action === 'DELETE') {
+      await handleDeleteNotification(selectedNotification);
+      setIsModalOpen(false);
+      return;
+    }
+
     if (action === 'VIEW') {
-      if (selectedNotification.targetView && onNavigateToTab) {
-        onNavigateToTab(selectedNotification.targetView);
+      if (selectedNotification.status === 'PENDING') {
+        handleMarkAsRead(selectedNotification);
       }
       if (selectedNotification.targetFilter?.caseNo && onNavigateToCase) {
         onNavigateToCase(selectedNotification.targetFilter.caseNo, selectedNotification.targetFilter);
+      } else if (selectedNotification.targetView && onNavigateToTab) {
+        onNavigateToTab(selectedNotification.targetView);
       }
       setIsModalOpen(false);
       setIsOpen(false);
@@ -491,6 +670,21 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                     <span>Mark all read</span>
                   </button>
                 )}
+                {relevantNotifications.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearAllNotifications}
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1.5 ${
+                      isPearl 
+                        ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100' 
+                        : 'bg-rose-500/10 border-rose-500/25 text-rose-300 hover:bg-rose-500/20'
+                    }`}
+                    title="Clear all notifications"
+                  >
+                    <Trash2 size={14} />
+                    <span>Clear all</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
@@ -578,11 +772,14 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
 
                   const isApproval = 
                     isPaymentApproval ||
+                    n.notificationSubType === 'URGENT_PAYABLE_APPROVAL' ||
                     n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
                     n.notificationSubType === 'CASE_APPROVAL' ||
                     n.notificationSubType === 'DELETION_APPROVAL' ||
                     n.notificationSubType === 'CANCELLATION_APPROVAL' ||
                     n.notificationSubType === 'EDIT_APPROVAL' ||
+                    n.approvalData?.actionType === 'APPROVE_URGENT_PAYABLE' ||
+                    n.approvalData?.actionType === 'APPROVE_NOC' ||
                     n.approvalData?.actionType === 'APPROVE_CLIENT';
 
                   return (
@@ -623,7 +820,7 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                               </h4>
                             </div>
 
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center gap-1.5 shrink-0">
                               <span className={`text-[11px] whitespace-nowrap ${
                                 isPearl ? 'text-slate-500' : 'text-slate-400'
                               }`}>
@@ -643,6 +840,18 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                                   <Check size={15} />
                                 </button>
                               )}
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteNotification(n, e)}
+                                className={`p-1 rounded-lg transition cursor-pointer ${
+                                  isPearl 
+                                    ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50' 
+                                    : 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/10'
+                                }`}
+                                title="Delete Notification"
+                              >
+                                <Trash2 size={14} />
+                              </button>
                             </div>
                           </div>
 
@@ -654,19 +863,28 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                             </p>
                           )}
 
-                          {/* Action Buttons Only When Needed */}
-                          {((isApproval && isPending) || n.targetFilter?.caseNo) && (
-                            <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-200/60 dark:border-white/10 flex-wrap">
-                              {n.targetFilter?.caseNo ? (
+                          {/* Action Buttons Footer */}
+                          <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-200/60 dark:border-white/10 flex-wrap">
+                            <div className="flex items-center gap-2">
+                              {n.targetFilter?.caseNo && (
                                 <span className={`text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-lg border ${
                                   isPearl ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-white/5 text-slate-300 border-white/10'
                                 }`}>
                                   Case: {n.targetFilter.caseNo}
                                 </span>
-                              ) : <span />}
+                              )}
+                              {n.targetFilter?.vehicleNo && (
+                                <span className={`text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-lg border ${
+                                  isPearl ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+                                }`}>
+                                  Vehicle: {n.targetFilter.vehicleNo}
+                                </span>
+                              )}
+                            </div>
 
-                              {isApproval && isPending ? (
-                                <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 ml-auto">
+                              {isApproval && isPending && (
+                                <>
                                   <button
                                     type="button"
                                     onClick={(e) => handleQuickApprove(n, e)}
@@ -685,17 +903,24 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                                     <X size={13} />
                                     <span>Reject</span>
                                   </button>
-                                </div>
-                              ) : (
-                                <span className={`text-xs font-semibold flex items-center gap-1 ${
-                                  isPearl ? 'text-amber-700' : 'text-amber-400'
-                                }`}>
-                                  <span>Open</span>
+                                </>
+                              )}
+                              {(n.targetView || n.targetFilter?.caseNo) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDirectNavigate(n, e)}
+                                  className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1 border transition cursor-pointer ${
+                                    isPearl
+                                      ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
+                                      : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/25'
+                                  }`}
+                                >
+                                  <span>{n.actionLabel || 'Open'}</span>
                                   <ArrowRight size={12} />
-                                </span>
+                                </button>
                               )}
                             </div>
-                          )}
+                          </div>
                         </div>
                       </div>
                     </div>

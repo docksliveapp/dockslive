@@ -162,6 +162,284 @@ export function subscribeToCases(
   };
 }
 
+function dispatchCaseLifecycleNotifications(caseItem: Case, prevCase?: Case | null, isNew?: boolean) {
+  try {
+    const clientName = (
+      caseItem.clientName ||
+      caseItem.client ||
+      caseItem.importer ||
+      (caseItem.extractedData as any)?.cargoOwner ||
+      (caseItem.extractedData as any)?.importerName ||
+      ''
+    ).trim();
+    const caseNo = caseItem.caseNo || caseItem.caseNumber || `Case #${caseItem.id}`;
+    if (!caseNo) return;
+
+    const nowTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // 1. Case Number Generated (New Case) -> Client
+    if (isNew && clientName) {
+      const genKey = `notif_case_gen_${caseItem.id || caseNo}`;
+      if (!safeAppStorage.getItem(genKey)) {
+        safeAppStorage.setItem(genKey, 'true');
+        saveNotificationToFirestore({
+          id: Date.now() + Math.floor(Math.random() * 1000),
+          title: `Case Registered & Number Generated: ${caseNo}`,
+          description: `Your consignment Case ${caseNo} (${caseItem.category || 'Transit'}) has been registered for ${clientName}. Route: ${caseItem.pol || 'POL'} → ${caseItem.pod || 'POD'}. You will receive live notifications for every workflow step until completion.`,
+          details: `Case Number: ${caseNo}\nClient: ${clientName}\nCategory: ${caseItem.category || 'N/A'}\nRoute: ${caseItem.pol || 'POL'} → ${caseItem.pod || 'POD'}\nCurrent Status: ${caseItem.status || 'Registered'}`,
+          timestamp: nowTimeStr,
+          type: 'INFO',
+          notificationSubType: 'WORKFLOW_UPDATE',
+          status: 'PENDING',
+          actionLabel: 'Track Case Workflow',
+          priority: 'HIGH',
+          targetRole: 'CLIENT',
+          targetClientName: clientName,
+          category: 'CASE',
+          targetView: 'cases',
+          targetFilter: { caseId: caseItem.id, caseNo }
+        }).catch(() => {});
+      }
+    }
+
+    // 2. Case Cancelled Status Marked -> Client
+    const isNowCancelled = String(caseItem.status || '').toUpperCase() === 'CANCELLED';
+    const wasCancelled = prevCase ? String(prevCase.status || '').toUpperCase() === 'CANCELLED' : false;
+    if (isNowCancelled && !wasCancelled && clientName) {
+      const cancelKey = `notif_case_cancelled_${caseItem.id || caseNo}`;
+      if (!safeAppStorage.getItem(cancelKey)) {
+        safeAppStorage.setItem(cancelKey, 'true');
+        saveNotificationToFirestore({
+          id: Date.now() + Math.floor(Math.random() * 1000) + 1,
+          title: `Case Cancelled: ${caseNo}`,
+          description: `Your Case ${caseNo} (${clientName}) has been marked as CANCELLED.`,
+          details: `Case No: ${caseNo}\nClient: ${clientName}\nStatus: CANCELLED\nRoute: ${caseItem.pol || 'N/A'} → ${caseItem.pod || 'N/A'}`,
+          timestamp: nowTimeStr,
+          type: 'ALERT',
+          notificationSubType: 'CASE_CANCELLED_ALERT',
+          status: 'PENDING',
+          actionLabel: 'View Case Details',
+          priority: 'HIGH',
+          targetRole: 'CLIENT',
+          targetClientName: clientName,
+          category: 'CASE',
+          targetView: 'cases',
+          targetFilter: { caseId: caseItem.id, caseNo }
+        }).catch(() => {});
+      }
+    }
+
+    // 3. Workflow Progress / Step Update (From Case Generation to Finish) -> Client
+    if (!isNew && !isNowCancelled && clientName) {
+      const prevStatus = prevCase?.status || '';
+      const prevStep = prevCase?.currentStep ?? -1;
+      const currStatus = caseItem.status || '';
+      const currStep = caseItem.currentStep ?? -1;
+      const prevWfJson = JSON.stringify(prevCase?.workflowDetails || {});
+      const currWfJson = JSON.stringify(caseItem.workflowDetails || {});
+
+      if (prevStatus !== currStatus || prevStep !== currStep || prevWfJson !== currWfJson) {
+        const wfKey = `notif_case_wf_${caseItem.id}_${currStatus}_${currStep}_${currWfJson.length}`;
+        if (!safeAppStorage.getItem(wfKey)) {
+          safeAppStorage.setItem(wfKey, 'true');
+          const isFinished =
+            currStatus.toUpperCase() === 'COMPLETED' ||
+            currStatus.toUpperCase() === 'DELIVERED' ||
+            currStatus.toUpperCase() === 'FINISHED';
+
+          saveNotificationToFirestore({
+            id: Date.now() + Math.floor(Math.random() * 1000) + 2,
+            title: isFinished
+              ? `Case Completed / Finished: ${caseNo}`
+              : `Case Workflow Update (${currStatus || `Step ${Number(currStep) + 1}`}): ${caseNo}`,
+            description: isFinished
+              ? `All workflows for your Case ${caseNo} (${clientName}) have been completed and finished.`
+              : `Workflow updated for Case ${caseNo}: Status is now "${currStatus}" (Step ${Number(currStep) + 1}).`,
+            details: `Case No: ${caseNo}\nClient: ${clientName}\nUpdated Status: ${currStatus}\nWorkflow Step: ${Number(currStep) + 1}\nRoute: ${caseItem.pol || 'POL'} → ${caseItem.pod || 'POD'}`,
+            timestamp: nowTimeStr,
+            type: 'INFO',
+            notificationSubType: 'WORKFLOW_UPDATE',
+            status: 'PENDING',
+            actionLabel: 'View Workflow Status',
+            priority: isFinished ? 'HIGH' : 'MEDIUM',
+            targetRole: 'CLIENT',
+            targetClientName: clientName,
+            category: 'CASE',
+            targetView: 'cases',
+            targetFilter: { caseId: caseItem.id, caseNo }
+          }).catch(() => {});
+        }
+      }
+    }
+
+    // 4. Company-Managed vs Client-Managed Arrangements Notification & Demand -> Client
+    if (clientName) {
+      const companyManagedItems: string[] = [];
+      const clientManagedItems: string[] = [];
+
+      if (caseItem.serviceArrangements && typeof caseItem.serviceArrangements === 'object') {
+        Object.entries(caseItem.serviceArrangements).forEach(([key, item]: [string, any]) => {
+          if (!item) return;
+          const label = item.label || key.replace(/_/g, ' ');
+          if (item.arrangedBy === 'Client') {
+            clientManagedItems.push(label);
+          } else if (item.arrangedBy === 'DPL' || item.arrangedBy === 'Company') {
+            companyManagedItems.push(label);
+          }
+        });
+      }
+
+      if (Array.isArray(caseItem.charges)) {
+        caseItem.charges.forEach((ch) => {
+          if (!ch || !ch.description) return;
+          if (ch.arrangedBy === 'Client') {
+            if (!clientManagedItems.includes(ch.description)) clientManagedItems.push(ch.description);
+          } else if ((Number(ch.amount) || 0) > 0) {
+            if (!companyManagedItems.includes(ch.description)) companyManagedItems.push(ch.description);
+          }
+        });
+      }
+
+      if (companyManagedItems.length > 0 || clientManagedItems.length > 0) {
+        const arrSig = `${companyManagedItems.join('|')}__${clientManagedItems.join('|')}`;
+        const arrKey = `notif_case_arr_${caseItem.id}_${arrSig}`;
+        if (!safeAppStorage.getItem(arrKey)) {
+          safeAppStorage.setItem(arrKey, 'true');
+
+          if (companyManagedItems.length > 0) {
+            saveNotificationToFirestore({
+              id: Date.now() + Math.floor(Math.random() * 1000) + 3,
+              title: `Company Managed Services (${caseNo})`,
+              description: `Company is managing the following items in Case ${caseNo}: ${companyManagedItems.join(', ')}.`,
+              details: `Case No: ${caseNo}\nClient: ${clientName}\nManaged by Company:\n• ${companyManagedItems.join('\n• ')}`,
+              timestamp: nowTimeStr,
+              type: 'INFO',
+              notificationSubType: 'COMPANY_MANAGED_UPDATE',
+              status: 'PENDING',
+              actionLabel: 'View Case Services',
+              priority: 'MEDIUM',
+              targetRole: 'CLIENT',
+              targetClientName: clientName,
+              category: 'CASE',
+              targetView: 'cases',
+              targetFilter: { caseId: caseItem.id, caseNo }
+            }).catch(() => {});
+          }
+
+          if (clientManagedItems.length > 0) {
+            saveNotificationToFirestore({
+              id: Date.now() + Math.floor(Math.random() * 1000) + 4,
+              title: `Action Required: Update Client-Managed Items (${caseNo})`,
+              description: `Demand for Update: Please provide/update details & documents for items managed by you in Case ${caseNo}: ${clientManagedItems.join(', ')}.`,
+              details: `Case No: ${caseNo}\nClient: ${clientName}\nItems Managed by Client (Update Required):\n• ${clientManagedItems.join('\n• ')}\nPlease update these particulars in your Client Portal.`,
+              timestamp: nowTimeStr,
+              type: 'ACTION',
+              notificationSubType: 'CLIENT_MANAGED_DEMAND',
+              status: 'PENDING',
+              actionLabel: 'Update Client Items',
+              priority: 'HIGH',
+              targetRole: 'CLIENT',
+              targetClientName: clientName,
+              category: 'CASE',
+              targetView: 'cases',
+              targetFilter: { caseId: caseItem.id, caseNo }
+            }).catch(() => {});
+          }
+        }
+      }
+    }
+
+    // 5. Case Receivable Invoice / Charges Notification -> Finance Manager & Charged Client ONLY
+    const explicitCharges = Array.isArray(caseItem.charges)
+      ? caseItem.charges.filter(ch => ch && ch.arrangedBy !== 'Client' && (Number(ch.amount) || 0) > 0)
+      : [];
+    const totalCharged = explicitCharges.length > 0
+      ? explicitCharges.reduce((s, c) => s + (Number(c.amount) || 0), 0)
+      : Number(caseItem.totalAmount || (caseItem.extractedData as any)?.totalAmount || 0);
+
+    if (totalCharged > 0 && !isNowCancelled) {
+      const chargeKey = `notif_case_charge_${caseItem.id}_${totalCharged}`;
+      if (!safeAppStorage.getItem(chargeKey)) {
+        safeAppStorage.setItem(chargeKey, 'true');
+        const breakdownStr = explicitCharges.length > 0
+          ? explicitCharges.map(c => `${c.description}: PKR ${Number(c.amount).toLocaleString()}`).join(', ')
+          : `Case Invoice Total: PKR ${totalCharged.toLocaleString()}`;
+
+        saveNotificationToFirestore({
+          id: Date.now() + Math.floor(Math.random() * 1000) + 5,
+          title: `Case Invoice / Ledger Charge (${caseNo}): PKR ${totalCharged.toLocaleString()}`,
+          description: `Invoice & ledger charge of PKR ${totalCharged.toLocaleString()} generated for ${clientName || 'Client'} on Case ${caseNo} (${breakdownStr}).`,
+          details: `Case / Invoice No: ${caseNo}\nCharged Client: ${clientName || 'N/A'}\nTotal Amount Charged: PKR ${totalCharged.toLocaleString()}\nBreakdown: ${breakdownStr}`,
+          timestamp: nowTimeStr,
+          type: 'INFO',
+          notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
+          status: 'PENDING',
+          actionLabel: 'View Invoice & Ledger',
+          priority: 'HIGH',
+          targetRole: clientName ? 'FINANCE_MANAGER,CLIENT' : 'FINANCE_MANAGER',
+          targetClientName: clientName || undefined,
+          category: 'FINANCE',
+          targetView: 'finance',
+          targetFilter: { caseId: caseItem.id, caseNo }
+        }).catch(() => {});
+      }
+    }
+
+    // 6. Transporter Freight Invoice Generated Notification -> Specific Transporter & Finance Manager (& Client if rentPaymentBy === 'Client')
+    if (Array.isArray(caseItem.containers) && !isNowCancelled) {
+      caseItem.containers.forEach((cntr, cIdx) => {
+        const tName = (cntr.transporterName || (caseItem as any).transporterName || '').trim();
+        const rentAmt = Number(cntr.rentAmount || 0);
+        if (tName && rentAmt > 0) {
+          const transInvKey = `notif_trans_inv_${caseItem.id}_${cntr.number || cIdx}_${rentAmt}`;
+          if (!safeAppStorage.getItem(transInvKey)) {
+            safeAppStorage.setItem(transInvKey, 'true');
+            saveNotificationToFirestore({
+              id: Date.now() + Math.floor(Math.random() * 1000) + 16 + cIdx,
+              title: `Invoice Generated (${caseNo}): PKR ${rentAmt.toLocaleString()}`,
+              description: `Freight / Vehicle Rent invoice of PKR ${rentAmt.toLocaleString()} generated for Transporter "${tName}" (Container: ${cntr.number || 'N/A'}, Vehicle: ${cntr.vehicleNo || 'Assigned'}, Paid By: ${cntr.rentPaymentBy || 'Client'}).`,
+              details: `Case No: ${caseNo}\nTransporter: ${tName}\nContainer No: ${cntr.number || 'N/A'}\nVehicle No: ${cntr.vehicleNo || 'N/A'}\nInvoice Amount: PKR ${rentAmt.toLocaleString()}\nPayable By: ${cntr.rentPaymentBy || 'Client'}\nClient: ${clientName || 'N/A'}`,
+              timestamp: nowTimeStr,
+              type: 'INFO',
+              notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
+              status: 'PENDING',
+              actionLabel: 'View Freight Invoice',
+              priority: 'HIGH',
+              targetRole: 'TRANSPORTER,FINANCE_MANAGER',
+              targetClientName: tName,
+              category: 'TRANSPORTER',
+              targetView: 'finance',
+              targetFilter: { caseId: caseItem.id, caseNo }
+            }).catch(() => {});
+
+            if (cntr.rentPaymentBy === 'Client' && clientName) {
+              saveNotificationToFirestore({
+                id: Date.now() + Math.floor(Math.random() * 1000) + 26 + cIdx,
+                title: `Transporter Freight Charge (${caseNo}): PKR ${rentAmt.toLocaleString()}`,
+                description: `Transporter (${tName}) freight invoice of PKR ${rentAmt.toLocaleString()} generated on your ledger for Container ${cntr.number || 'N/A'} (Vehicle: ${cntr.vehicleNo || 'Assigned'}).`,
+                details: `Case No: ${caseNo}\nCharged Client: ${clientName}\nTransporter: ${tName}\nContainer: ${cntr.number || 'N/A'}\nVehicle: ${cntr.vehicleNo || 'N/A'}\nAmount: PKR ${rentAmt.toLocaleString()}`,
+                timestamp: nowTimeStr,
+                type: 'INFO',
+                notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
+                status: 'PENDING',
+                actionLabel: 'View Client Ledger',
+                priority: 'HIGH',
+                targetRole: 'CLIENT,FINANCE_MANAGER',
+                targetClientName: clientName,
+                category: 'FINANCE',
+                targetView: 'finance',
+                targetFilter: { caseId: caseItem.id, caseNo }
+              }).catch(() => {});
+            }
+          }
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('Case lifecycle notification dispatch notice:', err);
+  }
+}
+
 export async function saveCaseToFirestore(newCase: Case): Promise<void> {
   const path = 'cases';
   const docId = newCase.id || String(Date.now());
@@ -200,6 +478,7 @@ export async function saveCaseToFirestore(newCase: Case): Promise<void> {
       updatedAt: new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload);
+    dispatchCaseLifecycleNotifications({ ...newCase, id: docId }, null, true);
   } catch (error) {
     console.warn(`Firestore saveCase warning for ${docId}:`, error);
   }
@@ -209,6 +488,12 @@ export async function updateCaseInFirestore(caseItem: Case): Promise<void> {
   const path = 'cases';
   const docId = caseItem.id;
   const activeCompany = getActiveCompanyId();
+  let prevCase: Case | null = null;
+  try {
+    const liveCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
+    prevCase = liveCases.find(c => String(c.id) === String(docId)) || null;
+  } catch (_) {}
+
   try {
     const payload = sanitizeForFirestore({
       ...caseItem,
@@ -216,6 +501,8 @@ export async function updateCaseInFirestore(caseItem: Case): Promise<void> {
       updatedAt: new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload, { merge: true });
+    const mergedCase = prevCase ? { ...prevCase, ...caseItem } : caseItem;
+    dispatchCaseLifecycleNotifications(mergedCase, prevCase, false);
   } catch (error) {
     console.warn(`Firestore updateCase warning for ${docId}:`, error);
   }
@@ -318,7 +605,7 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
     });
     await setDoc(doc(db, path, docId), payload);
 
-    // Notify Finance Manager and Admin of finance entries
+    // Notify Finance Manager, Admin, and Client according to strict notification rules
     if (entryToSave.amount && Number(entryToSave.amount) > 0) {
       const notifId = Date.now() + Math.floor(Math.random() * 1000);
 
@@ -329,33 +616,33 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
       let notif: AppNotification;
 
       if (isMonthlyOrRecurring) {
-        // Monthly fixed amounts and salaries: AUTOMATIC, NO approval required!
+        // Monthly fixed amounts and salaries: AUTOMATIC, NO approval required -> Finance Manager
         notif = {
           id: notifId,
           title: `Monthly Fixed Expense: PKR ${Number(entryToSave.amount).toLocaleString()} (Auto-Approved)`,
-          description: `${entryToSave.description || 'Monthly Fixed Expense'} for ${entryToSave.party || 'Account'} has been automatically approved and recorded to Finance Payables. No manual approval required.`,
+          description: `${entryToSave.description || 'Monthly Fixed Expense'} for ${entryToSave.party || 'Account'} has been automatically approved and recorded to Finance Payables.`,
           details: `${entryToSave.category || 'Finance'} • Reference: ${entryToSave.reference || 'N/A'} • Status: AUTO-APPROVED • Payment Method: ${entryToSave.paymentMethod || 'BANK'}`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           type: 'INFO',
-          notificationSubType: 'FINANCE_RECORDED',
-          status: 'RESOLVED',
+          notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
+          status: 'PENDING',
           actionLabel: 'View in Finance',
           targetRole: UserRole.FINANCE_MANAGER,
           targetView: 'finance',
           category: 'FINANCE'
         };
       } else if (isClientDepositUpload) {
-        // Client / User deposited money or uploaded slip: REQUIRES Finance Manager verification of funds!
+        // Rule 9: Payment submitted from client ID -> Confirmation request coming to Finance Manager Notification Center
         notif = {
           id: notifId,
           title: `Payment Verification Required: PKR ${Number(entry.amount).toLocaleString()}`,
-          description: `Deposit slip / payment uploaded by ${entry.party || 'Client'} for ${entry.category || 'Payment'}. Finance Manager verification required to verify funds received before crediting ledger.`,
-          details: `Party: ${entry.party} • Bank: ${entry.bankName || 'Direct'} • Ref: ${entry.reference || 'N/A'} • Amount: PKR ${Number(entry.amount).toLocaleString()}`,
+          description: `Payment submitted from Client ID (${entry.party || 'Client'}) for ${entry.category || 'Payment'}. Finance Manager verification & confirmation required before adding to Received Payments, Client Ledger & Cashbook.`,
+          details: `Client / Party: ${entry.party} • Bank: ${entry.bankName || 'Direct'} • Ref: ${entry.reference || 'N/A'} • Amount: PKR ${Number(entry.amount).toLocaleString()}`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           type: 'ACTION',
           notificationSubType: 'PAYMENT_APPROVAL',
           status: 'PENDING',
-          actionLabel: 'Verify Payment',
+          actionLabel: 'Verify & Confirm Payment',
           targetRole: UserRole.FINANCE_MANAGER,
           targetView: 'finance',
           category: 'FINANCE',
@@ -371,21 +658,122 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
             caseNo: (entry as any).caseNo
           }
         };
-      } else {
+      } else if (entryToSave.type === 'PAYABLE') {
+        const catLower = (entry.category || '').toLowerCase();
+        const descLower = (entry.description || '').toLowerCase();
+        const isTransporterInvoice =
+          catLower.includes('vehicle rent') ||
+          catLower.includes('freight') ||
+          catLower.includes('transporter') ||
+          (entry as any).paymentCategory === 'VEHICLE_RENT' ||
+          Boolean((entry as any).targetTransporter) ||
+          descLower.includes('vehicle rent') ||
+          descLower.includes('freight') ||
+          descLower.includes('transporter');
+        const transporterTarget = (entry as any).targetTransporter || entry.party || 'Transporter';
+
+        // Rule 9 & Transporter Rule: Payable invoice by vendor / transporter -> Notification coming in Finance Manager (& Transporter if freight/vehicle rent)
         notif = {
           id: notifId,
-          title: `Finance ${entry.type === 'RECEIVABLE' ? 'Receivable' : entry.type === 'PAYABLE' ? 'Payable' : 'Entry'}: PKR ${Number(entry.amount).toLocaleString()}`,
-          description: `${entry.description || entry.category || 'Transaction'} for ${entry.party || 'Account'}. Status: ${entry.status || 'RECORDED'}`,
-          details: `${entry.category || 'Finance'} • Reference: ${entry.reference || 'N/A'} • Payment Method: ${entry.paymentMethod || 'BANK'}`,
+          title: isTransporterInvoice
+            ? `Invoice Generated: PKR ${Number(entry.amount).toLocaleString()}`
+            : `Payable Invoice Charge (Vendor): PKR ${Number(entry.amount).toLocaleString()}`,
+          description: isTransporterInvoice
+            ? `Freight / Vehicle Rent invoice of PKR ${Number(entry.amount).toLocaleString()} generated for Transporter "${transporterTarget}": ${entry.description || entry.category || 'Freight Invoice'}.`
+            : `Payable invoice / charge recorded for Vendor "${entry.party || 'Vendor'}": ${entry.description || entry.category || 'Payable Invoice'}.`,
+          details: `Party: ${transporterTarget}\nCategory: ${entry.category || 'Payable'}\nReference: ${entry.reference || 'N/A'}\nAmount: PKR ${Number(entry.amount).toLocaleString()}\nStatus: ${entryToSave.status || 'PENDING'}`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           type: 'INFO',
-          notificationSubType: 'GENERAL',
-          status: 'RESOLVED',
-          actionLabel: 'View Finance',
-          targetRole: UserRole.FINANCE_MANAGER,
+          notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
+          status: 'PENDING',
+          actionLabel: isTransporterInvoice ? 'View Freight Invoice' : 'View Payable Invoice',
+          targetRole: isTransporterInvoice ? `${UserRole.FINANCE_MANAGER},${UserRole.TRANSPORTER}` : UserRole.FINANCE_MANAGER,
+          targetClientName: isTransporterInvoice ? transporterTarget : undefined,
+          targetView: 'finance',
+          category: isTransporterInvoice ? 'TRANSPORTER' : 'FINANCE'
+        };
+      } else if (entryToSave.type === 'RECEIVABLE') {
+        // Rule 9 & Rule 11: Receivable invoice / company ledger charge -> Finance Manager AND specific Client being charged
+        const clientParty = entry.party || 'Client';
+        notif = {
+          id: notifId,
+          title: `Receivable Invoice / Ledger Charge: PKR ${Number(entry.amount).toLocaleString()}`,
+          description: `Company invoice / ledger charge of PKR ${Number(entry.amount).toLocaleString()} generated for ${clientParty}: ${entry.description || entry.category || 'Invoice Charge'}.`,
+          details: `Client: ${clientParty}\nDescription: ${entry.description || entry.category || 'Receivable Invoice'}\nReference: ${entry.reference || 'N/A'}\nAmount Charged: PKR ${Number(entry.amount).toLocaleString()}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: 'INFO',
+          notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
+          status: 'PENDING',
+          actionLabel: 'View Invoice & Ledger',
+          targetRole: `${UserRole.FINANCE_MANAGER},${UserRole.CLIENT}`,
+          targetClientName: clientParty,
           targetView: 'finance',
           category: 'FINANCE'
         };
+      } else {
+        // INCOME (Payment Received) or EXPENSE (Payment Paid) -> Admin & Finance Manager (Rule 7: Any payment paid and received notification)
+        const isPaidOut = entryToSave.type === 'EXPENSE';
+        const label = isPaidOut ? 'Payment Paid' : 'Payment Received';
+        notif = {
+          id: notifId,
+          title: `${label}: PKR ${Number(entry.amount).toLocaleString()}`,
+          description: `${label} (${entry.party || 'Account'}): ${entry.description || entry.category || 'Transaction'}. Method: ${entry.paymentMethod || 'BANK'}`,
+          details: `Type: ${label}\nParty: ${entry.party || 'Account'}\nCategory: ${entry.category || 'Finance'}\nReference: ${entry.reference || 'N/A'}\nPayment Method: ${entry.paymentMethod || 'BANK'}${entry.bankName ? ` (${entry.bankName})` : ''}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: 'INFO',
+          notificationSubType: 'FINANCE_RECORDED',
+          status: 'PENDING',
+          actionLabel: 'View Cashbook',
+          targetRole: `ADMIN,FINANCE_MANAGER${!isPaidOut && entry.party ? ',CLIENT' : ''}`,
+          targetClientName: !isPaidOut && entry.party ? entry.party : undefined,
+          targetView: 'finance',
+          category: 'FINANCE'
+        };
+
+        // Transporter Rule: Payment received from client or company confirmation request
+        const catLower = (entry.category || '').toLowerCase();
+        const descLower = (entry.description || '').toLowerCase();
+        const isTransporterPayment =
+          catLower.includes('vehicle rent') ||
+          catLower.includes('freight') ||
+          catLower.includes('transporter') ||
+          (entry as any).paymentCategory === 'VEHICLE_RENT' ||
+          Boolean((entry as any).targetTransporter) ||
+          Boolean((entry as any).isTransporterPayment) ||
+          descLower.includes('vehicle rent') ||
+          descLower.includes('freight') ||
+          descLower.includes('transporter');
+
+        if (isTransporterPayment && !(entry as any).transporterConfirmed) {
+          const transporterTarget = (entry as any).targetTransporter || entry.party || 'Transporter';
+          const payerSource = (entry as any).paidBy || (entryToSave.type === 'EXPENSE' ? 'Company (DPL)' : 'Client');
+          saveNotificationToFirestore({
+            id: notifId + 5,
+            title: `Payment Received Confirmation Request: PKR ${Number(entry.amount).toLocaleString()}`,
+            description: `Payment of PKR ${Number(entry.amount).toLocaleString()} sent from ${payerSource} for ${entry.description || entry.category || 'Vehicle Freight'}. Please confirm payment received.`,
+            details: `Transporter: ${transporterTarget}\nPaid By: ${payerSource}\nAmount: PKR ${Number(entry.amount).toLocaleString()}\nMethod: ${entry.paymentMethod || 'BANK'}${entry.bankName ? ` (${entry.bankName})` : ''}\nReference: ${entry.reference || 'N/A'}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            type: 'ACTION',
+            notificationSubType: 'TRANSPORTER_PAYMENT_CONFIRMATION',
+            status: 'PENDING',
+            actionLabel: 'Confirm Payment Received',
+            priority: 'HIGH',
+            targetRole: UserRole.TRANSPORTER,
+            targetClientName: transporterTarget,
+            targetView: 'finance',
+            category: 'TRANSPORTER',
+            approvalData: {
+              entityType: 'finance',
+              entityId: entry.id,
+              entityName: transporterTarget,
+              actionType: 'CONFIRM_TRANSPORTER_PAYMENT',
+              requestedBy: payerSource,
+              amount: Number(entry.amount),
+              bankName: entry.bankName,
+              caseNo: (entry as any).caseNo
+            }
+          }).catch(() => {});
+        }
       }
 
       saveNotificationToFirestore(notif).catch(() => {});
@@ -679,6 +1067,227 @@ export function subscribeToVehicles(
   };
 }
 
+function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?: Vehicle | null, isNew?: boolean) {
+  try {
+    const regNo = vehicle.registrationNumber || `Vehicle #${vehicle.id}`;
+    const transporterTarget = (vehicle.transporterName || vehicle.brokerName || vehicle.ownerName || '').trim() || undefined;
+    const nowTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // 1. Vehicle Registration Confirmed Marked -> Transporter
+    const isConfirmed =
+      vehicle.status === 'CONFIRMED' ||
+      vehicle.registrationConfirmed === true ||
+      (isNew && vehicle.status !== 'CANCELLED' && vehicle.status !== 'EXPIRED');
+    const wasConfirmed = prevVehicle
+      ? (prevVehicle.status === 'CONFIRMED' || prevVehicle.registrationConfirmed === true)
+      : false;
+
+    if (isConfirmed && (!prevVehicle || !wasConfirmed)) {
+      const confKey = `notif_veh_confirmed_${vehicle.id}_${regNo}`;
+      const detId = parseNumericDocId( undefined, confKey, 10 );
+      if (!safeAppStorage.getItem(confKey)) {
+        safeAppStorage.setItem(confKey, 'true');
+        saveNotificationToFirestore({
+          id: detId,
+          title: `Vehicle Registration Confirmed: ${regNo}`,
+          description: `Vehicle ${regNo} (${transporterTarget || 'Transporter'}) registration has been confirmed and marked active in the customs bonded fleet.`,
+          details: `Vehicle Registration No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nVehicle Type: ${vehicle.type || 'Trailer'}\nStatus: CONFIRMED\nRegistration Date: ${vehicle.registrationDate || new Date().toISOString().split('T')[0]}\nExpiry Date: ${vehicle.registrationExpiryDate || vehicle.validationExpiryDate || 'N/A'}`,
+          timestamp: nowTimeStr,
+          type: 'INFO',
+          notificationSubType: 'VEHICLE_REGISTERED',
+          status: 'PENDING',
+          actionLabel: 'View Registered Vehicle',
+          priority: 'HIGH',
+          targetRole: 'TRANSPORTER,VEHICLE_MANAGER',
+          targetClientName: transporterTarget,
+          category: 'TRANSPORTER',
+          targetView: 'vehicles',
+          targetFilter: { vehicleId: vehicle.id, vehicleNo: regNo }
+        }).catch(() => {});
+      }
+    }
+
+    // 2. Vehicle Cancelled Marked & NOC Generated -> Transporter
+    const isCancelled = vehicle.status === 'CANCELLED' || vehicle.cancellationApproved === true;
+    const wasCancelled = prevVehicle
+      ? (prevVehicle.status === 'CANCELLED' || prevVehicle.cancellationApproved === true)
+      : false;
+
+    if (isCancelled && !wasCancelled) {
+      const cancKey = `notif_veh_cancelled_noc_${vehicle.id}_${regNo}`;
+      const detId = parseNumericDocId(undefined, cancKey, 11);
+      if (!safeAppStorage.getItem(cancKey)) {
+        safeAppStorage.setItem(cancKey, 'true');
+        saveNotificationToFirestore({
+          id: detId,
+          title: `Vehicle Cancelled & NOC Generated: ${regNo}`,
+          description: `Vehicle ${regNo} (${transporterTarget || 'Transporter'}) has been marked CANCELLED and its De-Registration NOC has been generated.`,
+          details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nStatus: CANCELLED\nNOC Status: NOC Generated & Approved\nCancellation Date: ${vehicle.cancellationDate || new Date().toISOString().split('T')[0]}`,
+          timestamp: nowTimeStr,
+          type: 'ALERT',
+          notificationSubType: 'VEHICLE_CANCELLED_NOC',
+          status: 'PENDING',
+          actionLabel: 'View NOC & Status',
+          priority: 'HIGH',
+          targetRole: 'TRANSPORTER,VEHICLE_MANAGER',
+          targetClientName: transporterTarget,
+          category: 'TRANSPORTER',
+          targetView: 'vehicles',
+          targetFilter: { vehicleId: vehicle.id, vehicleNo: regNo }
+        }).catch(() => {});
+      }
+    }
+
+    // 3. Vehicle Renewed -> Transporter
+    const currRenewalsCount = Array.isArray(vehicle.renewals) ? vehicle.renewals.length : 0;
+    const prevRenewalsCount = prevVehicle && Array.isArray(prevVehicle.renewals) ? prevVehicle.renewals.length : 0;
+    const isRenewedNow =
+      vehicle.status === 'RENEWED' ||
+      currRenewalsCount > prevRenewalsCount ||
+      (Boolean(vehicle.lastRenewalDate) && vehicle.lastRenewalDate !== prevVehicle?.lastRenewalDate);
+
+    if (isRenewedNow && !isCancelled) {
+      const renSig = `${currRenewalsCount}_${vehicle.lastRenewalDate || ''}_${vehicle.validationExpiryDate || vehicle.registrationExpiryDate || ''}`;
+      const renKey = `notif_veh_renewed_${vehicle.id}_${renSig}`;
+      const detId = parseNumericDocId(undefined, renKey, 12);
+      if (!safeAppStorage.getItem(renKey)) {
+        safeAppStorage.setItem(renKey, 'true');
+        const newExp = vehicle.validationExpiryDate || vehicle.registrationExpiryDate || 'Updated';
+        saveNotificationToFirestore({
+          id: detId,
+          title: `Vehicle Renewed: ${regNo}`,
+          description: `Vehicle ${regNo} (${transporterTarget || 'Transporter'}) has been renewed. New validity/expiry date: ${newExp}.`,
+          details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nStatus: RENEWED\nLast Renewal Date: ${vehicle.lastRenewalDate || new Date().toISOString().split('T')[0]}\nNew Expiry Date: ${newExp}`,
+          timestamp: nowTimeStr,
+          type: 'INFO',
+          notificationSubType: 'VEHICLE_RENEWED',
+          status: 'PENDING',
+          actionLabel: 'View Renewal Details',
+          priority: 'HIGH',
+          targetRole: 'TRANSPORTER,VEHICLE_MANAGER',
+          targetClientName: transporterTarget,
+          category: 'TRANSPORTER',
+          targetView: 'vehicles',
+          targetFilter: { vehicleId: vehicle.id, vehicleNo: regNo }
+        }).catch(() => {});
+      }
+    }
+
+    // 4. Check Immediate Expiry / Expire Soon on Save or Update -> Admin, Vehicle Manager & Transporter
+    const expDateStr = vehicle.validationExpiryDate || vehicle.registrationExpiryDate || (vehicle as any).taxExpiryDate || (vehicle as any).fitnessExpiryDate;
+    if (expDateStr && !isCancelled) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const todayTime = new Date(todayStr).getTime();
+      const expTime = new Date(expDateStr).getTime();
+      if (!isNaN(expTime)) {
+        const diffDays = Math.ceil((expTime - todayTime) / (24 * 60 * 60 * 1000));
+        if (diffDays <= 0) {
+          const expKey = `audit_vehicle_expired_${vehicle.id}_${expDateStr}`;
+          const detId = parseNumericDocId(undefined, expKey, 13);
+          if (!safeAppStorage.getItem(expKey)) {
+            safeAppStorage.setItem(expKey, 'true');
+            saveNotificationToFirestore({
+              id: detId,
+              title: `Vehicle Expired: ${regNo}`,
+              description: `Vehicle ${regNo} (${transporterTarget || 'Transporter'}) registration/validation expired on ${expDateStr}.`,
+              details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nExpired On: ${expDateStr}\nAction Required: Immediate renewal required.`,
+              timestamp: nowTimeStr,
+              type: 'ALERT',
+              notificationSubType: 'DOC_EXPIRY_ALERT',
+              status: 'PENDING',
+              actionLabel: 'Renew Vehicle',
+              priority: 'HIGH',
+              targetRole: 'ADMIN,VEHICLE_MANAGER,TRANSPORTER',
+              targetClientName: transporterTarget,
+              category: 'TRANSPORTER',
+              targetView: 'vehicles',
+              targetFilter: { vehicleId: vehicle.id, vehicleNo: regNo }
+            }).catch(() => {});
+          }
+        } else if (diffDays <= 10) {
+          const soonKey = `audit_vehicle_expiring_soon_${vehicle.id}_${expDateStr}`;
+          const detId = parseNumericDocId(undefined, soonKey, 14);
+          if (!safeAppStorage.getItem(soonKey)) {
+            safeAppStorage.setItem(soonKey, 'true');
+            saveNotificationToFirestore({
+              id: detId,
+              title: `Vehicle Expire Soon (${diffDays} Days): ${regNo}`,
+              description: `Vehicle ${regNo} (${transporterTarget || 'Transporter'}) will expire in ${diffDays} day(s) on ${expDateStr}.`,
+              details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nExpiry Date: ${expDateStr}\nDays Remaining: ${diffDays} days`,
+              timestamp: nowTimeStr,
+              type: 'INFO',
+              notificationSubType: 'DOC_EXPIRY_ALERT',
+              status: 'PENDING',
+              actionLabel: 'View Vehicle',
+              priority: 'MEDIUM',
+              targetRole: 'ADMIN,VEHICLE_MANAGER,TRANSPORTER',
+              targetClientName: transporterTarget,
+              category: 'TRANSPORTER',
+              targetView: 'vehicles',
+              targetFilter: { vehicleId: vehicle.id, vehicleNo: regNo }
+            }).catch(() => {});
+          }
+        }
+      }
+    }
+
+    // 5. Vehicle Location Updated by Driver (if Location Service is ON on this vehicle)
+    const isLocationServiceOn = vehicle.locationServiceEnabled !== false;
+    if (
+      isLocationServiceOn &&
+      vehicle.onlineLocation &&
+      prevVehicle &&
+      (vehicle.onlineLocation !== prevVehicle.onlineLocation || vehicle.lastLocationUpdatedAt !== prevVehicle.lastLocationUpdatedAt)
+    ) {
+      const locKey = `notif_veh_loc_${vehicle.id}`;
+      const detId = parseNumericDocId(undefined, locKey, 15);
+      const drvName = vehicle.lastLocationDriverName || vehicle.driverName || 'Driver';
+      saveNotificationToFirestore({
+        id: detId,
+        title: `Vehicle Location Updated by Driver: ${regNo}`,
+        description: `Driver ${drvName} updated live location for vehicle ${regNo}: ${vehicle.onlineLocation}.`,
+        details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nDriver: ${drvName}\nCurrent Location: ${vehicle.onlineLocation}\nUpdated At: ${vehicle.lastLocationUpdatedAt || nowTimeStr}`,
+        timestamp: nowTimeStr,
+        type: 'INFO',
+        notificationSubType: 'VEHICLE_LOCATION_UPDATE',
+        status: 'PENDING',
+        actionLabel: 'View Live Location',
+        priority: 'HIGH',
+        targetRole: 'TRANSPORTER,VEHICLE_MANAGER',
+        targetClientName: transporterTarget,
+        category: 'TRANSPORTER',
+        targetView: 'vehicles',
+        targetFilter: { vehicleId: vehicle.id, vehicleNo: regNo }
+      }).catch(() => {});
+    }
+
+    // 6. Vehicle Missing Alert (if Location Service is ON on this vehicle)
+    if (isLocationServiceOn && vehicle.isMissingAlertActive && !prevVehicle?.isMissingAlertActive) {
+      const missKey = `notif_veh_missing_${vehicle.id}`;
+      const detId = parseNumericDocId(undefined, missKey, 16);
+      saveNotificationToFirestore({
+        id: detId,
+        title: `Vehicle Missing Alert: ${regNo}`,
+        description: `URGENT: Vehicle ${regNo} (Driver: ${vehicle.driverName || 'N/A'}) has Location Service ON but GPS signal is missing / vehicle unresponsive!`,
+        details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nDriver: ${vehicle.driverName || 'N/A'} (${vehicle.driverContact || 'N/A'})\nLast Known Location: ${vehicle.onlineLocation || 'Unknown'}\nAlert: Vehicle Missing / GPS Signal Lost while Location Service is ON.`,
+        timestamp: nowTimeStr,
+        type: 'ALERT',
+        notificationSubType: 'VEHICLE_MISSING_ALERT',
+        status: 'PENDING',
+        actionLabel: 'Locate Vehicle',
+        priority: 'HIGH',
+        targetRole: 'TRANSPORTER,VEHICLE_MANAGER,ADMIN',
+        targetClientName: transporterTarget,
+        category: 'TRANSPORTER',
+        targetView: 'vehicles',
+        targetFilter: { vehicleId: vehicle.id, vehicleNo: regNo }
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.warn('Transporter vehicle notification dispatch notice:', err);
+  }
+}
+
 export async function saveVehicleToFirestore(vehicle: Vehicle): Promise<void> {
   const path = 'vehicles';
   const docId = String(vehicle.id || Date.now());
@@ -693,6 +1302,7 @@ export async function saveVehicleToFirestore(vehicle: Vehicle): Promise<void> {
       updatedAt: new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload);
+    dispatchTransporterVehicleNotifications({ ...vehicle, id: Number(docId) }, null, true);
   } catch (error) {
     console.warn(`Firestore saveVehicle warning:`, error);
   }
@@ -702,6 +1312,12 @@ export async function updateVehicleInFirestore(vehicle: Vehicle): Promise<void> 
   const path = 'vehicles';
   const docId = String(vehicle.id);
   const activeCompany = getActiveCompanyId();
+  let prevVehicle: Vehicle | null = null;
+  try {
+    const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+    prevVehicle = liveVehicles.find(v => Number(v.id) === Number(vehicle.id)) || null;
+  } catch (_) {}
+
   try {
     const payload = sanitizeForFirestore({ 
       ...vehicle, 
@@ -709,6 +1325,8 @@ export async function updateVehicleInFirestore(vehicle: Vehicle): Promise<void> 
       updatedAt: new Date().toISOString() 
     });
     await setDoc(doc(db, path, docId), payload, { merge: true });
+    const mergedVehicle = prevVehicle ? { ...prevVehicle, ...vehicle } : vehicle;
+    dispatchTransporterVehicleNotifications(mergedVehicle, prevVehicle, false);
   } catch (error) {
     console.warn(`Firestore updateVehicle warning:`, error);
   }
@@ -775,6 +1393,10 @@ export function subscribeToDrivers(
   onError?: (err: any) => void
 ) {
   const path = 'drivers';
+  const cached = safeAppStorage.getJSON<Driver[]>('dpl_live_drivers', []);
+  if (cached && cached.length > 0) {
+    onData(dedupeArrayById(cached));
+  }
   return onSnapshot(
     collection(db, path),
     (snapshot) => {
@@ -782,7 +1404,9 @@ export function subscribeToDrivers(
       snapshot.forEach((docSnap) => {
         items.push({ ...docSnap.data(), id: docSnap.id } as Driver);
       });
-      onData(dedupeArrayById(items));
+      const unique = dedupeArrayById(items);
+      safeAppStorage.setJSON('dpl_live_drivers', unique);
+      onData(unique);
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
@@ -794,13 +1418,42 @@ export function subscribeToDrivers(
 export async function saveDriverToFirestore(item: Driver): Promise<void> {
   const path = 'drivers';
   const docId = String(item.id || `drv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`);
+  const payload = sanitizeForFirestore({
+    ...item,
+    id: docId,
+    updatedAt: new Date().toISOString()
+  });
+
+  // Update local storage cache immediately so Driver login works without delay
   try {
-    const payload = sanitizeForFirestore({
-      ...item,
-      id: docId,
-      updatedAt: new Date().toISOString()
-    });
-    await setDoc(doc(db, path, docId), payload);
+    const current = safeAppStorage.getJSON<Driver[]>('dpl_live_drivers', []) || [];
+    const filtered = current.filter(d => String(d.id) !== docId);
+    safeAppStorage.setJSON('dpl_live_drivers', [payload as Driver, ...filtered]);
+  } catch (_) {}
+
+  try {
+    await setDoc(doc(db, path, docId), payload, { merge: true });
+
+    // If Driver has Login ID & Password created by Transporter, also sync to users collection
+    if (item.userId && item.password) {
+      const userDocId = `driver_${docId}`;
+      const driverUserPayload = sanitizeForFirestore({
+        id: userDocId,
+        userId: item.userId.trim(),
+        password: item.password.trim(),
+        name: item.name.trim(),
+        role: UserRole.DRIVER,
+        roles: [UserRole.DRIVER],
+        designation: `Trip Driver (${item.assignedVehicleNo || 'Fleet'})`,
+        contact: item.contact || '',
+        email: `${item.userId.trim().toLowerCase()}@driver.dpl`,
+        status: 'ACTIVE',
+        clientName: item.transporterName || 'Transporter',
+        assignedVehicleNo: item.assignedVehicleNo || '',
+        updatedAt: new Date().toISOString()
+      });
+      await setDoc(doc(db, 'users', userDocId), driverUserPayload, { merge: true });
+    }
   } catch (error) {
     console.warn(`Firestore saveDriver warning:`, error);
   }
@@ -972,25 +1625,118 @@ export async function updateTransporterRequestInFirestore(request: TransporterRe
 }
 
 // NOTIFICATIONS
+let hasPurgedStaleNotificationsV5 = false;
+
+/**
+ * Checks whether a notification is an orphaned ghost notification pointing to deleted/reset data.
+ */
+function isOrphanedNotification(n: AppNotification): boolean {
+  if (!n || !n.title) return true;
+
+  // 1. Check against last reset timestamp if present
+  const lastResetIso = safeAppStorage.getRawItem('dpl_last_reset_timestamp');
+  if (lastResetIso && (n as any).updatedAt) {
+    const resetTime = new Date(lastResetIso).getTime();
+    const notifTime = new Date((n as any).updatedAt).getTime();
+    if (!isNaN(resetTime) && !isNaN(notifTime) && notifTime < resetTime) {
+      return true;
+    }
+  }
+
+  // 2. Check if notification points to a Case when Cases collection is empty or case was deleted
+  const liveCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
+  const caseNoTarget = n.targetFilter?.caseNo || n.approvalData?.caseNo;
+  const caseIdTarget = n.targetFilter?.caseId || (n.approvalData?.entityType === 'case' ? n.approvalData?.entityId : undefined);
+  if (n.category === 'CASE' || caseNoTarget || caseIdTarget || n.targetView === 'cases') {
+    if (liveCases.length === 0) return true;
+    if (caseNoTarget && !liveCases.some(c => (c.caseNo || c.caseNumber) === caseNoTarget)) return true;
+    if (caseIdTarget && !liveCases.some(c => String(c.id) === String(caseIdTarget))) return true;
+  }
+
+  // 3. Check if notification points to a Vehicle when Vehicles collection is empty or vehicle was deleted
+  const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+  const vehNoTarget = n.targetFilter?.vehicleNo;
+  const vehIdTarget = n.targetFilter?.vehicleId || (n.approvalData?.entityType === 'vehicle' ? n.approvalData?.entityId : undefined);
+  const isVehicleNotif =
+    Boolean(vehNoTarget) ||
+    Boolean(vehIdTarget) ||
+    n.targetView === 'vehicles' ||
+    n.notificationSubType === 'VEHICLE_REGISTERED' ||
+    n.notificationSubType === 'VEHICLE_RENEWED' ||
+    n.notificationSubType === 'VEHICLE_CANCELLED_NOC' ||
+    n.notificationSubType === 'IDLE_VEHICLE_ALERT' ||
+    (n.notificationSubType === 'DOC_EXPIRY_ALERT' && n.category === 'TRANSPORTER');
+
+  if (isVehicleNotif) {
+    if (liveVehicles.length === 0) return true;
+    if (vehNoTarget && !liveVehicles.some(v => (v.registrationNumber || '').toLowerCase() === String(vehNoTarget).toLowerCase())) return true;
+    if (vehIdTarget && !liveVehicles.some(v => String(v.id) === String(vehIdTarget))) return true;
+  }
+
+  // 4. Check if notification points to Company Documents when Company Documents collection is empty
+  const liveDocs = safeAppStorage.getJSON<CompanyDocument[]>('dpl_company_documents', []);
+  if (
+    n.targetView === 'company_documents' ||
+    n.notificationSubType === 'HEARING_NOTICE_REMINDER' ||
+    (n.notificationSubType === 'DOC_EXPIRY_ALERT' && n.category !== 'TRANSPORTER')
+  ) {
+    if (liveDocs.length === 0) return true;
+  }
+
+  // 5. Check if notification points to Finance when all finance arrays are empty
+  const liveFin = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', []);
+  const liveRecv = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_receivables', []);
+  const livePay = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', []);
+  if (
+    n.category === 'FINANCE' ||
+    n.targetView === 'finance' ||
+    n.notificationSubType === 'FINANCE_RECORDED' ||
+    n.notificationSubType === 'INVOICE_CHARGE_NOTIFICATION' ||
+    n.notificationSubType === 'PAYMENT_APPROVAL' ||
+    n.approvalData?.entityType === 'finance'
+  ) {
+    if (liveFin.length === 0 && liveRecv.length === 0 && livePay.length === 0) return true;
+  }
+
+  return false;
+}
+
 export function subscribeToNotifications(
   onData: (items: AppNotification[]) => void,
   onError?: (err: any) => void
 ) {
   const path = 'notifications';
 
-  // 1. Immediately emit local cached notifications
+  // One-time cleanup of stale/pre-reset notifications so 99+ ghost notifications from prior resets are wiped immediately
+  if (!hasPurgedStaleNotificationsV5 && typeof window !== 'undefined') {
+    hasPurgedStaleNotificationsV5 = true;
+    if (safeAppStorage.getRawItem('dpl_purge_stale_notifications_v5') !== 'done') {
+      safeAppStorage.setRawItem('dpl_purge_stale_notifications_v5', 'done');
+      safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, []);
+      onData([]);
+      clearAllNotificationsInFirestore().catch(() => {});
+    }
+  }
+
+  // 1. Immediately emit valid local cached notifications
   const cached = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []);
   if (cached && cached.length > 0) {
-    onData(dedupeArrayById(cached));
+    const validCached = dedupeArrayById(cached).filter(n => !isOrphanedNotification(n));
+    onData(validCached);
+  } else {
+    onData([]);
   }
 
   // 2. Intra-window broadcast listener
   const handleLocalUpdate = () => {
     const fresh = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []);
-    if (fresh) onData(dedupeArrayById(fresh));
+    const validFresh = fresh ? dedupeArrayById(fresh).filter(n => !isOrphanedNotification(n)) : [];
+    onData(validFresh);
   };
   if (typeof window !== 'undefined') {
     window.addEventListener('dpl_notification_updated', handleLocalUpdate);
+    window.addEventListener('dpl_cases_updated', handleLocalUpdate);
+    window.addEventListener('dpl_finance_updated', handleLocalUpdate);
   }
 
   // 3. Firestore live subscription
@@ -998,14 +1744,45 @@ export function subscribeToNotifications(
     collection(db, path),
     (snapshot) => {
       const items: AppNotification[] = [];
+      const orphanRefsToDelete: any[] = [];
       let idx = 0;
+
       snapshot.forEach((docSnap) => {
         const d = docSnap.data();
         const numId = parseNumericDocId(d.id, docSnap.id, idx++);
-        items.push({ ...d, id: numId } as AppNotification);
+        const notifObj = { ...d, id: numId, _docId: docSnap.id } as AppNotification & { _docId?: string };
+        if (isOrphanedNotification(notifObj)) {
+          orphanRefsToDelete.push(docSnap.ref);
+        } else {
+          items.push(notifObj);
+        }
       });
-      // Deduplicate items so same key is never emitted twice
-      const uniqueItems = dedupeArrayById(items);
+
+      // Automatically purge orphaned ghost notifications from Firestore in the background
+      if (orphanRefsToDelete.length > 0) {
+        (async () => {
+          try {
+            for (let i = 0; i < orphanRefsToDelete.length; i += 400) {
+              const chunk = orphanRefsToDelete.slice(i, i + 400);
+              const batch = writeBatch(db);
+              chunk.forEach((r) => batch.delete(r));
+              await batch.commit();
+            }
+          } catch (_) {}
+        })();
+      }
+
+      // Deduplicate by both id and title+description signature so identical spam notifications never stack
+      const seenSig = new Set<string>();
+      const uniqueItems: AppNotification[] = [];
+      for (const item of dedupeArrayById(items)) {
+        const sig = `${item.title || ''}__${item.description || ''}__${item.status || ''}`;
+        if (!seenSig.has(sig)) {
+          seenSig.add(sig);
+          uniqueItems.push(item);
+        }
+      }
+
       // Sort newest first
       uniqueItems.sort((a, b) => {
         const timeA = a.id || 0;
@@ -1026,16 +1803,22 @@ export function subscribeToNotifications(
     unsubscribeSnapshot();
     if (typeof window !== 'undefined') {
       window.removeEventListener('dpl_notification_updated', handleLocalUpdate);
+      window.removeEventListener('dpl_cases_updated', handleLocalUpdate);
+      window.removeEventListener('dpl_finance_updated', handleLocalUpdate);
     }
   };
 }
 
 export async function saveNotificationToFirestore(notif: AppNotification): Promise<void> {
   const path = 'notifications';
-  const numId = notif.id || (Date.now() + Math.floor(Math.random() * 1000));
+  // Use deterministic ID if not provided or if based on title+entity so identical notifications never duplicate
+  const deterministicKey = `${notif.notificationSubType || 'GEN'}_${notif.title || ''}_${notif.targetFilter?.caseNo || notif.targetFilter?.vehicleNo || notif.approvalData?.entityId || ''}`;
+  const numId = notif.id || parseNumericDocId(undefined, deterministicKey, 0);
   const docId = String(numId);
+  const activeCompany = getActiveCompanyId();
   const payload = sanitizeForFirestore({
     ...notif,
+    companyId: (notif as any).companyId || activeCompany,
     id: numId,
     updatedAt: new Date().toISOString()
   });
@@ -1055,7 +1838,7 @@ export async function saveNotificationToFirestore(notif: AppNotification): Promi
 
   // Persist to Firestore
   try {
-    await setDoc(doc(db, path, docId), payload);
+    await setDoc(doc(db, path, docId), payload, { merge: true });
   } catch (error) {
     console.warn(`Firestore saveNotification warning:`, error);
   }
@@ -1064,7 +1847,7 @@ export async function saveNotificationToFirestore(notif: AppNotification): Promi
 export async function updateNotificationInFirestore(notif: AppNotification): Promise<void> {
   const path = 'notifications';
   const numId = Number(notif.id);
-  const docId = String(numId);
+  const docId = String((notif as any)._docId || numId);
   const payload = sanitizeForFirestore({ ...notif, updatedAt: new Date().toISOString() });
 
   // Update local storage cache immediately
@@ -1084,6 +1867,60 @@ export async function updateNotificationInFirestore(notif: AppNotification): Pro
     await setDoc(doc(db, path, docId), payload, { merge: true });
   } catch (error) {
     console.warn(`Firestore updateNotification warning:`, error);
+  }
+}
+
+export async function deleteNotificationFromFirestore(notifId: number | string, rawDocId?: string): Promise<void> {
+  const path = 'notifications';
+  const docId = String(rawDocId || notifId);
+  try {
+    const current = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []) || [];
+    const updated = current.filter(n => String(n.id) !== String(notifId) && String((n as any)._docId || '') !== docId);
+    safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dpl_notification_updated'));
+    }
+  } catch (_) {}
+
+  try {
+    await deleteDoc(doc(db, path, docId));
+    if (rawDocId && String(notifId) !== rawDocId) {
+      await deleteDoc(doc(db, path, String(notifId))).catch(() => {});
+    }
+  } catch (err) {
+    console.warn('Firestore deleteNotification warning:', err);
+  }
+}
+
+export async function clearAllNotificationsInFirestore(companyId?: CompanyId): Promise<void> {
+  try {
+    if (!companyId) {
+      safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, []);
+    } else {
+      const current = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []) || [];
+      safeAppStorage.setJSON(
+        NOTIFICATIONS_STORAGE_KEY,
+        current.filter(n => !matchesActiveCompany((n as any).companyId, companyId))
+      );
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dpl_notification_updated'));
+    }
+
+    const snap = await getDocs(collection(db, 'notifications'));
+    if (!snap.empty) {
+      const docsToDelete = companyId
+        ? snap.docs.filter(d => matchesActiveCompany(d.data().companyId, companyId))
+        : snap.docs;
+      for (let i = 0; i < docsToDelete.length; i += 400) {
+        const chunk = docsToDelete.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+      }
+    }
+  } catch (err) {
+    console.warn('Firestore clearAllNotifications warning:', err);
   }
 }
 
@@ -1359,6 +2196,134 @@ export async function authenticateDatabaseUser(
         });
       } catch (dbErr: any) {
         console.log('Error querying clients from Firestore:', dbErr);
+      }
+    }
+
+    // 1.7. If not matched, query Firestore drivers & vehicles collections and local caches (for Driver Trip Login IDs created by Transporters)
+    if (!matchedUser) {
+      let expiredTripIdNotice: string | null = null;
+
+      const checkDriverMatch = (drv: any, fallbackId?: string): AppUser | null => {
+        if (!drv) return null;
+        const dUserId = (drv.userId || '').toLowerCase().trim();
+        const dExpiredId = (drv.lastExpiredTripId || '').toLowerCase().trim();
+        const dPhone = (drv.contact || '').toLowerCase().trim();
+        const dName = (drv.name || '').toLowerCase().trim();
+        const dVeh = (drv.assignedVehicleNo || '').toLowerCase().trim();
+
+        const matchUserId = dUserId && (dUserId === cleanId || dUserId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
+        const matchExpiredId = dExpiredId && (dExpiredId === cleanId || dExpiredId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
+        const matchPhone = dPhone && (dPhone === cleanId || dPhone.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
+        const matchVeh = dVeh && dVeh === cleanId;
+        const matchName = dName && dName === cleanId;
+
+        if (matchUserId || matchExpiredId || matchPhone || matchVeh || matchName) {
+          if (
+            drv.driverLoginStatus === 'SUSPENDED_TRIP_COMPLETED' ||
+            drv.driverLoginStatus === 'EXPIRED' ||
+            drv.loginEnabled === false ||
+            matchExpiredId
+          ) {
+            expiredTripIdNotice = `This Driver Trip Login ID (${drv.lastExpiredTripId || drv.userId || identifier}) has been automatically suspended/expired after trip completion & unloading at destination. Driver permanent data is saved — please generate a new Trip ID & Password for the next trip.`;
+            return null;
+          }
+
+          if (drv.password) {
+            return {
+              id: (drv.id || fallbackId || Date.now()) as any,
+              userId: drv.userId || drv.contact || drv.name,
+              password: drv.password,
+              name: drv.name || 'Trip Driver',
+              role: UserRole.DRIVER,
+              roles: [UserRole.DRIVER],
+              designation: `Trip Driver (${drv.assignedVehicleNo || 'Assigned Vehicle'})`,
+              contact: drv.contact || '',
+              email: '',
+              status: 'ACTIVE',
+              clientName: drv.transporterName || 'Transporter',
+              assignedVehicleNo: drv.assignedVehicleNo || ''
+            } as unknown as AppUser;
+          }
+        }
+        return null;
+      };
+
+      const checkVehicleDriverMatch = (veh: any): AppUser | null => {
+        if (!veh) return null;
+        const vUserId = (veh.driverUserId || '').toLowerCase().trim();
+        const vExpiredId = (veh.lastExpiredTripId || '').toLowerCase().trim();
+        const matchUserId = vUserId && (vUserId === cleanId || vUserId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
+        const matchExpiredId = vExpiredId && (vExpiredId === cleanId || vExpiredId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
+
+        if (matchUserId || matchExpiredId) {
+          if (
+            veh.driverLoginStatus === 'SUSPENDED_TRIP_COMPLETED' ||
+            veh.driverLoginStatus === 'EXPIRED' ||
+            matchExpiredId
+          ) {
+            expiredTripIdNotice = `This Driver Trip Login ID (${veh.lastExpiredTripId || veh.driverUserId || identifier}) for vehicle ${veh.registrationNumber} has been automatically expired/blocked because the trip finished & container was unloaded at destination. A new Trip ID & Password is required for the next trip.`;
+            return null;
+          }
+
+          if (veh.driverPassword) {
+            return {
+              id: (veh.id || Date.now()) as any,
+              userId: veh.driverUserId,
+              password: veh.driverPassword,
+              name: veh.driverName || 'Trip Driver',
+              role: UserRole.DRIVER,
+              roles: [UserRole.DRIVER],
+              designation: `Trip Driver (${veh.registrationNumber || 'Assigned Vehicle'})`,
+              contact: veh.driverContact || '',
+              email: '',
+              status: 'ACTIVE',
+              clientName: veh.transporterName || 'Transporter',
+              assignedVehicleNo: veh.registrationNumber || ''
+            } as unknown as AppUser;
+          }
+        }
+        return null;
+      };
+
+      // Check local cached drivers first for instant response
+      const localDrivers = safeAppStorage.getJSON<Driver[]>('dpl_live_drivers', []) || [];
+      for (const d of localDrivers) {
+        const m = checkDriverMatch(d, d.id);
+        if (m) {
+          matchedUser = m;
+          break;
+        }
+      }
+
+      // Check local cached vehicles for Trip Driver IDs
+      if (!matchedUser) {
+        const localVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []) || [];
+        for (const v of localVehicles) {
+          const m = checkVehicleDriverMatch(v);
+          if (m) {
+            matchedUser = m;
+            break;
+          }
+        }
+      }
+
+      // Also check Firestore drivers collection
+      if (!matchedUser && !expiredTripIdNotice) {
+        try {
+          const drvSnap = await getDocs(collection(db, 'drivers'));
+          drvSnap.forEach((docSnap) => {
+            if (!matchedUser) {
+              const m = checkDriverMatch(docSnap.data(), docSnap.id);
+              if (m) matchedUser = m;
+            }
+          });
+        } catch (drvErr) {
+          console.log('Error querying drivers from Firestore:', drvErr);
+        }
+      }
+
+      if (!matchedUser && expiredTripIdNotice) {
+        throw new Error(expiredTripIdNotice);
       }
     }
 
@@ -1970,8 +2935,9 @@ export async function exportSelectiveDatabaseBackup(options: {
   vehicles: boolean;
   clients: boolean;
   companyInfo?: any;
+  companyId?: CompanyId;
 }): Promise<any> {
-  const isFull = options.cases && options.finance && options.vehicles && options.clients;
+  const isFull = options.cases && options.finance && options.vehicles && options.clients && !options.companyId;
   if (isFull) {
     const fullSnapshot = await exportCompleteDatabaseSnapshot();
     if (options.companyInfo) {
@@ -2009,6 +2975,9 @@ export async function exportSelectiveDatabaseBackup(options: {
   if (options.cases && cases.length === 0) {
     cases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
   }
+  if (options.companyId) {
+    cases = cases.filter(c => matchesActiveCompany(c.companyId, options.companyId!));
+  }
 
   let finance: FinanceEntry[] = (finSnap?.docs || []).map((d: any) => ({ ...d.data(), id: d.id }));
   if (options.finance && finance.length === 0) {
@@ -2016,6 +2985,9 @@ export async function exportSelectiveDatabaseBackup(options: {
     const recv = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_receivables', []);
     const pay = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', []);
     finance = [...cash, ...recv, ...pay];
+  }
+  if (options.companyId) {
+    finance = finance.filter(f => matchesActiveCompany(f.companyId, options.companyId!));
   }
 
   let vehicles: Vehicle[] = (vehSnap?.docs || []).map((d: any) => ({ ...d.data(), id: d.id }));
@@ -2031,7 +3003,8 @@ export async function exportSelectiveDatabaseBackup(options: {
   return {
     version: '3.0.0',
     timestamp: new Date().toISOString(),
-    backupType: 'SELECTIVE',
+    backupType: options.companyId ? `COMPANY_${options.companyId.toUpperCase()}` : 'SELECTIVE',
+    companyId: options.companyId || null,
     app: 'DOCKS (PVT) LTD - ERP & Logistics Management',
     includedModules: {
       cases: options.cases,
@@ -2101,20 +3074,35 @@ export async function wipeCompleteDatabase(): Promise<{
   };
 
   const collectionsToWipe = [
+    'notifications',
+    'activity_logs',
     'cases',
     'finances',
     'finance',
+    'payables',
+    'receivables',
     'vehicles',
+    'available_vehicles',
+    'transporter_requests',
+    'drivers',
     'clients',
     'vendors',
     'recurring_templates',
     'staff_ledgers',
+    'staff_loading_bills',
+    'staff_private_ledgers',
     'destination_staff',
-    'notifications',
-    'activity_logs'
+    'company_documents',
+    'personal_ledger_accounts',
+    'personal_ledger_entries',
+    'work_drafts'
   ] as const;
 
-  // 1. Wipe Firestore Collections in Parallel using writeBatch with 3.5s per-collection timeout
+  const resetNowIso = new Date().toISOString();
+  safeAppStorage.setRawItem('dpl_last_reset_timestamp', resetNowIso);
+  safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, []);
+
+  // 1. Wipe Firestore Collections in Parallel using writeBatch with 12s per-collection timeout
   const wipePromises = collectionsToWipe.map(async (colName) => {
     try {
       await executeWithTimeout((async () => {
@@ -2129,7 +3117,7 @@ export async function wipeCompleteDatabase(): Promise<{
           await batch.commit();
         }
         if (colName === 'cases') deletedCounts.cases += docs.length;
-        else if (colName === 'finances' || colName === 'finance') deletedCounts.finances += docs.length;
+        else if (colName === 'finances' || colName === 'finance' || colName === 'payables' || colName === 'receivables') deletedCounts.finances += docs.length;
         else if (colName === 'vehicles') deletedCounts.vehicles += docs.length;
         else if (colName === 'clients') deletedCounts.clients += docs.length;
         else if (colName === 'vendors') deletedCounts.vendors += docs.length;
@@ -2138,7 +3126,7 @@ export async function wipeCompleteDatabase(): Promise<{
         else if (colName === 'destination_staff') deletedCounts.destinationStaff += docs.length;
         else if (colName === 'notifications') deletedCounts.notifications += docs.length;
         else if (colName === 'activity_logs') deletedCounts.activityLogs += docs.length;
-      })(), 3500, null);
+      })(), 12000, null);
     } catch (err) {
       console.warn(`Error wiping collection ${colName}:`, err);
     }
@@ -2161,13 +3149,13 @@ export async function wipeCompleteDatabase(): Promise<{
             batch.update(uDoc.ref, {
               baseSalary: 0,
               loansAdvances: 0,
-              updatedAt: new Date().toISOString()
+              updatedAt: resetNowIso
             });
           }
         }
         await batch.commit();
       }
-    })(), 3000, null);
+    })(), 5000, null);
   } catch (err) {
     console.warn('Error resetting users collection in wipeCompleteDatabase:', err);
   }
@@ -2178,10 +3166,12 @@ export async function wipeCompleteDatabase(): Promise<{
     GROUP_COMPANIES[k as CompanyId].logo = '';
   });
 
-  // 4. Wipe universal unified storage (all operational dpl_ keys in memory, localStorage, and sessionStorage)
+  // 4. Wipe universal unified storage (all operational dpl_, notif_, audit_ keys in memory, localStorage, and sessionStorage)
   try {
     safeAppStorage.wipeAppOperationalData(true);
     safeAppStorage.setItem('dpl_cleanup_phantom_v3', 'done');
+    safeAppStorage.setRawItem('dpl_purge_stale_notifications_v5', 'done');
+    safeAppStorage.setRawItem('dpl_last_reset_timestamp', resetNowIso);
   } catch (e) {
     console.warn('Storage wipe notice:', e);
   }
@@ -2189,6 +3179,7 @@ export async function wipeCompleteDatabase(): Promise<{
   // 5. Explicitly purge all known keys to ensure complete wipe
   const explicitKeys = [
     'dpl_live_finance', 'dpl_live_receivables', 'dpl_live_payables', 'dpl_live_cases',
+    'dpl_live_notifications', 'dpl_live_transporter_requests', 'dpl_live_drivers',
     'dpl_live_transporters', 'dpl_live_vehicles', 'dpl_finance_client', 'dpl_finance_tab',
     'dpl_vendors_list', 'dpl_staff_ledgers', 'dpl_destination_staff', 'dpl_recurring_templates',
     'dpl_system_activity_logs', 'dpl_cached_cases', 'dpl_cached_finances', 'dpl_cached_vehicles',
@@ -2196,7 +3187,7 @@ export async function wipeCompleteDatabase(): Promise<{
     'dpl_reg_draft_active', 'dpl_reg_step', 'dpl_reg_caseno', 'dpl_reg_formdata', 
     'dpl_reg_docs', 'dpl_reg_updated_at', 'dpl_reg_view', 'dpl_vehicles_data', 'dpl_registered_clients',
     'dpl_selected_case', 'dpl_selected_case_id', 'dpl_finance_active_tab', 'dpl_dashboard_timeframe',
-    'dpl_ports', 'dpl_company_docs', 'dpl_custom_banks', 'dpl_last_cloud_backup_time',
+    'dpl_ports', 'dpl_company_docs', 'dpl_company_documents', 'dpl_custom_banks', 'dpl_last_cloud_backup_time',
     'dpl_last_location_view', 'dpl_last_location_role', 'dpl_session_active'
   ];
 
@@ -2206,16 +3197,19 @@ export async function wipeCompleteDatabase(): Promise<{
     try { sessionStorage.removeItem(k); } catch (_) {}
   });
 
-  // 6. Ensure all payables and finances in memory and storage are strictly empty
+  // 6. Ensure all payables, finances, cases, and notifications in memory and storage are strictly empty
   safeAppStorage.setJSON('dpl_live_finance', []);
   safeAppStorage.setJSON('dpl_live_payables', []);
   safeAppStorage.setJSON('dpl_live_receivables', []);
   safeAppStorage.setJSON('dpl_live_cases', []);
+  safeAppStorage.setJSON('dpl_live_notifications', []);
 
   // 7. Remove custom branding for all companies and parent group
   ['docks', 'muhib', 'vantage', 'truckit'].forEach(cId => {
     safeAppStorage.removeItem(`dpl_company_branding_v1_${cId}`);
+    safeAppStorage.removeItem(`dpl_live_notifications_${cId}`);
     try { localStorage.removeItem(`dpl_company_branding_v1_${cId}`); } catch (_) {}
+    try { localStorage.removeItem(`dpl_live_notifications_${cId}`); } catch (_) {}
   });
   safeAppStorage.removeItem('mak_parent_group_branding');
   try { localStorage.removeItem('mak_parent_group_branding'); } catch (_) {}
@@ -2224,13 +3218,14 @@ export async function wipeCompleteDatabase(): Promise<{
   try {
     await executeWithTimeout((async () => {
       const batch = writeBatch(db);
-      batch.set(doc(db, 'settings', 'branding'), { customLogo: null, updatedAt: new Date().toISOString() }, { merge: true });
-      batch.set(doc(db, 'settings', 'parent_group'), { logo: '', updatedAt: new Date().toISOString() }, { merge: true });
+      batch.set(doc(db, 'settings', 'branding'), { customLogo: null, updatedAt: resetNowIso }, { merge: true });
+      batch.set(doc(db, 'settings', 'parent_group'), { logo: '', updatedAt: resetNowIso }, { merge: true });
+      batch.set(doc(db, 'settings', 'system_reset'), { lastResetAt: resetNowIso }, { merge: true });
       for (const cId of ['muhib', 'vantage', 'truckit']) {
-        batch.set(doc(db, 'settings', `branding_${cId}`), { customLogo: null, updatedAt: new Date().toISOString() }, { merge: true });
+        batch.set(doc(db, 'settings', `branding_${cId}`), { customLogo: null, updatedAt: resetNowIso }, { merge: true });
       }
       await batch.commit();
-    })(), 2500, null);
+    })(), 3500, null);
   } catch (err) {
     console.warn('Error resetting Firestore settings docs:', err);
   }
@@ -2260,6 +3255,7 @@ export async function wipeCompleteDatabase(): Promise<{
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('dpl_cases_updated'));
     window.dispatchEvent(new Event('dpl_finance_updated'));
+    window.dispatchEvent(new Event('dpl_notification_updated'));
     window.dispatchEvent(new Event('dpl_branding_changed'));
     window.dispatchEvent(new Event('storage'));
   }
@@ -2272,7 +3268,7 @@ export async function wipeCompleteDatabase(): Promise<{
 
 /**
  * Wipes operational data for a SINGLE specific subsidiary company only.
- * Leaves all other 3 subsidiaries 100% intact and untouched.
+ * Leaves all other 3 subsidiaries and the shared vehicle fleet 100% intact.
  */
 export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
   success: boolean;
@@ -2289,13 +3285,18 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
   };
 
   // 1. Wipe Firestore docs for this specific company only using writeBatch
+  // Note: 'vehicles' is intentionally excluded here because the Vehicle Management database is shared across all 4 group companies.
   const collectionsToCheck = [
+    { name: 'notifications', type: 'notifications' },
+    { name: 'activity_logs', type: 'logs' },
     { name: 'cases', type: 'cases' },
     { name: 'finances', type: 'finances' },
     { name: 'finance', type: 'finances' },
-    { name: 'vehicles', type: 'vehicles' },
+    { name: 'payables', type: 'finances' },
+    { name: 'receivables', type: 'finances' },
     { name: 'recurring_templates', type: 'finances' },
-    { name: 'staff_ledgers', type: 'finances' }
+    { name: 'staff_ledgers', type: 'finances' },
+    { name: 'company_documents', type: 'cases' }
   ] as const;
 
   const wipePromises = collectionsToCheck.map(async (item) => {
@@ -2314,8 +3315,7 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
 
         if (item.type === 'cases') deletedCounts.cases += matchedDocs.length;
         else if (item.type === 'finances') deletedCounts.finances += matchedDocs.length;
-        else if (item.type === 'vehicles') deletedCounts.vehicles += matchedDocs.length;
-      })(), 3500, null);
+      })(), 10000, null);
     } catch (err) {
       console.warn(`Error wiping company ${companyId} data from ${item.name}:`, err);
     }
@@ -2328,7 +3328,7 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
     GROUP_COMPANIES[companyId].logo = '';
   }
 
-  // 2. Filter local storage cached arrays to remove only this company's items
+  // 2. Filter local storage cached arrays to remove only this company's items (preserving shared vehicles)
   try {
     const liveFinance = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', []);
     safeAppStorage.setJSON('dpl_live_finance', liveFinance.filter(f => !matchesActiveCompany(f.companyId, companyId)));
@@ -2342,8 +3342,9 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
     const liveCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
     safeAppStorage.setJSON('dpl_live_cases', liveCases.filter(c => !matchesActiveCompany(c.companyId, companyId)));
 
-    const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
-    safeAppStorage.setJSON('dpl_live_vehicles', liveVehicles.filter(v => !matchesActiveCompany((v as any).companyId, companyId)));
+    const liveNotifs = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []);
+    safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, liveNotifs.filter(n => !matchesActiveCompany((n as any).companyId, companyId)));
+    safeAppStorage.removeItem(`dpl_live_notifications_${companyId}`);
 
     // Reset this specific company's branding
     safeAppStorage.removeItem(`dpl_company_branding_v1_${companyId}`);
@@ -2366,6 +3367,7 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('dpl_cases_updated'));
     window.dispatchEvent(new Event('dpl_finance_updated'));
+    window.dispatchEvent(new Event('dpl_notification_updated'));
     window.dispatchEvent(new Event('dpl_branding_changed'));
     window.dispatchEvent(new Event('storage'));
   }
@@ -2691,19 +3693,26 @@ export async function saveStaffBillToFirestore(bill: StaffLoadingBill): Promise<
     });
     await setDoc(doc(db, path, docId), payload, { merge: true });
 
-    // Notify Finance Manager and Admin
+    // Notify Finance Manager and the specific Client being charged (Rule 9 & Rule 11)
+    const billAmount = Number(bill.totalAmount || bill.grandTotal || 0);
+    const clientTarget = bill.clientName || '';
+    const isDestStaff = staffUserId.includes('dest') || staffUserId.includes('unload') || (bill.staffName || '').toLowerCase().includes('destination') || (bill.staffName || '').toLowerCase().includes('unloading');
+    const staffSourceLabel = isDestStaff ? 'Destination Staff' : 'Loading Staff';
+
     const notifId = Date.now() + Math.floor(Math.random() * 1000);
     const notif: AppNotification = {
       id: notifId,
-      title: `Port Loading Bill: PKR ${Number(bill.grandTotal || 0).toLocaleString()}`,
-      description: `Staff ${bill.staffName || staffUserId} generated Loading Bill #${bill.billNo || docId} for Case #${bill.caseNo}. Grand Total: PKR ${Number(bill.grandTotal || 0).toLocaleString()}`,
-      details: `Case #${bill.caseNo} • Container: ${bill.containerNumber || 'N/A'} • Port: ${bill.portStation || 'Port Terminal'}`,
+      title: `${staffSourceLabel} Invoice / Bill: PKR ${billAmount.toLocaleString()}`,
+      description: `${staffSourceLabel} (${bill.staffName || staffUserId}) generated Bill #${bill.billNo || docId} for Case #${bill.caseNo}${clientTarget ? ` (${clientTarget})` : ''}. Amount Charged: PKR ${billAmount.toLocaleString()}`,
+      details: `Case #${bill.caseNo} • Client: ${clientTarget || 'N/A'} • Container: ${bill.containerNo || bill.containerNumber || 'N/A'} • Port: ${bill.portTerminal || bill.portStation || 'Port Terminal'} • Total Charged: PKR ${billAmount.toLocaleString()}`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       type: 'INFO',
-      notificationSubType: 'BUYING',
+      notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
       status: 'PENDING',
-      actionLabel: 'Review Bill',
-      targetRole: UserRole.FINANCE_MANAGER,
+      actionLabel: 'View Bill & Ledger',
+      targetRole: clientTarget ? 'FINANCE_MANAGER,CLIENT' : 'FINANCE_MANAGER',
+      targetClientName: clientTarget || undefined,
+      targetFilter: { caseNo: bill.caseNo },
       targetView: 'finance',
       category: 'FINANCE'
     };
@@ -2713,7 +3722,7 @@ export async function saveStaffBillToFirestore(bill: StaffLoadingBill): Promise<
       notif.description, 
       'LOADING_PORT_STAFF', 
       bill.staffName || staffUserId, 
-      { caseNo: bill.caseNo, grandTotal: bill.grandTotal }
+      { caseNo: bill.caseNo, grandTotal: billAmount }
     ).catch(() => {});
   } catch (error) {
     console.warn(`Firestore saveStaffBill warning:`, error);
@@ -2786,6 +3795,31 @@ export async function saveStaffPrivateLedgerEntryToFirestore(entry: StaffPrivate
       createdAt: entry.createdAt || new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload, { merge: true });
+
+    // Rule 11 & Rule 9: Any ledger generated to client from loading staff, destination staff, or transporter -> notify that specific Client & Finance Manager
+    const chargeAmt = Number(entry.debit || entry.credit || 0);
+    if (entry.clientName && chargeAmt > 0 && entry.type === 'DEBIT') {
+      const isDest = staffUserId.includes('dest') || staffUserId.includes('unload') || (entry.staffName || '').toLowerCase().includes('destination');
+      const isTrans = staffUserId.includes('trans') || (entry.description || '').toLowerCase().includes('rent') || (entry.description || '').toLowerCase().includes('transporter');
+      const sourceLabel = isTrans ? 'Transporter' : isDest ? 'Destination Staff' : 'Loading Staff';
+
+      saveNotificationToFirestore({
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        title: `${sourceLabel} Ledger Charge: PKR ${chargeAmt.toLocaleString()}`,
+        description: `${sourceLabel} (${entry.staffName || staffUserId}) billed PKR ${chargeAmt.toLocaleString()} to your ledger: ${entry.description || 'Port / Transport Ledger Charge'}.`,
+        details: `Client Charged: ${entry.clientName}\nSource: ${sourceLabel} (${entry.staffName || staffUserId})\nDescription: ${entry.description}\nReference: ${entry.reference || 'N/A'}\nCase No: ${entry.caseNo || 'N/A'}\nAmount Charged: PKR ${chargeAmt.toLocaleString()}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        type: 'INFO',
+        notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
+        status: 'PENDING',
+        actionLabel: 'View Client Ledger',
+        targetRole: 'CLIENT,FINANCE_MANAGER',
+        targetClientName: entry.clientName,
+        targetFilter: entry.caseNo ? { caseNo: entry.caseNo } : undefined,
+        targetView: 'finance',
+        category: 'FINANCE'
+      }).catch(() => {});
+    }
   } catch (error) {
     console.warn(`Firestore saveStaffPrivateLedgerEntry warning:`, error);
   }
@@ -2846,6 +3880,61 @@ export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocume
       updatedAt: new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload, { merge: true });
+
+    // Rule 7 & 8: Notify Admin immediately if Hearing Notice or Document Expired / Expiring Soon
+    const catLower = (documentItem.category || '').toLowerCase();
+    const titleLower = (documentItem.title || '').toLowerCase();
+    const isHearing =
+      catLower.includes('hearing') ||
+      catLower.includes('show cause') ||
+      catLower.includes('adjudication') ||
+      titleLower.includes('hearing') ||
+      titleLower.includes('show cause') ||
+      titleLower.includes('notice');
+
+    if (isHearing) {
+      const hearingDate = (documentItem as any).hearingDate || documentItem.expiryDate || documentItem.issueDate || 'Scheduled';
+      saveNotificationToFirestore({
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        title: `Hearing Notice Reminder: ${documentItem.title}`,
+        description: `Legal / Customs Hearing Notice "${documentItem.title}" recorded. Scheduled Date: ${hearingDate}.`,
+        details: `Document: ${documentItem.title}\nCategory: ${documentItem.category}\nReference: ${documentItem.referenceNo || 'N/A'}\nDate: ${hearingDate}\nNotes: ${documentItem.notes || 'N/A'}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        type: 'ALERT',
+        notificationSubType: 'HEARING_NOTICE_REMINDER',
+        status: 'PENDING',
+        actionLabel: 'Open Hearing Notice',
+        priority: 'HIGH',
+        targetRole: 'ADMIN',
+        category: 'GENERAL',
+        targetView: 'company_documents'
+      }).catch(() => {});
+    } else if (documentItem.hasExpiry && documentItem.expiryDate) {
+      const todayTime = new Date(new Date().toISOString().split('T')[0]).getTime();
+      const expTime = new Date(documentItem.expiryDate).getTime();
+      if (!isNaN(expTime)) {
+        const diffDays = Math.ceil((expTime - todayTime) / (24 * 60 * 60 * 1000));
+        if (diffDays <= 10) {
+          saveNotificationToFirestore({
+            id: Date.now() + Math.floor(Math.random() * 1000),
+            title: diffDays <= 0 ? `Document Expired: ${documentItem.title}` : `Document Expiring Soon (${diffDays} Days): ${documentItem.title}`,
+            description: diffDays <= 0
+              ? `Company document "${documentItem.title}" expired on ${documentItem.expiryDate}.`
+              : `Company document "${documentItem.title}" will expire in ${diffDays} day(s) on ${documentItem.expiryDate}.`,
+            details: `Document: ${documentItem.title}\nCategory: ${documentItem.category}\nExpiry Date: ${documentItem.expiryDate}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            type: 'ALERT',
+            notificationSubType: 'DOC_EXPIRY_ALERT',
+            status: 'PENDING',
+            actionLabel: 'Open Company Documents',
+            priority: 'HIGH',
+            targetRole: 'ADMIN',
+            category: 'GENERAL',
+            targetView: 'company_documents'
+          }).catch(() => {});
+        }
+      }
+    }
   } catch (error) {
     console.warn(`Firestore saveCompanyDocument warning for ${docId}:`, error);
   }
@@ -3076,4 +4165,92 @@ export async function deletePersonalLedgerEntry(entryId: string): Promise<void> 
   safeAppStorage.setJSON(PERSONAL_LEDGER_ENTRIES_KEY, current.filter(e => e.id !== entryId));
 }
 
+// ==========================================
+// CLOUD-SYNCED USER WORK DRAFTS (AUTO-SAVE ACROSS DISCONNECTIONS)
+// Ensures any in-progress registration or form work is saved online in Firestore
+// per user so the user can Resume or Discard upon login from any device or after disconnect
+// ==========================================
 
+export interface UserWorkDraft {
+  id: string;
+  userId: string;
+  userName?: string;
+  role?: string;
+  companyId: CompanyId;
+  draftType: 'CASE_REGISTRATION' | 'FINANCE_ENTRY' | 'VEHICLE_REGISTRATION';
+  step?: number;
+  caseNo?: string;
+  formData?: any;
+  docs?: any;
+  updatedAt: string;
+  active: boolean;
+}
+
+export async function saveUserWorkDraftToFirestore(userId: string, draft: Omit<UserWorkDraft, 'id' | 'userId'>): Promise<void> {
+  const cleanUser = (userId || 'admin').toLowerCase().trim().replace(/[^a-z0-9_-]/g, '_');
+  const docId = `draft_${cleanUser}`;
+  const payload = sanitizeForFirestore({
+    ...draft,
+    id: docId,
+    userId: cleanUser,
+    updatedAt: draft.updatedAt || new Date().toISOString(),
+    active: true
+  });
+
+  // Always save locally immediately for instant zero-latency recovery
+  safeAppStorage.setJSON(`dpl_cloud_draft_${cleanUser}`, payload);
+
+  try {
+    await setDoc(doc(db, 'work_drafts', docId), payload, { merge: true });
+  } catch (error) {
+    // Fallback to settings collection if work_drafts rules haven't propagated yet
+    try {
+      await setDoc(doc(db, 'settings', `work_draft_${cleanUser}`), payload, { merge: true });
+    } catch (_) {}
+  }
+}
+
+export async function getUserWorkDraftFromFirestore(userId: string): Promise<UserWorkDraft | null> {
+  const cleanUser = (userId || 'admin').toLowerCase().trim().replace(/[^a-z0-9_-]/g, '_');
+  const docId = `draft_${cleanUser}`;
+
+  try {
+    const snap = await executeWithTimeout(getDoc(doc(db, 'work_drafts', docId)), 2500, null);
+    if (snap && snap.exists()) {
+      const data = snap.data() as UserWorkDraft;
+      if (data && data.active) {
+        safeAppStorage.setJSON(`dpl_cloud_draft_${cleanUser}`, data);
+        return data;
+      }
+    }
+    const fallbackSnap = await executeWithTimeout(getDoc(doc(db, 'settings', `work_draft_${cleanUser}`)), 2000, null);
+    if (fallbackSnap && fallbackSnap.exists()) {
+      const data = fallbackSnap.data() as UserWorkDraft;
+      if (data && data.active) {
+        safeAppStorage.setJSON(`dpl_cloud_draft_${cleanUser}`, data);
+        return data;
+      }
+    }
+  } catch (e) {
+    console.warn('Cloud work draft fetch notice:', e);
+  }
+
+  const localDraft = safeAppStorage.getJSON<UserWorkDraft | null>(`dpl_cloud_draft_${cleanUser}`, null);
+  if (localDraft && localDraft.active) {
+    return localDraft;
+  }
+  return null;
+}
+
+export async function deleteUserWorkDraftFromFirestore(userId: string): Promise<void> {
+  const cleanUser = (userId || 'admin').toLowerCase().trim().replace(/[^a-z0-9_-]/g, '_');
+  const docId = `draft_${cleanUser}`;
+  safeAppStorage.removeItem(`dpl_cloud_draft_${cleanUser}`);
+
+  try {
+    await deleteDoc(doc(db, 'work_drafts', docId));
+  } catch (_) {}
+  try {
+    await setDoc(doc(db, 'settings', `work_draft_${cleanUser}`), { active: false, updatedAt: new Date().toISOString() }, { merge: true });
+  } catch (_) {}
+}

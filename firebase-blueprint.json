@@ -231,6 +231,21 @@
         "companyName": { "type": "string", "description": "Displayed company title", "maxLength": 150 },
         "updatedAt": { "type": "string", "description": "Timestamp of update", "maxLength": 50 }
       }
+    },
+    "UserWorkDraft": {
+      "title": "UserWorkDraft",
+      "description": "Cloud-synced in-progress work draft per user across disconnections and logins",
+      "type": "object",
+      "properties": {
+        "userKey": { "type": "string", "description": "Unique user identifier or email", "maxLength": 150 },
+        "userName": { "type": "string", "description": "Display name of the user", "maxLength": 150 },
+        "companyId": { "type": "string", "description": "Active company workspace identifier", "maxLength": 40 },
+        "module": { "type": "string", "description": "Module where work was in progress", "maxLength": 60 },
+        "title": { "type": "string", "description": "Summary title of in-progress draft", "maxLength": 200 },
+        "step": { "type": "number", "description": "Wizard step index" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last auto-save", "maxLength": 50 }
+      },
+      "required": ["userKey", "module", "updatedAt"]
     }
   },
   "firestore": {
@@ -313,6 +328,10 @@
     "/company_document_categories/{catId}": {
       "schema": "CompanyDocumentCategory",
       "description": "Categories for organizing official company documentation"
+    },
+    "/work_drafts/{draftId}": {
+      "schema": "UserWorkDraft",
+      "description": "Cloud-synced user work drafts for session and disconnection recovery"
     }
   }
 }

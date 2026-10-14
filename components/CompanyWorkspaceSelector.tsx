@@ -334,44 +334,44 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   };
 
   const content = (
-    <div className="w-full max-w-4xl mx-auto px-3 sm:px-6 py-3 sm:py-5 flex flex-col justify-start">
-      {/* 1. COMPACT SINGLE-LINE EXECUTIVE ACTION BAR */}
-      <div className={`flex items-center justify-between gap-2 pb-2.5 mb-4 sm:mb-5 border-b shrink-0 ${
+    <div className="w-full max-w-4xl mx-auto px-2 sm:px-6 py-3 sm:py-5 flex flex-col justify-start min-w-0">
+      {/* 1. SINGLE-LINE EXECUTIVE ACTION BAR */}
+      <div className={`flex flex-nowrap items-center justify-between gap-1 sm:gap-2 pb-2.5 mb-4 sm:mb-5 border-b shrink-0 w-full min-w-0 ${
         isPearl ? 'border-slate-200' : 'border-white/10'
       }`}>
         
         {/* Left Side: Change Portal Dropdown Menu (Strictly for Admins: Main Admin or Company Admin) */}
         {isCompanyAdmin ? (
-          <div className="relative shrink-0" ref={portalDropdownRef}>
+          <div className="relative shrink-0 min-w-0" ref={portalDropdownRef}>
             <button
               type="button"
               id="btn-change-portal-dropdown"
               onClick={() => setIsPortalDropdownOpen(!isPortalDropdownOpen)}
-              className={`group px-2.5 py-1.5 rounded-lg text-[11px] font-semibold tracking-wide transition-all duration-200 border shadow-xs flex items-center gap-1.5 cursor-pointer ${
+              className={`group h-7 sm:h-8 px-1.5 sm:px-2.5 rounded-lg text-[9.5px] sm:text-[11px] font-semibold tracking-tight sm:tracking-wide transition-all duration-200 border shadow-xs flex items-center gap-1 sm:gap-1.5 cursor-pointer whitespace-nowrap ${
                 isPearl
                   ? 'bg-white hover:bg-slate-100 text-slate-900 border-slate-300'
                   : 'border-white/15 bg-slate-800/95 hover:bg-slate-700 text-white'
               }`}
               title="Change Portal (Admin, Operations, Case Manager, Finance, Port Staff, Client, etc.)"
             >
-              <LayoutGrid size={12} className={isPearl ? "text-slate-600 shrink-0" : "text-slate-300 shrink-0"} />
-              <span className={`${isPearl ? 'text-slate-500' : 'text-slate-400'} font-normal hidden sm:inline`}>Change Portal:</span>
-              <span className={`${isPearl ? 'text-slate-900' : 'text-white'} font-bold truncate max-w-[120px] sm:max-w-[170px]`}>{activePortal.name}</span>
-              <ChevronDown size={12} className={`transition-transform shrink-0 ${isPortalDropdownOpen ? 'rotate-180' : ''} ${isPearl ? 'text-slate-600' : 'text-slate-400'}`} />
+              <LayoutGrid className={`w-2.5 h-2.5 sm:w-3 sm:h-3 shrink-0 ${isPearl ? "text-slate-600" : "text-slate-300"}`} />
+              <span className={`${isPearl ? 'text-slate-500' : 'text-slate-400'} font-normal hidden md:inline`}>Change Portal:</span>
+              <span className={`${isPearl ? 'text-slate-900' : 'text-white'} font-bold truncate max-w-[74px] xs:max-w-[95px] sm:max-w-[180px]`}>{activePortal.name}</span>
+              <ChevronDown className={`w-2.5 h-2.5 sm:w-3 sm:h-3 transition-transform shrink-0 ${isPortalDropdownOpen ? 'rotate-180' : ''} ${isPearl ? 'text-slate-600' : 'text-slate-400'}`} />
             </button>
 
             {/* Dropdown Menu Popover */}
             {isPortalDropdownOpen && (
-              <div className={`absolute left-0 top-full mt-1.5 w-72 sm:w-88 rounded-2xl border shadow-2xl p-2 z-50 backdrop-blur-2xl animate-fade-in max-h-[75vh] overflow-y-auto custom-scrollbar ${
+              <div className={`absolute left-0 top-full mt-1.5 w-[calc(100vw-2rem)] max-w-[320px] sm:w-88 sm:max-w-none rounded-2xl border shadow-2xl p-2 z-50 backdrop-blur-2xl animate-fade-in max-h-[70vh] overflow-y-auto custom-scrollbar ${
                 isPearl ? 'bg-white border-slate-200 text-slate-900' : 'bg-slate-900 border-white/20 text-white'
               }`}>
                 <div className={`p-2 border-b mb-1 flex items-center justify-between ${isPearl ? 'border-slate-200' : 'border-white/10'}`}>
-                  <div>
+                  <div className="min-w-0 pr-2">
                     <p className={`text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${isPearl ? 'text-slate-900' : 'text-white'}`}>
-                      <LayoutGrid size={12} className={isPearl ? "text-slate-600" : "text-slate-300"} />
-                      <span>Select Portal Workspace</span>
+                      <LayoutGrid size={12} className={isPearl ? "text-slate-600 shrink-0" : "text-slate-300 shrink-0"} />
+                      <span className="truncate">Select Portal Workspace</span>
                     </p>
-                    <p className={`text-[10px] mt-0.5 ${isPearl ? 'text-slate-500' : 'text-slate-400'}`}>
+                    <p className={`text-[10px] mt-0.5 leading-tight ${isPearl ? 'text-slate-500' : 'text-slate-400'}`}>
                       {effectiveIsGlobalAdmin 
                         ? 'Main Admin: Switch into any portal across any company' 
                         : 'Company Admin: Switch into any portal in your company'}
@@ -380,7 +380,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
                   <button
                     type="button"
                     onClick={() => setIsPortalDropdownOpen(false)}
-                    className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                    className={`p-1 rounded-lg transition-colors cursor-pointer shrink-0 ${
                       isPearl ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-100' : 'text-slate-400 hover:text-white hover:bg-white/10'
                     }`}
                   >
@@ -418,7 +418,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
                             <IconComp size={14} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className={`text-xs font-bold truncate ${isPearl ? 'text-slate-900' : 'text-white'}`}>{p.name}</span>
                               <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold shrink-0 ${
                                 isPearl ? 'bg-slate-200 text-slate-700' : 'bg-white/10 text-slate-300'
@@ -459,16 +459,16 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
             )}
           </div>
         ) : (
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] truncate ${
+          <div className={`flex items-center gap-1 sm:gap-1.5 h-7 sm:h-8 px-2 sm:px-2.5 rounded-lg border text-[10px] sm:text-[11px] truncate max-w-[130px] sm:max-w-[180px] shrink-0 ${
             isPearl ? 'bg-white border-slate-200 text-slate-700' : 'bg-white/5 border-white/10 text-slate-300'
           }`}>
-            <ShieldCheck size={12} className="text-emerald-500 shrink-0" />
+            <ShieldCheck className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-emerald-500 shrink-0" />
             <span className="truncate">{activePortal.name}</span>
           </div>
         )}
 
-        {/* Right side: Main Admin Panel, Logout & Theme Switch in one compact single line */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        {/* Right side: Main Admin Panel, Logout & Theme Switch strictly on the same single line */}
+        <div className="flex flex-nowrap items-center justify-end gap-1 sm:gap-2 ml-auto shrink-0">
           {/* Main Admin Panel Button - Visible ONLY to Main Group Admin */}
           {effectiveIsGlobalAdmin && (
             <button
@@ -480,14 +480,14 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
                   openAdminModal('users');
                 }
               }}
-              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold tracking-wide transition-all duration-200 cursor-pointer border shadow-xs flex items-center gap-1.5 whitespace-nowrap ${
+              className={`h-7 sm:h-8 px-1.5 sm:px-2.5 rounded-lg text-[9.5px] sm:text-[11px] font-bold tracking-tight sm:tracking-wide transition-all duration-200 cursor-pointer border shadow-xs flex items-center gap-1 sm:gap-1.5 whitespace-nowrap shrink-0 ${
                 isPearl
                   ? 'bg-slate-900 hover:bg-slate-800 text-white border-slate-900'
                   : 'border-white/20 bg-slate-800/90 hover:bg-slate-700 text-white'
               }`}
               title="Open Main Admin Panel"
             >
-              <Crown size={12} className="text-white shrink-0" />
+              <Crown className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white shrink-0" />
               <span>Main Admin Panel</span>
             </button>
           )}
@@ -497,14 +497,14 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
             <button
               type="button"
               onClick={onSignOut}
-              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 cursor-pointer shadow-xs whitespace-nowrap ${
+              className={`h-7 sm:h-8 px-1.5 sm:px-2.5 rounded-lg text-[9.5px] sm:text-[11px] font-semibold border transition-all flex items-center gap-1 cursor-pointer shadow-xs whitespace-nowrap shrink-0 ${
                 isPearl
                   ? 'bg-white hover:bg-slate-100 text-slate-700 hover:text-slate-900 border-slate-300'
                   : 'text-gray-300 hover:text-white bg-slate-900/90 hover:bg-slate-800 border-white/12 hover:border-white/25'
               }`}
               title="Sign Out / Switch Account"
             >
-              <LogOut size={12} className={isPearl ? "text-slate-500 shrink-0" : "text-slate-400 shrink-0"} />
+              <LogOut className={`w-2.5 h-2.5 sm:w-3 sm:h-3 shrink-0 ${isPearl ? "text-slate-500" : "text-slate-400"}`} />
               <span>Logout</span>
             </button>
           )}
@@ -516,88 +516,43 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
             <button
               type="button"
               onClick={onClose}
-              className={`p-1.5 rounded-lg transition-colors border cursor-pointer ${
+              className={`h-7 w-7 sm:h-8 sm:w-8 flex items-center justify-center rounded-lg transition-colors border cursor-pointer shrink-0 ${
                 isPearl
                   ? 'text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-100 border-slate-300'
                   : 'text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border-white/10'
               }`}
               title="Close Switcher"
             >
-              <X size={14} />
+              <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
           )}
         </div>
       </div>
 
       {/* 2. CENTER CONGLOMERATE HEADER */}
-      <div className="text-center mb-5 sm:mb-7 shrink-0">
+      <div className="text-center mb-4 sm:mb-6 shrink-0 px-2">
         <div className="inline-flex items-center justify-center mb-2 transform hover:scale-105 transition-transform duration-300">
           <img 
             src={parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? parentGroup.logo : (isPearl ? "/logos/mak_pearl_white_emblem.svg" : (parentGroup.logo || "/logos/mak_group_logo.svg"))} 
             alt={parentGroup.name} 
-            className="h-20 sm:h-28 w-auto max-w-[340px] sm:max-w-[420px] object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.22)]" 
+            className="h-20 sm:h-28 w-auto max-w-[240px] sm:max-w-[400px] object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.22)]" 
           />
         </div>
 
-        <h1 className={`text-xl sm:text-2xl font-bold tracking-wide font-sans mb-1 ${
+        <h1 className={`text-lg sm:text-2xl font-bold tracking-wide font-sans mb-1 break-words ${
           isPearl ? 'text-slate-900' : 'text-white drop-shadow-md'
         }`}>
           {parentGroup.title || 'MAK GROUP OF COMPANIES'}
         </h1>
-        <p className={`text-[11px] sm:text-xs font-mono tracking-widest uppercase ${
+        <p className={`text-[10px] sm:text-xs font-mono tracking-widest uppercase ${
           isPearl ? 'text-slate-500' : 'text-slate-400'
         }`}>
           Select Company Workspace
         </p>
-
-        {/* Active Portal Status & Switcher Bar */}
-        {isCompanyAdmin && (
-          <div className="mt-3 inline-flex items-center justify-center">
-            <div className={`px-3.5 py-1.5 rounded-xl border flex flex-wrap items-center justify-center gap-2 shadow-sm backdrop-blur-md ${
-              isPearl ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900/90 border-white/15 text-white'
-            }`}>
-              <span className={`text-[11px] uppercase tracking-wider font-semibold flex items-center gap-1 ${
-                isPearl ? 'text-slate-500' : 'text-slate-400'
-              }`}>
-                <LayoutGrid size={12} className={isPearl ? "text-slate-600" : "text-slate-300"} />
-                <span>Target Portal:</span>
-              </span>
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-md border ${
-                isPearl ? 'text-slate-900 bg-slate-100 border-slate-200' : 'text-white bg-white/10 border-white/10'
-              }`}>
-                {activePortal.name}
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsPortalDropdownOpen(true)}
-                className={`text-[11px] underline font-semibold cursor-pointer ml-1 ${
-                  isPearl ? 'text-slate-600 hover:text-slate-900' : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                Change Portal ▾
-              </button>
-              {onSwitchPortal && (
-                <button
-                  type="button"
-                  onClick={() => handleLaunchPortalDirectly(activePortal)}
-                  className={`px-2.5 py-0.5 rounded-md font-bold text-[11px] shadow-xs transition cursor-pointer flex items-center gap-1 ml-1 ${
-                    isPearl
-                      ? 'bg-slate-900 hover:bg-slate-800 text-white'
-                      : 'bg-white hover:bg-slate-200 text-slate-950'
-                  }`}
-                  title={`Launch into ${activePortal.name} directly`}
-                >
-                  <span>Open</span>
-                  <ArrowRight size={11} />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* 3. FOUR COMPANIES IN 2x2 SQUARE-SHAPED ANIMATED BUTTONS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-6 mb-5 w-full min-w-0">
         {COMPANIES_LIST.map((comp) => {
           const isCurrentActive = comp.id === currentActiveId;
           const isAllowed = effectiveIsGlobalAdmin || userAllowed.includes(comp.id);
@@ -607,7 +562,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
             return (
               <div
                 key={comp.id}
-                className={`relative rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center opacity-50 border shadow-inner min-h-[190px] sm:min-h-[220px] select-none ${
+                className={`relative rounded-3xl p-5 sm:p-8 flex flex-col items-center justify-center text-center opacity-50 border shadow-inner min-h-[175px] sm:min-h-[220px] select-none w-full min-w-0 overflow-hidden ${
                   isPearl ? 'bg-slate-100 border-slate-200' : 'bg-slate-950/60 border-white/5'
                 }`}
               >
@@ -624,7 +579,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
                   </div>
                 </div>
 
-                <h3 className={`text-base sm:text-lg font-bold tracking-wide max-w-xs leading-tight ${
+                <h3 className={`text-sm sm:text-lg font-bold tracking-wide max-w-full leading-tight px-2 break-words ${
                   isPearl ? 'text-slate-500' : 'text-gray-400'
                 }`}>
                   {comp.name}
@@ -641,7 +596,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
               key={comp.id}
               type="button"
               onClick={() => onSelectCompany(comp.id, activePortal.role, activePortal.targetView)}
-              className={`group relative rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-300 backdrop-blur-xl bg-gradient-to-b ${styles.bgGradient} border ${styles.cardBorder} transform hover:-translate-y-1 hover:scale-[1.02] active:scale-[0.98] shadow-xl overflow-hidden min-h-[190px] sm:min-h-[220px]`}
+              className={`group relative rounded-3xl p-5 sm:p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-300 backdrop-blur-xl bg-gradient-to-b ${styles.bgGradient} border ${styles.cardBorder} transform hover:-translate-y-1 hover:scale-[1.01] active:scale-[0.98] shadow-xl overflow-hidden min-h-[175px] sm:min-h-[220px] w-full min-w-0`}
             >
               {/* Animated Background Shimmer Effect on Hover */}
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out pointer-events-none" />
@@ -659,27 +614,27 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
               )}
 
               {/* Company Logo Display */}
-              <div className="h-28 sm:h-36 w-full flex items-center justify-center p-2 mb-3 transform group-hover:scale-105 transition-transform duration-300">
+              <div className="h-24 sm:h-36 w-full flex items-center justify-center p-2 mb-2 sm:mb-3 transform group-hover:scale-105 transition-transform duration-300">
                 <img 
                   src={getCompanyLogoUrl(comp.id)} 
                   alt={comp.name} 
-                  className="max-h-full max-w-[260px] sm:max-w-[320px] object-contain filter drop-shadow-[0_6px_16px_rgba(0,0,0,0.25)]" 
+                  className="max-h-full w-auto max-w-[200px] sm:max-w-[300px] object-contain filter drop-shadow-[0_6px_16px_rgba(0,0,0,0.25)]" 
                 />
               </div>
 
               {/* Only Company Name (Clean & Prominent) */}
-              <h3 className={`text-base sm:text-lg font-bold transition-colors tracking-wide max-w-xs leading-tight ${
+              <h3 className={`text-sm sm:text-lg font-bold transition-colors tracking-wide max-w-full leading-tight px-2 break-words ${
                 isPearl ? 'text-slate-900 group-hover:text-slate-700' : 'text-white group-hover:text-slate-100'
               }`}>
                 {comp.name}
               </h3>
 
               {/* Subtle Animated Indicator displaying target portal */}
-              <div className={`mt-3 flex items-center gap-1.5 text-[11px] font-semibold transition-colors ${
+              <div className={`mt-2.5 flex items-center justify-center gap-1.5 text-[11px] font-semibold transition-colors max-w-full px-2 ${
                 isPearl ? 'text-slate-600 group-hover:text-slate-900' : 'text-slate-400 group-hover:text-white'
               }`}>
-                <span>Enter Workspace • {activePortal.name}</span>
-                <ArrowRight size={13} className="transform group-hover:translate-x-1 transition-transform" />
+                <span className="truncate">Enter Workspace • {activePortal.name}</span>
+                <ArrowRight size={13} className="transform group-hover:translate-x-1 transition-transform shrink-0" />
               </div>
             </button>
           );
@@ -687,7 +642,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
       </div>
 
       {/* 4. FOOTER NOTE */}
-      <div className="text-center pt-2 pb-4 text-xs text-slate-500 font-sans shrink-0">
+      <div className="text-center pt-2 pb-4 px-2 text-[11px] sm:text-xs text-slate-500 font-sans shrink-0">
         MAK Group of Companies • Cross-entity user authentication enabled. Subsidiaries can be switched at any time.
       </div>
 
@@ -703,8 +658,8 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 
   if (isModal) {
     return (
-      <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-md overflow-y-auto">
-        <div className={`relative w-full max-w-4xl border rounded-3xl shadow-2xl my-6 flex flex-col overflow-visible transition-colors duration-300 ${
+      <div className="fixed inset-0 z-50 flex items-start justify-center p-2.5 sm:p-4 bg-black/75 backdrop-blur-md overflow-y-auto overflow-x-hidden">
+        <div className={`relative w-full max-w-4xl border rounded-2xl sm:rounded-3xl shadow-2xl my-2 sm:my-6 flex flex-col overflow-hidden transition-colors duration-300 ${
           isPearl ? 'bg-[#F8FAFC] border-slate-200 text-slate-900' : 'bg-[#11141D] border-white/10 text-slate-100'
         }`}>
           {content}
@@ -714,7 +669,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
   }
 
   return (
-    <div className={`min-h-screen w-full flex flex-col overflow-y-auto relative touch-pan-y transition-colors duration-300 ${
+    <div className={`min-h-screen w-full flex flex-col overflow-y-auto overflow-x-hidden relative touch-pan-y transition-colors duration-300 ${
       isPearl
         ? 'bg-gradient-to-b from-[#FFFFFF] via-[#F8FAFC] to-[#F1F5F9] text-slate-900'
         : 'bg-[#0B0E14] text-slate-100'

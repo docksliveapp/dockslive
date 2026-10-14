@@ -43,7 +43,8 @@ import {
   normalizeCategoryName, 
   supportsSubCategories,
   isDestinationUnloadedAndGateOut,
-  getStepTargetRole
+  getStepTargetRole,
+  getStepArrangedBy
 } from '../services/workflowConfig';
 import { sendAppNotification } from '../services/notificationService';
 import { PdfViewerModal } from './PdfViewerModal';
@@ -61,6 +62,8 @@ import { IsoTankSteps } from './workflowSteps/IsoTankSteps';
 import { BreakbulkSteps } from './workflowSteps/BreakbulkSteps';
 import { LinerNvoccSteps } from './workflowSteps/LinerNvoccSteps';
 import { ImportExportSteps } from './workflowSteps/ImportExportSteps';
+import { enrichCaseWithTripTimings, expireDriverTripCredentialsOnGateOut } from '../services/tripLifecycleService';
+import { CaseTransitHistoryCard } from './CaseTransitHistoryCard';
 
 interface WorkflowStepModalProps {
   isOpen: boolean;
@@ -99,31 +102,75 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
   const activeStepIdx = useMemo(() => getWorkflowStepIndex(targetCase.category, targetCase.status as string), [targetCase.category, targetCase.status]);
   const canEditStep = useMemo(() => {
     if (targetCase.status === CaseStatus.COMPLETED) return false;
-    // Admin has unrestricted workflow rights
-    if (rolesList.includes(UserRole.ADMIN)) {
+
+    const stepStr = String(stepStatus).toLowerCase();
+    const isLoadingWorkflowStep =
+      stepStatus === CaseStatus.LOADING_PORT_PROCESSING ||
+      (normCategory === 'Bonded Carrier' && stepIndex === 4) ||
+      stepStr.includes('loading port');
+    const isDestinationWorkflowStep =
+      stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL ||
+      (normCategory === 'Bonded Carrier' && (stepIndex === 6 || stepIndex === 7)) ||
+      stepStr.includes('destination port');
+
+    // STRICT ROLE MANDATE:
+    // Loading workflow and Loading bill can ONLY be updated/created by Loading Port Staff
+    if (isLoadingWorkflowStep) {
+      return rolesList.includes(UserRole.LOADING_PORT_STAFF);
+    }
+
+    // Destination unloading workflow and Destination bill can ONLY be updated/created by Destination Port Staff
+    if (isDestinationWorkflowStep) {
+      return rolesList.includes(UserRole.DESTINATION_PORT_STAFF) || rolesList.includes(UserRole.UNLOADING_PORT_STAFF);
+    }
+
+    // In Transit can be updated by Destination Port Staff (to receive vehicle & complete transit), Transporter, Vehicle Manager, Operations Manager, or Admin
+    if (stepStatus === CaseStatus.IN_TRANSIT || (normCategory === 'Bonded Carrier' && stepIndex === 5)) {
+      if (
+        rolesList.includes(UserRole.DESTINATION_PORT_STAFF) ||
+        rolesList.includes(UserRole.UNLOADING_PORT_STAFF) ||
+        rolesList.includes(UserRole.TRANSPORTER) ||
+        rolesList.includes(UserRole.VEHICLE_MANAGER)
+      ) {
+        return true;
+      }
+    }
+
+    // Admin and Operations Manager / Case Manager can update all other company-arranged workflows and vehicle assignment
+    if (
+      rolesList.includes(UserRole.ADMIN) ||
+      rolesList.includes(UserRole.OPERATIONS_MANAGER) ||
+      rolesList.includes(UserRole.CASE_MANAGER)
+    ) {
       return true;
     }
-    // Client can edit if the step is arranged by client (e.g. Shipping Line DO)
+
+    const arrangedBy = getStepArrangedBy(targetCase, String(stepStatus), stepIndex);
+
+    // Client can edit if the step is arranged/managed by Client (including DO, Customs, or Vehicle Assignment if arranged by Client)
     if (rolesList.includes(UserRole.CLIENT) && rolesList.length === 1) {
+      if (arrangedBy === 'Client') return true;
       if (stepIndex === 0 || stepStatus === CaseStatus.SHIPPING_LINE_DO) {
         const isClientDo = targetCase.serviceArrangements?.['delivery_order']?.arrangedBy === 'Client' ||
                            targetCase.serviceArrangements?.shippingLineDO?.arrangedBy === 'Client' ||
                            targetCase.workflowDetails?.[CaseStatus.SHIPPING_LINE_DO]?.doDueChargesArrangedBy === 'Client' ||
-                           formData.doDueChargesArrangedBy === 'Client' ||
                            !targetCase.workflowDetails?.[CaseStatus.SHIPPING_LINE_DO]?.doDueChargesArrangedBy;
         if (isClientDo) return true;
+      }
+      if (
+        stepStatus === CaseStatus.VEHICLE_ASSIGNMENT ||
+        stepStr.includes('vehicle') ||
+        stepStr.includes('transport')
+      ) {
+        const isClientVeh =
+          targetCase.serviceArrangements?.['transportation']?.arrangedBy === 'Client' ||
+          targetCase.workflowDetails?.[stepStatus]?.vehicleRentArrangedBy === 'Client';
+        if (isClientVeh) return true;
       }
       return false;
     }
 
     let canEdit = false;
-
-    // Operations Manager can update up to Vehicle Assignment (stepIndex <= 4)
-    if (rolesList.includes(UserRole.OPERATIONS_MANAGER)) {
-      if (stepIndex <= 4) canEdit = true;
-    }
-
-    const stepStr = String(stepStatus).toLowerCase();
 
     // Loading Port Staff: Loading Port Processing & Shipping Line DO (when arranged by client)
     if (rolesList.includes(UserRole.LOADING_PORT_STAFF)) {
@@ -138,7 +185,6 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       ) {
         canEdit = true;
       }
-      // Also can edit Shipping Line DO if arranged by client!
       if (stepIndex === 0 || stepStatus === CaseStatus.SHIPPING_LINE_DO) {
         const isClientDo = targetCase.serviceArrangements?.['delivery_order']?.arrangedBy === 'Client' ||
                            targetCase.workflowDetails?.[CaseStatus.SHIPPING_LINE_DO]?.doDueChargesArrangedBy === 'Client' ||
@@ -157,7 +203,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     }
 
     return canEdit;
-  }, [rolesList, targetCase.status, stepIndex, stepStatus, targetCase.serviceArrangements, targetCase.workflowDetails]);
+  }, [rolesList, targetCase, stepIndex, stepStatus, normCategory]);
 
   const isReadOnly = !canEditStep || targetCase.status === CaseStatus.COMPLETED;
 
@@ -249,7 +295,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     trackerArrangedBy: existingDetail.trackerArrangedBy || (targetCase.serviceArrangements?.['tracker_security']?.arrangedBy || 'Client'),
     trackerAmount: existingDetail.trackerAmount || (targetCase.serviceArrangements?.['tracker_security']?.arrangedBy === 'DPL' ? (targetCase.serviceArrangements['tracker_security'].amount || 0) : 0),
     trackerCommission: 0,
-    loadingChargesArrangedBy: existingDetail.loadingChargesArrangedBy || (targetCase.serviceArrangements?.['loading_unloading']?.arrangedBy || 'Client'),
+    loadingChargesArrangedBy: existingDetail.loadingChargesArrangedBy || (targetCase.serviceArrangements?.['loading_unloading']?.arrangedBy || targetCase.serviceArrangements?.loadingUnloading?.arrangedBy || 'Client'),
     loadingChargesAmount: existingDetail.loadingChargesAmount || (targetCase.serviceArrangements?.['loading_unloading']?.arrangedBy === 'DPL' ? (targetCase.serviceArrangements['loading_unloading'].amount || 0) : 0),
     loadingChargesCommission: 0,
     weightSlipUrl: existingDetail.weightSlipUrl || '',
@@ -271,7 +317,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     clientDoNumber: existingDetail.clientDoNumber || '',
     clientDoDate: existingDetail.clientDoDate || '',
 
-    // Step 7
+    // Step 7: In Transit
     inTransitActive: existingDetail.inTransitActive || false,
     incidentReported: existingDetail.incidentReported || false,
     incidentReason: existingDetail.incidentReason || '',
@@ -279,10 +325,10 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     incidentLocation: existingDetail.incidentLocation || '',
     incidentRemarks: existingDetail.incidentRemarks || '',
 
-    // Step 8
-    portGateArrivalPhotoUrl: existingDetail.portGateArrivalPhotoUrl || '',
-    portGateArrivalPhotoName: existingDetail.portGateArrivalPhotoName || '',
-    destinationGateInToggled: existingDetail.destinationGateInToggled || false,
+    // Step 8: Destination Port Arrival & Unloading
+    portGateArrivalPhotoUrl: existingDetail.portGateArrivalPhotoUrl || targetCase.workflowDetails?.[CaseStatus.DESTINATION_PORT_ARRIVAL]?.portGateArrivalPhotoUrl || '',
+    portGateArrivalPhotoName: existingDetail.portGateArrivalPhotoName || targetCase.workflowDetails?.[CaseStatus.DESTINATION_PORT_ARRIVAL]?.portGateArrivalPhotoName || '',
+    destinationGateInToggled: existingDetail.destinationGateInToggled || targetCase.workflowDetails?.[CaseStatus.DESTINATION_PORT_ARRIVAL]?.destinationGateInToggled || false,
     secondaryCustomsSealPhotoUrl: existingDetail.secondaryCustomsSealPhotoUrl || '',
     secondaryCustomsSealPhotoName: existingDetail.secondaryCustomsSealPhotoName || '',
     secondaryCustomsSealNumber: existingDetail.secondaryCustomsSealNumber || '',
@@ -292,7 +338,9 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     finalSignedTransportNoteName: existingDetail.finalSignedTransportNoteName || '',
     dryPortGatePassUrl: existingDetail.dryPortGatePassUrl || '',
     dryPortGatePassName: existingDetail.dryPortGatePassName || '',
-    vehicleGateOutToggled: existingDetail.vehicleGateOutToggled || false
+    vehicleGateOutToggled: existingDetail.vehicleGateOutToggled || false,
+    destinationChargesArrangedBy: existingDetail.destinationChargesArrangedBy || (targetCase.serviceArrangements?.['destination_unloading']?.arrangedBy || targetCase.serviceArrangements?.['loading_unloading']?.arrangedBy || targetCase.serviceArrangements?.loadingUnloading?.arrangedBy || 'Client'),
+    destinationChargesAmount: existingDetail.destinationChargesAmount || 0
   });
 
   const [activePdfPreview, setActivePdfPreview] = useState<{ url: string; title: string } | null>(null);
@@ -314,8 +362,9 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
   const [showVehicleSearchModal, setShowVehicleSearchModal] = useState(false);
   const [vehicleSearchQuery, setVehicleSearchQuery] = useState('');
 
-  // Loading Bill modal state
+  // Loading & Destination Bill modal state
   const [showLoadingBillModal, setShowLoadingBillModal] = useState(false);
+  const [billModalType, setBillModalType] = useState<'LOADING' | 'DESTINATION'>('LOADING');
   const [validationError, setValidationError] = useState<string | null>(null);
 
   // Load vehicles from storage if availableVehicles is empty
@@ -731,8 +780,9 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     return filtered;
   };
 
-  const handleSave = (isCompleting: boolean) => {
-    if (isCompleting) {
+  const handleSave = (isCompleting: boolean, forceGateOutComplete?: boolean) => {
+    const effectiveCompleting = isCompleting || Boolean(forceGateOutComplete);
+    if (effectiveCompleting) {
       const validation = validateStepStrict();
       if (!validation.valid) {
         alert(validation.error);
@@ -744,10 +794,14 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     let finalStatus = targetCase.status;
     let isCompleted = false;
 
-    if (isCompleting) {
+    if (effectiveCompleting) {
       isCompleted = true;
       const totalSteps = categoryWorkflow.totalSteps;
-      if (stepIndex < totalSteps - 1) {
+      if (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 4)) {
+        finalStatus = CaseStatus.IN_TRANSIT;
+      } else if (stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL || (normCategory === 'Bonded Carrier' && (stepIndex === 6 || stepIndex === 7))) {
+        finalStatus = CaseStatus.COMPLETED;
+      } else if (stepIndex < totalSteps - 1) {
         finalStatus = categoryWorkflow.steps[stepIndex + 1].id as any;
       } else {
         finalStatus = CaseStatus.COMPLETED;
@@ -756,14 +810,33 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       isCompleted = false;
     }
 
-    // Final step completion trigger
-    if (stepIndex === categoryWorkflow.totalSteps - 1 && (formData.vehicleGateOutToggled || formData.outOfChargeCleared)) {
+    // Loading Gate-Out auto-completion trigger:
+    // "We can get out karte hi loading staff ka kam khatm aur loading ka workflow complete ho jaega finish ho jaega. Aur transit per chala jaega workflow"
+    if (
+      (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 4)) &&
+      (formData.gateOutToggled || forceGateOutComplete) &&
+      formData.portGatePassUrl &&
+      formData.vehiclePhotoUrl &&
+      formData.customsSealPhotoUrl &&
+      formData.customsSealNumber?.trim() &&
+      formData.driverGateOutPhotoUrl
+    ) {
+      isCompleted = true;
+      finalStatus = CaseStatus.IN_TRANSIT;
+    }
+
+    // Final step completion trigger (Destination Port Arrival -> Case Finish)
+    if (
+      (stepIndex === categoryWorkflow.totalSteps - 1 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL || (normCategory === 'Bonded Carrier' && (stepIndex === 6 || stepIndex === 7))) &&
+      (effectiveCompleting || ((formData.vehicleGateOutToggled || formData.outOfChargeCleared) && formData.secondaryCustomsSealPhotoUrl && formData.secondaryCustomsSealNumber?.trim()))
+    ) {
       finalStatus = CaseStatus.COMPLETED;
       isCompleted = true;
     }
 
     const updatedStepDetail: CaseStepDetail = {
       ...formData,
+      gateOutToggled: forceGateOutComplete ? true : formData.gateOutToggled,
       status: stepStatus,
       completed: isCompleted,
       updatedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -783,42 +856,133 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       }));
     }
 
-    // Extract all uploaded step files/receipts and merge into targetCase.documents
-    const stepDocs = extractDocsFromStep(updatedStepDetail);
+    // Extract all uploaded step files/receipts across current step AND all workflow steps when archiving/saving
+    const mergedWorkflowDetails: Record<string, CaseStepDetail> = {
+      ...currentWorkflow,
+      [stepStatus]: updatedStepDetail
+    };
+
+    // When Loading completes and transitions to IN_TRANSIT, also activate IN_TRANSIT step detail
+    if (
+      (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 4)) &&
+      isCompleted &&
+      finalStatus === CaseStatus.IN_TRANSIT
+    ) {
+      const existingTransit = mergedWorkflowDetails[CaseStatus.IN_TRANSIT] || ({} as CaseStepDetail);
+      mergedWorkflowDetails[CaseStatus.IN_TRANSIT] = {
+        ...existingTransit,
+        status: CaseStatus.IN_TRANSIT,
+        inTransitActive: true,
+        date: existingTransit.date || new Date().toISOString().split('T')[0],
+        updatedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+    }
+
     const existingDocs = [...(targetCase.documents || [])];
-    stepDocs.forEach(newDoc => {
-      if (!existingDocs.some((d: any) => d.url === newDoc.url || (d.name === newDoc.name && d.name !== 'Document'))) {
-        existingDocs.push(newDoc);
-      }
+    Object.values(mergedWorkflowDetails).forEach(detailObj => {
+      if (!detailObj) return;
+      const docsFromDetail = extractDocsFromStep(detailObj);
+      docsFromDetail.forEach(newDoc => {
+        if (!existingDocs.some((d: any) => d.url === newDoc.url || (d.name === newDoc.name && d.name !== 'Document'))) {
+          existingDocs.push(newDoc);
+        }
+      });
     });
 
-    const updatedCase: Case = {
+    let updatedCase: Case = {
       ...targetCase,
       status: finalStatus,
       charges: updatedCharges,
       containers: updatedContainers,
       documents: existingDocs,
-      workflowDetails: {
-        ...currentWorkflow,
-        [stepStatus]: updatedStepDetail
-      }
+      workflowDetails: mergedWorkflowDetails,
+      ...(finalStatus === CaseStatus.COMPLETED
+        ? {
+            completedAt: (targetCase as any).completedAt || new Date().toISOString(),
+            permanentlyArchived: true
+          }
+        : {})
     };
+
+    // Enrich with loading port gate-out duration, transit duration, and destination unloading & gate-out duration across all categories
+    updatedCase = enrichCaseWithTripTimings(updatedCase, String(stepStatus), updatedStepDetail);
+
+    // If container is unloaded & vehicle gates out at destination (or final step completes), automatically expire/block Driver Trip Login ID
+    const isDestGateOutDone =
+      updatedStepDetail.vehicleGateOutToggled === true ||
+      updatedStepDetail.gateOutVehicle === true ||
+      updatedStepDetail.outOfChargeCleared === true ||
+      finalStatus === CaseStatus.COMPLETED ||
+      isDestinationUnloadedAndGateOut(updatedCase);
+
+    if (isDestGateOutDone && !updatedCase.driverTripIdExpiredOnGateOut) {
+      updatedCase = {
+        ...updatedCase,
+        driverTripIdExpiredOnGateOut: true
+      };
+      expireDriverTripCredentialsOnGateOut(updatedCase).catch(err =>
+        console.warn('Could not auto-expire driver trip credentials:', err)
+      );
+    }
 
     onSaveCase(updatedCase);
 
-    // Dispatch real-time workflow notification to the responsible role
-    if (isCompleting) {
+    // Dispatch real-time workflow notifications to Operations Manager, Client, and responsible role
+    const currentStepObj = categoryWorkflow.steps[stepIndex] || { id: String(stepStatus), title: String(stepStatus) };
+    const currentStepArrangedBy = getStepArrangedBy(updatedCase, String(stepStatus), stepIndex);
+
+    // 1. Notify Operations Manager & Client about current step update / completion
+    sendAppNotification({
+      title: isCompleted
+        ? `Workflow Step ${stepIndex + 1} Completed: #${updatedCase.caseNo} (${currentStepObj.title})`
+        : `Workflow Step ${stepIndex + 1} Updated: #${updatedCase.caseNo} (${currentStepObj.title})`,
+      description: `Case #${updatedCase.caseNo} (${updatedCase.clientName || 'Client'}) - Step ${stepIndex + 1} (${currentStepObj.title}, Managed by ${currentStepArrangedBy === 'Client' ? 'Client' : 'Company / Operations Manager'}) has been ${isCompleted ? 'completed' : 'updated'} by ${String(userRole).replace(/_/g, ' ')}.${formData.assignedVehicleNo ? ` Assigned Vehicle: ${formData.assignedVehicleNo}.` : ''}`,
+      details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName || 'N/A'}\nService: ${updatedCase.category}\nStep ${stepIndex + 1}: ${currentStepObj.title}\nManaged By: ${currentStepArrangedBy === 'Client' ? 'Client' : 'Company (Operations Manager)'}\nStatus: ${isCompleted ? 'COMPLETED' : 'UPDATED'}${formData.assignedVehicleNo ? `\nAssigned Vehicle: ${formData.assignedVehicleNo}` : ''}`,
+      targetRole: 'OPERATIONS_MANAGER,CASE_MANAGER,CLIENT',
+      targetClientName: updatedCase.clientName,
+      targetView: 'cases',
+      targetFilter: {
+        caseNo: updatedCase.caseNo,
+        stepId: String(stepStatus),
+        stepIndex: stepIndex
+      },
+      type: 'INFO',
+      notificationSubType: 'WORKFLOW_TASK',
+      actionLabel: 'View Case Workflow',
+      category: 'CASE',
+      performedBy: String(userRole),
+      performedByRole: String(userRole)
+    }).catch(e => console.warn('Could not dispatch step update notification:', e));
+
+    // 2. If completing this step, dispatch Action Required notification for Next Step (or Case Finish)
+    if (isCompleted) {
       const totalSteps = categoryWorkflow.totalSteps;
-      if (stepIndex < totalSteps - 1) {
+      if (finalStatus !== CaseStatus.COMPLETED && stepIndex < totalSteps - 1) {
         const nextStep = categoryWorkflow.steps[stepIndex + 1];
-        const targetRole = getStepTargetRole(targetCase.category, nextStep.id, stepIndex + 1);
-        const nextRoleLabel = String(targetRole).replace(/_/g, ' ');
+        const nextArrangedBy = getStepArrangedBy(updatedCase, nextStep.id, stepIndex + 1);
+        const primaryTargetRole = getStepTargetRole(targetCase.category, nextStep.id, stepIndex + 1, updatedCase);
+        const nextRoleLabel = nextArrangedBy === 'Client'
+          ? 'Client (Managed by Client)'
+          : `Operations Manager / ${String(primaryTargetRole).replace(/_/g, ' ')} (Managed by Company)`;
+
+        // Always include OPERATIONS_MANAGER and CLIENT in targetRole so Operations Manager gets every workflow notification from start to finish
+        const combinedRoles = Array.from(new Set([
+          'OPERATIONS_MANAGER',
+          'CASE_MANAGER',
+          'CLIENT',
+          String(primaryTargetRole)
+        ])).join(',');
 
         sendAppNotification({
-          title: `Action Required: #${updatedCase.caseNo} - Step ${stepIndex + 2}: ${nextStep.title}`,
-          description: `Case #${updatedCase.caseNo} (${updatedCase.clientName || 'Consignment'}) has progressed to Step ${stepIndex + 2}: ${nextStep.title}. Assigned to ${nextRoleLabel} to update and advance workflow.`,
-          details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName || 'N/A'}\nService: ${updatedCase.category}\nNext Step: Step ${stepIndex + 2} - ${nextStep.title}\nAssigned Role: ${nextRoleLabel}`,
-          targetRole: targetRole,
+          title: nextArrangedBy === 'Client'
+            ? `Action Required by Client: #${updatedCase.caseNo} - Step ${stepIndex + 2}: ${nextStep.title}`
+            : `Action Required (Managed by Company): #${updatedCase.caseNo} - Step ${stepIndex + 2}: ${nextStep.title}`,
+          description: nextArrangedBy === 'Client'
+            ? `Case #${updatedCase.caseNo} (${updatedCase.clientName}) reached Step ${stepIndex + 2}: ${nextStep.title}. Managed by Client — Client is requested to update this workflow step.`
+            : `Case #${updatedCase.caseNo} (${updatedCase.clientName}) reached Step ${stepIndex + 2}: ${nextStep.title}. Managed by Company — Operations Manager to update and advance workflow.`,
+          details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName || 'N/A'}\nService: ${updatedCase.category}\nNext Step: Step ${stepIndex + 2} - ${nextStep.title}\nArrangement: ${nextArrangedBy === 'Client' ? 'Managed by Client (Demand sent to Client)' : 'Managed by Company (Operations Manager updates)'}\nAssigned Role: ${nextRoleLabel}`,
+          targetRole: combinedRoles,
+          targetClientName: updatedCase.clientName,
           targetView: 'cases',
           targetFilter: {
             caseNo: updatedCase.caseNo,
@@ -834,17 +998,19 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
           performedByRole: String(userRole)
         }).catch(e => console.warn('Could not dispatch workflow step notification:', e));
       } else {
-        // All steps completed - Notify Finance Manager for Final Invoicing & Settlement
+        // All steps completed (Case Finish) - Notify Operations Manager, Client, and Finance Manager
         sendAppNotification({
-          title: `Case Workflow Completed: #${updatedCase.caseNo}`,
-          description: `All ${totalSteps} workflow steps for Case #${updatedCase.caseNo} (${updatedCase.clientName}) are completed. Ready for final finance billing and account clearance.`,
-          details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName || 'N/A'}\nService: ${updatedCase.category}\nStatus: ALL STEPS COMPLETED`,
-          targetRole: UserRole.FINANCE_MANAGER,
-          targetView: 'finance',
+          title: `Case Workflow Finished & Permanently Archived: #${updatedCase.caseNo}`,
+          description: `All workflow steps for Case #${updatedCase.caseNo} (${updatedCase.clientName}) are 100% completed. All case data, bills, ledgers, and documents are permanently saved and available for download.`,
+          details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName || 'N/A'}\nService: ${updatedCase.category}\nStatus: CASE FINISHED & PERMANENTLY ARCHIVED (ALL STEPS COMPLETED)`,
+          targetRole: 'OPERATIONS_MANAGER,CASE_MANAGER,FINANCE_MANAGER,CLIENT,ADMIN',
+          targetClientName: updatedCase.clientName,
+          targetView: 'cases',
+          targetFilter: { caseNo: updatedCase.caseNo },
           type: 'INFO',
-          notificationSubType: 'FINANCE_RECORDED',
-          actionLabel: 'View Invoice & Billing',
-          category: 'FINANCE',
+          notificationSubType: 'WORKFLOW_TASK',
+          actionLabel: 'View Completed Case Dossier',
+          category: 'CASE',
           performedBy: String(userRole),
           performedByRole: String(userRole)
         }).catch(e => console.warn('Could not dispatch workflow completed notification:', e));
@@ -854,33 +1020,88 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     onClose();
   };
 
-  // Step 8 Trigger: Uploading destination arrival picture automatically marks Step 7 (In Transit) as completed
+  // Destination Staff Vehicle Reception & Photo Trigger:
+  // "Destination staff Jaise hi Kisi bhi vehicle receive karenge aur uski picture lenge vahi transit complete ho jaega aur destination unloading workflow start ho jaega"
   const handleDestinationArrivalPhotoUploaded = (photoUrl: string) => {
+    const nowDate = new Date().toISOString().split('T')[0];
+    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
     setFormData(prev => ({
       ...prev,
       portGateArrivalPhotoUrl: photoUrl,
-      portGateArrivalPhotoName: 'Destination Port Arrival Photo'
+      portGateArrivalPhotoName: 'Destination Vehicle Reception & Gate Arrival Photo',
+      destinationGateInToggled: true
     }));
 
-    // Auto-mark Step 7 In Transit as completed in targetCase
-    const s7 = targetCase.workflowDetails?.[CaseStatus.IN_TRANSIT] || ({} as CaseStepDetail);
-    const updatedS7: CaseStepDetail = {
-      ...s7,
+    // Auto-mark In Transit as completed in targetCase AND transition case status to DESTINATION_PORT_ARRIVAL
+    const sTransit = targetCase.workflowDetails?.[CaseStatus.IN_TRANSIT] || ({} as CaseStepDetail);
+    const updatedTransit: CaseStepDetail = {
+      ...sTransit,
       status: CaseStatus.IN_TRANSIT,
       completed: true,
       inTransitActive: false,
-      date: new Date().toISOString().split('T')[0],
-      remarks: (s7.remarks || '') + ' (Arrival at Destination Port Verified)'
+      date: nowDate,
+      updatedAt: nowTime,
+      remarks: (sTransit.remarks || '') + ' (Vehicle Received & Arrival Photo Captured by Destination Staff — Transit Completed)'
     };
 
-    const updatedCase: Case = {
+    const sDest = targetCase.workflowDetails?.[CaseStatus.DESTINATION_PORT_ARRIVAL] || ({} as CaseStepDetail);
+    const updatedDest: CaseStepDetail = {
+      ...sDest,
+      ...(stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL ? formData : {}),
+      status: CaseStatus.DESTINATION_PORT_ARRIVAL,
+      portGateArrivalPhotoUrl: photoUrl,
+      portGateArrivalPhotoName: 'Destination Vehicle Reception & Gate Arrival Photo',
+      destinationGateInToggled: true,
+      date: sDest.date || nowDate,
+      updatedAt: nowTime
+    };
+
+    const existingDocs = [...(targetCase.documents || [])];
+    if (photoUrl && !existingDocs.some((d: any) => d.url === photoUrl)) {
+      existingDocs.push({
+        id: `doc_dest_arrival_${Date.now()}`,
+        name: `Destination_Vehicle_Reception_${targetCase.caseNo}.pdf`,
+        url: photoUrl,
+        type: 'Destination Vehicle Reception Photo',
+        uploadedAt: new Date().toISOString()
+      });
+    }
+
+    const nextCaseStatus =
+      targetCase.status === CaseStatus.COMPLETED
+        ? CaseStatus.COMPLETED
+        : CaseStatus.DESTINATION_PORT_ARRIVAL;
+
+    let updatedCase: Case = {
       ...targetCase,
+      status: nextCaseStatus,
+      documents: existingDocs,
       workflowDetails: {
         ...(targetCase.workflowDetails || {}),
-        [CaseStatus.IN_TRANSIT]: updatedS7
+        [CaseStatus.IN_TRANSIT]: updatedTransit,
+        [CaseStatus.DESTINATION_PORT_ARRIVAL]: updatedDest
       }
     };
+
+    updatedCase = enrichCaseWithTripTimings(updatedCase, CaseStatus.DESTINATION_PORT_ARRIVAL, updatedDest);
     onSaveCase(updatedCase);
+
+    sendAppNotification({
+      title: `Vehicle Received at Destination (Transit Completed): #${targetCase.caseNo}`,
+      description: `Destination Staff received vehicle ${targetCase.containers?.[0]?.vehicleNo || ''} and captured arrival photo for Case #${targetCase.caseNo}. Transit is now COMPLETED and Destination Unloading workflow has started.`,
+      details: `Case No: ${targetCase.caseNo}\nClient: ${targetCase.clientName || 'N/A'}\nVehicle: ${targetCase.containers?.[0]?.vehicleNo || 'N/A'}\nTransit Status: COMPLETED\nActive Stage: Destination Port Unloading Workflow`,
+      targetRole: 'OPERATIONS_MANAGER,CASE_MANAGER,CLIENT,DESTINATION_PORT_STAFF',
+      targetClientName: targetCase.clientName,
+      targetView: 'cases',
+      targetFilter: { caseNo: targetCase.caseNo, stepId: CaseStatus.DESTINATION_PORT_ARRIVAL },
+      type: 'INFO',
+      notificationSubType: 'WORKFLOW_TASK',
+      actionLabel: 'Open Destination Workflow',
+      category: 'CASE',
+      performedBy: String(userRole),
+      performedByRole: String(userRole)
+    }).catch(e => console.warn('Could not dispatch destination arrival notification:', e));
   };
 
   const handleTriggerIncident = () => {
@@ -919,7 +1140,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-slate-900 rounded-3xl overflow-hidden max-w-2xl w-full border border-white/15 shadow-2xl animate-fade-in max-h-[92vh] flex flex-col">
+      <div className="bg-slate-900 rounded-3xl overflow-hidden max-w-3xl w-full border border-white/15 shadow-2xl animate-fade-in max-h-[92vh] flex flex-col">
         {/* Header */}
         <div className="p-5 border-b border-white/10 flex justify-between items-center bg-slate-950/70 shrink-0">
           <div className="flex items-center gap-3">
@@ -973,20 +1194,32 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   <ShieldCheck size={24} />
                 </div>
                 <div>
-                  <h4 className="font-bold text-white text-sm">Finalized Case Dossier (Read-Only Lock)</h4>
+                  <h4 className="font-bold text-white text-sm">Finalized & Permanently Archived Case Dossier</h4>
                   <p className="text-gray-300 text-[11px]">
-                    All operational steps and mandatory compliance documents are sealed under Pakistan Customs regulations.
+                    All operational steps, bills, ledgers, and compliance documents are permanently saved and available for download anytime.
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => downloadCasePdf(targetCase)}
-                className="px-3 py-1.5 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 font-semibold text-xs border border-emerald-500/30 flex items-center gap-1.5 transition-colors shrink-0"
-              >
-                <Download size={14} />
-                <span>Download Dossier (PDF)</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {isDestinationUnloadedAndGateOut(targetCase) && (
+                  <button
+                    type="button"
+                    onClick={() => downloadCustomsDeliveryOrderPdf({ targetCase })}
+                    className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-semibold text-xs border border-amber-500/30 flex items-center gap-1.5 transition-colors"
+                  >
+                    <FileCheck size={14} />
+                    <span>Delivery Order (PDF)</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => downloadCasePdf(targetCase)}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 font-semibold text-xs border border-emerald-500/30 flex items-center gap-1.5 transition-colors"
+                >
+                  <Download size={14} />
+                  <span>Download Full Dossier (PDF)</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -994,9 +1227,21 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
           {!canEditStep && targetCase.status !== CaseStatus.COMPLETED && (
             <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-wrap items-center justify-between gap-3 text-amber-200">
               <div className="flex items-center gap-2.5">
-                <AlertCircle size={18} className="text-amber-400 shrink-0" />
+                <Lock size={18} className="text-amber-400 shrink-0" />
                 <span className="text-xs">
-                  <strong>Restricted Operational Stage:</strong> You are logged in as <strong>{userRole}</strong>. This stage is editable by authorized role personnel or Case Manager/Admin.
+                  {(stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 4)) ? (
+                    <>
+                      <strong>Exclusive Loading Staff Stage:</strong> Only <strong>Loading Port Staff</strong> can update the Loading workflow or generate the Loading Bill. (Current Role: <strong>{userRole}</strong> — View Only)
+                    </>
+                  ) : (stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL || (normCategory === 'Bonded Carrier' && (stepIndex === 6 || stepIndex === 7))) ? (
+                    <>
+                      <strong>Exclusive Destination Staff Stage:</strong> Only <strong>Destination Port Staff</strong> can update the Destination Unloading workflow or generate the Destination Bill. (Current Role: <strong>{userRole}</strong> — View Only)
+                    </>
+                  ) : (
+                    <>
+                      <strong>Restricted Operational Stage:</strong> You are logged in as <strong>{userRole}</strong>. This stage is editable only by its designated role personnel.
+                    </>
+                  )}
                 </span>
               </div>
               {isDestinationUnloadedAndGateOut(targetCase) && (userRole === UserRole.UNLOADING_PORT_STAFF || userRole === UserRole.DESTINATION_PORT_STAFF || userRole === UserRole.ADMIN || userRole === UserRole.OPERATIONS_MANAGER) && (
@@ -1868,75 +2113,168 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
             </div>
           )}
 
-          {/* STEP 5: LOADING PORT PROCESSING (STEP INDEX 4) */}
+          {/* STEP 5: LOADING PORT PROCESSING — REDESIGNED 4-STAGE COMMAND DECK (STEP INDEX 4) */}
           {(stepIndex === 4 || stepStatus === CaseStatus.LOADING_PORT_PROCESSING) && (
-            <div className="space-y-4">
-              {/* Shipping Line DO section (When arranged by DPL) */}
-              {(formData.doDueChargesArrangedBy === 'DPL' || targetCase.serviceArrangements?.['delivery_order']?.arrangedBy === 'DPL') && (
-                <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3.5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-white text-xs uppercase tracking-wider block">
-                      Delivery Order (DO) Details:
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      DPL Arranged DO
-                    </span>
+            <div className="space-y-5">
+              {/* Top Loading Command Deck Banner & 4-Stage Visual Stepper */}
+              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-brand-950/30 border border-brand-500/30 shadow-xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3.5">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-brand-500/20 text-brand-300 border border-brand-500/30">
+                        Loading Port Command Center
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                        Managed Exclusively by Loading Staff
+                      </span>
+                    </div>
+                    <h4 className="text-sm sm:text-base font-black text-white mt-1.5">
+                      Container Loading, Customs Seal, Loading Bill & Gate-Out Dispatch
+                    </h4>
                   </div>
 
-                  {/* DO Picture Upload */}
-                  <WorkflowMultiUploader
-                    label="Delivery Order (DO) Document / Photo"
-                    sublabel="Upload or take photo of physical Delivery Order issued by shipping line"
-                    urlField="doReceiptUrl"
-                    nameField="doReceiptName"
-                    allowCamera={true}
-                    compact={true}
-                    formData={formData}
-                    setFormData={setFormData}
-                    onPreview={setActivePdfPreview}
-                  />
-
-                  {/* Date, Shipping Line, and Shipping Agent */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="font-semibold text-gray-300 block mb-1 text-xs">DO Date</label>
-                      <input
-                        type="date"
-                        value={formData.doIssueDate || new Date().toISOString().split('T')[0]}
-                        onChange={(e) => setFormData({ ...formData, doIssueDate: e.target.value })}
-                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-semibold text-gray-300 block mb-1 text-xs">Shipping Line</label>
-                      <input
-                        type="text"
-                        value={formData.shippingLine || ''}
-                        onChange={(e) => setFormData({ ...formData, shippingLine: e.target.value })}
-                        placeholder="e.g. Maersk, MSC, Hapag-Lloyd"
-                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs font-medium"
-                      />
-                    </div>
-                    <div>
-                      <label className="font-semibold text-gray-300 block mb-1 text-xs">Shipping Agent</label>
-                      <input
-                        type="text"
-                        value={formData.shippingAgent || ''}
-                        onChange={(e) => setFormData({ ...formData, shippingAgent: e.target.value })}
-                        placeholder="e.g. Marine Services"
-                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs font-medium"
-                      />
+                  {/* Assigned Vehicle & Container Quick Pill */}
+                  <div className="bg-black/40 border border-white/10 rounded-2xl px-3.5 py-2 flex items-center gap-3 shrink-0">
+                    <Truck size={18} className="text-amber-400 shrink-0" />
+                    <div className="text-[11px]">
+                      <span className="text-gray-400 block">Vehicle / Container</span>
+                      <span className="font-mono font-bold text-white">
+                        {formData.assignedVehicleNo || targetCase.containers?.[0]?.vehicleNo || 'TBD'} • {targetCase.containers?.[0]?.number || 'CNTR'}
+                      </span>
                     </div>
                   </div>
                 </div>
-              )}
 
-              {/* Media & Document Uploads */}
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
-                <label className="font-bold text-white text-sm block">Port Gate Pass & Vehicle Verification</label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* 4-Stage Visual Progress Bar */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {[
+                    {
+                      stage: 'Stage 1',
+                      title: 'Gate-In & Reception',
+                      done: Boolean(formData.vehiclePhotoUrl && formData.portGatePassUrl)
+                    },
+                    {
+                      stage: 'Stage 2',
+                      title: 'Weight & Customs Seal',
+                      done: Boolean(formData.customsSealPhotoUrl && formData.customsSealNumber?.trim())
+                    },
+                    {
+                      stage: 'Stage 3',
+                      title: 'Loading Bill & Ledger',
+                      done: Boolean((targetCase.loadingBills && targetCase.loadingBills.length > 0) || Number(formData.loadingChargesAmount) > 0)
+                    },
+                    {
+                      stage: 'Stage 4',
+                      title: 'Gate-Out ➔ Transit',
+                      done: Boolean(formData.gateOutToggled && formData.driverGateOutPhotoUrl)
+                    }
+                  ].map((item, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-2.5 rounded-2xl border transition-all flex items-center gap-2.5 ${
+                        item.done
+                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
+                          : 'bg-slate-900/80 border-white/10 text-gray-400'
+                      }`}
+                    >
+                      <div
+                        className={`w-6 h-6 rounded-xl font-mono font-black text-[11px] flex items-center justify-center shrink-0 ${
+                          item.done
+                            ? 'bg-emerald-500 text-slate-950'
+                            : 'bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        {item.done ? '✓' : idx + 1}
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[9px] uppercase tracking-wider font-bold block opacity-75">{item.stage}</span>
+                        <span className="text-[11px] font-bold text-white truncate block">{item.title}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* STAGE 1: PORT GATE-IN, DO VERIFICATION & VEHICLE RECEPTION */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/60 border border-white/10 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-lg bg-brand-500/20 border border-brand-500/40 text-brand-300 font-mono font-black text-xs flex items-center justify-center">
+                      1
+                    </span>
+                    <div>
+                      <h5 className="font-bold text-white text-sm">Stage 1: Port Gate-In & Vehicle Reception</h5>
+                      <p className="text-[11px] text-gray-400">Verify vehicle arrival at loading port and upload Port Gate Pass & Vehicle Photo</p>
+                    </div>
+                  </div>
+                  {formData.vehiclePhotoUrl && formData.portGatePassUrl && (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      ✓ Stage 1 Ready
+                    </span>
+                  )}
+                </div>
+
+                {/* Shipping Line DO section (When arranged by DPL) */}
+                {(formData.doDueChargesArrangedBy === 'DPL' || targetCase.serviceArrangements?.['delivery_order']?.arrangedBy === 'DPL') && (
+                  <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-white text-xs uppercase tracking-wider block">
+                        Delivery Order (DO) Verification
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        Company (DPL) Arranged DO
+                      </span>
+                    </div>
+
+                    <WorkflowMultiUploader
+                      label="Delivery Order (DO) Document / Photo"
+                      sublabel="Upload or take photo of physical Delivery Order issued by shipping line"
+                      urlField="doReceiptUrl"
+                      nameField="doReceiptName"
+                      allowCamera={true}
+                      compact={true}
+                      formData={formData}
+                      setFormData={setFormData}
+                      onPreview={setActivePdfPreview}
+                    />
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="font-semibold text-gray-300 block mb-1 text-xs">DO Date</label>
+                        <input
+                          type="date"
+                          value={formData.doIssueDate || new Date().toISOString().split('T')[0]}
+                          onChange={(e) => setFormData({ ...formData, doIssueDate: e.target.value })}
+                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-semibold text-gray-300 block mb-1 text-xs">Shipping Line</label>
+                        <input
+                          type="text"
+                          value={formData.shippingLine || ''}
+                          onChange={(e) => setFormData({ ...formData, shippingLine: e.target.value })}
+                          placeholder="e.g. Maersk, MSC, Hapag-Lloyd"
+                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs font-medium"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-semibold text-gray-300 block mb-1 text-xs">Shipping Agent</label>
+                        <input
+                          type="text"
+                          value={formData.shippingAgent || ''}
+                          onChange={(e) => setFormData({ ...formData, shippingAgent: e.target.value })}
+                          placeholder="e.g. Marine Services"
+                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs font-medium"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <WorkflowMultiUploader
-                    label="Vehicle Photo at Port"
+                    label="Vehicle Photo at Loading Port *"
                     sublabel="Upload or take photo of container loaded on trailer (Image / Picture Format)"
                     urlField="vehiclePhotoUrl"
                     nameField="vehiclePhotoName"
@@ -1950,8 +2288,8 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   />
 
                   <WorkflowMultiUploader
-                    label="Port Gate Pass"
-                    sublabel="Upload or scan gate pass slip"
+                    label="Port Gate Pass *"
+                    sublabel="Upload or scan official loading port gate pass slip"
                     urlField="portGatePassUrl"
                     nameField="portGatePassName"
                     compact={true}
@@ -1962,120 +2300,65 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                 </div>
               </div>
 
-              {/* Tracker Device Module */}
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-bold text-white text-sm block">Tracker Device Module</span>
-                    <span className="text-gray-400 text-[11px]">GPS tracking unit installation & arrangement</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ 
-                      ...formData, 
-                      trackerStatus: formData.trackerStatus === 'Installed' ? 'Not Installed' : 'Installed' 
-                    })}
-                    className={`px-3 py-1 rounded-xl text-xs font-semibold border transition-all ${
-                      formData.trackerStatus === 'Installed' 
-                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' 
-                        : 'bg-white/5 border-white/10 text-gray-400'
-                    }`}
-                  >
-                    {formData.trackerStatus === 'Installed' ? '✓ Tracker Installed' : 'Not Installed'}
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-gray-300 text-xs">Arranged By:</span>
-                  <div className="flex rounded-xl bg-slate-800 p-1 border border-white/10">
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, trackerArrangedBy: 'Client' })}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold ${
-                        formData.trackerArrangedBy === 'Client' ? 'bg-brand-600 text-white' : 'text-gray-400'
-                      }`}
-                    >
-                      Client
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, trackerArrangedBy: 'DPL' })}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold ${
-                        formData.trackerArrangedBy === 'DPL' ? 'bg-emerald-600 text-white' : 'text-gray-400'
-                      }`}
-                    >
-                      DPL
-                    </button>
-                  </div>
-                </div>
-
-                {formData.trackerArrangedBy === 'DPL' && (
-                  <div className="pt-2 animate-fade-in">
-                    <label className="text-gray-400 block mb-1 text-xs">Tracker Cost (PKR)</label>
-                    <input 
-                      type="number"
-                      value={formData.trackerAmount || ''}
-                      onChange={(e) => setFormData({ ...formData, trackerAmount: Number(e.target.value) })}
-                      placeholder="e.g. 15000"
-                      className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white font-mono text-xs"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Loading Charges Module */}
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-bold text-white text-sm block">Loading Charges Module</span>
-                    <span className="text-gray-400 text-[11px]">Crane & container lifter charges (Karachi Port)</span>
-                  </div>
-                  <div className="flex rounded-xl bg-slate-800 p-1 border border-white/10">
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, loadingChargesArrangedBy: 'Client' })}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold ${
-                        formData.loadingChargesArrangedBy === 'Client' ? 'bg-brand-600 text-white' : 'text-gray-400'
-                      }`}
-                    >
-                      Arranged by Client
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, loadingChargesArrangedBy: 'DPL' })}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold ${
-                        formData.loadingChargesArrangedBy === 'DPL' ? 'bg-emerald-600 text-white' : 'text-gray-400'
-                      }`}
-                    >
-                      Arranged by DPL
-                    </button>
-                  </div>
-                </div>
-
-                {formData.loadingChargesArrangedBy === 'DPL' ? (
-                  <div className="pt-2 animate-fade-in">
-                    <label className="text-gray-400 block mb-1 text-xs">Loading Amount (PKR)</label>
-                    <input 
-                      type="number"
-                      value={formData.loadingChargesAmount || ''}
-                      onChange={(e) => setFormData({ ...formData, loadingChargesAmount: Number(e.target.value) })}
-                      placeholder="e.g. 6000"
-                      className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white font-mono text-xs"
-                    />
-                    <span className="text-[10px] text-gray-500 mt-1 block">
-                      Loading amount will be added to the invoice.
+              {/* STAGE 2: CONTAINER LOADING, TRACKER & CUSTOMS SEAL VERIFICATION */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/60 border border-white/10 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-lg bg-brand-500/20 border border-brand-500/40 text-brand-300 font-mono font-black text-xs flex items-center justify-center">
+                      2
                     </span>
+                    <div>
+                      <h5 className="font-bold text-white text-sm">Stage 2: Container Loading, Weight & Customs Seal</h5>
+                      <p className="text-[11px] text-gray-400">Record weight/seal slips, GPS tracker status, and mandatory Customs Bullet Seal</p>
+                    </div>
                   </div>
-                ) : (
-                  <div className="text-xs text-sky-300/80 bg-black/20 p-2.5 rounded-xl border border-white/5">
-                    Loading charges settled directly by client.
-                  </div>
-                )}
-              </div>
+                  {formData.customsSealPhotoUrl && formData.customsSealNumber?.trim() && (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      ✓ Seal Verified
+                    </span>
+                  )}
+                </div>
 
-              {/* Verification Slips & Customs Seal Capture */}
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
-                <label className="font-bold text-white text-sm block">Verification Slips & Customs Seal</label>
+                {/* Customs Seal Photo & Mandatory Customs Seal Number */}
+                <div className="p-4 rounded-2xl border border-amber-500/30 bg-slate-900/90 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-white font-bold text-xs block">Customs Container Seal Verification (Mandatory)</span>
+                      <span className="text-[11px] text-amber-400 font-medium">Both High-Res Seal Photo & Customs Seal Number are compulsory</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <WorkflowMultiUploader
+                      label="Customs Seal Photo *"
+                      sublabel="Capture or upload high-res photo of container seal"
+                      urlField="customsSealPhotoUrl"
+                      nameField="customsSealPhotoName"
+                      required={true}
+                      isPhotoOnly={true}
+                      accept="image/*"
+                      allowCamera={true}
+                      compact={true}
+                      formData={formData}
+                      setFormData={setFormData}
+                      onPreview={setActivePdfPreview}
+                    />
+
+                    <div>
+                      <label className="text-gray-300 text-xs font-semibold block mb-1">
+                        Customs Seal Number *
+                      </label>
+                      <input 
+                        type="text"
+                        value={formData.customsSealNumber || ''}
+                        onChange={(e) => setFormData({ ...formData, customsSealNumber: e.target.value })}
+                        placeholder="e.g. PK-KPT-89421"
+                        className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2.5 text-white font-mono font-bold uppercase text-xs focus:border-brand-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <WorkflowMultiUploader
                     label="Port Weight Slip"
@@ -2102,110 +2385,208 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   />
                 </div>
 
-                {/* Customs Seal Photo & Mandatory Customs Seal Number */}
-                <div className="p-4 rounded-xl border border-white/10 bg-slate-800/60 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-white font-semibold text-xs block">Customs Container Seal Verification</span>
-                      <span className="text-[11px] text-amber-400 font-medium">Both Seal Photo & Customs Seal Number are mandatory</span>
-                    </div>
+                {/* Tracker Device Quick Bar */}
+                <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/10 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <span className="font-bold text-white text-xs block">Satellite GPS Tracker Installation</span>
+                    <span className="text-gray-400 text-[11px]">Confirm whether container tracker unit is mounted</span>
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <WorkflowMultiUploader
-                      label="Customs Seal Photo"
-                      sublabel="Capture or upload high-res photo of container seal (Image / Picture Format)"
-                      urlField="customsSealPhotoUrl"
-                      nameField="customsSealPhotoName"
-                      required={true}
-                      isPhotoOnly={true}
-                      accept="image/*"
-                      allowCamera={true}
-                      compact={true}
-                      formData={formData}
-                      setFormData={setFormData}
-                      onPreview={setActivePdfPreview}
-                    />
-
-                    <div>
-                      <label className="text-gray-300 text-xs font-semibold block mb-1">
-                        Customs Seal Number (Mandatory)
-                      </label>
-                      <input 
-                        type="text"
-                        value={formData.customsSealNumber || ''}
-                        onChange={(e) => setFormData({ ...formData, customsSealNumber: e.target.value })}
-                        placeholder="e.g. PK-KPT-89421"
-                        className="w-full bg-slate-900 border border-white/15 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-brand-400 focus:outline-none"
-                      />
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ 
+                        ...formData, 
+                        trackerStatus: formData.trackerStatus === 'Installed' ? 'Not Installed' : 'Installed' 
+                      })}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                        formData.trackerStatus === 'Installed' 
+                          ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' 
+                          : 'bg-white/5 border-white/10 text-gray-400'
+                      }`}
+                    >
+                      {formData.trackerStatus === 'Installed' ? '✓ Tracker Installed' : 'Mark Tracker Installed'}
+                    </button>
                   </div>
                 </div>
               </div>
 
-              {/* Gate Out Verification & Completion Criteria */}
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-bold text-white text-sm block">Gate Out Verification</span>
-                    <span className="text-gray-400 text-[11px]">Gate Out and Driver Live Photo verification</span>
+              {/* STAGE 3: LOADING BILL & FINANCIAL SETTLEMENT (ARRANGED BY CLIENT VS COMPANY) */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-amber-500/10 via-slate-950 to-emerald-500/10 border border-amber-500/30 space-y-4 shadow-lg">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono font-black text-xs flex items-center justify-center">
+                      3
+                    </span>
+                    <div>
+                      <h5 className="font-bold text-white text-sm">Stage 3: Loading Bill & Separate Ledger Settlement</h5>
+                      <p className="text-[11px] text-gray-300">
+                        Loading Staff prepares the itemized Loading Bill. Routes automatically to Client Expenses/Ledger or Company Invoice/Payables.
+                      </p>
+                    </div>
                   </div>
+
+                  <div className="flex rounded-xl bg-slate-900 p-1 border border-white/10 shrink-0">
+                    <button
+                      type="button"
+                      disabled={isReadOnly}
+                      onClick={() => setFormData({ ...formData, loadingChargesArrangedBy: 'Client' })}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        formData.loadingChargesArrangedBy === 'Client'
+                          ? 'bg-sky-600 text-white shadow'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Arranged by Client
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isReadOnly}
+                      onClick={() => setFormData({ ...formData, loadingChargesArrangedBy: 'DPL' })}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        formData.loadingChargesArrangedBy === 'DPL'
+                          ? 'bg-emerald-600 text-white shadow'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Arranged by Company (DPL)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Routing Explanation Banner */}
+                <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                  formData.loadingChargesArrangedBy === 'DPL'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                    : 'bg-sky-500/10 border-sky-500/30 text-sky-200'
+                }`}>
+                  <Receipt size={16} className="shrink-0 mt-0.5" />
+                  <div>
+                    {formData.loadingChargesArrangedBy === 'DPL' ? (
+                      <>
+                        <strong className="block text-emerald-300">Arranged by Company (DPL):</strong>
+                        Loading Bill charges are billed by Loading Staff to Company (recorded in <strong>Loading Staff ➔ Company Ledger</strong> & <strong>Company Payables</strong>, notifying Finance Manager) and automatically added to <strong>Company's Client Invoice</strong>.
+                      </>
+                    ) : (
+                      <>
+                        <strong className="block text-sky-300">Arranged by Client (Direct):</strong>
+                        Loading Bill is generated directly for <strong>{targetCase.clientName}</strong> with full itemized breakup. Added to <strong>Client Case Expenses</strong>, <strong>Loading Staff ➔ Client Ledger</strong>, and <strong>Client ➔ Loading Staff Ledger</strong> with instant notification to Client.
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Existing Loading Bills Breakdown Table if created */}
+                {targetCase.loadingBills && targetCase.loadingBills.length > 0 && (
+                  <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-white/10 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-300">
+                        Generated Loading Bill ({targetCase.loadingBills[targetCase.loadingBills.length - 1].billNo})
+                      </span>
+                      <span className="text-xs font-mono font-black text-emerald-400">
+                        Total: PKR {Number(targetCase.loadingBills[targetCase.loadingBills.length - 1].totalAmount || 0).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-black/40 p-2.5 rounded-xl border border-white/5">
+                      {(targetCase.loadingBills[targetCase.loadingBills.length - 1].items || []).map((it, idx) => (
+                        <div key={idx} className="flex flex-col">
+                          <span className="text-gray-400 truncate">{it.description}</span>
+                          <span className="text-white font-mono font-bold">PKR {Number(it.amount || 0).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
+                  <div className="text-[11px] text-gray-300">
+                    Current Recorded Loading Bill Amount:{' '}
+                    <strong className="text-amber-300 font-mono text-xs">
+                      PKR {Number(
+                        (targetCase.loadingBills && targetCase.loadingBills.length > 0
+                          ? targetCase.loadingBills[targetCase.loadingBills.length - 1].totalAmount
+                          : formData.loadingChargesAmount) || 0
+                      ).toLocaleString()}
+                    </strong>
+                  </div>
+
                   <button
                     type="button"
+                    disabled={isReadOnly}
+                    onClick={() => {
+                      setBillModalType('LOADING');
+                      setShowLoadingBillModal(true);
+                    }}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-40 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-95"
+                  >
+                    <Receipt size={15} />
+                    <span>{targetCase.loadingBills && targetCase.loadingBills.length > 0 ? 'Update / View Loading Bill & Breakup' : 'Create Loading Bill (Full Breakup)'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* STAGE 4: VEHICLE GATE-OUT & AUTO-TRANSIT DISPATCH */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-slate-950 to-teal-950/50 border border-emerald-500/40 space-y-4 shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono font-black text-xs flex items-center justify-center">
+                      4
+                    </span>
+                    <div>
+                      <h5 className="font-bold text-white text-sm">Stage 4: Vehicle Gate-Out & Transit Dispatch</h5>
+                      <p className="text-[11px] text-emerald-200/80">
+                        Marking Vehicle Gate-Out finishes Loading Staff's work, completes the Loading workflow, and automatically sends the case to In-Transit!
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isReadOnly}
                     onClick={() => setFormData({ ...formData, gateOutToggled: !formData.gateOutToggled })}
-                    className={`px-3.5 py-1.5 rounded-xl font-bold text-xs border transition-all ${
+                    className={`px-4 py-2 rounded-xl font-bold text-xs border transition-all shrink-0 ${
                       formData.gateOutToggled
-                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-md'
-                        : 'bg-slate-800 text-gray-400 border-white/10'
+                        ? 'bg-emerald-600 text-white border-emerald-400 shadow-lg shadow-emerald-600/30'
+                        : 'bg-slate-800 text-gray-300 border-white/15 hover:border-emerald-500/40'
                     }`}
                   >
-                    {formData.gateOutToggled ? '✓ Gate Out Confirmed' : 'Mark Gate Out'}
+                    {formData.gateOutToggled ? '✓ Vehicle Gate-Out Marked' : 'Mark Vehicle Gate-Out'}
                   </button>
                 </div>
 
-                <div className="pt-1">
-                  <WorkflowMultiUploader
-                    label="Driver Live Picture at Gate Out *"
-                    sublabel="Capture or upload live verification photo of driver passing gate out (Image / Picture Format)"
-                    urlField="driverGateOutPhotoUrl"
-                    nameField="driverGateOutPhotoName"
-                    required={true}
-                    isPhotoOnly={true}
-                    accept="image/*"
-                    allowCamera={true}
-                    formData={formData}
-                    setFormData={setFormData}
-                    onPreview={setActivePdfPreview}
-                  />
-                </div>
-              </div>
+                <WorkflowMultiUploader
+                  label="Driver Live Picture at Gate Out *"
+                  sublabel="Capture or upload live verification photo of driver & vehicle passing port gate-out"
+                  urlField="driverGateOutPhotoUrl"
+                  nameField="driverGateOutPhotoName"
+                  required={true}
+                  isPhotoOnly={true}
+                  accept="image/*"
+                  allowCamera={true}
+                  formData={formData}
+                  setFormData={setFormData}
+                  onPreview={setActivePdfPreview}
+                />
 
-              {/* Make Loading Bill Button */}
-              <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-600/10 to-emerald-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
-                    <Receipt size={22} />
+                {!isReadOnly && (
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, gateOutToggled: true }));
+                        setTimeout(() => handleSave(true, true), 30);
+                      }}
+                      className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/30 transition-all active:scale-95"
+                    >
+                      <CheckCircle2 size={16} />
+                      <span>Confirm Vehicle Gate-Out & Finish Loading ➔ Send to Transit</span>
+                    </button>
                   </div>
-                  <div>
-                    <h4 className="font-bold text-white text-sm">Port Loading Bill & Disbursement Invoice</h4>
-                    <p className="text-gray-300 text-[11px]">
-                      Add wharfage, tracker, delivery & port charges with receipts, and generate downloadable Port Loading Bill PDF.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowLoadingBillModal(true)}
-                  className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-95 shrink-0"
-                >
-                  <Receipt size={15} />
-                  <span>Make Loading Bill</span>
-                </button>
+                )}
               </div>
             </div>
           )}
 
-          {/* STEP 6: IN TRANSIT & EMERGENCY EXCEPTION (STEP INDEX 5) */}
+          {/* STEP 6: IN TRANSIT & DESTINATION VEHICLE RECEPTION TRIGGER (STEP INDEX 5) */}
           {(stepIndex === 5 || stepStatus === CaseStatus.IN_TRANSIT) && (
             <div className="space-y-5">
               {/* Motion Feature: Animated Transport Carrier */}
@@ -2222,20 +2603,57 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
                 {/* Road & Truck Animation Container */}
                 <div className="relative h-20 bg-slate-950/80 rounded-xl border border-white/10 overflow-hidden flex items-center px-4">
-                  {/* Road Center Dashed Line */}
                   <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-0.5 border-b border-dashed border-white/20"></div>
-
-                  {/* Animated Moving Truck */}
                   <div className="flex items-center gap-2 animate-[pulse_3s_ease-in-out_infinite] transform transition-transform">
                     <div className="w-10 h-10 rounded-xl bg-blue-600/30 border border-blue-500 flex items-center justify-center text-blue-300 shadow-lg shadow-blue-500/20">
                       <Truck size={22} className="animate-bounce" />
                     </div>
                     <div className="bg-slate-900/90 border border-white/10 px-2.5 py-1 rounded-lg">
-                      <p className="text-[11px] font-bold text-white font-mono">{formData.assignedVehicleNo || 'CARRIER-FLEET'}</p>
+                      <p className="text-[11px] font-bold text-white font-mono">{formData.assignedVehicleNo || targetCase.containers?.[0]?.vehicleNo || 'CARRIER-FLEET'}</p>
                       <p className="text-[9px] text-emerald-400">GPS Signal Verified • Normal Speed</p>
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Destination Staff Vehicle Reception Card: Receiving Vehicle & Taking Picture Completes Transit & Starts Unloading */}
+              <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-950/50 via-slate-900 to-teal-950/40 border border-emerald-500/30 space-y-3.5 shadow-lg">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shrink-0">
+                      <Camera size={20} />
+                    </div>
+                    <div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        Destination Staff Action
+                      </span>
+                      <h4 className="font-bold text-white text-sm mt-1">
+                        Receive Vehicle at Destination & Capture Arrival Picture
+                      </h4>
+                      <p className="text-gray-300 text-[11px]">
+                        As soon as Destination Staff receives the vehicle and uploads/takes its arrival picture, Transit is automatically completed and Destination Unloading workflow starts immediately.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <WorkflowMultiUploader
+                  label="Destination Vehicle Reception / Arrival Picture *"
+                  sublabel="Take or upload vehicle arrival photo to immediately complete Transit & start Destination Unloading"
+                  urlField="portGateArrivalPhotoUrl"
+                  nameField="portGateArrivalPhotoName"
+                  isPhotoOnly={true}
+                  accept="image/*"
+                  allowCamera={true}
+                  formData={formData}
+                  setFormData={setFormData}
+                  onPreview={setActivePdfPreview}
+                  onChange={(url) => {
+                    if (url) {
+                      handleDestinationArrivalPhotoUploaded(url);
+                    }
+                  }}
+                />
               </div>
 
               {/* Emergency Exception Red Button */}
@@ -2264,56 +2682,161 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
             </div>
           )}
 
-          {/* STEP 7: DESTINATION PORT ARRIVAL (STEP INDEX 6) */}
-          {(stepIndex === 6 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL) && (
-            <div className="space-y-4">
-              {/* Transit Completion Trigger: Port Gate Arrival Picture */}
-              <WorkflowMultiUploader
-                label="Port Gate Arrival Picture"
-                sublabel="Capture or upload arrival photo of vehicle at destination dry port (Image / Picture Format)"
-                urlField="portGateArrivalPhotoUrl"
-                nameField="portGateArrivalPhotoName"
-                isPhotoOnly={true}
-                accept="image/*"
-                allowCamera={true}
-                formData={formData}
-                setFormData={setFormData}
-                onPreview={setActivePdfPreview}
-                onChange={(url) => {
-                  if (url) handleDestinationArrivalPhotoUploaded(url);
-                }}
-              />
+          {/* STEP 7: DESTINATION PORT ARRIVAL & UNLOADING — REDESIGNED 4-STAGE COMMAND DECK (STEP INDEX 6 / 7) */}
+          {(stepIndex === 6 || stepIndex === 7 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL) && (
+            <div className="space-y-5">
+              {/* Top Destination Command Deck Banner & 4-Stage Stepper */}
+              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/30 border border-emerald-500/30 shadow-xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3.5">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        Destination Unloading Command Center
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                        Managed Exclusively by Destination Staff
+                      </span>
+                    </div>
+                    <h4 className="text-sm sm:text-base font-black text-white mt-1.5">
+                      Vehicle Reception, Offloading, Destination Bill, Delivery Order (DO) & Case Finish
+                    </h4>
+                  </div>
 
-              {/* Destination Port Operations */}
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-white text-sm">Destination Terminal Operations</span>
+                  <div className="bg-black/40 border border-white/10 rounded-2xl px-3.5 py-2 flex items-center gap-3 shrink-0">
+                    <Truck size={18} className="text-emerald-400 shrink-0" />
+                    <div className="text-[11px]">
+                      <span className="text-gray-400 block">Destination: {targetCase.pod || 'Dry Port'}</span>
+                      <span className="font-mono font-bold text-white">
+                        {formData.assignedVehicleNo || targetCase.containers?.[0]?.vehicleNo || 'TBD'} • {targetCase.containers?.[0]?.number || 'CNTR'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4-Stage Visual Progress Bar */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {[
+                    {
+                      stage: 'Stage 1',
+                      title: 'Vehicle Received & Photo',
+                      done: Boolean(formData.portGateArrivalPhotoUrl || formData.destinationGateInToggled)
+                    },
+                    {
+                      stage: 'Stage 2',
+                      title: 'Seal & Unloading Slips',
+                      done: Boolean(formData.secondaryCustomsSealPhotoUrl && formData.secondaryCustomsSealNumber?.trim())
+                    },
+                    {
+                      stage: 'Stage 3',
+                      title: 'Destination Bill & Ledger',
+                      done: Boolean((targetCase.destinationBills && targetCase.destinationBills.length > 0) || Number(formData.destinationChargesAmount) > 0)
+                    },
+                    {
+                      stage: 'Stage 4',
+                      title: 'Gate-Out, DO & Finish',
+                      done: Boolean(formData.vehicleGateOutToggled)
+                    }
+                  ].map((item, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-2.5 rounded-2xl border transition-all flex items-center gap-2.5 ${
+                        item.done
+                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
+                          : 'bg-slate-900/80 border-white/10 text-gray-400'
+                      }`}
+                    >
+                      <div
+                        className={`w-6 h-6 rounded-xl font-mono font-black text-[11px] flex items-center justify-center shrink-0 ${
+                          item.done
+                            ? 'bg-emerald-500 text-slate-950'
+                            : 'bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        {item.done ? '✓' : idx + 1}
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[9px] uppercase tracking-wider font-bold block opacity-75">{item.stage}</span>
+                        <span className="text-[11px] font-bold text-white truncate block">{item.title}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* STAGE 1: VEHICLE RECEPTION & ARRIVAL PICTURE (COMPLETES TRANSIT & STARTS UNLOADING) */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/60 border border-white/10 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono font-black text-xs flex items-center justify-center">
+                      1
+                    </span>
+                    <div>
+                      <h5 className="font-bold text-white text-sm">Stage 1: Receive Vehicle & Capture Arrival Picture</h5>
+                      <p className="text-[11px] text-gray-400">
+                        Uploading the vehicle arrival picture automatically completes Transit and activates Destination Unloading
+                      </p>
+                    </div>
+                  </div>
                   <button
                     type="button"
+                    disabled={isReadOnly}
                     onClick={() => setFormData({ ...formData, destinationGateInToggled: !formData.destinationGateInToggled })}
-                    className={`px-3 py-1 rounded-xl text-xs font-semibold border transition-all ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
                       formData.destinationGateInToggled
                         ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
                         : 'bg-white/5 border-white/10 text-gray-400'
                     }`}
                   >
-                    {formData.destinationGateInToggled ? '✓ Gate In Recorded' : 'Mark Gate In'}
+                    {formData.destinationGateInToggled ? '✓ Vehicle Received (Gate-In)' : 'Mark Vehicle Received'}
                   </button>
                 </div>
 
-                {/* Destination Customs Seal Verification */}
-                <div className="p-4 rounded-xl border border-white/10 bg-slate-800/60 space-y-3">
-                  <div className="flex items-center justify-between">
+                <WorkflowMultiUploader
+                  label="Destination Port Vehicle Arrival Picture *"
+                  sublabel="Capture or upload arrival photo of vehicle at destination dry port (Automatically marks Transit Completed)"
+                  urlField="portGateArrivalPhotoUrl"
+                  nameField="portGateArrivalPhotoName"
+                  isPhotoOnly={true}
+                  accept="image/*"
+                  allowCamera={true}
+                  formData={formData}
+                  setFormData={setFormData}
+                  onPreview={setActivePdfPreview}
+                  onChange={(url) => {
+                    if (url) handleDestinationArrivalPhotoUploaded(url);
+                  }}
+                />
+              </div>
+
+              {/* STAGE 2: DESTINATION CUSTOMS SEAL VERIFICATION & OFFLOADING DOCUMENTS */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/60 border border-white/10 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono font-black text-xs flex items-center justify-center">
+                      2
+                    </span>
                     <div>
-                      <span className="text-white font-semibold text-xs block">Destination Customs Seal Verification</span>
-                      <span className="text-[11px] text-amber-400 font-medium">Both Seal Photo & Customs Seal Number are mandatory</span>
+                      <h5 className="font-bold text-white text-sm">Stage 2: Destination Customs Seal & Unloading Documents</h5>
+                      <p className="text-[11px] text-gray-400">Verify intact seal before breaking and upload weighbridge, transport note & gate pass</p>
                     </div>
+                  </div>
+                  {formData.secondaryCustomsSealPhotoUrl && formData.secondaryCustomsSealNumber?.trim() && (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      ✓ Seal Verified
+                    </span>
+                  )}
+                </div>
+
+                <div className="p-4 rounded-xl border border-amber-500/30 bg-slate-900/80 space-y-3">
+                  <div>
+                    <span className="text-white font-bold text-xs block">Destination Customs Seal Verification (Mandatory)</span>
+                    <span className="text-[11px] text-amber-400 font-medium">Both Intact Seal Photo & Customs Seal Number are mandatory</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <WorkflowMultiUploader
-                      label="Secondary Customs Seal Photo"
-                      sublabel="Capture or upload intact seal photo (Image / Picture Format)"
+                      label="Secondary Customs Seal Photo *"
+                      sublabel="Capture or upload intact seal photo at destination"
                       urlField="secondaryCustomsSealPhotoUrl"
                       nameField="secondaryCustomsSealPhotoName"
                       required={true}
@@ -2328,14 +2851,14 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
                     <div>
                       <label className="text-gray-300 text-xs font-semibold block mb-1">
-                        Customs Seal Number (Mandatory)
+                        Customs Seal Number (Mandatory) *
                       </label>
                       <input 
                         type="text"
                         value={formData.secondaryCustomsSealNumber || ''}
                         onChange={(e) => setFormData({ ...formData, secondaryCustomsSealNumber: e.target.value })}
                         placeholder="e.g. PK-DEST-89421"
-                        className="w-full bg-slate-900 border border-white/15 rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-brand-400 focus:outline-none"
+                        className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2.5 text-white font-mono font-bold uppercase text-xs focus:border-brand-400 focus:outline-none"
                       />
                     </div>
                   </div>
@@ -2380,29 +2903,245 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                 </div>
               </div>
 
-              {/* Vehicle Gate Out */}
-              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between">
-                <div>
-                  <span className="font-bold text-white text-sm block">Vehicle Gate Out</span>
-                  <span className="text-emerald-200/80 text-[11px]">
-                    Confirm destination container offloading and vehicle gate-out
-                  </span>
+              {/* STAGE 3: DESTINATION UNLOADING BILL & SEPARATE LEDGER (ARRANGED BY CLIENT VS COMPANY) */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-amber-500/10 via-slate-950 to-emerald-500/10 border border-amber-500/30 space-y-4 shadow-lg">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono font-black text-xs flex items-center justify-center">
+                      3
+                    </span>
+                    <div>
+                      <h5 className="font-bold text-white text-sm">Stage 3: Destination Unloading Bill & Separate Ledger</h5>
+                      <p className="text-[11px] text-gray-300">
+                        Destination Staff generates the unloading bill (Arranged by Client or Arranged by Company) with separate financial ledgers.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex rounded-xl bg-slate-900 p-1 border border-white/10 shrink-0">
+                    <button
+                      type="button"
+                      disabled={isReadOnly}
+                      onClick={() => setFormData({ ...formData, destinationChargesArrangedBy: 'Client' })}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        formData.destinationChargesArrangedBy === 'Client'
+                          ? 'bg-sky-600 text-white shadow'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Arranged by Client
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isReadOnly}
+                      onClick={() => setFormData({ ...formData, destinationChargesArrangedBy: 'DPL' })}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        formData.destinationChargesArrangedBy === 'DPL'
+                          ? 'bg-emerald-600 text-white shadow'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Arranged by Company (DPL)
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, vehicleGateOutToggled: !formData.vehicleGateOutToggled })}
-                  className={`px-4 py-2 rounded-xl font-bold text-xs border transition-all ${
-                    formData.vehicleGateOutToggled
-                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-lg shadow-emerald-600/30'
-                      : 'bg-slate-800 text-gray-400 border-white/10'
-                  }`}
-                >
-                  {formData.vehicleGateOutToggled ? '✓ Vehicle Gate Out Confirmed' : 'Mark Vehicle Gate Out'}
-                </button>
+
+                <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                  formData.destinationChargesArrangedBy === 'DPL'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                    : 'bg-sky-500/10 border-sky-500/30 text-sky-200'
+                }`}>
+                  <Receipt size={16} className="shrink-0 mt-0.5" />
+                  <div>
+                    {formData.destinationChargesArrangedBy === 'DPL' ? (
+                      <>
+                        <strong className="block text-emerald-300">Arranged by Company (DPL):</strong>
+                        Destination Unloading Bill is billed to Company (recorded in <strong>Destination Staff ➔ Company Ledger</strong> & <strong>Company Payables</strong>, notifying Finance Manager) and automatically added to <strong>Company's Client Invoice</strong>.
+                      </>
+                    ) : (
+                      <>
+                        <strong className="block text-sky-300">Arranged by Client (Direct):</strong>
+                        Destination Unloading Bill is generated directly for <strong>{targetCase.clientName}</strong> with full itemized breakup. Added to <strong>Client Case Expenses</strong>, <strong>Destination Staff ➔ Client Ledger</strong>, and <strong>Client ➔ Destination Staff Ledger</strong> with notification to Client.
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Existing Destination Bills Breakdown if created */}
+                {targetCase.destinationBills && targetCase.destinationBills.length > 0 && (
+                  <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-white/10 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-300">
+                        Generated Destination Bill ({targetCase.destinationBills[targetCase.destinationBills.length - 1].billNo})
+                      </span>
+                      <span className="text-xs font-mono font-black text-emerald-400">
+                        Total: PKR {Number(targetCase.destinationBills[targetCase.destinationBills.length - 1].totalAmount || 0).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-black/40 p-2.5 rounded-xl border border-white/5">
+                      {(targetCase.destinationBills[targetCase.destinationBills.length - 1].items || []).map((it, idx) => (
+                        <div key={idx} className="flex flex-col">
+                          <span className="text-gray-400 truncate">{it.description}</span>
+                          <span className="text-white font-mono font-bold">PKR {Number(it.amount || 0).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
+                  <div className="text-[11px] text-gray-300">
+                    Current Recorded Destination Bill Amount:{' '}
+                    <strong className="text-amber-300 font-mono text-xs">
+                      PKR {Number(
+                        (targetCase.destinationBills && targetCase.destinationBills.length > 0
+                          ? targetCase.destinationBills[targetCase.destinationBills.length - 1].totalAmount
+                          : formData.destinationChargesAmount) || 0
+                      ).toLocaleString()}
+                    </strong>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isReadOnly}
+                    onClick={() => {
+                      setBillModalType('DESTINATION');
+                      setShowLoadingBillModal(true);
+                    }}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-40 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-95"
+                  >
+                    <Receipt size={15} />
+                    <span>{targetCase.destinationBills && targetCase.destinationBills.length > 0 ? 'Update / View Destination Bill & Breakup' : 'Create Destination Unloading Bill'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* STAGE 4: VEHICLE GATE-OUT, DELIVERY ORDER (DO) PDF DOWNLOAD & CASE FINISH */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-slate-950 to-teal-950/50 border border-emerald-500/40 space-y-4 shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono font-black text-xs flex items-center justify-center">
+                      4
+                    </span>
+                    <div>
+                      <h5 className="font-bold text-white text-sm">Stage 4: Vehicle Gate-Out, Delivery Order (DO) & Case Finish</h5>
+                      <p className="text-[11px] text-emerald-200/80">
+                        Marking Vehicle Gate-Out immediately unlocks the Delivery Order (PDF) generator. Completing this workflow finishes & archives the case permanently.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isReadOnly}
+                    onClick={() => setFormData({ ...formData, vehicleGateOutToggled: !formData.vehicleGateOutToggled })}
+                    className={`px-4 py-2 rounded-xl font-bold text-xs border transition-all shrink-0 ${
+                      formData.vehicleGateOutToggled
+                        ? 'bg-emerald-600 text-white border-emerald-400 shadow-lg shadow-emerald-600/30'
+                        : 'bg-slate-800 text-gray-300 border-white/15 hover:border-emerald-500/40'
+                    }`}
+                  >
+                    {formData.vehicleGateOutToggled ? '✓ Vehicle Gate Out Confirmed' : 'Mark Vehicle Gate Out'}
+                  </button>
+                </div>
+
+                {/* Delivery Order (DO) PDF Download Card — Appears immediately when Vehicle Gate-Out is marked */}
+                {(formData.vehicleGateOutToggled || isDestinationUnloadedAndGateOut(targetCase)) && (
+                  <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-400/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 flex items-center justify-center shrink-0">
+                        <FileCheck size={20} />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300 block">
+                          Vehicle Gate-Out Verified • Delivery Order Ready
+                        </span>
+                        <h6 className="text-sm font-bold text-white">
+                          Official Destination Delivery Order (DO) PDF
+                        </h6>
+                        <p className="text-[11px] text-gray-300">
+                          Click to generate & download the official Delivery Order PDF and permanently archive it in Case Documents.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const doRes = await downloadCustomsDeliveryOrderPdf({
+                          targetCase: {
+                            ...targetCase,
+                            workflowDetails: {
+                              ...(targetCase.workflowDetails || {}),
+                              [stepStatus]: { ...formData, vehicleGateOutToggled: true }
+                            }
+                          },
+                          officerName: formData.officer || 'Destination Staff'
+                        });
+                        if (doRes?.dataUrl) {
+                          const existingDocs = [...(targetCase.documents || [])];
+                          const doName = `Destination_Delivery_Order_${targetCase.caseNo}.pdf`;
+                          if (!existingDocs.some((d: any) => d.name === doName)) {
+                            existingDocs.push({
+                              id: `doc_dest_do_${Date.now()}`,
+                              name: doName,
+                              url: doRes.dataUrl,
+                              type: 'Destination Delivery Order (DO)',
+                              uploadedAt: new Date().toISOString()
+                            });
+                            onSaveCase({
+                              ...targetCase,
+                              documents: existingDocs
+                            });
+                          }
+                        }
+                      }}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-emerald-500/30 transition-all active:scale-95 shrink-0"
+                    >
+                      <Download size={15} />
+                      <span>Generate & Download Delivery Order (PDF)</span>
+                    </button>
+                  </div>
+                )}
+
+                {!isReadOnly && (
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, vehicleGateOutToggled: true }));
+                        setTimeout(() => {
+                          const check = validateStepStrict();
+                          if (!check.valid) {
+                            setValidationError(check.error || 'Please verify Customs Seal Photo & Number and mark Vehicle Gate-Out.');
+                            return;
+                          }
+                          setValidationError(null);
+                          handleSave(true);
+                        }, 30);
+                      }}
+                      className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/30 transition-all active:scale-95"
+                    >
+                      <CheckCircle2 size={16} />
+                      <span>Complete Destination Workflow & Finish Case</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
             </div>
+          )}
+
+          {/* Live Transit Route Locations & Port Gate-Out / Unloading Duration History (All Categories) */}
+          {(stepIndex >= 4 ||
+            String(stepStatus).toLowerCase().includes('transit') ||
+            String(stepStatus).toLowerCase().includes('loading') ||
+            String(stepStatus).toLowerCase().includes('destination') ||
+            String(stepStatus).toLowerCase().includes('unload') ||
+            String(stepStatus).toLowerCase().includes('dispatch') ||
+            (targetCase.transitLocationsHistory && targetCase.transitLocationsHistory.length > 0) ||
+            Boolean(targetCase.loadingGateOutDuration) ||
+            Boolean(targetCase.destinationGateOutDuration)) && (
+            <CaseTransitHistoryCard targetCase={targetCase} compact={true} />
           )}
 
         </div>
@@ -2682,21 +3421,33 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         </div>
       )}
 
-      {/* Loading Bill Modal */}
+      {/* Loading & Destination Bill Modal */}
       {showLoadingBillModal && (
         <LoadingBillModal
           isOpen={showLoadingBillModal}
           onClose={() => setShowLoadingBillModal(false)}
           targetCase={targetCase}
-          onSaveBill={(billData, newCharges, newDocs) => {
-            setFormData(prev => ({
-              ...prev,
-              wharfageAmount: billData.wharfageAmount,
-              wharfageReceiptUrl: billData.wharfageReceiptUrl,
-              wharfageReceiptName: billData.wharfageReceiptName,
-              trackerAmount: billData.trackerAmount,
-              loadingChargesAmount: billData.deliveryCharges
-            }));
+          isDestinationBill={billModalType === 'DESTINATION'}
+          staffUserId={formData.officer || String(userRole)}
+          staffName={formData.officer || (billModalType === 'DESTINATION' ? 'Destination Port Staff' : 'Loading Port Staff')}
+          onSaveBill={(billData, newCharges, newDocs, generatedBill) => {
+            if (billModalType === 'DESTINATION') {
+              setFormData(prev => ({
+                ...prev,
+                destinationChargesArrangedBy: billData.arrangedBy || prev.destinationChargesArrangedBy,
+                destinationChargesAmount: billData.grandTotal || prev.destinationChargesAmount
+              }));
+            } else {
+              setFormData(prev => ({
+                ...prev,
+                wharfageAmount: billData.wharfageAmount,
+                wharfageReceiptUrl: billData.wharfageReceiptUrl,
+                wharfageReceiptName: billData.wharfageReceiptName,
+                trackerAmount: billData.trackerAmount,
+                loadingChargesArrangedBy: billData.arrangedBy || prev.loadingChargesArrangedBy,
+                loadingChargesAmount: billData.grandTotal || billData.deliveryCharges
+              }));
+            }
             const existingCharges = targetCase.charges || [];
             const updatedCharges = [...existingCharges];
             newCharges.forEach(chg => {
@@ -2714,7 +3465,12 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
             onSaveCase({
               ...targetCase,
               charges: updatedCharges,
-              documents: updatedDocs
+              documents: updatedDocs,
+              ...(generatedBill
+                ? billModalType === 'DESTINATION'
+                  ? { destinationBills: [...(targetCase.destinationBills || []), generatedBill] }
+                  : { loadingBills: [...(targetCase.loadingBills || []), generatedBill] }
+                : {})
             });
             setShowLoadingBillModal(false);
           }}

@@ -149,6 +149,16 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Fleet Drivers Directory
+    match /drivers/{driverId} {
+      allow read, write: if true;
+    }
+
+    // Cloud-Synced User Work Drafts (Auto-saved in-progress work across disconnections)
+    match /work_drafts/{draftId} {
+      allow read, write: if true;
+    }
+
     // Admin Authorizations
     match /admins/{adminId} {
       allow read: if true;

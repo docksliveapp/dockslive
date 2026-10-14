@@ -27,7 +27,6 @@ const COMPANY_PARTITIONED_KEYS = new Set([
   'dpl_destination_staff',
   'dpl_company_branding_v1',
   'dpl_reg_formdata',
-  'dpl_live_notifications',
   'dpl_cashbook_transactions',
   'dpl_payment_vouchers',
   'dpl_general_ledger_entries',
@@ -173,9 +172,9 @@ export const safeAppStorage = {
     const authUser = preserveAuth ? safeAppStorage.getItem('dpl_auth_user') : null;
     const userRole = preserveAuth ? safeAppStorage.getItem('dpl_user_role') : null;
 
-    // 1. Clear memory cache for all dpl keys
+    // 1. Clear memory cache for all operational, notification, and audit keys
     Object.keys(memoryCache).forEach((k) => {
-      if (k.startsWith('dpl_') || k.startsWith('dpl-')) {
+      if (k.startsWith('dpl_') || k.startsWith('dpl-') || k.startsWith('notif_') || k.startsWith('audit_')) {
         delete memoryCache[k];
       }
     });
@@ -186,7 +185,7 @@ export const safeAppStorage = {
         const keysToRemove: string[] = [];
         for (let i = 0; i < window.localStorage.length; i++) {
           const key = window.localStorage.key(i);
-          if (key && (key.startsWith('dpl_') || key.startsWith('dpl-'))) {
+          if (key && (key.startsWith('dpl_') || key.startsWith('dpl-') || key.startsWith('notif_') || key.startsWith('audit_'))) {
             keysToRemove.push(key);
           }
         }
@@ -200,7 +199,7 @@ export const safeAppStorage = {
         const keysToRemove: string[] = [];
         for (let i = 0; i < window.sessionStorage.length; i++) {
           const key = window.sessionStorage.key(i);
-          if (key && (key.startsWith('dpl_') || key.startsWith('dpl-'))) {
+          if (key && (key.startsWith('dpl_') || key.startsWith('dpl-') || key.startsWith('notif_') || key.startsWith('audit_'))) {
             keysToRemove.push(key);
           }
         }

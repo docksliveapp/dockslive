@@ -198,14 +198,20 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
         status: nextStatus,
         containers: updatedContainers,
         workflowDetails: updatedWf,
-        documents: newDocs
+        documents: newDocs,
+        ...(nextStatus === CaseStatus.COMPLETED
+          ? {
+              completedAt: (targetCase as any).completedAt || nowIso,
+              permanentlyArchived: true
+            }
+          : {})
       };
 
       await saveCaseToFirestore(updatedCase);
 
       const successText = isDestinationStaff
-        ? `🎉 Case ${targetCase.caseNo} completed! Container unloaded & vehicle gated out.`
-        : `🎉 Loading completed for Case ${targetCase.caseNo}! Container dispatched into transit.`;
+        ? `🎉 Case ${targetCase.caseNo} completed & permanently archived! Container unloaded & vehicle gated out.`
+        : `🎉 Loading completed for Case ${targetCase.caseNo}! Vehicle gated out & dispatched into transit.`;
 
       if (onSuccess) onSuccess(successText);
       onClose();
@@ -233,7 +239,7 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-base font-bold text-white tracking-wide">
-                    {isDestinationStaff ? 'Destination Offloading Workflow' : 'Port Loading Workflow Operations'}
+                    {isDestinationStaff ? 'Destination Unloading & Gate-Out Command Center' : 'Port Loading & Gate-Out Command Center'}
                   </h2>
                   <span className="text-xs font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full">
                     {targetCase.caseNo}
@@ -256,12 +262,16 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
           {/* Body */}
           <div className="p-6 overflow-y-auto space-y-5 custom-scrollbar text-xs">
             
-            {/* Top Action Ribbon for Make Loading Bill */}
+            {/* Top Action Ribbon for Make Loading / Destination Bill */}
             <div className="bg-gradient-to-r from-amber-500/15 via-slate-900 to-brand-500/15 p-4 rounded-2xl border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
               <div>
-                <span className="text-xs font-bold text-amber-300 block">Loading Bill & Expense Recording</span>
+                <span className="text-xs font-bold text-amber-300 block">
+                  {isDestinationStaff ? 'Destination Unloading Bill & Separate Ledger' : 'Loading Bill & Separate Ledger Settlement'}
+                </span>
                 <span className="text-[11px] text-gray-300">
-                  Record wharfage, port demurrage, tracker, and delivery charges to generate the official bill.
+                  {isDestinationStaff
+                    ? 'Record destination unloading charges (Arranged by Client or Arranged by Company) with separate financial ledgers.'
+                    : 'Record wharfage, port demurrage, tracker, and loading charges (Arranged by Client or Arranged by Company).'}
                 </span>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -272,7 +282,7 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
                     className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 transition active:scale-95"
                   >
                     <FileCheck size={13} />
-                    <span>Generate Delivery Order</span>
+                    <span>Download Delivery Order (PDF)</span>
                   </button>
                 )}
                 <button
@@ -281,7 +291,7 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
                   className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black px-4 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 transition active:scale-95 w-full sm:w-auto"
                 >
                   <Receipt size={14} />
-                  <span>Create Loading Bill / Make Bill</span>
+                  <span>{isDestinationStaff ? 'Create Destination Bill' : 'Create Loading Bill'}</span>
                 </button>
               </div>
             </div>
@@ -314,7 +324,9 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
               
               {/* Port Terminal Selector */}
               <div>
-                <label className="text-gray-300 block mb-1 font-medium text-[11px]">Port Terminal Node</label>
+                <label className="text-gray-300 block mb-1 font-medium text-[11px]">
+                  {isDestinationStaff ? 'Destination Dry Port / Terminal Node' : 'Loading Port Terminal Node'}
+                </label>
                 <select
                   value={portTerminal}
                   onChange={e => setPortTerminal(e.target.value)}
@@ -343,7 +355,9 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-gray-300 block mb-1 font-medium text-[11px]">Customs Seal Photo Scan</label>
+                  <label className="text-gray-300 block mb-1 font-medium text-[11px]">
+                    {isDestinationStaff ? 'Vehicle Reception / Seal Photo Scan' : 'Customs Seal Photo Scan'}
+                  </label>
                   <label className="flex items-center justify-center gap-2 p-2.5 border border-dashed border-white/20 hover:border-brand-500 rounded-xl cursor-pointer bg-black/40 hover:bg-black/60 transition text-center text-xs">
                     <input 
                       type="file" 
@@ -353,7 +367,7 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
                       onChange={handleSealPhotoCapture} 
                     />
                     <Camera size={14} className="text-brand-400" />
-                    <span>{sealPhoto ? 'Change Seal Photo' : 'Capture Seal Photo'}</span>
+                    <span>{sealPhoto ? 'Change Photo Scan' : isDestinationStaff ? 'Capture Vehicle Arrival / Seal Photo' : 'Capture Seal Photo'}</span>
                   </label>
                 </div>
               </div>
@@ -363,7 +377,9 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
                 <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between text-xs text-emerald-300">
                   <div className="flex items-center gap-2">
                     <ShieldCheck size={16} className="text-emerald-400" />
-                    <span className="font-semibold">Customs Seal Photo Scan Attached ✅</span>
+                    <span className="font-semibold">
+                      {isDestinationStaff ? 'Vehicle Reception & Seal Photo Attached (Transit Completed) ✅' : 'Customs Seal Photo Scan Attached ✅'}
+                    </span>
                   </div>
                   <button
                     type="button"
@@ -410,6 +426,22 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
                       <span className="text-gray-200 font-medium">Vehicle successfully gated out from port terminal / station</span>
                     </label>
                   </div>
+
+                  {vehicleGatedOut && (
+                    <div className="pt-2 border-t border-white/10 flex items-center justify-between gap-3">
+                      <span className="text-emerald-300 font-bold text-xs">
+                        ✓ Vehicle Gate-Out Confirmed — Delivery Order (DO) PDF is ready:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleGenerateDO}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-600/20"
+                      >
+                        <Download size={13} />
+                        <span>Download Delivery Order (PDF)</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -445,14 +477,14 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
               className="px-6 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 disabled:opacity-50 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-xl shadow-emerald-600/20 transition active:scale-95"
             >
               <CheckCircle2 size={15} />
-              <span>{isDestinationStaff ? 'Mark Offloading Complete & Finish' : 'Mark Loading Complete & Sail'}</span>
+              <span>{isDestinationStaff ? 'Complete Destination Workflow & Finish Case' : 'Mark Gate-Out & Complete Loading ➔ Transit'}</span>
             </button>
           </div>
 
         </div>
       </div>
 
-      {/* Embedded Make Loading Bill Modal */}
+      {/* Embedded Make Loading / Destination Bill Modal */}
       {showBillModal && (
         <PortMakeBillModal
           isOpen={showBillModal}
@@ -460,9 +492,10 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
           targetCase={targetCase}
           staffUserId={staffUserId}
           staffName={staffName}
+          isDestinationStaff={isDestinationStaff}
           onBillGenerated={(bill) => {
             if (onSuccess) {
-              onSuccess(`✓ Bill #${bill.billNo} generated and posted to ${targetCase.clientName}'s private ledger.`);
+              onSuccess(`✓ ${isDestinationStaff ? 'Destination' : 'Loading'} Bill #${bill.billNo} generated and posted to ${bill.arrangedBy === 'DPL' ? 'Company (DPL) & Client Invoice' : `${targetCase.clientName}'s ledger`}.`);
             }
           }}
         />

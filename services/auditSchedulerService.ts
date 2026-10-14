@@ -42,113 +42,122 @@ export async function runFullComplianceAudit() {
     const todayStr = new Date().toISOString().split('T')[0];
 
     // Retrieve active cached state
-    const finances = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', []);
-    const payables = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', []);
-    const receivables = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_receivables', []);
-    const cases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
-    const vehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
-    const documents = safeAppStorage.getJSON<CompanyDocument[]>('dpl_company_documents', []);
+    const cases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []) || [];
+    const vehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []) || [];
+    const documents = safeAppStorage.getJSON<CompanyDocument[]>('dpl_company_documents', []) || [];
 
-    // 1. Check Midnight Daily Financial Summary
-    checkDailyMidnightSummary(finances, todayStr);
+    // 1. Check Company Documents Expiries (10 Days Before & Expired) -> Admin
+    if (documents.length > 0) {
+      await checkCompanyDocumentExpiries(documents, todayStr);
+      await checkHearingNoticeReminders(documents, cases, todayStr);
+    }
 
-    // 2. Check 10-day Loading Gate-Out In-Transit consignments
-    checkTenDayTransitDelay(cases);
+    // 2. Check Vehicle Fleet Expiries (10 Days Before & Expired Today) -> Admin & Vehicle Manager
+    if (vehicles.length > 0) {
+      await checkVehicleFleetExpiries(vehicles, todayStr);
+      await checkIdleVehicles(vehicles, cases);
+    }
 
-    // 3. Check Company Documents Expiries (10 Days Before & Expired)
-    checkCompanyDocumentExpiries(documents, todayStr);
-
-    // 4. Check Vehicle Fleet Expiries (10 Days Before & Expired Today)
-    checkVehicleFleetExpiries(vehicles, todayStr);
-
-    // 5. Check Idle Vehicles (No Trip in 1 Month / 30 Days)
-    checkIdleVehicles(vehicles, cases);
+    // 3. Check 10-day Loading Gate-Out In-Transit consignments -> Operations Manager
+    if (cases.length > 0) {
+      await checkTenDayTransitDelay(cases);
+    }
   } catch (err) {
     console.warn('Audit scheduler execution notice:', err);
   }
 }
 
 /**
- * Generates the daily midnight 12:00 AM financial reconciliation summary
- * providing total collections, total disbursements, and interactive transaction breakdown.
- */
-export async function checkDailyMidnightSummary(allFinances: FinanceEntry[], todayStr: string) {
-  const lastMidnightKey = `audit_midnight_summary_${todayStr}`;
-  if (safeAppStorage.getItem(lastMidnightKey)) return;
-
-  const todayEntries = allFinances.filter(f => f.date === todayStr);
-  const incomeEntries = todayEntries.filter(f => f.type === 'INCOME');
-  const expenseEntries = todayEntries.filter(f => f.type === 'EXPENSE');
-
-  const totalIncome = incomeEntries.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
-  const totalExpense = expenseEntries.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
-
-  // If there are transactions today or it's nighttime
-  const hour = new Date().getHours();
-  // Trigger once per day
-  if (todayEntries.length > 0 || hour >= 0) {
-    safeAppStorage.setItem(lastMidnightKey, 'true');
-
-    await sendAppNotification({
-      title: `Daily Financial History Summary: ${todayStr}`,
-      description: `Total Received: PKR ${totalIncome.toLocaleString()} | Total Expenses: PKR ${totalExpense.toLocaleString()}`,
-      details: `Daily Consolidated History (${todayStr}):\n\nTotal Inflow Received: PKR ${totalIncome.toLocaleString()} (${incomeEntries.length} receipts)\nTotal Outflow Incurred: PKR ${totalExpense.toLocaleString()} (${expenseEntries.length} expenses)\nNet Balance For Today: PKR ${(totalIncome - totalExpense).toLocaleString()}`,
-      targetRole: 'ADMIN',
-      type: 'INFO',
-      notificationSubType: 'MIDNIGHT_SUMMARY',
-      category: 'FINANCE',
-      priority: 'HIGH',
-      actionLabel: 'View Detailed Breakdown',
-      approvalData: {
-        entityType: 'finance',
-        entityId: Date.now(),
-        actionType: 'VERIFY_PAYMENT',
-        requestedBy: 'System Audit Scheduler',
-        breakdownData: {
-          date: todayStr,
-          totalIncome,
-          totalExpense,
-          incomeEntries: incomeEntries.slice(0, 20),
-          expenseEntries: expenseEntries.slice(0, 20)
-        }
-      }
-    });
-  }
-}
-
-/**
- * Triggers an immediate live corporate notification for every payment receipt or expense entry.
+ * Triggers an immediate live corporate notification for every payment paid or received.
+ * Admin Rule: "Any payment paid and received notification"
  */
 export async function notifyLiveFinanceTransaction(entry: FinanceEntry) {
   const isIncome = entry.type === 'INCOME';
-  const typeLabel = isIncome ? 'Payment Inflow Received' : 'Disbursement Expense Incurred';
+  const isExpense = entry.type === 'EXPENSE';
+  if (!isIncome && !isExpense) return;
+  if (!entry.amount || Number(entry.amount) <= 0) return;
+
+  const typeLabel = isIncome ? 'Payment Received' : 'Payment Paid';
   const roleTarget = 'ADMIN,FINANCE_MANAGER';
 
   await sendAppNotification({
-    title: `Live Finance: ${typeLabel} - PKR ${Number(entry.amount || 0).toLocaleString()}`,
-    description: `${entry.party} • ${entry.category} • Ref: ${entry.reference || entry.id}`,
-    details: `Transaction Type: ${entry.type}\nAmount: PKR ${Number(entry.amount || 0).toLocaleString()}\nParty / Account: ${entry.party}\nCategory: ${entry.category}\nDate: ${entry.date}\nPayment Method: ${entry.paymentMethod || 'Cash / Bank'}\nDescription: ${entry.description}`,
+    title: `${typeLabel}: PKR ${Number(entry.amount || 0).toLocaleString()}`,
+    description: `${typeLabel} (${entry.party || 'Account'}) • ${entry.category || entry.description || 'Finance'} • Ref: ${entry.reference || entry.id}`,
+    details: `Transaction Type: ${typeLabel} (${entry.type})\nAmount: PKR ${Number(entry.amount || 0).toLocaleString()}\nParty / Account: ${entry.party}\nCategory: ${entry.category}\nDate: ${entry.date}\nPayment Method: ${entry.paymentMethod || 'Cash / Bank'}\nDescription: ${entry.description}`,
     targetRole: roleTarget,
     type: 'INFO',
     notificationSubType: 'FINANCE_RECORDED',
     category: 'FINANCE',
-    priority: isIncome ? 'MEDIUM' : 'HIGH'
+    priority: isIncome ? 'MEDIUM' : 'HIGH',
+    targetView: 'finance'
   });
 }
 
 /**
+ * Checks Legal & Show Cause Notices / Hearing Notices and sends Hearing Notice Reminders to Admin.
+ * Admin Rule: "Or hearing notice reminder"
+ */
+export async function checkHearingNoticeReminders(documents: CompanyDocument[], cases: Case[], todayStr: string) {
+  const todayTime = new Date(todayStr).getTime();
+
+  for (const doc of documents) {
+    const catLower = (doc.category || '').toLowerCase();
+    const titleLower = (doc.title || '').toLowerCase();
+    const isHearingDoc =
+      catLower.includes('hearing') ||
+      catLower.includes('show cause') ||
+      catLower.includes('legal') ||
+      catLower.includes('adjudication') ||
+      titleLower.includes('hearing') ||
+      titleLower.includes('show cause') ||
+      titleLower.includes('notice');
+
+    if (!isHearingDoc) continue;
+
+    const hearingDateStr = (doc as any).hearingDate || doc.expiryDate || doc.issueDate;
+    const reminderKey = `audit_hearing_notice_${doc.id}_${hearingDateStr || todayStr}`;
+    if (safeAppStorage.getItem(reminderKey)) continue;
+
+    if (hearingDateStr) {
+      const hTime = new Date(hearingDateStr).getTime();
+      if (!isNaN(hTime)) {
+        const diffDays = Math.ceil((hTime - todayTime) / (24 * 60 * 60 * 1000));
+        if (diffDays <= 14 && diffDays >= -1) {
+          safeAppStorage.setItem(reminderKey, 'true');
+          await sendAppNotification({
+            title: `Hearing Notice Reminder: ${doc.title}`,
+            description: diffDays === 0
+              ? `URGENT: Legal / Customs Hearing for "${doc.title}" is scheduled for TODAY (${hearingDateStr}).`
+              : diffDays > 0
+                ? `Upcoming Hearing Reminder: "${doc.title}" is scheduled in ${diffDays} day(s) on ${hearingDateStr}.`
+                : `Hearing Notice Alert: "${doc.title}" scheduled date ${hearingDateStr}.`,
+            details: `Hearing / Notice Title: ${doc.title}\nCategory: ${doc.category || 'Hearings & Adjudication'}\nReference No: ${doc.referenceNo || 'N/A'}\nHearing Date: ${hearingDateStr}\nNotes: ${doc.notes || 'Please prepare legal/customs adjudication dossier.'}`,
+            targetRole: 'ADMIN',
+            type: 'ALERT',
+            notificationSubType: 'HEARING_NOTICE_REMINDER',
+            category: 'GENERAL',
+            priority: 'HIGH',
+            actionLabel: 'Open Hearing Notice',
+            targetView: 'company_documents'
+          });
+        }
+      }
+    }
+  }
+}
+
+/**
  * Monitors shipments where vehicle gated out of loading port but has not reached destination
- * within 10 days.
+ * within 10 days. Sent to Operations Manager only.
  */
 export async function checkTenDayTransitDelay(cases: Case[]) {
   const now = Date.now();
   const tenDaysMs = 10 * 24 * 60 * 60 * 1000;
 
   for (const c of cases) {
-    if (c.status === 'Completed' || c.status === 'Delivered' || c.status === 'Cancelled') continue;
+    if (c.status === 'Completed' || c.status === 'Delivered' || c.status === 'Cancelled' || c.status === 'CANCELLED') continue;
 
     const wf: Record<string, any> = c.workflowDetails || {};
-    // Look for gate out date
     const gateOutStep: any = wf['LOADING_PORT_PROCESSING'] || wf['Step 6: Loading Port Processing'] || wf['Loading Port Processing'] || {};
     const gateOutDateStr = gateOutStep?.gateOutDate || gateOutStep?.date || c.registrationDate;
 
@@ -164,7 +173,7 @@ export async function checkTenDayTransitDelay(cases: Case[]) {
             title: `Transit Delay Alert (>10 Days): Case ${c.caseNo}`,
             description: `Vehicle gated out ${daysElapsed} days ago but shipment has not reached destination port (${c.pod}).`,
             details: `Consignment: ${c.caseNo}\nClient: ${c.clientName}\nRoute: ${c.pol} → ${c.pod}\nGate Out Date: ${gateOutDateStr}\nDays in Transit: ${daysElapsed} days\nImmediate inspection recommended.`,
-            targetRole: 'ADMIN,OPERATIONS_MANAGER',
+            targetRole: 'OPERATIONS_MANAGER',
             type: 'ALERT',
             notificationSubType: 'TRANSIT_DELAY_ALERT',
             category: 'CASE',
@@ -181,12 +190,11 @@ export async function checkTenDayTransitDelay(cases: Case[]) {
 
 /**
  * Audits company documents validity:
- * 1. 10 days before expiry date: notifies Admin, Finance Manager, Operations Manager.
- * 2. On expiry date: notifies that document has expired.
+ * 1. 10 days before expiry date: notifies Admin.
+ * 2. On/after expiry date: notifies Admin that document has expired.
  */
 export async function checkCompanyDocumentExpiries(documents: CompanyDocument[], todayStr: string) {
   const todayTime = new Date(todayStr).getTime();
-  const tenDaysMs = 10 * 24 * 60 * 60 * 1000;
 
   for (const doc of documents) {
     if (!doc.hasExpiry || !doc.expiryDate) continue;
@@ -207,7 +215,7 @@ export async function checkCompanyDocumentExpiries(documents: CompanyDocument[],
           title: `Document Expired: ${doc.title}`,
           description: `Company document "${doc.title}" expired on ${doc.expiryDate}. Immediate renewal required.`,
           details: `Document: ${doc.title}\nCategory: ${doc.category || 'General'}\nReference: ${doc.referenceNo || 'N/A'}\nExpired On: ${doc.expiryDate}\nAction: Please upload renewed compliance certificate.`,
-          targetRole: 'ADMIN,FINANCE_MANAGER,OPERATIONS_MANAGER',
+          targetRole: 'ADMIN',
           type: 'ALERT',
           notificationSubType: 'DOC_EXPIRY_ALERT',
           category: 'GENERAL',
@@ -226,7 +234,7 @@ export async function checkCompanyDocumentExpiries(documents: CompanyDocument[],
           title: `Document Expiring Soon (${diffDays} Days): ${doc.title}`,
           description: `Company document "${doc.title}" will expire in ${diffDays} days on ${doc.expiryDate}.`,
           details: `Document: ${doc.title}\nCategory: ${doc.category || 'General'}\nReference: ${doc.referenceNo || 'N/A'}\nExpiry Date: ${doc.expiryDate}\nDays Remaining: ${diffDays} days\nPrepare renewal application.`,
-          targetRole: 'ADMIN,FINANCE_MANAGER,OPERATIONS_MANAGER',
+          targetRole: 'ADMIN',
           type: 'INFO',
           notificationSubType: 'DOC_EXPIRY_ALERT',
           category: 'GENERAL',
@@ -241,14 +249,15 @@ export async function checkCompanyDocumentExpiries(documents: CompanyDocument[],
 
 /**
  * Checks vehicle fleet validity:
- * 1. 10 days before expiry: notifies Vehicle Manager and Admin.
- * 2. On expiry date: notifies that vehicle expired today.
+ * 1. 10 days before expiry: notifies Vehicle Manager, Admin, and Transporter.
+ * 2. On/after expiry date: notifies Admin, Vehicle Manager, and Transporter that vehicle document/registration expired.
  */
 export async function checkVehicleFleetExpiries(vehicles: Vehicle[], todayStr: string) {
   const todayTime = new Date(todayStr).getTime();
 
   for (const v of vehicles) {
-    const expDateStr = v.validationExpiryDate || (v as any).taxExpiryDate || (v as any).fitnessExpiryDate;
+    if (v.status === 'CANCELLED') continue;
+    const expDateStr = v.validationExpiryDate || v.registrationExpiryDate || (v as any).taxExpiryDate || (v as any).fitnessExpiryDate;
     if (!expDateStr) continue;
 
     const expiryTime = new Date(expDateStr).getTime();
@@ -256,6 +265,7 @@ export async function checkVehicleFleetExpiries(vehicles: Vehicle[], todayStr: s
 
     const diffMs = expiryTime - todayTime;
     const diffDays = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+    const transporterTarget = v.transporterName || v.brokerName || v.ownerName || undefined;
 
     if (diffDays <= 0) {
       const expiredKey = `audit_vehicle_expired_${v.id}_${todayStr}`;
@@ -264,16 +274,17 @@ export async function checkVehicleFleetExpiries(vehicles: Vehicle[], todayStr: s
 
         await sendAppNotification({
           title: `Vehicle Expired: ${v.registrationNumber}`,
-          description: `Fleet unit ${v.registrationNumber} (${v.transporterName || 'Transporter'}) expired today on ${expDateStr}.`,
+          description: `Fleet unit ${v.registrationNumber} (${v.transporterName || 'Transporter'}) registration/document expired on ${expDateStr}. Immediate renewal required.`,
           details: `Vehicle No: ${v.registrationNumber}\nTransporter: ${v.transporterName || 'Fleet Operator'}\nType: ${v.type || 'Trailer'}\nExpired On: ${expDateStr}\nStatus: Unit cannot be assigned to customs bonded routes until renewed.`,
-          targetRole: 'ADMIN,VEHICLE_MANAGER',
+          targetRole: 'ADMIN,VEHICLE_MANAGER,TRANSPORTER',
+          targetClientName: transporterTarget,
           type: 'ALERT',
-          notificationSubType: 'VEHICLE_EXPIRY_ALERT',
+          notificationSubType: 'DOC_EXPIRY_ALERT',
           category: 'TRANSPORTER',
           priority: 'HIGH',
           actionLabel: 'Renew Fleet Unit',
           targetView: 'vehicles',
-          targetFilter: { vehicleId: v.id }
+          targetFilter: { vehicleId: v.id, vehicleNo: v.registrationNumber }
         });
       }
     } else if (diffDays <= 10) {
@@ -282,17 +293,18 @@ export async function checkVehicleFleetExpiries(vehicles: Vehicle[], todayStr: s
         safeAppStorage.setItem(warningKey, 'true');
 
         await sendAppNotification({
-          title: `Vehicle Expiring Soon (${diffDays} Days): ${v.registrationNumber}`,
-          description: `Fleet unit ${v.registrationNumber} will expire in ${diffDays} days on ${expDateStr}.`,
+          title: `Vehicle Expire Soon (${diffDays} Days): ${v.registrationNumber}`,
+          description: `Fleet unit ${v.registrationNumber} (${v.transporterName || 'Transporter'}) registration/validation will expire in ${diffDays} days on ${expDateStr}.`,
           details: `Vehicle No: ${v.registrationNumber}\nTransporter: ${v.transporterName || 'Fleet Operator'}\nExpiry Date: ${expDateStr}\nDays Remaining: ${diffDays} days\nPlease process customs bonded route renewal.`,
-          targetRole: 'ADMIN,VEHICLE_MANAGER',
+          targetRole: 'ADMIN,VEHICLE_MANAGER,TRANSPORTER',
+          targetClientName: transporterTarget,
           type: 'INFO',
-          notificationSubType: 'VEHICLE_EXPIRY_ALERT',
+          notificationSubType: 'DOC_EXPIRY_ALERT',
           category: 'TRANSPORTER',
           priority: 'MEDIUM',
           actionLabel: 'View Vehicle',
           targetView: 'vehicles',
-          targetFilter: { vehicleId: v.id }
+          targetFilter: { vehicleId: v.id, vehicleNo: v.registrationNumber }
         });
       }
     }
@@ -301,13 +313,12 @@ export async function checkVehicleFleetExpiries(vehicles: Vehicle[], todayStr: s
 
 /**
  * Identifies fleet vehicles that have not been assigned a consignment or trip
- * for over 30 days (1 month).
+ * for over 30 days (1 month). Sent to Vehicle & Operations Managers.
  */
 export async function checkIdleVehicles(vehicles: Vehicle[], cases: Case[]) {
   const now = Date.now();
   const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
 
-  // Build a map of latest trip assignment timestamp per vehicle registration number
   const latestTripMap = new Map<string, number>();
 
   for (const c of cases) {
@@ -339,7 +350,7 @@ export async function checkIdleVehicles(vehicles: Vehicle[], cases: Case[]) {
           title: `Idle Fleet Unit Alert (>30 Days): ${v.registrationNumber}`,
           description: `Vehicle ${v.registrationNumber} (${v.transporterName || 'Transporter'}) has had no trips assigned for ${idleDays} days.`,
           details: `Fleet Unit: ${v.registrationNumber}\nTransporter: ${v.transporterName || 'Operator'}\nType: ${v.type || 'Trailer'}\nDays Without Consignment: ${idleDays} days\nConsider broadcasting availability or reviewing route allocation.`,
-          targetRole: 'ADMIN,OPERATIONS_MANAGER,VEHICLE_MANAGER',
+          targetRole: 'OPERATIONS_MANAGER,VEHICLE_MANAGER',
           type: 'INFO',
           notificationSubType: 'IDLE_VEHICLE_ALERT',
           category: 'TRANSPORTER',
@@ -352,3 +363,4 @@ export async function checkIdleVehicles(vehicles: Vehicle[], cases: Case[]) {
     }
   }
 }
+

@@ -11,7 +11,8 @@ export enum UserRole {
   OFFICE_STAFF = 'OFFICE_STAFF',
   CLIENT = 'CLIENT',
   TRANSPORTER = 'TRANSPORTER',
-  VENDOR = 'VENDOR'
+  VENDOR = 'VENDOR',
+  DRIVER = 'DRIVER'
 }
 
 export enum CaseStatus {
@@ -93,6 +94,17 @@ export interface PortItem {
   containerInquiryLink?: string;
 }
 
+export interface TransitLocationLogEntry {
+  id: string;
+  timestamp: string;
+  formattedTime: string;
+  roadOrAreaName: string;
+  vehicleNo: string;
+  driverName: string;
+  driverId?: string;
+  coordinates?: string;
+}
+
 export interface Driver {
   id: string;
   transporterId?: string | number;
@@ -109,6 +121,17 @@ export interface Driver {
   cnicDocUrl?: string;
   cnicDocName?: string;
   notes?: string;
+  userId?: string;
+  password?: string;
+  loginEnabled?: boolean;
+  driverLoginStatus?: 'ACTIVE' | 'SUSPENDED_TRIP_COMPLETED' | 'EXPIRED';
+  lastExpiredTripId?: string;
+  tripLoginExpiredAt?: string;
+  tripCompletedCaseNo?: string;
+  lastLocation?: string;
+  lastLocationLat?: number;
+  lastLocationLng?: number;
+  lastLocationUpdatedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -214,11 +237,14 @@ export interface ExtractedData {
 export interface StaffLoadingBill {
   id: string;
   billNo: string;
+  billType?: 'LOADING' | 'DESTINATION';
+  arrangedBy?: 'Client' | 'DPL';
   staffUserId: string;
   staffName: string;
   caseId: string;
   caseNo: string;
   clientName: string;
+  billedPartyName?: string;
   containerNo: string;
   containerNumber?: string;
   vehicleNo?: string;
@@ -839,6 +865,11 @@ export interface CaseStepDetail {
   containerDemurrageDetentionAmount?: number;
   containerSecurityRefunded?: boolean;
   allChargesSettledVerified?: boolean;
+  currentTransitLocation?: string;
+  transitLocationsHistory?: TransitLocationLogEntry[];
+  loadingPortDurationFormatted?: string;
+  destinationPortDurationFormatted?: string;
+  totalTransitDurationFormatted?: string;
 }
 
 export interface Case {
@@ -859,12 +890,24 @@ export interface Case {
   igmNo?: string;
   documents: (File | MockDocument)[];
   loadingBills?: StaffLoadingBill[];
+  destinationBills?: StaffLoadingBill[];
   extractedData: ExtractedData;
   containers: Container[];
   createdAt: string;
   charges?: CaseCharge[];
   serviceArrangements?: Record<string, { arrangedBy: 'DPL' | 'Client'; amount: number }>;
   workflowDetails?: Record<string, CaseStepDetail>;
+  // Permanent Transit Locations & Port Gate-Out / Unloading Duration History (Saved on every case of any category)
+  transitLocationsLog?: TransitLocationLogEntry[];
+  loadingPortArrivalTime?: string;
+  loadingPortGateOutTime?: string;
+  loadingPortDurationFormatted?: string;
+  destinationPortArrivalTime?: string;
+  destinationUnloadAndGateOutTime?: string;
+  destinationPortDurationFormatted?: string;
+  totalTransitDurationFormatted?: string;
+  driverTripIdAutoExpired?: boolean;
+  driverTripIdExpiredAt?: string;
   isIncidentVault?: boolean;
   incidentDetails?: {
     reportedAt: string;
@@ -902,6 +945,7 @@ export interface Case {
     requestedByRole?: string;
     requestedAt: string;
     proposedChanges?: any;
+    stage?: 'MANAGER_REVIEW' | 'ADMIN_FINAL';
   };
 }
 
@@ -1212,6 +1256,18 @@ export interface Vehicle {
   onlineLocation?: string;
   onlineDestination?: string;
   onlineSince?: string;
+  locationServiceEnabled?: boolean;
+  driverUserId?: string;
+  driverPassword?: string;
+  driverLoginStatus?: 'ACTIVE' | 'SUSPENDED_TRIP_COMPLETED' | 'EXPIRED';
+  lastExpiredTripId?: string;
+  tripLoginExpiredAt?: string;
+  tripCompletedCaseNo?: string;
+  lastLocationLat?: number;
+  lastLocationLng?: number;
+  lastLocationUpdatedAt?: string;
+  lastLocationDriverName?: string;
+  isMissingAlertActive?: boolean;
   isReadyForLoading?: boolean;
   readyCity?: string;
   readyDestinations?: string[];
@@ -1240,6 +1296,7 @@ export interface Vehicle {
     requestedByRole?: string;
     requestedAt: string;
     proposedChanges?: any;
+    stage?: 'MANAGER_REVIEW' | 'ADMIN_FINAL';
   };
 }
 
@@ -1324,6 +1381,9 @@ export interface AppNotification {
     | 'CLIENT_REGISTRATION_APPROVAL'
     | 'WORKFLOW_TASK'
     | 'FINANCE_RECORDED'
+    | 'INVOICE_CHARGE_NOTIFICATION'
+    | 'URGENT_PAYABLE_APPROVAL'
+    | 'HEARING_REMINDER'
     | 'DOC_EXPIRY_ALERT'
     | 'VEHICLE_EXPIRY_ALERT'
     | 'IDLE_VEHICLE_ALERT'
@@ -1331,7 +1391,14 @@ export interface AppNotification {
     | 'TRANSIT_DELAY_ALERT'
     | 'SALARY_READY'
     | 'MIDNIGHT_SUMMARY'
-    | 'NOC_REQUEST';
+    | 'NOC_REQUEST'
+    | 'HEARING_NOTICE_REMINDER'
+    | 'VEHICLE_REGISTERED'
+    | 'VEHICLE_CANCELLED_NOC'
+    | 'VEHICLE_RENEWED'
+    | 'VEHICLE_LOCATION_UPDATE'
+    | 'VEHICLE_MISSING_ALERT'
+    | 'TRANSPORTER_PAYMENT_CONFIRMATION';
   status: 'PENDING' | 'RESOLVED' | 'REJECTED';
   actionLabel?: string;
   priority?: 'HIGH' | 'MEDIUM' | 'LOW';
@@ -1345,7 +1412,10 @@ export interface AppNotification {
     entityType: 'case' | 'vehicle' | 'finance' | 'client' | 'transporter' | 'document' | 'staff';
     entityId: number | string;
     entityName?: string;
-    actionType: 'DELETE' | 'CANCEL' | 'EDIT' | 'VERIFY_PAYMENT' | 'APPROVE_CLIENT' | 'APPROVE_TRANSPORTER' | 'WORKFLOW_ACTION' | 'COLLECT_SALARY' | 'APPROVE_NOC';
+    actionType: 'DELETE' | 'CANCEL' | 'EDIT' | 'VERIFY_PAYMENT' | 'CONFIRM_TRANSPORTER_PAYMENT' | 'APPROVE_CLIENT' | 'APPROVE_TRANSPORTER' | 'WORKFLOW_ACTION' | 'COLLECT_SALARY' | 'APPROVE_NOC' | 'APPROVE_URGENT_PAYABLE';
+    approvalStage?: 'MANAGER_REVIEW' | 'ADMIN_FINAL';
+    originalRequester?: string;
+    originalRequesterRole?: string;
     requestedBy: string;
     requestedByRole?: string;
     reason?: string;
@@ -1354,6 +1424,7 @@ export interface AppNotification {
     amount?: number;
     slipUrl?: string;
     bankName?: string;
+    paymentSource?: 'CASH' | 'BANK';
     caseNo?: string;
     breakdownData?: any;
     staffUserId?: string | number;

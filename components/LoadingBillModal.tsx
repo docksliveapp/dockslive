@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { X, Receipt, Plus, Trash2, Download, CheckCircle2, FileText, Camera, Upload, AlertCircle, ExternalLink } from 'lucide-react';
-import { Case, CaseCharge } from '../types';
+import { X, Receipt, Plus, Trash2, Download, CheckCircle2, FileText, Camera, Upload, AlertCircle, ExternalLink, Building2, User } from 'lucide-react';
+import { Case, CaseCharge, CaseStatus, UserRole } from '../types';
 import { downloadLoadingBillPdf, LoadingBillData, LoadingBillItem } from '../services/pdfExportService';
 import { WorkflowMultiUploader } from './WorkflowMultiUploader';
 import { getPortInquiryLink } from '../services/portInquiryService';
-import { saveStaffBillToFirestore, saveStaffPrivateLedgerEntryToFirestore } from '../services/dbService';
+import { saveStaffBillToFirestore, saveStaffPrivateLedgerEntryToFirestore, saveFinanceToFirestore } from '../services/dbService';
+import { sendAppNotification } from '../services/notificationService';
 import { safeAppStorage } from '../services/storage';
 import { convertImageToPdf } from '../services/fileUtils';
+import { generateStandardBillNumber } from '../services/caseNumberService';
 
 interface ExtraChargeItem {
   id: string;
@@ -20,6 +22,7 @@ interface LoadingBillModalProps {
   isOpen: boolean;
   onClose: () => void;
   targetCase: Case;
+  isDestinationBill?: boolean;
   onSaveBill?: (billData: any, newCharges: CaseCharge[], newDocs: any[]) => void;
   branding?: any;
 }
@@ -28,22 +31,43 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
   isOpen,
   onClose,
   targetCase,
+  isDestinationBill = false,
   onSaveBill,
   branding
 }) => {
   if (!isOpen) return null;
 
   const initialWf: Record<string, any> = targetCase.workflowDetails || {};
-  const loadingStepDetail: any = initialWf[targetCase.status] || initialWf['LOADING_PORT_PROCESSING'] || {};
+  const stepKey = isDestinationBill ? CaseStatus.DESTINATION_PORT_ARRIVAL : CaseStatus.LOADING_PORT_PROCESSING;
+  const loadingStepDetail: any = initialWf[stepKey] || initialWf[targetCase.status] || initialWf['LOADING_PORT_PROCESSING'] || {};
 
-  // Form states
-  const [billNo, setBillNo] = useState(`LB-${targetCase.caseNo?.replace(/[^a-zA-Z0-9]/g, '') || 'PORT'}-${Date.now().toString().slice(-4)}`);
+  const defaultArrangedBy: 'Client' | 'DPL' =
+    (isDestinationBill
+      ? (loadingStepDetail.destinationChargesArrangedBy || targetCase.serviceArrangements?.['loading_unloading']?.arrangedBy)
+      : (loadingStepDetail.loadingChargesArrangedBy || targetCase.serviceArrangements?.['loading_unloading']?.arrangedBy || targetCase.serviceArrangements?.['terminal_handling']?.arrangedBy)) || 'Client';
+
+  const [arrangedBy, setArrangedBy] = useState<'Client' | 'DPL'>(defaultArrangedBy === 'DPL' ? 'DPL' : 'Client');
+
+  const prefix = isDestinationBill ? 'DB' : 'LB';
+  const billTitle = isDestinationBill ? 'Destination Unloading Bill' : 'Port Loading Bill';
+
+  // Form states - Deterministic standard bill number linked to Case No
+  const existingBillsCount = Array.isArray((targetCase as any).loadingBills) ? (targetCase as any).loadingBills.length : 0;
+  const [billNo, setBillNo] = useState(generateStandardBillNumber(prefix, targetCase.caseNo, existingBillsCount));
   const [billDate, setBillDate] = useState(new Date().toISOString().split('T')[0]);
-  const [portTerminal, setPortTerminal] = useState(targetCase.pol || 'KICT Port Terminal, Karachi');
+  const [portTerminal, setPortTerminal] = useState(
+    isDestinationBill
+      ? (targetCase.pod || 'Destination Dry Port / Terminal')
+      : (targetCase.pol || 'KICT Port Terminal, Karachi')
+  );
   const [containerNo, setContainerNo] = useState(targetCase.containers?.[0]?.number || targetCase.containerNumber || '');
   const [vehicleNo, setVehicleNo] = useState(targetCase.containers?.[0]?.vehicleNo || loadingStepDetail.assignedVehicleNo || '');
   const [driverName, setDriverName] = useState(targetCase.containers?.[0]?.driverName || loadingStepDetail.driverName || '');
-  const [remarks, setRemarks] = useState('Terminal handling, wharfage, tracker and gate dispatch charges.');
+  const [remarks, setRemarks] = useState(
+    isDestinationBill
+      ? 'Destination port terminal offloading, weighbridge, crane/lifter, and gate-out delivery expenses.'
+      : 'Terminal handling, wharfage, tracker and gate dispatch charges.'
+  );
 
   // Standard charges
   const [wharfageAmount, setWharfageAmount] = useState<number>(Number(loadingStepDetail.wharfageAmount) || 0);
@@ -138,52 +162,55 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
     setExtraCharges(prev => prev.filter(item => item.id !== id));
   };
 
+  const buildPdfItems = (): LoadingBillItem[] => {
+    const items: LoadingBillItem[] = [];
+    if (wharfageAmount > 0) {
+      items.push({
+        head: isDestinationBill ? 'Destination Terminal / Dry Port Handling' : 'Wharfage Terminal Payment',
+        amount: wharfageAmount,
+        receiptUrl: wharfageReceiptUrl,
+        receiptName: wharfageReceiptName
+      });
+    }
+    if (addnlWharfageAmount > 0) {
+      items.push({
+        head: isDestinationBill ? 'Destination Storage / Demurrage' : 'Additional Wharfage Payment',
+        amount: addnlWharfageAmount,
+        receiptUrl: addnlWharfageReceiptUrl,
+        receiptName: addnlWharfageReceiptName
+      });
+    }
+    if (trackerAmount > 0) {
+      items.push({
+        head: isDestinationBill ? 'Tracker De-activation / Seal Clearance' : 'Satellite GPS Tracker Payment',
+        amount: trackerAmount,
+        receiptUrl: trackerReceiptUrl,
+        receiptName: trackerReceiptName
+      });
+    }
+    if (deliveryCharges > 0) {
+      items.push({
+        head: isDestinationBill ? 'Crane Offloading & Gate-Out Delivery Charges' : 'Port Delivery / Terminal Gate Charges',
+        amount: deliveryCharges,
+        receiptUrl: deliveryReceiptUrl,
+        receiptName: deliveryReceiptName
+      });
+    }
+    extraCharges.forEach(ex => {
+      items.push({
+        head: ex.head,
+        amount: ex.amount,
+        receiptUrl: ex.receiptUrl,
+        receiptName: ex.receiptName
+      });
+    });
+    return items;
+  };
+
   const handleDownloadPdf = async () => {
     try {
       setIsGeneratingPdf(true);
-      const items: LoadingBillItem[] = [];
-
-      if (wharfageAmount > 0) {
-        items.push({
-          head: 'Wharfage Terminal Payment',
-          amount: wharfageAmount,
-          receiptUrl: wharfageReceiptUrl,
-          receiptName: wharfageReceiptName
-        });
-      }
-      if (addnlWharfageAmount > 0) {
-        items.push({
-          head: 'Additional Wharfage Payment',
-          amount: addnlWharfageAmount,
-          receiptUrl: addnlWharfageReceiptUrl,
-          receiptName: addnlWharfageReceiptName
-        });
-      }
-      if (trackerAmount > 0) {
-        items.push({
-          head: 'Satellite GPS Tracker Payment',
-          amount: trackerAmount,
-          receiptUrl: trackerReceiptUrl,
-          receiptName: trackerReceiptName
-        });
-      }
-      if (deliveryCharges > 0) {
-        items.push({
-          head: 'Port Delivery / Terminal Gate Charges',
-          amount: deliveryCharges,
-          receiptUrl: deliveryReceiptUrl,
-          receiptName: deliveryReceiptName
-        });
-      }
-
-      extraCharges.forEach(ex => {
-        items.push({
-          head: ex.head,
-          amount: ex.amount,
-          receiptUrl: ex.receiptUrl,
-          receiptName: ex.receiptName
-        });
-      });
+      const items = buildPdfItems();
 
       const pdfData: LoadingBillData = {
         billNo,
@@ -196,171 +223,87 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
         date: billDate,
         items,
         totalAmount: grandTotal,
-        remarks,
+        remarks: `[${billTitle} - Arranged by ${arrangedBy === 'DPL' ? 'Company' : 'Client'}] ${remarks}`,
         branding
       };
 
       await downloadLoadingBillPdf(pdfData);
     } catch (e) {
-      console.error('Failed to generate Loading Bill PDF', e);
-      alert('Error generating Loading Bill PDF');
+      console.error('Failed to generate Bill PDF', e);
+      alert('Error generating Bill PDF');
     } finally {
       setIsGeneratingPdf(false);
     }
   };
 
-  const handleSaveAndSync = () => {
+  const handleSaveAndSync = async () => {
+    if (grandTotal <= 0) {
+      alert('Please enter at least one charge amount before saving the bill.');
+      return;
+    }
+
     const newCharges: CaseCharge[] = [];
     const newDocs: any[] = [];
-
     const now = Date.now();
+    const pdfItems = buildPdfItems();
 
-    if (wharfageAmount > 0) {
-      newCharges.push({
-        id: `chg_wharfage_${now}`,
-        description: 'Wharfage Terminal Payment',
-        category: 'Port Terminal',
-        amount: wharfageAmount,
-        receiptUrl: wharfageReceiptUrl,
-        receiptName: wharfageReceiptName || 'Wharfage_Receipt.png',
-        taxable: false,
-        arrangedBy: 'DPL'
-      });
-      if (wharfageReceiptUrl) {
-        newDocs.push({
-          id: `doc_wharfage_${now}`,
-          name: wharfageReceiptName || 'Wharfage Payment Receipt',
-          type: 'Payment Receipt',
-          url: wharfageReceiptUrl,
-          uploadedAt: new Date().toISOString()
+    pdfItems.forEach((item, idx) => {
+      // Only push into Company Invoice (targetCase.charges) if Arranged by Company ('DPL')!
+      if (arrangedBy === 'DPL') {
+        newCharges.push({
+          id: `chg_${prefix.toLowerCase()}_${now}_${idx}`,
+          description: `${item.head} (${billTitle} #${billNo} - Company Arranged)`,
+          category: isDestinationBill ? 'Destination Port (Company Arranged)' : 'Loading Port (Company Arranged)',
+          amount: item.amount,
+          receiptUrl: item.receiptUrl,
+          receiptName: item.receiptName,
+          taxable: false,
+          arrangedBy: 'DPL'
         });
       }
-    }
-
-    if (addnlWharfageAmount > 0) {
-      newCharges.push({
-        id: `chg_addnl_wharfage_${now}`,
-        description: 'Additional Wharfage Payment',
-        category: 'Port Terminal',
-        amount: addnlWharfageAmount,
-        receiptUrl: addnlWharfageReceiptUrl,
-        receiptName: addnlWharfageReceiptName || 'Addnl_Wharfage_Receipt.png',
-        taxable: false,
-        arrangedBy: 'DPL'
-      });
-      if (addnlWharfageReceiptUrl) {
+      if (item.receiptUrl) {
         newDocs.push({
-          id: `doc_addnl_wharfage_${now}`,
-          name: addnlWharfageReceiptName || 'Additional Wharfage Receipt',
-          type: 'Payment Receipt',
-          url: addnlWharfageReceiptUrl,
-          uploadedAt: new Date().toISOString()
-        });
-      }
-    }
-
-    if (trackerAmount > 0) {
-      newCharges.push({
-        id: `chg_tracker_${now}`,
-        description: 'Tracker Payment',
-        category: 'Tracker / Security',
-        amount: trackerAmount,
-        receiptUrl: trackerReceiptUrl,
-        receiptName: trackerReceiptName || 'Tracker_Receipt.png',
-        taxable: false,
-        arrangedBy: 'DPL'
-      });
-      if (trackerReceiptUrl) {
-        newDocs.push({
-          id: `doc_tracker_${now}`,
-          name: trackerReceiptName || 'GPS Tracker Payment Receipt',
-          type: 'Payment Receipt',
-          url: trackerReceiptUrl,
-          uploadedAt: new Date().toISOString()
-        });
-      }
-    }
-
-    if (deliveryCharges > 0) {
-      newCharges.push({
-        id: `chg_delivery_${now}`,
-        description: 'Delivery Charges (Port Terminal)',
-        category: 'Port Terminal',
-        amount: deliveryCharges,
-        receiptUrl: deliveryReceiptUrl,
-        receiptName: deliveryReceiptName || 'Delivery_Charges_Receipt.png',
-        taxable: false,
-        arrangedBy: 'DPL'
-      });
-      if (deliveryReceiptUrl) {
-        newDocs.push({
-          id: `doc_delivery_${now}`,
-          name: deliveryReceiptName || 'Port Delivery Charges Receipt',
-          type: 'Payment Receipt',
-          url: deliveryReceiptUrl,
-          uploadedAt: new Date().toISOString()
-        });
-      }
-    }
-
-    extraCharges.forEach((ex, idx) => {
-      newCharges.push({
-        id: `chg_extra_${now}_${idx}`,
-        description: ex.head,
-        category: 'Extra Port Charges',
-        amount: ex.amount,
-        receiptUrl: ex.receiptUrl,
-        receiptName: ex.receiptName,
-        taxable: false,
-        arrangedBy: 'DPL'
-      });
-      if (ex.receiptUrl) {
-        newDocs.push({
-          id: `doc_extra_${now}_${idx}`,
-          name: ex.receiptName || `${ex.head} Receipt`,
-          type: 'Payment Receipt',
-          url: ex.receiptUrl,
+          id: `doc_${prefix.toLowerCase()}_${now}_${idx}`,
+          name: item.receiptName || `${item.head} Receipt`,
+          type: isDestinationBill ? 'Destination Receipt' : 'Loading Receipt',
+          url: item.receiptUrl,
           uploadedAt: new Date().toISOString()
         });
       }
     });
 
-    const billData = {
-      billNo,
-      date: billDate,
-      totalAmount: grandTotal,
-      portTerminal,
-      containerNo,
-      vehicleNo,
-      driverName,
-      remarks,
-      items: [
-        { head: 'Wharfage Payment', amount: wharfageAmount, receiptUrl: wharfageReceiptUrl, receiptName: wharfageReceiptName },
-        { head: 'Additional Wharfage Payment', amount: addnlWharfageAmount, receiptUrl: addnlWharfageReceiptUrl, receiptName: addnlWharfageReceiptName },
-        { head: 'Tracker Payment', amount: trackerAmount, receiptUrl: trackerReceiptUrl, receiptName: trackerReceiptName },
-        { head: 'Delivery Charges', amount: deliveryCharges, receiptUrl: deliveryReceiptUrl, receiptName: deliveryReceiptName },
-        ...extraCharges
-      ]
-    };
+    const staffId = safeAppStorage.getItem('dpl_current_user_id') || (isDestinationBill ? 'deststaff' : 'officestaff');
+    const staffName = safeAppStorage.getItem('dpl_current_user_name') || (isDestinationBill ? 'Destination Port Staff' : 'Loading Port Staff');
 
-    // Also add the Loading Bill PDF document to the case's document downloads list
-    newDocs.push({
-      id: `doc_lb_${billNo}`,
-      name: `Loading Bill - ${billNo}.pdf`,
-      type: 'Port Loading Bill',
-      billNo,
-      totalAmount: grandTotal,
-      url: '',
-      uploadedAt: new Date().toISOString()
-    });
+    // Generate PDF dataUrl so the official bill PDF is permanently stored in Case Documents
+    let generatedPdfUrl = '';
+    try {
+      const pdfRes = await downloadLoadingBillPdf({
+        billNo,
+        caseNo: targetCase.caseNo,
+        clientName: targetCase.clientName,
+        containerNo,
+        vehicleNo,
+        driverName,
+        portTerminal,
+        date: billDate,
+        items: pdfItems,
+        totalAmount: grandTotal,
+        remarks: `[${billTitle} - Arranged by ${arrangedBy === 'DPL' ? 'Company' : 'Client'}] ${remarks}`,
+        officerName: staffName,
+        branding
+      });
+      generatedPdfUrl = pdfRes?.dataUrl || pdfRes?.blobUrl || '';
+    } catch (e) {
+      console.warn('Could not auto-generate PDF during save:', e);
+    }
 
-    const staffId = safeAppStorage.getItem('dpl_current_user_id') || 'officestaff';
-    const staffName = safeAppStorage.getItem('dpl_current_user_name') || 'Port Operations Staff';
-
-    // Save to Staff Loading Bills repository
-    saveStaffBillToFirestore({
+    const staffBillObj = {
       id: `bill_${billNo}`,
       billNo,
+      billType: (isDestinationBill ? 'DESTINATION' : 'LOADING') as 'LOADING' | 'DESTINATION',
+      arrangedBy,
+      billedPartyName: arrangedBy === 'DPL' ? 'Company (DPL)' : (targetCase.clientName || 'Client'),
       caseId: targetCase.id,
       caseNo: targetCase.caseNo,
       containerNo: containerNo || '',
@@ -370,26 +313,63 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
       portTerminal: portTerminal || '',
       date: billDate,
       totalAmount: grandTotal,
+      grandTotal: grandTotal,
       paidAmount: 0,
       balanceDue: grandTotal,
-      status: 'PENDING',
-      charges: billData.items,
+      status: 'PENDING' as const,
+      charges: pdfItems.map(it => ({
+        head: it.head,
+        amount: it.amount,
+        receiptUrl: it.receiptUrl,
+        receiptName: it.receiptName
+      })),
       remarks,
       staffUserId: staffId,
       staffName,
       createdAt: new Date().toISOString()
-    }).catch(err => console.warn('Could not save staff bill to db:', err));
+    };
 
-    // Post to Client's dedicated Loading Ledger as a DEBIT
-    if (targetCase.clientName && grandTotal > 0) {
+    const billData = {
+      ...staffBillObj,
+      wharfageAmount,
+      wharfageReceiptUrl,
+      wharfageReceiptName,
+      trackerAmount,
+      deliveryCharges,
+      items: pdfItems
+    };
+
+    // Permanently add the Bill PDF document to the case's document downloads list
+    newDocs.push({
+      id: `doc_${prefix.toLowerCase()}_${billNo}`,
+      name: `${billTitle} - ${billNo}.pdf`,
+      type: isDestinationBill ? 'Destination Unloading Bill' : 'Port Loading Bill',
+      billNo,
+      billType: isDestinationBill ? 'DESTINATION' : 'LOADING',
+      arrangedBy,
+      totalAmount: grandTotal,
+      url: generatedPdfUrl,
+      uploadedAt: new Date().toISOString(),
+      officer: staffName,
+      billData: staffBillObj
+    });
+
+    // 1. Save to Staff Bills repository (separate per staffUserId)
+    saveStaffBillToFirestore(staffBillObj).catch(err => console.warn('Could not save staff bill to db:', err));
+
+    // 2. Post to Staff's Private Ledger:
+    // - If Arranged by Company ('DPL'), ledger party is 'Company (DPL)' (separate Company ledger for this staff ID)
+    // - If Arranged by Client ('Client'), ledger party is targetCase.clientName (separate Client ledger for this staff ID)
+    const ledgerParty = arrangedBy === 'DPL' ? 'Company (DPL)' : (targetCase.clientName || 'General Client');
+    if (grandTotal > 0) {
       saveStaffPrivateLedgerEntryToFirestore({
         id: `ledger_${billNo}_${Date.now()}`,
         staffUserId: staffId,
         staffName,
-        clientName: targetCase.clientName,
+        clientName: ledgerParty,
         date: billDate,
         reference: billNo,
-        description: `Port Loading Bill - Case #${targetCase.caseNo} (${containerNo || 'Container'})`,
+        description: `${billTitle} (${arrangedBy === 'DPL' ? 'Arranged by Company' : `Client: ${targetCase.clientName}`}) - Case #${targetCase.caseNo} (${containerNo || 'Container'})`,
         type: 'DEBIT',
         debit: grandTotal,
         credit: 0,
@@ -397,14 +377,67 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
         caseNo: targetCase.caseNo,
         containerNo: containerNo || '',
         createdAt: new Date().toISOString()
-      }).catch(err => console.warn('Could not save client loading ledger entry:', err));
+      }).catch(err => console.warn('Could not save staff private ledger entry:', err));
+    }
+
+    // 3. Financial Routing & Real-Time Notifications based on Arranged By Company vs Arranged By Client
+    const breakupLines = pdfItems.map(i => `• ${i.head}: PKR ${Number(i.amount).toLocaleString()}`).join('\n');
+
+    if (arrangedBy === 'DPL') {
+      // Arranged by Company:
+      // a) Add to Company Payables (so Finance Manager sees payable owed to Loading/Destination Staff)
+      saveFinanceToFirestore({
+        id: Date.now() + Math.floor(Math.random() * 10000),
+        date: billDate,
+        reference: billNo,
+        description: `${billTitle} Payable to ${staffName} (${staffId}) - Case #${targetCase.caseNo} (${targetCase.clientName})`,
+        amount: grandTotal,
+        type: 'PAYABLE',
+        status: 'APPROVED',
+        party: `${staffName} (${isDestinationBill ? 'Destination Staff' : 'Loading Staff'})`,
+        caseNo: targetCase.caseNo,
+        category: isDestinationBill ? 'Destination Port Payable' : 'Loading Port Payable'
+      } as any).catch(err => console.warn('Could not save company payable entry:', err));
+
+      // b) Notify Finance Manager (and Admin / Operations Manager)
+      sendAppNotification({
+        title: `${billTitle} Added to Client Invoice & Payable: #${billNo} (PKR ${grandTotal.toLocaleString()})`,
+        description: `${staffName} generated ${billTitle} #${billNo} (Arranged by Company) for Case #${targetCase.caseNo} (${targetCase.clientName}). Automatically added to Client Invoice (Company Receivable) and Company Payables.`,
+        details: `Bill No: ${billNo}\nType: ${billTitle}\nArrangement: Arranged by Company (Added to Client Invoice & Company Payable)\nCase No: ${targetCase.caseNo}\nClient: ${targetCase.clientName}\nPort/Terminal: ${portTerminal}\nStaff: ${staffName} (${staffId})\nTotal Amount: PKR ${grandTotal.toLocaleString()}\n\nItemized Breakup:\n${breakupLines}`,
+        targetRole: 'FINANCE_MANAGER,OPERATIONS_MANAGER,ADMIN',
+        targetView: 'finance',
+        type: 'INFO',
+        notificationSubType: 'BUYING',
+        actionLabel: 'View Payable & Invoice',
+        performedBy: staffName,
+        performedByRole: isDestinationBill ? 'DESTINATION_PORT_STAFF' : 'LOADING_PORT_STAFF',
+        category: 'FINANCE'
+      }).catch(err => console.warn('Notification error:', err));
+    } else {
+      // Arranged by Client:
+      // Send notification directly to Client (and Operations Manager) with full itemized breakup!
+      sendAppNotification({
+        title: `${billTitle} Generated (Arranged by Client): #${billNo} - PKR ${grandTotal.toLocaleString()}`,
+        description: `${staffName} generated ${billTitle} #${billNo} for Case #${targetCase.caseNo} at ${portTerminal}. Added to your Case Expenses & ${ isDestinationBill ? 'Destination' : 'Loading' } Staff Ledger with full itemized breakup.`,
+        details: `Bill No: ${billNo}\nType: ${billTitle}\nArrangement: Arranged by Client (Direct Client Ledger & Case Expense)\nCase No: ${targetCase.caseNo}\nClient: ${targetCase.clientName}\nContainer: ${containerNo || 'N/A'}\nPort/Terminal: ${portTerminal}\nStaff: ${staffName} (${staffId})\nTotal Amount: PKR ${grandTotal.toLocaleString()}\n\nComplete Charges Breakup:\n${breakupLines}`,
+        targetRole: 'CLIENT,OPERATIONS_MANAGER',
+        targetClientName: targetCase.clientName,
+        targetView: 'cases',
+        targetFilter: { caseNo: targetCase.caseNo },
+        type: 'INFO',
+        notificationSubType: 'SELLING',
+        actionLabel: 'View Bill Breakup',
+        performedBy: staffName,
+        performedByRole: isDestinationBill ? 'DESTINATION_PORT_STAFF' : 'LOADING_PORT_STAFF',
+        category: 'FINANCE'
+      }).catch(err => console.warn('Notification error:', err));
     }
 
     if (onSaveBill) {
       onSaveBill(billData, newCharges, newDocs);
     }
 
-    setSaveSuccessMsg(`Loading Bill saved successfully! Total PKR ${grandTotal.toLocaleString('en-PK')} added.`);
+    setSaveSuccessMsg(`${billTitle} saved & PDF generated! (${arrangedBy === 'DPL' ? 'Added to Company Client Invoice & Payable' : 'Added to Client Case Expenses & Ledger'})`);
     setTimeout(() => {
       onClose();
     }, 1200);
@@ -425,14 +458,14 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
               <Receipt size={22} />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base sm:text-lg font-bold text-white">Make Loading Bill</h3>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base sm:text-lg font-bold text-white">Make {billTitle}</h3>
                 <span className="text-[10px] bg-sky-500/20 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded-full font-semibold">
-                  Port Terminal Invoice
+                  {isDestinationBill ? 'Destination Unloading Desk' : 'Port Loading Desk'}
                 </span>
               </div>
               <p className="text-xs text-gray-400">
-                Case: <span className="text-amber-300 font-mono font-semibold">{targetCase.caseNo}</span> • Container: <span className="text-white font-mono">{containerNo || 'N/A'}</span>
+                Case: <span className="text-amber-300 font-mono font-semibold">{targetCase.caseNo}</span> • Client: <span className="text-white font-semibold">{targetCase.clientName}</span> • Container: <span className="text-white font-mono">{containerNo || 'N/A'}</span>
               </p>
             </div>
           </div>
@@ -453,6 +486,46 @@ export const LoadingBillModal: React.FC<LoadingBillModalProps> = ({
               <span>{saveSuccessMsg}</span>
             </div>
           )}
+
+          {/* Arranged By Selector: Arranged by Client vs Arranged by Company */}
+          <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-bold text-amber-300 uppercase tracking-wider block">
+                {isDestinationBill ? 'Destination Unloading' : 'Port Loading'} Arrangement & Billing Target
+              </span>
+              <span className="text-[11px] text-gray-300">
+                {arrangedBy === 'Client'
+                  ? `Direct Bill to Client (${targetCase.clientName}) — Adds to Client Case Expenses & Client-Staff Ledger`
+                  : `Arranged by Company — Auto-adds to Company's Client Invoice, Company Payable & Finance Manager Notification`}
+              </span>
+            </div>
+            <div className="flex rounded-xl bg-slate-900 p-1 border border-white/10 shrink-0">
+              <button
+                type="button"
+                onClick={() => setArrangedBy('Client')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                  arrangedBy === 'Client'
+                    ? 'bg-brand-600 text-white shadow'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <User size={13} />
+                <span>Arranged by Client</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setArrangedBy('DPL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                  arrangedBy === 'DPL'
+                    ? 'bg-emerald-600 text-white shadow'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Building2 size={13} />
+                <span>Arranged by Company</span>
+              </button>
+            </div>
+          </div>
 
           {/* Quick Particulars Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-2xl bg-white/[0.02] border border-white/10">

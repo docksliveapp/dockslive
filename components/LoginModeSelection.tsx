@@ -87,6 +87,11 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
       if ((user as any).station) {
         safeAppStorage.setItem('dpl_current_user_station', (user as any).station);
       }
+      if ((user as any).assignedVehicleNo) {
+        safeAppStorage.setItem('dpl_driver_vehicle_no', (user as any).assignedVehicleNo);
+      } else {
+        safeAppStorage.removeItem('dpl_driver_vehicle_no');
+      }
 
       const userAllowedCompanies: string[] = (user as any).allowedCompanies || (user.isGlobalAdmin ? ['docks', 'truckit', 'muhib', 'vantage'] : ['docks']);
       const isUserGlobalAdmin: boolean = Boolean(user.isGlobalAdmin);
@@ -96,7 +101,9 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
 
       let targetView = 'dashboard';
 
-      if (userRole === UserRole.CLIENT) {
+      if (userRole === UserRole.DRIVER) {
+        targetView = 'driver_location';
+      } else if (userRole === UserRole.CLIENT) {
         targetView = 'cases';
       } else if (userRole === UserRole.VENDOR) {
         targetView = 'vendor_portal';
@@ -114,7 +121,7 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
         role: userRole,
         roles: userRoles,
         designation: user.designation,
-        clientName: user.clientName || (userRole === UserRole.CLIENT ? user.name : 'Client Portal'),
+        clientName: user.clientName || (userRole === UserRole.CLIENT ? user.name : userRole === UserRole.TRANSPORTER ? user.name : 'Client Portal'),
         targetView: targetView,
         displayName: user.name || user.userId || 'Staff User',
         allowedCompanies: userAllowedCompanies,

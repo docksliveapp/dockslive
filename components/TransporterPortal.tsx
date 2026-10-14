@@ -35,6 +35,7 @@ import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
 import { ThemeToggleSwitch } from './ThemeToggleSwitch';
 import { UserRole } from '../types';
 import { sendAppNotification } from '../services/notificationService';
+import { generateNewTripDriverCredentials } from '../services/tripLifecycleService';
 
 interface TransporterPortalProps {
   onSignOut?: () => void;
@@ -913,16 +914,98 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
                           </span>
                         </div>
 
-                        {/* Driver & Fitness Info */}
-                        <div className="space-y-1.5 text-xs text-gray-300 bg-white/5 p-3 rounded-xl">
+                        {/* Driver & Fitness Info + Per-Trip Location Service & Driver ID */}
+                        <div className="space-y-2 text-xs text-gray-300 bg-white/5 p-3 rounded-xl">
                           <p>👤 Driver: <strong className="text-white">{v.driverName || 'N/A'}</strong></p>
                           <p>📞 Phone: <span className="font-mono text-amber-300">{v.driverContact || 'N/A'}</span></p>
                           <p>📄 Fitness Expiry: <span className="font-mono text-gray-200">{v.validationExpiryDate || 'Active'}</span></p>
-                          {isReady && (
-                            <p className="text-emerald-400 text-[11px] pt-1 border-t border-white/10">
-                              📍 Location: {v.readyCity || 'Karachi'} &bull; Est. Rent: PKR {Number(v.estimatedRent || 150000).toLocaleString()}
+                          {v.onlineLocation && (
+                            <p className="text-sky-300 text-[11px] pt-1 border-t border-white/10">
+                              🛰️ Last GPS Road/Area: <strong className="text-white">{v.onlineLocation}</strong>
                             </p>
                           )}
+                          {isReady && (
+                            <p className="text-emerald-400 text-[11px] pt-1 border-t border-white/10">
+                              📍 Ready City: {v.readyCity || 'Karachi'} &bull; Est. Rent: PKR {Number(v.estimatedRent || 150000).toLocaleString()}
+                            </p>
+                          )}
+
+                          {/* Per-Trip Location Service & Driver ID Box */}
+                          <div className="mt-2 pt-2 border-t border-white/10 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-semibold text-gray-300">Trip Location Service:</span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const nextState = !v.locationServiceEnabled;
+                                  if (nextState && (!v.driverUserId || !v.driverPassword || v.driverLoginStatus === 'SUSPENDED_TRIP_COMPLETED')) {
+                                    const matchedDrv = myDrivers.find(
+                                      d => (d.assignedVehicleNo || '').toUpperCase() === v.registrationNumber.toUpperCase() ||
+                                           (v.driverName && (d.name || '').toLowerCase() === v.driverName.toLowerCase())
+                                    );
+                                    await generateNewTripDriverCredentials({
+                                      vehicle: v,
+                                      driver: matchedDrv,
+                                      transporterName: selectedTransporterName
+                                    });
+                                  } else {
+                                    await updateVehicleInFirestore({
+                                      ...v,
+                                      locationServiceEnabled: nextState
+                                    });
+                                  }
+                                }}
+                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition cursor-pointer ${
+                                  v.locationServiceEnabled
+                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                    : 'bg-gray-500/20 text-gray-400 border-gray-500/30 hover:text-white'
+                                }`}
+                              >
+                                {v.locationServiceEnabled ? 'ON (Active)' : 'OFF'}
+                              </button>
+                            </div>
+
+                            {v.driverLoginStatus === 'SUSPENDED_TRIP_COMPLETED' ? (
+                              <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-200 space-y-1">
+                                <span className="font-bold text-amber-300 block">
+                                  Trip Finished — Previous Driver ID Expired ({v.lastExpiredTripId || v.driverUserId})
+                                </span>
+                                <span className="text-gray-300 block">
+                                  Container unloaded &amp; gated out at destination. Generate a new ID for the next trip.
+                                </span>
+                              </div>
+                            ) : v.driverUserId && v.driverPassword ? (
+                              <div className="p-2 rounded-lg bg-slate-950/80 border border-sky-500/30 text-[11px] font-mono space-y-0.5">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Trip Driver ID:</span>
+                                  <span className="text-sky-300 font-bold">{v.driverUserId}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400">Trip Password:</span>
+                                  <span className="text-emerald-300 font-bold">{v.driverPassword}</span>
+                                </div>
+                              </div>
+                            ) : null}
+
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const matchedDrv = myDrivers.find(
+                                  d => (d.assignedVehicleNo || '').toUpperCase() === v.registrationNumber.toUpperCase() ||
+                                       (v.driverName && (d.name || '').toLowerCase() === v.driverName.toLowerCase())
+                                );
+                                await generateNewTripDriverCredentials({
+                                  vehicle: v,
+                                  driver: matchedDrv,
+                                  transporterName: selectedTransporterName
+                                });
+                              }}
+                              className="w-full py-1.5 px-2.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                            >
+                              <RefreshCw size={11} />
+                              <span>Generate New Trip Driver ID &amp; Password</span>
+                            </button>
+                          </div>
                         </div>
 
                         {/* Actions for this vehicle */}
@@ -1115,6 +1198,55 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
                             </span>
                           </div>
                         )}
+                        {drv.lastLocation && (
+                          <div className="pt-1 border-t border-white/5 text-[11px]">
+                            <span className="text-gray-400 block">Last Sent Location:</span>
+                            <span className="text-emerald-300 font-semibold">{drv.lastLocation}</span>
+                          </div>
+                        )}
+
+                        {/* Per-Trip Login ID Status on Driver */}
+                        <div className="pt-1.5 border-t border-white/10 space-y-1.5">
+                          {drv.driverLoginStatus === 'SUSPENDED_TRIP_COMPLETED' || drv.loginEnabled === false ? (
+                            <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-200">
+                              <span className="font-bold text-amber-300 block">
+                                Trip Completed — Login ID Suspended ({drv.lastExpiredTripId || drv.userId || 'Expired'})
+                              </span>
+                              <span className="text-gray-300">
+                                Permanent driver record is saved. Generate a new ID for the next trip.
+                              </span>
+                            </div>
+                          ) : drv.userId && drv.password ? (
+                            <div className="p-2 rounded-lg bg-slate-950 border border-sky-500/30 font-mono text-[11px] space-y-0.5">
+                              <div className="flex justify-between">
+                                <span className="text-gray-400">Active Trip ID:</span>
+                                <span className="text-sky-300 font-bold">{drv.userId}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-400">Trip Password:</span>
+                                <span className="text-emerald-300 font-bold">{drv.password}</span>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const matchedVeh = myVehicles.find(
+                                v => (v.registrationNumber || '').toUpperCase() === (drv.assignedVehicleNo || '').toUpperCase()
+                              );
+                              await generateNewTripDriverCredentials({
+                                driver: drv,
+                                vehicle: matchedVeh,
+                                transporterName: selectedTransporterName
+                              });
+                            }}
+                            className="w-full py-1.5 px-2.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                          >
+                            <RefreshCw size={11} />
+                            <span>Generate New Trip Login ID &amp; Password</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
 

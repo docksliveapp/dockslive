@@ -11,7 +11,7 @@ interface NotificationModalProps {
   notification: AppNotification | null;
   isOpen: boolean;
   onClose: () => void;
-  onAction: (action: 'ACCEPT' | 'REJECT' | 'VIEW' | 'MARK_READ') => void;
+  onAction: (action: 'ACCEPT' | 'REJECT' | 'VIEW' | 'MARK_READ' | 'DELETE') => void;
 }
 
 const NotificationModal: React.FC<NotificationModalProps> = ({ 
@@ -42,11 +42,16 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
     notification.notificationSubType === 'NOC_REQUEST' || 
     notification.approvalData?.actionType === 'APPROVE_NOC';
 
+  const isUrgentPayableApproval =
+    notification.notificationSubType === 'URGENT_PAYABLE_APPROVAL' ||
+    notification.approvalData?.actionType === 'APPROVE_URGENT_PAYABLE';
+
   const isApprovalAction = 
     !isMonthlyExpense && (
       isPaymentApproval ||
       isSalaryCollection ||
       isNocApproval ||
+      isUrgentPayableApproval ||
       notification.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
       notification.notificationSubType === 'CASE_APPROVAL' ||
       notification.notificationSubType === 'DELETION_APPROVAL' ||
@@ -489,6 +494,20 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
                 <span>Mark Read</span>
               </button>
             )}
+
+            <button 
+              type="button"
+              onClick={() => onAction('DELETE')}
+              className={`py-2.5 px-3.5 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0 cursor-pointer border ${
+                isPearl 
+                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200' 
+                  : 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/25'
+              }`}
+              title="Delete Notification"
+            >
+              <Trash2 size={14} />
+              <span>Delete</span>
+            </button>
 
             <button 
               type="button"

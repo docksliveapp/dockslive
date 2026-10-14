@@ -24,6 +24,7 @@ import ClientPortal from './components/ClientPortal';
 import { LoadingPortStaffPortal } from './components/LoadingPortStaffPortal';
 import TransporterPortal from './components/TransporterPortal';
 import VendorPortal from './components/VendorPortal';
+import DriverLocationPortal from './components/DriverLocationPortal';
 import { AvailableVehiclesView } from './components/AvailableVehiclesView';
 import { ModeOption } from './components/TopModeSwitcher';
 import { AppNotification, UserRole } from './types';
@@ -32,7 +33,7 @@ import AuthModal from './components/AuthModal';
 import Logo from './components/Logo';
 import { LiveNotificationCenter } from './components/LiveNotificationCenter';
 import { auth, onAuthStateChanged, testFirestoreConnection } from './services/firebase';
-import { subscribeToNotifications } from './services/dbService';
+import { subscribeToNotifications, getUserWorkDraftFromFirestore, deleteUserWorkDraftFromFirestore, UserWorkDraft } from './services/dbService';
 import { approveActionRequest, rejectActionRequest } from './services/approvalService';
 import { safeSessionStorage, safeLocalStorage, safeAppStorage } from './services/storage';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -309,6 +310,96 @@ const App: React.FC = () => {
   // Session Toast for workflow restoration feedback
   const [sessionToast, setSessionToast] = useState<string | null>(null);
 
+  // Cloud-Synced Unfinished Work Recovery Modal State (Triggered on Login)
+  const [pendingUserDraft, setPendingUserDraft] = useState<UserWorkDraft | null>(null);
+  const [hasCheckedLoginDraft, setHasCheckedLoginDraft] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (showSplash || showModeSelection || showCompanySelection || isGroupAdminPortalOpen || hasCheckedLoginDraft) {
+      return;
+    }
+    const userKey = (
+      safeAppStorage.getItem('dpl_current_user_id') ||
+      currentClientName ||
+      String(currentRole || 'admin')
+    ).toLowerCase().trim();
+
+    setHasCheckedLoginDraft(true);
+    getUserWorkDraftFromFirestore(userKey).then((cloudDraft) => {
+      if (cloudDraft && cloudDraft.active && cloudDraft.formData) {
+        // Hydrate local storage keys so CaseManagement can immediately resume if user clicks Continue
+        safeAppStorage.setItem('dpl_reg_draft_active', 'true');
+        safeAppStorage.setItem('dpl_reg_step', String(cloudDraft.step || 1));
+        if (cloudDraft.caseNo) safeAppStorage.setItem('dpl_reg_caseno', cloudDraft.caseNo);
+        safeAppStorage.setJSON('dpl_reg_formdata', cloudDraft.formData);
+        if (Array.isArray(cloudDraft.docs)) {
+          safeAppStorage.setJSON('dpl_reg_docs', cloudDraft.docs);
+        }
+        setPendingUserDraft(cloudDraft);
+      } else if (safeAppStorage.getItem('dpl_reg_draft_active') === 'true') {
+        const localFormData = safeAppStorage.getJSON<any>('dpl_reg_formdata', null);
+        if (localFormData) {
+          setPendingUserDraft({
+            id: `draft_${userKey}`,
+            userId: userKey,
+            role: String(currentRole),
+            companyId: activeCompany.id,
+            draftType: 'CASE_REGISTRATION',
+            step: parseInt(safeAppStorage.getItem('dpl_reg_step') || '1', 10),
+            caseNo: safeAppStorage.getItem('dpl_reg_caseno') || '',
+            formData: localFormData,
+            docs: safeAppStorage.getJSON<any[]>('dpl_reg_docs', []),
+            updatedAt: new Date().toISOString(),
+            active: true
+          });
+        }
+      }
+    }).catch(() => {});
+  }, [showSplash, showModeSelection, showCompanySelection, isGroupAdminPortalOpen, hasCheckedLoginDraft, currentRole, currentClientName, activeCompany.id]);
+
+  const handleContinueSavedWork = () => {
+    if (!pendingUserDraft) return;
+    if (pendingUserDraft.companyId && pendingUserDraft.companyId !== activeCompany.id) {
+      setActiveCompany(pendingUserDraft.companyId);
+    }
+    safeAppStorage.setItem('dpl_reg_draft_active', 'true');
+    safeAppStorage.setItem('dpl_reg_view', 'register');
+    safeAppStorage.setItem('dpl_reg_step', String(pendingUserDraft.step || 1));
+    if (pendingUserDraft.caseNo) {
+      safeAppStorage.setItem('dpl_reg_caseno', pendingUserDraft.caseNo);
+    }
+    if (pendingUserDraft.formData) {
+      safeAppStorage.setJSON('dpl_reg_formdata', pendingUserDraft.formData);
+    }
+    if (Array.isArray(pendingUserDraft.docs)) {
+      safeAppStorage.setJSON('dpl_reg_docs', pendingUserDraft.docs);
+    }
+    setPendingUserDraft(null);
+    setActiveView('cases');
+    setSessionToast('Resumed your cloud-saved work from where you left off.');
+  };
+
+  const handleDiscardSavedWork = () => {
+    const userKey = (
+      pendingUserDraft?.userId ||
+      safeAppStorage.getItem('dpl_current_user_id') ||
+      currentClientName ||
+      String(currentRole || 'admin')
+    ).toLowerCase().trim();
+
+    safeAppStorage.removeItem('dpl_reg_draft_active');
+    safeAppStorage.removeItem('dpl_reg_step');
+    safeAppStorage.removeItem('dpl_reg_caseno');
+    safeAppStorage.removeItem('dpl_reg_formdata');
+    safeAppStorage.removeItem('dpl_reg_docs');
+    safeAppStorage.removeItem('dpl_reg_updated_at');
+    safeAppStorage.removeItem('dpl_reg_timestamp');
+    safeAppStorage.removeItem('dpl_reg_view');
+    deleteUserWorkDraftFromFirestore(userKey).catch(() => {});
+    setPendingUserDraft(null);
+    setSessionToast('Previous unfinished work discarded.');
+  };
+
   useEffect(() => {
     if (sessionToast) {
       const timer = setTimeout(() => setSessionToast(null), 5000);
@@ -448,6 +539,8 @@ const App: React.FC = () => {
     safeAppStorage.setItem('dpl_last_location_view', activeView);
     safeAppStorage.setItem('dpl_last_location_role', currentRole);
     safeAppStorage.removeItem('dpl_session_active');
+    setPendingUserDraft(null);
+    setHasCheckedLoginDraft(false);
     setShowSplash(false);
     setShowCompanySelection(false);
     setIsCompanyModalOpen(false);
@@ -562,13 +655,26 @@ const App: React.FC = () => {
       );
     }
 
+    // If in Driver Role, directly render the Driver Auto-Location Portal
+    if (currentRole === UserRole.DRIVER) {
+      return (
+        <DriverLocationPortal
+          driverId={safeAppStorage.getItem('dpl_current_user_id') || ''}
+          driverName={safeAppStorage.getItem('dpl_current_user_name') || 'Driver'}
+          transporterName={currentClientName || safeAppStorage.getItem('dpl_client_name') || 'Transporter'}
+          assignedVehicleNo={safeAppStorage.getItem('dpl_driver_vehicle_no') || ''}
+          onSignOut={handleSignOut}
+        />
+      );
+    }
+
     // If in Transporter Role, directly render the Transporter Portal
     if (currentRole === UserRole.TRANSPORTER) {
       return (
         <TransporterPortal
           onSignOut={handleSignOut}
           onSwitchMode={handleSwitchMode}
-          transporterName={safeAppStorage.getItem('dpl_current_user_name') || 'Bilal Goods Transport Co.'}
+          transporterName={currentClientName || safeAppStorage.getItem('dpl_current_user_name') || 'Bilal Goods Transport Co.'}
         />
       );
     }
@@ -818,6 +924,7 @@ const App: React.FC = () => {
               setShowCompanySelection(false);
             } else {
               const shouldPickCompany = !(
+                payload.role === UserRole.DRIVER ||
                 payload.role === UserRole.TRANSPORTER || 
                 payload.role === UserRole.CLIENT || 
                 payload.role === UserRole.VENDOR ||
@@ -894,6 +1001,7 @@ const App: React.FC = () => {
 
   // Check if current active session is a dedicated full-page portal
   const isDedicatedPortal = 
+    currentRole === UserRole.DRIVER ||
     currentRole === UserRole.CLIENT || 
     currentRole === UserRole.TRANSPORTER || 
     currentRole === UserRole.LOADING_PORT_STAFF || 
@@ -1457,6 +1565,80 @@ const App: React.FC = () => {
               setIsCompanyModalOpen(false);
             }}
           />
+        )}
+
+        {/* Cloud-Synced Unfinished Work Recovery Modal (Continue or Discard on Login) */}
+        {pendingUserDraft && (
+          <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+            <div className="bg-slate-900 border border-brand-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-brand-500/20 border border-brand-500/40 text-brand-400 flex items-center justify-center shrink-0">
+                    <RefreshCw size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Continue Unfinished Work?</h3>
+                    <p className="text-xs text-gray-400">
+                      Your previous in-progress session was automatically saved online in the database.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPendingUserDraft(null)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-950/90 border border-white/10 space-y-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">Saved Progress:</span>
+                  <span className="font-mono font-bold text-brand-300">
+                    Step {pendingUserDraft.step || 1} of 3
+                  </span>
+                </div>
+                {pendingUserDraft.caseNo && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Case / Invoice No:</span>
+                    <span className="font-mono font-bold text-emerald-400">{pendingUserDraft.caseNo}</span>
+                  </div>
+                )}
+                {pendingUserDraft.formData?.client && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Client Account:</span>
+                    <span className="font-semibold text-white">{pendingUserDraft.formData.client}</span>
+                  </div>
+                )}
+                {pendingUserDraft.formData?.category && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Service Category:</span>
+                    <span className="text-gray-200">{pendingUserDraft.formData.category}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={handleDiscardSavedWork}
+                  className="px-4 py-2.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Trash2 size={14} />
+                  <span>Discard Old Work</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleContinueSavedWork}
+                  className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-brand-600/30 transition cursor-pointer"
+                >
+                  <Check size={14} />
+                  <span>Continue Work</span>
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>

@@ -260,6 +260,8 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
   const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null);
   const [backupSuccessMessage, setBackupSuccessMessage] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [backupScope, setBackupScope] = useState<'COMPANY' | 'MAIN_APP'>('COMPANY');
+  const [resetScope, setResetScope] = useState<'COMPANY' | 'MAIN_APP'>('COMPANY');
 
   // Toggle selection for backup items
   const handleToggleBackupOption = (key: 'full' | 'cases' | 'finance' | 'vehicles' | 'clients') => {
@@ -280,7 +282,8 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
   };
 
   // Open Backup Modal
-  const handleOpenBackupModal = () => {
+  const handleOpenBackupModal = (scope: 'COMPANY' | 'MAIN_APP' = 'COMPANY') => {
+    setBackupScope(scope);
     setBackupSuccessMessage(null);
     setShowBackupModal(true);
   };
@@ -289,11 +292,13 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
   const handleDownloadSelectedBackup = async () => {
     try {
       setIsExportingBackup(true);
+      const targetCompanyId = backupScope === 'COMPANY' ? (activeCompany?.id || 'docks') : undefined;
       const snapshot = await exportSelectiveDatabaseBackup({
         cases: backupOptions.cases,
         finance: backupOptions.finance,
         vehicles: backupOptions.vehicles,
         clients: backupOptions.clients,
+        companyId: targetCompanyId,
         companyInfo: {
           companyName,
           adminUsername,
@@ -309,7 +314,10 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `DOCKS_LTD_Backup_${dateStr}.json`;
+      const prefixTag = backupScope === 'COMPANY'
+        ? (activeCompany?.shortName || activeCompany?.prefix || 'COMPANY').replace(/[^a-zA-Z0-9]/g, '_')
+        : 'MAIN_APP_MASTER_ALL_COMPANIES';
+      link.download = `${prefixTag}_Backup_${dateStr}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -325,7 +333,11 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
         }
       }
 
-      setBackupSuccessMessage("Backup file created and downloaded successfully! Keep this file safe.");
+      setBackupSuccessMessage(
+        backupScope === 'COMPANY'
+          ? `Company Backup for ${activeCompany?.name || 'Active Company'} created and downloaded!`
+          : `Main App Master Backup (All 4 Group Companies + Fleet) created and downloaded!`
+      );
       setShowBackupModal(false);
     } catch (err: any) {
       alert("Error generating backup: " + (err.message || String(err)));
@@ -390,12 +402,13 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
   };
 
   // Open Factory Reset Warning Window
-  const handleOpenResetWarning = () => {
+  const handleOpenResetWarning = (scope: 'COMPANY' | 'MAIN_APP' = 'COMPANY') => {
+    setResetScope(scope);
     setResetConfirmInput('');
     setShowResetWarningModal(true);
   };
 
-  // Execute complete factory reset for this company only
+  // Execute factory reset for either current company only OR complete Main App
   const handleExecuteFactoryReset = async () => {
     setIsResetting(true);
     let completed = false;
@@ -407,23 +420,34 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
         setIsResetting(false);
         window.location.reload();
       }
-    }, 4500);
+    }, 15000);
 
     try {
-      const targetCompanyId = activeCompany?.id || 'docks';
-      // 1. Wipe Firebase Firestore operational data for THIS SPECIFIC SUBSIDIARY ONLY
-      const wipeResult = await wipeCompanyDatabase(targetCompanyId);
-      completed = true;
-      clearTimeout(failsafeTimer);
+      if (resetScope === 'MAIN_APP') {
+        const masterWipe = await wipeCompleteDatabase();
+        completed = true;
+        clearTimeout(failsafeTimer);
+        setCompanyDocuments([]);
+        setShowResetWarningModal(false);
+        setResetSuccessMessage(
+          `Main App Complete Factory Reset Successful: Wiped ${masterWipe.deletedCounts.cases} cases, ${masterWipe.deletedCounts.finances} finance entries, and ${masterWipe.deletedCounts.vehicles} vehicles across all 4 companies.`
+        );
+      } else {
+        const targetCompanyId = activeCompany?.id || 'docks';
+        // Wipe Firebase Firestore operational data for THIS SPECIFIC SUBSIDIARY ONLY
+        const wipeResult = await wipeCompanyDatabase(targetCompanyId);
+        completed = true;
+        clearTimeout(failsafeTimer);
 
-      // 2. Reset local settings state
-      setCompanyDocuments([]);
-      setBanks([{ id: 1, name: 'HBL Corporate', acct: '0011-2233-4455', iban: 'PK36HABB001122334455', branch: 'Clifton' }]);
+        // Reset local settings state
+        setCompanyDocuments([]);
+        setBanks([{ id: 1, name: 'HBL Corporate', acct: '0011-2233-4455', iban: 'PK36HABB001122334455', branch: 'Clifton' }]);
 
-      setShowResetWarningModal(false);
-      setResetSuccessMessage(
-        `Reset for ${activeCompany?.name || 'Company'} Successful: Wiped ${wipeResult.deletedCounts.cases} cases and ${wipeResult.deletedCounts.finances} finance entries for ${activeCompany?.name || 'this company'}. All other 3 subsidiaries remain completely intact.`
-      );
+        setShowResetWarningModal(false);
+        setResetSuccessMessage(
+          `Reset for ${activeCompany?.name || 'Company'} Successful: Wiped ${wipeResult.deletedCounts.cases} cases and ${wipeResult.deletedCounts.finances} finance entries for ${activeCompany?.name || 'this company'}. Shared Fleet Vehicles and all other 3 subsidiaries remain 100% intact.`
+        );
+      }
 
       // Reload window after brief delay so state starts clean
       setTimeout(() => {
@@ -695,24 +719,35 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
            onChange={onRestoreFileChange}
         />
         
-        <div className="space-y-6">
-           <div className="glass-panel p-6 rounded-xl border border-white/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="space-y-5">
+           {/* Company vs Main App Backup */}
+           <div className="glass-panel p-6 rounded-xl border border-white/10 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
               <div>
-                 <h4 className="text-lg font-medium text-white">Create Custom Backup</h4>
-                 <p className="text-sm text-gray-400 font-sans">Choose which modules to export (Full, Cases, Finance, Vehicles, Clients).</p>
+                 <h4 className="text-lg font-medium text-white">Create Company or Main App Backup</h4>
+                 <p className="text-sm text-gray-400 font-sans">
+                   Export a dedicated backup for <strong>{activeCompany?.name || 'this company'}</strong> or a consolidated Master Backup of the entire Main App (all 4 group companies + shared fleet).
+                 </p>
               </div>
-              <button 
-                  onClick={handleOpenBackupModal}
-                  className="bg-brand-600 hover:bg-brand-500 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 shadow-lg shadow-brand-600/20 transition-all"
-              >
-                 <Save size={16} /> Create Backup
-              </button>
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                 <button 
+                     onClick={() => handleOpenBackupModal('COMPANY')}
+                     className="bg-brand-600 hover:bg-brand-500 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-xs sm:text-sm font-semibold shadow-lg shadow-brand-600/20 transition-all"
+                 >
+                    <Save size={15} /> Backup {activeCompany?.shortName || 'Company'}
+                 </button>
+                 <button 
+                     onClick={() => handleOpenBackupModal('MAIN_APP')}
+                     className="bg-indigo-600/25 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 px-4 py-2.5 rounded-lg flex items-center gap-2 text-xs sm:text-sm font-semibold transition-all"
+                 >
+                    <HardDrive size={15} /> Main App Master Backup
+                 </button>
+              </div>
            </div>
 
            <div className="glass-panel p-6 rounded-xl border border-white/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                  <h4 className="text-lg font-medium text-white">Restore from Backup</h4>
-                 <p className="text-sm text-gray-400 font-sans">Upload a previously generated backup file (.json) to restore Firestore & Drive.</p>
+                 <p className="text-sm text-gray-400 font-sans">Upload a previously generated Company or Main App backup file (.json) to restore Firestore & Drive.</p>
               </div>
               <button 
                   disabled={isRestoring}
@@ -724,17 +759,28 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
               </button>
            </div>
 
-           <div className="glass-panel p-6 rounded-xl border border-red-500/20 bg-red-500/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+           {/* Company Reset vs Main App Complete Reset */}
+           <div className="glass-panel p-6 rounded-xl border border-red-500/20 bg-red-500/5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
               <div>
-                 <h4 className="text-lg font-medium text-red-400">Factory Reset</h4>
-                 <p className="text-sm text-red-400/70 font-sans">Wipe all data (Cases, Finance, Vehicles, Clients) and restore to default empty state.</p>
+                 <h4 className="text-lg font-medium text-red-400">Reset Company or Reset Main App</h4>
+                 <p className="text-sm text-red-400/70 font-sans">
+                   Resetting <strong>{activeCompany?.name || 'current company'}</strong> wipes only its Cases & Finance while keeping the other 3 companies and Shared Vehicle Fleet safe. Resetting <strong>Main App</strong> wipes all 4 companies & fleet to factory zero.
+                 </p>
               </div>
-              <button 
-                  onClick={handleOpenResetWarning}
-                  className="bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white px-5 py-2.5 rounded-lg flex items-center gap-2 border border-red-500/30 transition-all font-sans"
-              >
-                 <Trash2 size={16} /> Reset Application
-              </button>
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                 <button 
+                     onClick={() => handleOpenResetWarning('COMPANY')}
+                     className="bg-red-500/15 hover:bg-red-500 text-red-300 hover:text-white px-4 py-2.5 rounded-lg flex items-center gap-2 border border-red-500/30 transition-all text-xs sm:text-sm font-semibold"
+                 >
+                    <Trash2 size={15} /> Reset {activeCompany?.shortName || 'Company'} Only
+                 </button>
+                 <button 
+                     onClick={() => handleOpenResetWarning('MAIN_APP')}
+                     className="bg-rose-700 hover:bg-rose-600 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 shadow-lg shadow-rose-700/30 transition-all text-xs sm:text-sm font-semibold"
+                 >
+                    <RotateCcw size={15} /> Reset Main App (All 4 Companies)
+                 </button>
+              </div>
            </div>
         </div>
 
@@ -884,8 +930,16 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
                           <AlertCircle size={22} />
                        </div>
                        <div>
-                          <h3 className="text-lg font-bold text-red-300">Warning: Reset {activeCompany?.name || 'Company'}</h3>
-                          <p className="text-xs text-red-300/80">Permanent erasure of operational data for this company only</p>
+                          <h3 className="text-lg font-bold text-red-300">
+                             {resetScope === 'MAIN_APP'
+                                ? 'Warning: Complete Main App Factory Reset'
+                                : `Warning: Reset ${activeCompany?.name || 'Company'} Only`}
+                          </h3>
+                          <p className="text-xs text-red-300/80">
+                             {resetScope === 'MAIN_APP'
+                                ? 'Permanent erasure of ALL 4 companies, shared fleet vehicles, clients & ledgers'
+                                : 'Permanent erasure of operational cases & finance for this company only'}
+                          </p>
                        </div>
                     </div>
                     <button onClick={() => setShowResetWarningModal(false)} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10">
@@ -895,14 +949,26 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
 
                  <div className="p-6 space-y-4 text-left">
                     <div className="p-4 rounded-xl bg-red-950/40 border border-red-500/20 text-xs text-red-200/90 leading-relaxed space-y-2">
-                       <p className="font-semibold text-red-300">This action will delete operational data for {activeCompany?.name || 'this company'} only:</p>
-                       <ul className="list-disc pl-5 space-y-1">
-                          <li>All registered Cases, B/Ls, and Containers for {activeCompany?.name || 'this company'}</li>
-                          <li>All Finance records, Payables, Receivables, and Ledgers for {activeCompany?.name || 'this company'}</li>
-                          <li>All Registered Vehicles and Fleet Drivers for {activeCompany?.name || 'this company'}</li>
-                          <li>Custom branding and document settings for {activeCompany?.name || 'this company'}</li>
-                          <li className="text-emerald-300 font-semibold list-none pt-1">✓ Important: All other 3 corporate subsidiaries remain completely untouched.</li>
-                       </ul>
+                       {resetScope === 'MAIN_APP' ? (
+                          <>
+                             <p className="font-semibold text-red-300">This action will wipe the ENTIRE Main Application across all 4 group companies:</p>
+                             <ul className="list-disc pl-5 space-y-1">
+                                <li>All Cases, B/Ls, and Containers across Docks, Muhib, Vantage, and TruckIt</li>
+                                <li>All Finance records, Cashbooks, Payables, Receivables, and Ledgers across all 4 companies</li>
+                                <li>All Shared Fleet Vehicles, Drivers, Clients, and Vendors</li>
+                             </ul>
+                          </>
+                       ) : (
+                          <>
+                             <p className="font-semibold text-red-300">This action will delete operational data for {activeCompany?.name || 'this company'} only:</p>
+                             <ul className="list-disc pl-5 space-y-1">
+                                <li>All registered Cases, B/Ls, and Containers for {activeCompany?.name || 'this company'}</li>
+                                <li>All Finance records, Payables, Receivables, and Ledgers for {activeCompany?.name || 'this company'}</li>
+                                <li>Custom branding and document settings for {activeCompany?.name || 'this company'}</li>
+                                <li className="text-emerald-300 font-semibold list-none pt-1">✓ Important: Shared Vehicle Management Database and all other 3 corporate subsidiaries remain 100% intact.</li>
+                             </ul>
+                          </>
+                       )}
                     </div>
 
                     {/* Prominent Backup Now Option before Reset */}
@@ -914,7 +980,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
                        <button 
                           onClick={() => {
                              setShowResetWarningModal(false);
-                             handleOpenBackupModal();
+                             handleOpenBackupModal(resetScope);
                           }}
                           className="shrink-0 px-3.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all shadow-md shadow-amber-500/20"
                        >

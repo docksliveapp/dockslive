@@ -2013,29 +2013,23 @@ const UserManagement: React.FC = () => {
 
                     {/* Admin Level Selection (Only when Administrator role is active) */}
                     {formData.roles.includes(UserRole.ADMIN) && (
-                      <div className="mt-3 p-3.5 rounded-xl bg-purple-950/40 border border-purple-500/40 space-y-2">
+                      <div className="sm:col-span-2 p-3 rounded-xl bg-purple-950/40 border border-purple-500/40 space-y-2">
                         <div className="flex items-center justify-between">
                           <label className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
                             <Crown size={14} className="text-purple-400" />
                             Admin Authority Level *
                           </label>
-                          <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300">
+                          <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300">
                             {formData.isGlobalAdmin ? 'Group Super Admin' : 'Company Admin'}
                           </span>
                         </div>
 
                         {!isCurrentUserGlobalAdmin ? (
-                          <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-200">
-                            <div className="flex items-center gap-2 font-bold text-xs mb-1 text-amber-300">
-                              <Building size={14} />
-                              <span>Company Admin ({activeCompany.legalTitle || activeCompany.name})</span>
-                            </div>
-                            <p className="text-[11px] text-gray-300 leading-tight">
-                              You can only create Company Administrators for <strong>{activeCompany.name}</strong>. Group Super Admin privileges require Main Group Admin credentials.
-                            </p>
+                          <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-200 text-[11px]">
+                            Company Admin for <strong>{activeCompany.name}</strong>
                           </div>
                         ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <button
                               type="button"
                               onClick={() => {
@@ -2046,18 +2040,19 @@ const UserManagement: React.FC = () => {
                                   allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage']
                                 }));
                               }}
-                              className={`p-2.5 rounded-xl border text-left transition-all ${
+                              className={`p-2.5 rounded-xl border text-left transition-all flex items-center gap-2.5 cursor-pointer ${
                                 formData.isGlobalAdmin
-                                  ? 'bg-purple-600/30 border-purple-400 text-white shadow-md'
+                                  ? 'bg-purple-600/30 border-purple-400 text-white shadow-sm'
                                   : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'
                               }`}
                             >
-                              <span className="text-xs font-bold block text-purple-300 flex items-center gap-1.5">
-                                <Crown size={13} /> Main Group Admin (All 4 Companies)
-                              </span>
-                              <span className="text-[11px] text-gray-300 block mt-0.5 leading-tight">
-                                Central settings, group-wide data access across all 4 subsidiaries, and unlimited administrative authority.
-                              </span>
+                              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${formData.isGlobalAdmin ? 'bg-purple-500 border-purple-300 text-white' : 'border-white/25 bg-black/40'}`}>
+                                {formData.isGlobalAdmin && <Check size={11} strokeWidth={3} />}
+                              </div>
+                              <div>
+                                <span className="text-xs font-bold block text-purple-200">Main Group Admin (All 4 Companies)</span>
+                                <span className="text-[10px] text-gray-300 block">Full access across all 4 group companies</span>
+                              </div>
                             </button>
 
                             <button
@@ -2070,141 +2065,134 @@ const UserManagement: React.FC = () => {
                                   allowedCompanies: prev.allowedCompanies.length > 0 ? prev.allowedCompanies : [activeCompany?.id || 'docks']
                                 }));
                               }}
-                              className={`p-2.5 rounded-xl border text-left transition-all ${
+                              className={`p-2.5 rounded-xl border text-left transition-all flex items-center gap-2.5 cursor-pointer ${
                                 !formData.isGlobalAdmin
-                                  ? 'bg-amber-600/30 border-amber-400 text-white shadow-md'
+                                  ? 'bg-amber-600/30 border-amber-400 text-white shadow-sm'
                                   : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'
                               }`}
                             >
-                              <span className="text-xs font-bold block text-amber-300 flex items-center gap-1.5">
-                                <Building size={13} /> Company Admin ({activeCompany.name} Only)
-                              </span>
-                              <span className="text-[11px] text-gray-300 block mt-0.5 leading-tight">
-                                Administrator strictly for {activeCompany.name}. No access to other subsidiaries or central group settings.
-                              </span>
+                              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${!formData.isGlobalAdmin ? 'bg-amber-500 border-amber-300 text-slate-950' : 'border-white/25 bg-black/40'}`}>
+                                {!formData.isGlobalAdmin && <Check size={11} strokeWidth={3} />}
+                              </div>
+                              <div>
+                                <span className="text-xs font-bold block text-amber-200">Company Admin ({activeCompany.name} Only)</span>
+                                <span className="text-[10px] text-gray-300 block">Strictly for selected company scope</span>
+                              </div>
                             </button>
                           </div>
                         )}
                       </div>
                     )}
 
-                    {/* Company Access Rights & Subsidiary Scope (Multi-Company Selector) */}
-                    <div className="mt-3 p-3.5 rounded-xl bg-slate-950/60 border border-white/15 space-y-2.5">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                        <div>
-                          <label className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <Building size={14} className="text-amber-400" />
-                            Company Access Rights & Subsidiary Scope *
-                          </label>
-                          <p className="text-[11px] text-gray-400 mt-0.5">
-                            {!isCurrentUserGlobalAdmin 
-                              ? `This user will operate strictly within ${activeCompany.name}.`
-                              : 'Select whether this user has rights in 1, 2, 3, or all 4 companies.'}
-                          </p>
+                    {/* Company Access Rights & Subsidiary Scope (Compact Tick-Box Grid) */}
+                    <div className="sm:col-span-2 p-3.5 rounded-2xl bg-slate-950/70 border border-white/15 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2">
+                        <div className="flex items-center gap-2">
+                          <Building size={15} className="text-amber-400 shrink-0" />
+                          <div>
+                            <label className="text-xs font-bold text-white block leading-tight">
+                              Company Access Scope (Tick Companies for this ID)
+                            </label>
+                            <p className="text-[10px] text-gray-400">
+                              {!isCurrentUserGlobalAdmin
+                                ? `Active for ${activeCompany.name}`
+                                : 'Tick the companies this user ID can access'}
+                            </p>
+                          </div>
                         </div>
-                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 self-start sm:self-auto shrink-0">
-                          {!isCurrentUserGlobalAdmin ? `${activeCompany.shortName || activeCompany.name} Only` : (formData.allCompaniesAccess || formData.allowedCompanies.length === 4
-                            ? 'All 4 Companies'
-                            : `${formData.allowedCompanies.length} Selected`)}
-                        </span>
+
+                        {isCurrentUserGlobalAdmin && (
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  allCompaniesAccess: true,
+                                  allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage']
+                                }));
+                              }}
+                              className="font-semibold text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                            >
+                              Select All 4
+                            </button>
+                            <span className="text-gray-600">·</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  allCompaniesAccess: false,
+                                  allowedCompanies: [activeCompany?.id || 'docks']
+                                }));
+                              }}
+                              className="font-semibold text-gray-400 hover:text-white underline cursor-pointer"
+                            >
+                              Current Only
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       {!isCurrentUserGlobalAdmin ? (
-                        <div className="p-3 rounded-xl bg-black/40 border border-white/10 flex items-center justify-between">
+                        <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_currentColor]" />
+                            <span className="w-2 h-2 rounded-full bg-emerald-400" />
                             <span className="text-xs font-bold text-white">{activeCompany.legalTitle || activeCompany.name}</span>
                           </div>
-                          <span className="text-[10px] uppercase font-mono font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                            Current Company Scope
+                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
+                            Active Scope
                           </span>
                         </div>
                       ) : (
-                        <>
-                          {/* Mode Toggle: All Companies vs Custom Companies */}
-                          <div className="flex items-center gap-4 pt-1">
-                            <label className="inline-flex items-center gap-2 cursor-pointer text-xs text-gray-200">
-                              <input
-                                type="radio"
-                                name="company_access_mode"
-                                checked={formData.allCompaniesAccess}
-                                onChange={() => {
-                                  setFormData(prev => ({
-                                    ...prev,
-                                    allCompaniesAccess: true,
-                                    allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage']
-                                  }));
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {[
+                            { id: 'docks', name: 'Docks (Pvt.) Ltd.', sub: 'Port Logistics' },
+                            { id: 'truckit', name: 'Truckit (Pvt.) Ltd.', sub: 'Fleet Haulage' },
+                            { id: 'muhib', name: 'Muhib International', sub: 'Transit Trade' },
+                            { id: 'vantage', name: 'Vantage Shipping', sub: 'Marine Ops' }
+                          ].map(comp => {
+                            const isChecked = formData.allCompaniesAccess || formData.allowedCompanies.includes(comp.id);
+                            return (
+                              <button
+                                key={comp.id}
+                                type="button"
+                                onClick={() => {
+                                  setFormData(prev => {
+                                    const currentList = prev.allCompaniesAccess
+                                      ? ['docks', 'truckit', 'muhib', 'vantage']
+                                      : [...prev.allowedCompanies];
+                                    let nextList: string[];
+                                    if (currentList.includes(comp.id)) {
+                                      nextList = currentList.filter(c => c !== comp.id);
+                                      if (nextList.length === 0) nextList = [comp.id];
+                                    } else {
+                                      nextList = [...currentList, comp.id];
+                                    }
+                                    return {
+                                      ...prev,
+                                      allCompaniesAccess: nextList.length === 4,
+                                      allowedCompanies: nextList
+                                    };
+                                  });
                                 }}
-                                className="text-amber-500 focus:ring-0"
-                              />
-                              <span className="font-semibold">All 4 Companies (Group-wide Access)</span>
-                            </label>
-
-                            <label className="inline-flex items-center gap-2 cursor-pointer text-xs text-gray-200">
-                              <input
-                                type="radio"
-                                name="company_access_mode"
-                                checked={!formData.allCompaniesAccess}
-                                onChange={() => {
-                                  setFormData(prev => ({
-                                    ...prev,
-                                    allCompaniesAccess: false,
-                                    allowedCompanies: prev.allowedCompanies.length > 0 ? prev.allowedCompanies : [activeCompany?.id || 'docks']
-                                  }));
-                                }}
-                                className="text-amber-500 focus:ring-0"
-                              />
-                              <span className="font-semibold">Custom Selection (Assigned Companies)</span>
-                            </label>
-                          </div>
-
-                          {/* 4 Company Checkboxes */}
-                          {!formData.allCompaniesAccess && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1.5">
-                              {[
-                                { id: 'docks', name: 'Docks (Pvt.) Ltd.', sub: 'Customs & Port Logistics', color: 'border-amber-500/40 text-amber-300 bg-amber-500/10' },
-                                { id: 'truckit', name: 'Truckit (Pvt.) Ltd.', sub: 'Fleet & Cargo Haulage', color: 'border-red-500/40 text-red-300 bg-red-500/10' },
-                                { id: 'muhib', name: 'Muhib International', sub: 'Cross-Border & Transit Trade', color: 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10' },
-                                { id: 'vantage', name: 'Vantage Shipping Line', sub: 'Marine & Vessel Operations', color: 'border-cyan-500/40 text-cyan-300 bg-cyan-500/10' }
-                              ].map(comp => {
-                                const isChecked = formData.allowedCompanies.includes(comp.id);
-                                return (
-                                  <label
-                                    key={comp.id}
-                                    className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all ${
-                                      isChecked
-                                        ? `${comp.color} shadow-sm ring-1 ring-white/20`
-                                        : 'bg-black/30 border-white/10 text-gray-400 hover:border-white/20'
-                                    }`}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={isChecked}
-                                      onChange={(e) => {
-                                        const checked = e.target.checked;
-                                        setFormData(prev => {
-                                          let list = [...prev.allowedCompanies];
-                                          if (checked) {
-                                            if (!list.includes(comp.id)) list.push(comp.id);
-                                          } else {
-                                            list = list.filter(c => c !== comp.id);
-                                            if (list.length === 0) list = [comp.id]; // Keep at least 1
-                                          }
-                                          return { ...prev, allowedCompanies: list };
-                                        });
-                                      }}
-                                      className="mt-0.5 rounded text-amber-500 focus:ring-0"
-                                    />
-                                    <div className="min-w-0">
-                                      <span className="text-xs font-bold text-white block leading-tight">{comp.name}</span>
-                                      <span className="text-[10px] text-gray-400 block">{comp.sub}</span>
-                                    </div>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </>
+                                className={`flex items-center gap-2 px-2.5 py-2 rounded-xl border text-left transition-all cursor-pointer select-none ${
+                                  isChecked
+                                    ? 'bg-amber-500/20 border-amber-400 text-white'
+                                    : 'bg-white/[0.03] border-white/10 text-gray-400 hover:bg-white/[0.07] hover:text-white'
+                                }`}
+                              >
+                                <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${isChecked ? 'bg-amber-500 border-amber-300 text-slate-950' : 'bg-black/40 border-white/25'}`}>
+                                  {isChecked && <Check size={11} strokeWidth={3} />}
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="text-[11px] font-bold block truncate leading-tight">{comp.name}</span>
+                                  <span className="text-[9px] text-gray-400 block truncate">{comp.sub}</span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
 
@@ -2397,7 +2385,23 @@ const UserManagement: React.FC = () => {
                     />
                   </div>
 
+                  {/* Role Checkboxes for Transporter ID */}
+                  <div className="sm:col-span-2">
+                    <AdminRolesAndPrivilegesTable
+                      assignedRoles={formData.roles}
+                      userName={formData.name || 'this transporter'}
+                      allowedCompanies={formData.allowedCompanies}
+                      isGlobalAdmin={formData.isGlobalAdmin}
+                      onRolesChange={(newRoles, primaryRole) => {
+                        setFormData(prev => ({
+                          ...prev,
+                          roles: newRoles,
+                          role: primaryRole
+                        }));
+                      }}
+                    />
                   </div>
+                </div>
 
                 {/* Transporter User ID & Password */}
                 <div className="bg-white/5 p-3.5 rounded-xl border border-white/10 space-y-2">

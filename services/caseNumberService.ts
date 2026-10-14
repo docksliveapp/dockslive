@@ -166,3 +166,28 @@ export function getCaseInvoiceNumber(caseItem?: { caseNo?: string; id?: string; 
   }
   return `${prefix}-${caseItem.id || 'NEW'}`;
 }
+
+/**
+ * Generates a standardized, deterministic Bill Number linked to a Case Number
+ * Format: [LB|DB|TB]-[CASE_NO]-[SEQ] (e.g., LB-DPL-ISB-26-OCT-001 or LB-DPL-ISB-26-OCT-001-02)
+ */
+export function generateStandardBillNumber(
+  billType: 'LB' | 'DB' | 'TB',
+  caseNo?: string,
+  existingBillsCount: number = 0
+): string {
+  const prefix = getActiveCompanyPrefix();
+  const cleanCase = (caseNo || '').trim().toUpperCase();
+  const seqSuffix = existingBillsCount > 0 ? `-${String(existingBillsCount + 1).padStart(2, '0')}` : '';
+
+  if (cleanCase) {
+    return `${billType}-${cleanCase}${seqSuffix}`;
+  }
+
+  const now = new Date();
+  const yy = String(now.getFullYear()).slice(-2);
+  const mmm = MONTH_CODES[now.getMonth()];
+  const serial = String(existingBillsCount + 1).padStart(3, '0');
+  return `${prefix}-${billType}-${yy}-${mmm}-${serial}`;
+}
+

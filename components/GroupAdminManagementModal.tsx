@@ -598,7 +598,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     setIsResetting(true);
     let completed = false;
 
-    // Guaranteed failsafe: Never leave UI hanging in 'Wiping...'
+    // Guaranteed failsafe: allow up to 15s for all Firestore batch deletes (including notifications) to commit
     const failsafeTimer = setTimeout(() => {
       if (!completed) {
         completed = true;
@@ -607,7 +607,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
         setIsResetting(false);
         window.location.reload();
       }
-    }, 4500);
+    }, 15000);
 
     try {
       await wipeCompleteDatabase();

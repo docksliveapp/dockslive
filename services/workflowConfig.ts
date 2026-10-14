@@ -643,14 +643,96 @@ export function isDestinationUnloadedAndGateOut(targetCase?: any): boolean {
 }
 
 /**
- * Determines which role is primarily responsible for taking action on a given workflow step.
+ * Checks whether a specific workflow step is arranged/managed by Client or by Company (DPL).
  */
-export function getStepTargetRole(category: string | undefined, stepId: string, stepIndex: number): UserRole {
+export function getStepArrangedBy(targetCase: any, stepId: string, stepIndex: number): 'Client' | 'DPL' {
+  if (!targetCase) return 'DPL';
+  const s = (stepId || '').toLowerCase();
+  const wfDetail = targetCase.workflowDetails?.[stepId] || {};
+  const arrangements = targetCase.serviceArrangements || {};
+
+  // 1. Vehicle Assignment / Transportation step
+  if (
+    stepId === CaseStatus.VEHICLE_ASSIGNMENT ||
+    s.includes('vehicle') ||
+    s.includes('transport') ||
+    s.includes('fleet') ||
+    s.includes('carrier') ||
+    s.includes('trailer')
+  ) {
+    const by =
+      wfDetail.vehicleRentArrangedBy ||
+      arrangements['transportation']?.arrangedBy ||
+      arrangements['vehicle_assignment']?.arrangedBy;
+    return by === 'Client' ? 'Client' : 'DPL';
+  }
+
+  // 2. Shipping Line DO / Step 0
+  if (stepId === CaseStatus.SHIPPING_LINE_DO || s.includes('shipping_line_do') || s.includes('delivery_order') || stepIndex === 0) {
+    const by =
+      wfDetail.doDueChargesArrangedBy ||
+      arrangements['delivery_order']?.arrangedBy ||
+      arrangements['shippingLineDO']?.arrangedBy;
+    if (by === 'Client') return 'Client';
+    if (by === 'DPL') return 'DPL';
+  }
+
+  // 3. TP Filing / GD Filing / Customs Clearance
+  if (stepId === CaseStatus.TP_FILING || s.includes('tp_filing') || s.includes('gd') || s.includes('customs')) {
+    const by =
+      wfDetail.tpFilingEntity ||
+      arrangements['customs_clearance']?.arrangedBy;
+    if (by === 'Client') return 'Client';
+  }
+
+  // 4. Excise Payment
+  if (stepId === CaseStatus.EXCISE_PAYMENT || s.includes('excise')) {
+    const by =
+      wfDetail.exciseHandledBy ||
+      arrangements['customs_clearance']?.arrangedBy;
+    if (by === 'Client') return 'Client';
+  }
+
+  // 5. Loading Port Processing / Terminal Handling / Tracker
+  if (stepId === CaseStatus.LOADING_PORT_PROCESSING || s.includes('loading') || s.includes('wharfage')) {
+    const by =
+      wfDetail.loadingChargesArrangedBy ||
+      wfDetail.wharfagePaymentEntity ||
+      arrangements['loading_unloading']?.arrangedBy ||
+      arrangements['terminal_handling']?.arrangedBy;
+    if (by === 'Client') return 'Client';
+  }
+
+  return 'DPL';
+}
+
+/**
+ * Determines which role is primarily responsible for taking action on a given workflow step.
+ * - Vehicle Assignment: Operations Manager (if arranged by Company/DPL) or Client + Operations Manager (if arranged by Client)
+ * - Company-arranged workflows: Operations Manager alongside specialized port/office staff
+ */
+export function getStepTargetRole(category: string | undefined, stepId: string, stepIndex: number, targetCase?: any): UserRole {
   const s = (stepId || '').toLowerCase();
 
-  // 1. Vehicle / Fleet allocation & Transport dispatch
-  if (s.includes('vehicle') || s.includes('transport') || s.includes('fleet') || s.includes('carrier') || s.includes('trailer') || s.includes('driver')) {
-    return UserRole.VEHICLE_MANAGER;
+  // 1. Vehicle / Fleet allocation & Transport dispatch -> Managed by Operations Manager (or Client if arranged by Client)
+  if (
+    stepId === CaseStatus.VEHICLE_ASSIGNMENT ||
+    s.includes('vehicle') ||
+    s.includes('transport') ||
+    s.includes('fleet') ||
+    s.includes('carrier') ||
+    s.includes('trailer') ||
+    s.includes('driver')
+  ) {
+    if (targetCase && getStepArrangedBy(targetCase, stepId, stepIndex) === 'Client') {
+      return UserRole.CLIENT;
+    }
+    return UserRole.OPERATIONS_MANAGER;
+  }
+
+  // If step is explicitly arranged by Client
+  if (targetCase && getStepArrangedBy(targetCase, stepId, stepIndex) === 'Client') {
+    return UserRole.CLIENT;
   }
 
   // 2. Loading Port Processing / Stuffing / Wharfage / Port Gate Out
@@ -669,14 +751,11 @@ export function getStepTargetRole(category: string | undefined, stepId: string, 
   }
 
   // 5. Billing / Invoicing / Settlement
-  if (s.includes('settlement') || s.includes('billing') || s.includes('invoice') || s.includes('payment') || s.includes('excise')) {
+  if (s.includes('settlement') || s.includes('billing') || s.includes('invoice') || s.includes('payment')) {
     return UserRole.FINANCE_MANAGER;
   }
 
-  // 6. Early documentation: TP Filing, GD Filing, CRO Booking, Shipping Line DO
-  if (stepIndex === 0 || stepIndex === 1 || s.includes('booking') || s.includes('tp_filing') || s.includes('gd') || s.includes('document')) {
-    return UserRole.OFFICE_STAFF;
-  }
-
+  // 6. All Company-arranged operational steps (DO, TP Filing, Excise, Booking, etc.) are managed by Operations Manager
   return UserRole.OPERATIONS_MANAGER;
 }
+

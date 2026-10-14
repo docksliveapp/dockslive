@@ -17,6 +17,7 @@ import { detectMimeType, compressAndPrepareFile, convertImageToPdf } from '../se
 import { Container, ExtractedData, CaseStatus, Case, MockDocument, UserRole, CaseCharge, Client, ClientDefaultCharge, CaseStepDetail, WORKFLOW_8_STEPS, Vehicle } from '../types';
 import { WorkflowStepModal } from './WorkflowStepModal';
 import { CompletedCaseDossier } from './CompletedCaseDossier';
+import { CaseTransitHistoryCard } from './CaseTransitHistoryCard';
 import { VirtualizedList, VirtualizedTable } from './VirtualizedList';
 import { submitCaseActionApproval } from '../services/approvalService';
 import { saveDocumentToIndexedDB, getDocumentFromIndexedDB } from '../services/documentStorage';
@@ -127,7 +128,10 @@ import {
   deleteCaseFromFirestore,
   subscribeToClients,
   saveClientToFirestore,
-  DEFAULT_CLIENTS
+  DEFAULT_CLIENTS,
+  saveUserWorkDraftToFirestore,
+  getUserWorkDraftFromFirestore,
+  deleteUserWorkDraftFromFirestore
 } from '../services/dbService';
 import { sendAppNotification } from '../services/notificationService';
 
@@ -1308,12 +1312,44 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     };
   }, [hasDraft, formData, uploadedDocs]);
 
-  // Preserve registration draft in safeAppStorage with debouncing to prevent mobile I/O thrashing
+  // Determine unique user key for cloud-synced work draft persistence
+  const activeDraftUserKey = useMemo(() => {
+    return (
+      safeAppStorage.getItem('dpl_current_user_id') ||
+      safeAppStorage.getItem('dpl_client_name') ||
+      String(effectiveRole || 'admin')
+    ).toLowerCase().trim();
+  }, [effectiveRole]);
+
+  // Restore cloud-synced work draft from Firestore on mount or reconnect
+  useEffect(() => {
+    let mounted = true;
+    getUserWorkDraftFromFirestore(activeDraftUserKey).then((cloudDraft) => {
+      if (!mounted || !cloudDraft || !cloudDraft.active) return;
+      const localActive = safeAppStorage.getItem('dpl_reg_draft_active') === 'true';
+      if (!localActive && cloudDraft.formData) {
+        safeAppStorage.setItem('dpl_reg_draft_active', 'true');
+        safeAppStorage.setItem('dpl_reg_step', String(cloudDraft.step || 1));
+        if (cloudDraft.caseNo) safeAppStorage.setItem('dpl_reg_caseno', cloudDraft.caseNo);
+        safeAppStorage.setJSON('dpl_reg_formdata', cloudDraft.formData);
+        if (Array.isArray(cloudDraft.docs)) {
+          safeAppStorage.setJSON('dpl_reg_docs', cloudDraft.docs);
+        }
+        safeAppStorage.setItem('dpl_reg_updated_at', new Date(cloudDraft.updatedAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        safeAppStorage.setItem('dpl_reg_timestamp', String(new Date(cloudDraft.updatedAt || Date.now()).getTime()));
+        setHasDraft(true);
+      }
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, [activeDraftUserKey]);
+
+  // Preserve registration draft in safeAppStorage AND online in Firestore with debouncing
   useEffect(() => {
     if (view === 'register' && step < 4) {
       const hasContent = Boolean(formData.client?.trim()) || uploadedDocs.length > 0 || step > 1 || (formData.containers && formData.containers.length > 0);
       const timer = setTimeout(() => {
         if (hasContent) {
+          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           safeAppStorage.setItem('dpl_reg_draft_active', 'true');
           safeAppStorage.setItem('dpl_reg_step', String(step));
           if (generatedCaseNo) {
@@ -1323,14 +1359,35 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           }
           safeAppStorage.setJSON('dpl_reg_formdata', formData);
           safeAppStorage.setJSON('dpl_reg_docs', uploadedDocs);
-          safeAppStorage.setItem('dpl_reg_updated_at', new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+          safeAppStorage.setItem('dpl_reg_updated_at', timeStr);
           safeAppStorage.setItem('dpl_reg_timestamp', String(Date.now()));
           setHasDraft(true);
+
+          // Sync draft online to Firestore (stripping heavy base64 URLs from docs metadata if needed to stay under 1MB)
+          const lightDocs = uploadedDocs.map(d => ({
+            id: d.id,
+            name: d.name,
+            type: d.type,
+            size: d.size,
+            docCategory: d.docCategory,
+            url: (d.url && d.url.length < 180000) ? d.url : ''
+          }));
+          saveUserWorkDraftToFirestore(activeDraftUserKey, {
+            role: String(effectiveRole),
+            companyId: activeCompany?.id || 'docks',
+            draftType: 'CASE_REGISTRATION',
+            step,
+            caseNo: generatedCaseNo || '',
+            formData,
+            docs: lightDocs,
+            updatedAt: new Date().toISOString(),
+            active: true
+          }).catch(() => {});
         }
-      }, 200);
+      }, 250);
       return () => clearTimeout(timer);
     }
-  }, [view, step, generatedCaseNo, formData, uploadedDocs]);
+  }, [view, step, generatedCaseNo, formData, uploadedDocs, activeDraftUserKey, effectiveRole, activeCompany?.id]);
 
   // Safely release camera hardware when the user switches to gallery or another app
   useEffect(() => {
@@ -1477,6 +1534,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     safeAppStorage.removeItem('dpl_reg_updated_at');
     safeAppStorage.removeItem('dpl_reg_timestamp');
     safeAppStorage.removeItem('dpl_reg_view');
+    deleteUserWorkDraftFromFirestore(activeDraftUserKey).catch(() => {});
     setHasDraft(false);
     setGeneratedCaseNo('');
     setStep(1);
@@ -1523,6 +1581,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     safeAppStorage.removeItem('dpl_reg_docs');
     safeAppStorage.removeItem('dpl_reg_updated_at');
     safeAppStorage.removeItem('dpl_reg_timestamp');
+    deleteUserWorkDraftFromFirestore(activeDraftUserKey).catch(() => {});
     setHasDraft(false);
     setIsCaseSubmitted(false);
     setSubmittedCaseData(null);
@@ -2117,7 +2176,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         saveClientToFirestore({ name: formData.client }).catch(() => {});
       }
 
-      // Registration is complete! Clean up draft keys from storage
+      // Registration is complete! Clean up draft keys from storage and online Firestore
       safeAppStorage.removeItem('dpl_reg_draft_active');
       safeAppStorage.removeItem('dpl_reg_step');
       safeAppStorage.removeItem('dpl_reg_caseno');
@@ -2126,6 +2185,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       safeAppStorage.removeItem('dpl_reg_updated_at');
       safeAppStorage.removeItem('dpl_reg_timestamp');
       safeAppStorage.removeItem('dpl_reg_view');
+      deleteUserWorkDraftFromFirestore(activeDraftUserKey).catch(() => {});
       setHasDraft(false);
 
       setIsCaseSubmitted(true);
@@ -4829,11 +4889,61 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                                  )}
                                </div>
                              )}
+
+                             {/* Live Transit Road / Nearby Area Locations inside Transit Workflow Step */}
+                             {(() => {
+                               const isTransitStage =
+                                 String(stepConfig.id).toLowerCase().includes('transit') ||
+                                 String(stepConfig.title).toLowerCase().includes('transit') ||
+                                 String(stepConfig.title).toLowerCase().includes('en-route') ||
+                                 (stepDetail?.transitLocationsLog && stepDetail.transitLocationsLog.length > 0);
+                               if (!isTransitStage) return null;
+
+                               const stepLocs =
+                                 (stepDetail?.transitLocationsLog && stepDetail.transitLocationsLog.length > 0)
+                                   ? stepDetail.transitLocationsLog
+                                   : (targetCase?.transitLocationsHistory || []);
+
+                               if (!stepLocs || stepLocs.length === 0) return null;
+
+                               return (
+                                 <div className="mt-3 pt-2.5 border-t border-cyan-500/20 space-y-1.5">
+                                   <div className="flex items-center justify-between text-[11px] font-bold text-cyan-300">
+                                     <span className="flex items-center gap-1.5">
+                                       <MapPin size={12} className="text-cyan-400" />
+                                       <span>Live Transit Route Checkpoints (Road / Nearby Area):</span>
+                                     </span>
+                                     <span className="font-mono text-[10px] text-cyan-400">
+                                       {stepLocs.length} {stepLocs.length === 1 ? 'Location' : 'Locations'}
+                                     </span>
+                                   </div>
+                                   <div className="flex flex-wrap gap-1.5">
+                                     {stepLocs.map((loc: any, lIdx: number) => (
+                                       <span
+                                         key={loc.id || lIdx}
+                                         className="px-2.5 py-1 rounded-lg bg-cyan-950/60 border border-cyan-500/30 text-cyan-200 text-[11px] font-medium flex items-center gap-1.5"
+                                       >
+                                         <span className="w-4 h-4 rounded-full bg-cyan-500/20 text-cyan-300 font-mono text-[9px] font-bold flex items-center justify-center">
+                                           {lIdx + 1}
+                                         </span>
+                                         <strong className="text-white">{loc.roadOrAreaName}</strong>
+                                         <span className="text-[10px] text-cyan-400/80 font-mono">({loc.formattedTime})</span>
+                                       </span>
+                                     ))}
+                                   </div>
+                                 </div>
+                               );
+                             })()}
                           </div>
                        </div>
                      );
                    });
                  })()}
+              </div>
+
+              {/* Permanent Transit Route Locations & Port Gate-Out / Unloading Duration Calculation History */}
+              <div className="mt-6 pt-6 border-t border-white/10">
+                <CaseTransitHistoryCard targetCase={targetCase} />
               </div>
            </div>
          )}
@@ -4867,242 +4977,203 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   
   // --- Registration Step 1: Merged Case Particulars & Documents (Single-Screen) ---
   const renderStep1_Merged = () => {
+    const isPrivateCargo = formData.category === 'Transportation of Private Cargo' || formData.category?.toLowerCase().includes('private');
+
     return (
-      <div className="space-y-6 animate-in fade-in max-w-3xl mx-auto pb-4">
-        {/* Registration Header Card */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-brand-950/70 to-slate-900 border border-white/10 shadow-lg">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-bold border flex items-center gap-1.5 ${
-                generatedCaseNo 
-                  ? 'bg-brand-500/20 text-brand-300 border-brand-500/30' 
-                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-              }`}>
-                {generatedCaseNo ? (
-                  <span>{generatedCaseNo}</span>
-                ) : (
-                  <>
-                    <Clock size={12} className="animate-pulse" />
-                    <span>Serial: Assigned on Progression</span>
-                  </>
+      <div className="space-y-5 animate-in fade-in pb-2">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          
+          {/* LEFT COLUMN (7 Cols): Client, Category & Route */}
+          <div className="lg:col-span-7 bg-slate-900/95 p-5 sm:p-6 rounded-2xl border border-white/10 space-y-5 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3.5">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                  <Briefcase size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">1. Consignment Particulars & Route</h3>
+                  <p className="text-xs text-slate-400">Select client account, service category, and ports</p>
+                </div>
+              </div>
+              <span className="text-xs font-mono font-semibold text-amber-300 bg-amber-500/15 px-2.5 py-1 rounded-lg border border-amber-500/30 shrink-0">
+                Step 1 of 4
+              </span>
+            </div>
+
+            {/* 1. Client Selection */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+                  <User size={14} className="text-amber-400" />
+                  <span>Client / Importer / Shipper <span className="text-red-400">*</span></span>
+                </label>
+                {isClientUser && (
+                  <span className="text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-md flex items-center gap-1">
+                    <CheckCircle2 size={12} /> Verified Account
+                  </span>
                 )}
-              </span>
-              <span className="text-xs text-gray-400">Step 1 of 4</span>
-            </div>
-            <h2 className="text-lg sm:text-xl font-bold text-white mt-1">
-              Case Registration & Documents
-            </h2>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Client, category, route, and shipping documents on a single streamlined page
-            </p>
-          </div>
-          {uploadedDocs.length > 0 && (
-            <div className="self-start sm:self-auto flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-medium">
-              <CheckCircle2 size={15} />
-              <span>{uploadedDocs.length} {uploadedDocs.length === 1 ? 'Document Attached' : 'Documents Attached'}</span>
-            </div>
-          )}
-        </div>
-
-        {/* 1. Client Selection (Sabse Upar) */}
-        <div className="glass-panel p-4 sm:p-5 rounded-2xl border border-white/10 space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 text-sm font-semibold text-white">
-              <User size={16} className="text-brand-400" />
-              <span>Client / Importer / Shipper</span>
-              <span className="text-red-400">*</span>
-            </label>
-            {isClientUser && (
-              <span className="text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                <CheckCircle2 size={12} /> Auto-Selected
-              </span>
-            )}
-          </div>
-
-          {isClientUser ? (
-            /* Client is registering: Client account is pre-selected */
-            <div className="flex items-center justify-between p-3.5 sm:p-4 rounded-xl bg-slate-900/90 border border-brand-500/40 shadow-sm">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-brand-600/20 text-brand-400 border border-brand-500/30 flex items-center justify-center flex-shrink-0">
-                  <User size={20} />
-                </div>
-                <div className="min-w-0">
-                  <span className="text-[10px] sm:text-[11px] text-brand-300 uppercase tracking-wider block font-semibold">
-                    Client Company Name
-                  </span>
-                  <span className="text-base sm:text-lg font-bold text-white truncate block">
-                    {formData.client || effectiveClientName}
-                  </span>
-                </div>
-              </div>
-              <span className="text-xs text-gray-400 font-mono hidden sm:block">
-                Client Portal
-              </span>
-            </div>
-          ) : (
-            /* Case Manager / Admin is registering: Select from dropdown or add new */
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <select 
-                    className="w-full glass-input rounded-xl p-3.5 sm:p-4 outline-none appearance-none cursor-pointer text-sm sm:text-base text-white bg-black/60 border border-white/15 focus:border-brand-400 pr-10"
-                    value={formData.client}
-                    onChange={(e) => {
-                      if (e.target.value === '__ADD_NEW_CLIENT__') {
-                        setShowAddClientModal(true);
-                      } else {
-                        handleClientSelect(e.target.value);
-                      }
-                    }}
-                  >
-                    <option value="" className="bg-slate-900 text-gray-400">-- Select Client Company --</option>
-                    {registeredClients.map(c => (
-                      <option key={c} value={c} className="bg-slate-900 text-white">{c}</option>
-                    ))}
-                    <option value="__ADD_NEW_CLIENT__" className="bg-slate-900 text-amber-300 font-semibold">
-                      ➕ Add New Client & Set Default Charges
-                    </option>
-                  </select>
-                  <ChevronDown className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" size={20} />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowAddClientModal(true)}
-                  className="bg-brand-600 hover:bg-brand-500 text-white px-3.5 sm:px-4 py-3.5 sm:py-4 rounded-xl flex items-center gap-1.5 text-xs sm:text-sm font-semibold transition-all shadow-md shadow-brand-600/20 shrink-0"
-                  title="Add New Client & Set Default Tariff / Charges"
-                >
-                  <Plus size={16} />
-                  <span>Add Client & Tariff</span>
-                </button>
               </div>
 
-              {/* Status Badge when client default charges are loaded */}
-              {formData.client && formData.charges && formData.charges.length > 0 && (
-                <div className="flex items-center justify-between p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300">
-                  <div className="flex items-center gap-2 truncate pr-2">
-                    <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
-                    <span className="truncate">
-                      <strong>{formData.charges.length}</strong> default charges applied for <strong>{formData.client}</strong> (Total: PKR {formData.charges.reduce((s, c) => s + (Number(c.amount) || 0), 0).toLocaleString()})
+              {isClientUser ? (
+                <div className="flex items-center justify-between h-11 px-4 rounded-xl bg-slate-950 border border-emerald-500/30">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <User size={16} className="text-emerald-400 shrink-0" />
+                    <span className="text-sm font-bold text-white truncate">
+                      {formData.client || effectiveClientName}
                     </span>
                   </div>
-                  <span className="text-[11px] text-emerald-400/80 font-mono shrink-0 hidden sm:inline">
-                    Editable in Step 3 / Invoice
+                  <span className="text-xs text-slate-400 font-mono hidden sm:block">
+                    Client Portal
                   </span>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                    <div className="relative flex-1">
+                      <select 
+                        className="w-full h-10 rounded-xl px-3.5 outline-none appearance-none cursor-pointer text-sm text-white bg-slate-950 border border-white/15 focus:border-amber-400 pr-9 transition-all"
+                        value={formData.client}
+                        onChange={(e) => {
+                          if (e.target.value === '__ADD_NEW_CLIENT__') {
+                            setShowAddClientModal(true);
+                          } else {
+                            handleClientSelect(e.target.value);
+                          }
+                        }}
+                      >
+                        <option value="" className="bg-slate-900 text-slate-400">-- Select Registered Client --</option>
+                        {registeredClients.map(c => (
+                          <option key={c} value={c} className="bg-slate-900 text-white">{c}</option>
+                        ))}
+                        <option value="__ADD_NEW_CLIENT__" className="bg-slate-900 text-amber-300 font-semibold">
+                          + Add New Client & Configure Default Tariff...
+                        </option>
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowAddClientModal(true)}
+                      className="h-10 bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold transition-all shadow shrink-0 cursor-pointer"
+                      title="Register New Client & Set Default Tariff"
+                    >
+                      <Plus size={15} />
+                      <span>+ New Client</span>
+                    </button>
+                  </div>
+
+                  {formData.client && formData.charges && formData.charges.length > 0 && (
+                    <div className="flex items-center justify-between px-3 py-2 bg-emerald-500/10 border border-emerald-500/25 rounded-xl text-xs text-emerald-300">
+                      <div className="flex items-center gap-2 truncate pr-2">
+                        <CheckCircle2 size={14} className="text-emerald-400 shrink-0" />
+                        <span className="truncate">
+                          <strong>{formData.charges.length}</strong> default charges loaded for <strong>{formData.client}</strong> (PKR {formData.charges.reduce((s, c) => s + (Number(c.amount) || 0), 0).toLocaleString()})
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddClientModal(true)}
+                        className="text-xs text-amber-300 hover:text-amber-200 font-semibold shrink-0 underline cursor-pointer"
+                      >
+                        Edit Tariff
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
 
-        {/* 2. Case Category (Client ke niche) */}
-        <div className="glass-panel p-4 sm:p-5 rounded-2xl border border-white/10 space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 text-sm font-semibold text-white">
-              <Briefcase size={16} className="text-brand-400" />
-              <span>Case Category</span>
-              <span className="text-red-400">*</span>
-            </label>
-            {formData.client && getClientDefaultCategory(formData.client) && formData.category === getClientDefaultCategory(formData.client) && (
-              <span className="text-[11px] text-brand-300 bg-brand-500/10 border border-brand-500/25 px-2.5 py-0.5 rounded-full flex items-center gap-1 font-medium">
-                <CheckCircle2 size={11} /> Client Default Category
-              </span>
-            )}
-          </div>
-
-          <div className="relative">
-            <select
-              className="w-full glass-input rounded-xl p-3.5 sm:p-4 outline-none appearance-none cursor-pointer text-sm sm:text-base text-white bg-black/60 border border-white/15 focus:border-brand-400 pr-10"
-              value={formData.category}
-              onChange={(e) => {
-                const newCat = e.target.value;
-                const foundClient = clientsData.find(c => c.name?.toLowerCase() === formData.client?.toLowerCase());
-                const resolved = resolveCaseCharges(foundClient, newCat);
-                setFormData({ 
-                  ...formData, 
-                  category: newCat,
-                  subCategory: supportsSubCategories(newCat) ? (formData.subCategory || 'Standard Container / General Cargo') : undefined,
-                  serviceArrangements: resolved.arrangements as any,
-                  charges: resolved.charges
-                });
-                if (resolved.isClientCustomDefault) {
-                  setDraftToast(`✓ Applied ${resolved.charges.length} client default charges for ${formData.client}`);
-                } else {
-                  setDraftToast(`✓ Switched to ${newCat} default operational services`);
-                }
-              }}
-            >
-              <option value="" className="bg-slate-900 text-gray-400">-- Select Primary Category --</option>
-              {CATEGORIES.map(cat => (
-                <option key={cat} value={cat} className="bg-slate-900 text-white">
-                  {cat}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" size={20} />
-          </div>
-
-          {/* Dynamic Cargo / Equipment Sub-Category Dropdown */}
-          {supportsSubCategories(formData.category) && (
-            <div className="space-y-1.5 pt-2 animate-fade-in">
-              <label className="flex items-center justify-between text-xs font-semibold text-amber-300">
-                <span className="flex items-center gap-1.5">
-                  <Truck size={14} /> Cargo / Equipment Sub-Category
-                </span>
-                <span className="text-[10px] text-gray-400">Specialized Transport Equipment</span>
-              </label>
-              <div className="relative">
-                <select
-                  className="w-full glass-input rounded-xl p-3 sm:p-3.5 outline-none appearance-none cursor-pointer text-xs sm:text-sm text-amber-200 bg-amber-950/20 border border-amber-500/30 focus:border-amber-400 pr-10"
-                  value={formData.subCategory || 'Standard Container / General Cargo'}
-                  onChange={(e) => setFormData({ ...formData, subCategory: e.target.value })}
-                >
-                  {SUB_CATEGORY_OPTIONS.map(sub => (
-                    <option key={sub} value={sub} className="bg-slate-900 text-white">
-                      {sub}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-4 top-1/2 transform -translate-y-1/2 text-amber-400 pointer-events-none" size={18} />
+            {/* 2. Case Category & Equipment Sub-Category */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <div className={supportsSubCategories(formData.category) ? '' : 'sm:col-span-2'}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                    <Briefcase size={13} className="text-amber-400" />
+                    <span>Service Category <span className="text-red-400">*</span></span>
+                  </label>
+                </div>
+                <div className="relative">
+                  <select
+                    className="w-full h-10 rounded-xl px-3.5 outline-none appearance-none cursor-pointer text-sm text-white bg-slate-950 border border-white/15 focus:border-amber-400 pr-9 transition-all"
+                    value={formData.category}
+                    onChange={(e) => {
+                      const newCat = e.target.value;
+                      const foundClient = clientsData.find(c => c.name?.toLowerCase() === formData.client?.toLowerCase());
+                      const resolved = resolveCaseCharges(foundClient, newCat);
+                      setFormData({ 
+                        ...formData, 
+                        category: newCat,
+                        subCategory: supportsSubCategories(newCat) ? (formData.subCategory || 'Standard Container / General Cargo') : undefined,
+                        serviceArrangements: resolved.arrangements as any,
+                        charges: resolved.charges
+                      });
+                    }}
+                  >
+                    <option value="" className="bg-slate-900 text-slate-400">-- Select Category --</option>
+                    {CATEGORIES.map(cat => (
+                      <option key={cat} value={cat} className="bg-slate-900 text-white">
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                </div>
               </div>
-            </div>
-          )}
-        </div>
 
-        {/* 3. Port of Loading & Port of Destination (Searchable Suggestions & Instant Add Port) */}
-        {(() => {
-          const isPrivateCargo = formData.category === 'Transportation of Private Cargo' || formData.category?.toLowerCase().includes('private');
-          return (
-            <div className="glass-panel p-4 sm:p-5 rounded-2xl border border-white/10 space-y-3 relative z-30">
+              {supportsSubCategories(formData.category) && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5 mb-1.5">
+                    <Truck size={13} className="text-indigo-400" />
+                    <span>Equipment / Cargo Sub-Category</span>
+                  </label>
+                  <div className="relative">
+                    <select
+                      className="w-full h-10 rounded-xl px-3.5 outline-none appearance-none cursor-pointer text-sm text-white bg-slate-950 border border-white/15 focus:border-amber-400 pr-9 transition-all"
+                      value={formData.subCategory || 'Standard Container / General Cargo'}
+                      onChange={(e) => setFormData({ ...formData, subCategory: e.target.value })}
+                    >
+                      {SUB_CATEGORY_OPTIONS.map(sub => (
+                        <option key={sub} value={sub} className="bg-slate-900 text-white">
+                          {sub}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3. Port of Loading & Port of Destination */}
+            <div className="space-y-3 pt-2 border-t border-white/10 relative z-30">
               <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-sm font-semibold text-white">
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
                   {isPrivateCargo ? (
                     <>
-                      <Truck size={16} className="text-amber-400" />
-                      <span>Transport Route & Locations (Pick up / Drop off)</span>
+                      <Truck size={14} className="text-amber-400" />
+                      <span>Transport Route (Pickup & Drop-off Locations)</span>
                     </>
                   ) : (
                     <>
-                      <Ship size={16} className="text-brand-400" />
-                      <span>Route Selection (Ports & Terminals)</span>
+                      <Ship size={14} className="text-sky-400" />
+                      <span>Maritime / Transit Route (POL & POD)</span>
                     </>
                   )}
                 </label>
                 <button
                   type="button"
                   onClick={() => handleOpenAddPort(null)}
-                  className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1 font-medium bg-brand-500/10 hover:bg-brand-500/20 border border-brand-500/25 px-2.5 py-1 rounded-lg transition-colors shadow-sm"
-                  title="Add new port or terminal to all lists"
+                  className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/25 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
                 >
-                  <Plus size={13} /> {isPrivateCargo ? 'Add Location' : 'Add Port'}
+                  <Plus size={12} /> {isPrivateCargo ? 'Add Location' : 'Add New Port'}
                 </button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* POL with Autocomplete Search & Add Port */}
                 <PortSearchableInput
-                  label={isPrivateCargo ? "Pick up Destination (Loading Point / Origin)" : "Port of Loading (POL)"}
-                  icon={isPrivateCargo ? <MapPin size={14} className="text-amber-400" /> : <Anchor size={14} className="text-brand-400" />}
+                  label={isPrivateCargo ? "Pickup Location (Origin)" : "Port of Loading (POL)"}
+                  icon={isPrivateCargo ? <MapPin size={14} className="text-amber-400" /> : <Anchor size={14} className="text-sky-400" />}
                   value={formData.pol}
                   onChange={(val) => {
                     setFormData(prev => ({ 
@@ -5113,14 +5184,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   }}
                   ports={ports}
                   targetField="pol"
-                  placeholder={isPrivateCargo ? "Type pick up location (e.g. Karachi Factory, Hub, Multan)..." : "Type port name or code (e.g. KPT, Port Qasim)..."}
+                  placeholder={isPrivateCargo ? "e.g. Karachi Factory, Hub..." : "e.g. KPT, Port Qasim..."}
                   onOpenAddPort={handleOpenAddPort}
                 />
 
-                {/* POD with Autocomplete Search & Add Port */}
                 <PortSearchableInput
-                  label={isPrivateCargo ? "Drop off Destination (Unloading Point / Delivery)" : "Port of Destination (POD)"}
-                  icon={<MapPin size={14} className={isPrivateCargo ? "text-emerald-400" : "text-brand-400"} />}
+                  label={isPrivateCargo ? "Drop-off Location (Destination)" : "Port of Destination (POD)"}
+                  icon={<MapPin size={14} className="text-emerald-400" />}
                   value={formData.pod}
                   onChange={(val) => {
                     setFormData(prev => ({ 
@@ -5131,236 +5201,203 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   }}
                   ports={ports}
                   targetField="pod"
-                  placeholder={isPrivateCargo ? "Type drop off location (e.g. Faisalabad, Lahore, Rawalpindi)..." : "Type port name or code (e.g. Lahore, Sialkot, Torkham)..."}
+                  placeholder={isPrivateCargo ? "e.g. Faisalabad, Lahore..." : "e.g. Lahore Dry Port, Torkham..."}
                   onOpenAddPort={handleOpenAddPort}
                 />
               </div>
             </div>
-          );
-        })()}
-
-        {/* 4. Document Upload & Camera (Single unified upload button + Camera button) */}
-        <div ref={documentsSectionRef} className="glass-panel p-4 sm:p-5 rounded-2xl border border-white/10 space-y-3 relative z-10">
-          <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 text-sm font-semibold text-white">
-              <FileText size={16} className="text-brand-400" />
-              <span>Shipping Documents</span>
-            </label>
-            {uploadedDocs.length > 0 && (
-              <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1">
-                <CheckCircle2 size={12} /> {uploadedDocs.length} {uploadedDocs.length === 1 ? 'file' : 'files'} attached
-              </span>
-            )}
           </div>
 
-          {/* Attaching progress indicator */}
-          {isAttachingFiles && (
-            <div className="flex items-center justify-center gap-2 py-2 px-3 bg-brand-500/10 border border-brand-500/30 rounded-xl text-brand-300 text-xs animate-pulse">
-              <Loader2 size={15} className="animate-spin text-brand-400" />
-              <span>Attaching & verifying document...</span>
-            </div>
-          )}
-
-          {/* Standard accessible file and camera inputs (sr-only avoids Chromium layout drop/compositor flash) */}
-          <input 
-            ref={multiFileInputRef}
-            type="file"
-            accept=".pdf,image/*,application/pdf"
-            multiple
-            className="sr-only"
-            tabIndex={-1}
-            aria-hidden="true"
-            onChange={handleFileUpload}
-          />
-          <input 
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            tabIndex={-1}
-            aria-hidden="true"
-            onChange={handleCameraFileUpload}
-          />
-
-          {/* Dropzone container */}
-          <div 
-            data-dropzone="true"
-            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
-            onDrop={async (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-                await processFiles(Array.from(e.dataTransfer.files));
-              }
-            }}
-            className="border-2 border-dashed border-white/20 hover:border-brand-400/60 rounded-2xl p-5 sm:p-6 bg-slate-950/60 hover:bg-slate-950/80 transition-all text-center space-y-4"
-          >
-            {/* The Two Main Action Buttons: Upload Documents + Camera */}
-            <div className="flex flex-col sm:flex-row items-stretch justify-center gap-3 sm:gap-4 max-w-md mx-auto">
-              {/* 1. Single Multi-Document Upload Button */}
-              <button
-                type="button"
-                onClick={() => multiFileInputRef.current?.click()}
-                className="flex-1 py-3.5 px-4 bg-gradient-to-r from-blue-600 to-brand-600 hover:from-blue-500 hover:to-brand-500 text-white font-semibold rounded-xl flex items-center justify-center gap-2.5 shadow-lg shadow-blue-600/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                title="Select multiple documents or single multi-page PDF"
-              >
-                <UploadCloud size={20} className="text-cyan-200" />
-                <div className="text-left">
-                  <div className="text-sm font-bold leading-tight">Upload Documents</div>
-                  <div className="text-[10px] text-cyan-100/80 font-normal leading-tight">Multi-file or Single PDF</div>
-                </div>
-              </button>
-
-              {/* 2. Camera Document Scanner Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowCaseDocScanner(true);
-                }}
-                className="py-3.5 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold rounded-xl flex items-center justify-center gap-2.5 shadow-lg shadow-purple-600/30 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-                title="Capture & scan document via camera"
-              >
-                <Camera size={20} className="text-purple-200" />
-                <div className="text-left">
-                  <div className="text-sm font-bold leading-tight">Camera Scanner</div>
-                  <div className="text-[10px] text-purple-100/80 font-normal leading-tight">Scan document directly</div>
-                </div>
-              </button>
-            </div>
-
-            <p className="text-xs text-gray-400">
-              Drag & drop shipping documents (B/L, Invoice, Packing List) here
-            </p>
-
-            {/* Uploaded Documents List */}
-            {uploadedDocs.length > 0 && (
-              <div className="pt-3 border-t border-white/10 text-left space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-300">
-                    Selected Documents ({uploadedDocs.length})
-                  </span>
-                  {uploadedDocs.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUploadedDocs([]);
-                        setFiles([]);
-                        safeAppStorage.removeItem('dpl_reg_docs');
-                      }}
-                      className="text-xs text-red-400 hover:text-red-300 transition-colors"
-                    >
-                      Clear All
-                    </button>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {uploadedDocs.map((doc, idx) => {
-                    const isImage = (doc.type && doc.type.startsWith('image/')) || /\.(jpg|jpeg|png|webp|gif)$/i.test(doc.name);
-                    const fileSizeFormatted = doc.size > 1024 * 1024 
-                      ? `${(doc.size / (1024 * 1024)).toFixed(1)} MB`
-                      : `${Math.max(1, Math.round(doc.size / 1024))} KB`;
-
-                    return (
-                      <div 
-                        key={doc.id || `${doc.name}-${idx}`}
-                        className="bg-slate-900/90 border border-white/10 rounded-xl p-2.5 flex items-center justify-between gap-2 shadow-sm"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                          <div className="p-1.5 rounded-lg bg-brand-600/20 text-brand-300 flex-shrink-0">
-                            <FileText size={16} />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium text-white truncate" title={doc.name}>
-                              {doc.name}
-                            </p>
-                            <p className="text-[10px] text-gray-400">
-                              {fileSizeFormatted}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          {isImage && doc.url && (
-                            <button
-                              type="button"
-                              onClick={() => setLightboxImage(doc.url)}
-                              className="p-1 text-gray-400 hover:text-white rounded hover:bg-white/10"
-                              title="Preview"
-                            >
-                              <Eye size={14} />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const cached = docDataCache.get(doc.name);
-                              const downloadUrl = (doc.url && doc.url.startsWith('data:')) 
-                                ? doc.url 
-                                : cached?.base64 
-                                  ? `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}` 
-                                  : doc.url || '';
-                              if (downloadUrl) {
-                                const a = document.createElement('a');
-                                a.href = downloadUrl;
-                                a.download = doc.name || `Document_${idx + 1}.pdf`;
-                                document.body.appendChild(a);
-                                a.click();
-                                document.body.removeChild(a);
-                              }
-                            }}
-                            className="p-1 text-cyan-400 hover:text-cyan-300 rounded hover:bg-cyan-500/10"
-                            title="Download document"
-                          >
-                            <Download size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setUploadedDocs(prev => {
-                                const updated = prev.filter((_, i) => i !== idx);
-                                safeAppStorage.setJSON('dpl_reg_docs', updated);
-                                return updated;
-                              });
-                              setFiles(prev => prev.filter((_, i) => i !== idx));
-                            }}
-                            className="p-1 text-red-400 hover:text-red-300 rounded hover:bg-red-500/10"
-                            title="Remove"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Direct Instant AI Scan & Extract Button */}
-                <div className="pt-3 border-t border-brand-500/20 flex flex-col sm:flex-row items-center justify-between gap-3 bg-brand-950/40 p-3 rounded-xl border border-brand-500/30">
-                  <div className="text-left text-xs">
-                    <div className="font-semibold text-brand-200 flex items-center gap-1.5">
-                      <Sparkles size={14} className="text-brand-400 animate-pulse" />
-                      <span>Optical Document Reader Ready</span>
-                    </div>
-                    <div className="text-[11px] text-gray-400">
-                      Reads Bill of Lading, Consignee, Shipper, Shipping Agent, Containers, Packages, & Commercial Invoice.
-                    </div>
+          {/* RIGHT COLUMN (5 Cols): Shipping Documents Upload & Camera Scanner */}
+          <div ref={documentsSectionRef} className="lg:col-span-5 bg-slate-900/95 p-5 sm:p-6 rounded-2xl border border-white/10 space-y-4 shadow-md flex flex-col justify-between relative z-10">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3.5">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+                    <FileText size={18} />
                   </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">2. Shipping Documents</h3>
+                    <p className="text-xs text-slate-400">Upload B/L, Invoice & Packing List</p>
+                  </div>
+                </div>
+                {uploadedDocs.length > 0 && (
+                  <span className="text-xs text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 rounded-lg font-mono font-bold flex items-center gap-1">
+                    <CheckCircle2 size={12} /> {uploadedDocs.length} Attached
+                  </span>
+                )}
+              </div>
+
+              {isAttachingFiles && (
+                <div className="flex items-center justify-center gap-2 py-2.5 px-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs font-medium">
+                  <Loader2 size={15} className="animate-spin text-amber-400" />
+                  <span>Attaching & verifying document...</span>
+                </div>
+              )}
+
+              <input 
+                ref={multiFileInputRef}
+                type="file"
+                accept=".pdf,image/*,application/pdf"
+                multiple
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={handleFileUpload}
+              />
+              <input 
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={handleCameraFileUpload}
+              />
+
+              {/* Dropzone & Primary Upload Buttons */}
+              <div 
+                data-dropzone="true"
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDrop={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+                    await processFiles(Array.from(e.dataTransfer.files));
+                  }
+                }}
+                className="border border-dashed border-white/20 hover:border-amber-400/60 rounded-xl p-4 bg-slate-950/70 transition-all text-center space-y-3"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <button
                     type="button"
-                    onClick={() => triggerDocumentReading()}
-                    className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-all hover:scale-105 active:scale-95 flex-shrink-0"
+                    onClick={() => multiFileInputRef.current?.click()}
+                    className="h-11 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl flex items-center justify-center gap-2 shadow transition-all text-xs cursor-pointer"
                   >
-                    <Sparkles size={15} />
-                    <span>Scan & Auto-Extract All Data</span>
-                    <ChevronRight size={14} />
+                    <UploadCloud size={17} />
+                    <span>Upload PDF / Images</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowCaseDocScanner(true)}
+                    className="h-11 px-4 bg-slate-800 hover:bg-slate-700 text-white border border-white/15 font-semibold rounded-xl flex items-center justify-center gap-2 transition-all text-xs cursor-pointer"
+                  >
+                    <Camera size={17} className="text-amber-400" />
+                    <span>Camera Scanner</span>
                   </button>
                 </div>
+
+                <p className="text-xs text-slate-400">
+                  Drag & drop B/L, Commercial Invoice, or Packing List files here
+                </p>
               </div>
-            )}
+
+              {/* Uploaded Documents List */}
+              {uploadedDocs.length > 0 ? (
+                <div className="space-y-2.5 pt-2 border-t border-white/10">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-300">
+                      Attached Files ({uploadedDocs.length})
+                    </span>
+                    {uploadedDocs.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUploadedDocs([]);
+                          setFiles([]);
+                          safeAppStorage.removeItem('dpl_reg_docs');
+                        }}
+                        className="text-xs text-red-400 hover:text-red-300 font-semibold cursor-pointer"
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-44 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                    {uploadedDocs.map((doc, idx) => {
+                      const isImage = (doc.type && doc.type.startsWith('image/')) || /\.(jpg|jpeg|png|webp|gif)$/i.test(doc.name);
+                      const fileSizeFormatted = doc.size > 1024 * 1024 
+                        ? `${(doc.size / (1024 * 1024)).toFixed(1)} MB`
+                        : `${Math.max(1, Math.round(doc.size / 1024))} KB`;
+
+                      return (
+                        <div 
+                          key={doc.id || `${doc.name}-${idx}`}
+                          className="bg-slate-950 border border-white/10 rounded-xl p-2.5 flex items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className="p-1.5 rounded-lg bg-amber-500/15 text-amber-400 shrink-0">
+                              <FileText size={15} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold text-white truncate" title={doc.name}>
+                                {doc.name}
+                              </p>
+                              <p className="text-[11px] text-slate-400 font-mono">
+                                {fileSizeFormatted}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            {isImage && doc.url && (
+                              <button
+                                type="button"
+                                onClick={() => setLightboxImage(doc.url)}
+                                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 cursor-pointer"
+                                title="Preview"
+                              >
+                                <Eye size={14} />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUploadedDocs(prev => {
+                                  const updated = prev.filter((_, i) => i !== idx);
+                                  safeAppStorage.setJSON('dpl_reg_docs', updated);
+                                  return updated;
+                                });
+                                setFiles(prev => prev.filter((_, i) => i !== idx));
+                              }}
+                              className="p-1.5 text-red-400 hover:text-red-300 rounded-lg hover:bg-red-500/10 cursor-pointer"
+                              title="Remove"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Quick Scan & Auto-Extract Bar */}
+                  <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex items-center justify-between gap-3">
+                    <div className="text-xs text-emerald-200 font-medium">
+                      Ready to auto-extract B/L, Containers & Invoice fields
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => triggerDocumentReading()}
+                      className="h-9 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow shrink-0 cursor-pointer"
+                    >
+                      <Sparkles size={14} />
+                      <span>Auto-Extract</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-xl bg-slate-950/50 border border-white/5 text-xs text-slate-400 text-center">
+                  Attach shipping documents to auto-fill B/L, Vessel, Containers, and Invoice data, or proceed to enter details manually.
+                </div>
+              )}
+            </div>
           </div>
+
         </div>
       </div>
     );
@@ -5368,43 +5405,16 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
 
   const renderDocumentReadingView = () => (
-    <div className="w-full max-w-lg md:max-w-xl mx-auto px-2 sm:px-4 py-4 sm:py-8 space-y-4 sm:space-y-6 text-center overflow-hidden">
-      {/* 1. TOP: Circular Rotating / Spinning Loader */}
-      <div className="relative w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 mx-auto flex items-center justify-center my-1 sm:my-2 flex-shrink-0">
-        {/* Soft atmospheric glow */}
-        <div className="absolute inset-0 rounded-full bg-cyan-500/15 blur-xl sm:blur-2xl animate-pulse" />
-        
-        {/* Outer orbital spinning ring (Clockwise) */}
-        <div 
-          className="absolute inset-0 rounded-full border-3 sm:border-4 border-transparent border-t-cyan-400 border-r-blue-500 animate-spin" 
-          style={{ animationDuration: '1.8s' }} 
-        />
-
-        {/* Middle counter-spinning ring (Counter-Clockwise) */}
-        <div 
-          className="absolute inset-2 sm:inset-2.5 rounded-full border-2 sm:border-3 border-transparent border-b-cyan-300 border-l-blue-400 animate-spin" 
-          style={{ animationDuration: '2.4s', animationDirection: 'reverse' }} 
-        />
-
-        {/* Third subtle dashed rotating track */}
-        <div 
-          className="absolute inset-4 sm:inset-5 rounded-full border border-dashed border-cyan-400/30 animate-spin" 
-          style={{ animationDuration: '6s' }} 
-        />
-
-        {/* Glowing Center Optical Lens Orb */}
-        <div className="w-16 h-16 sm:w-20 sm:h-20 md:w-22 md:h-22 rounded-full bg-gradient-to-br from-slate-900 via-brand-950 to-slate-950 border border-cyan-400/50 shadow-[0_0_25px_rgba(56,189,248,0.35)] flex flex-col items-center justify-center relative overflow-hidden">
-          {/* Radar sweeping scanline */}
-          <div 
-            className="absolute inset-0 bg-gradient-to-b from-transparent via-cyan-400/25 to-transparent animate-pulse"
-            style={{ animationDuration: '1.2s' }}
-          />
+    <div className="w-full max-w-xl mx-auto px-4 py-8 space-y-6 text-center bg-slate-900/95 rounded-2xl border border-white/10 shadow-xl my-2">
+      <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
+        <div className="absolute inset-0 rounded-full border-4 border-amber-500/20 border-t-amber-400 animate-spin" />
+        <div className="w-16 h-16 rounded-2xl bg-slate-950 border border-white/15 flex flex-col items-center justify-center">
           {readingProgress >= 100 ? (
-            <CheckCircle2 className="text-emerald-400" size={30} />
+            <CheckCircle2 className="text-emerald-400" size={28} />
           ) : (
             <>
-              <Scan className="text-cyan-400 animate-pulse w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7" />
-              <span className="text-[10px] sm:text-xs font-mono font-bold text-cyan-300 mt-0.5 sm:mt-1">
+              <Scan className="text-amber-400 animate-pulse w-5 h-5" />
+              <span className="text-xs font-mono font-bold text-amber-300 mt-0.5">
                 {readingProgress}%
               </span>
             </>
@@ -5412,84 +5422,52 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         </div>
       </div>
 
-      {/* 2. BELOW: Clearly Written "Reading Document..." */}
-      <div className="space-y-1 sm:space-y-2 px-1">
-        <h2 className="text-lg sm:text-2xl md:text-3xl font-bold text-white tracking-tight sm:tracking-wide">
+      <div className="space-y-1.5">
+        <h2 className="text-lg sm:text-xl font-bold text-white">
           Reading Shipping Documents...
         </h2>
-        <p className="text-xs sm:text-sm text-cyan-300/90 font-medium line-clamp-2 max-w-md mx-auto leading-relaxed">
+        <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto">
           {readingPhase}
         </p>
       </div>
 
-      {/* 3. Progress Bar & Phase Info */}
-      <div className="glass-panel p-3.5 sm:p-5 rounded-2xl border border-white/10 space-y-3 text-left shadow-xl w-full overflow-hidden">
-        <div className="flex justify-between items-center text-xs font-medium gap-2 min-w-0">
-          <span className="text-cyan-300 flex items-center gap-1.5 min-w-0 flex-1">
-            <Loader2 size={13} className="animate-spin text-cyan-400 flex-shrink-0" />
-            <span className="truncate text-[11px] sm:text-xs text-cyan-200">{readingPhase}</span>
+      <div className="bg-slate-950 p-4 rounded-xl border border-white/10 space-y-3 text-left">
+        <div className="flex justify-between items-center text-xs font-medium gap-2">
+          <span className="text-amber-300 flex items-center gap-1.5 truncate">
+            <Loader2 size={13} className="animate-spin text-amber-400 shrink-0" />
+            <span className="truncate">{readingPhase}</span>
           </span>
-          <span className="text-white font-mono bg-cyan-500/20 px-2 py-0.5 rounded border border-cyan-500/30 flex-shrink-0 font-bold text-[11px] sm:text-xs">
+          <span className="text-white font-mono bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 shrink-0 font-bold text-xs">
             {readingProgress}%
           </span>
         </div>
 
-        {/* Progress Track */}
-        <div className="w-full bg-white/10 rounded-full h-2 sm:h-2.5 overflow-hidden p-0.5 border border-white/10">
+        <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
           <div 
-            className="bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400 h-full rounded-full transition-all duration-300 shadow-[0_0_12px_rgba(56,189,248,0.5)]"
+            className="bg-gradient-to-r from-amber-500 to-emerald-400 h-full rounded-full transition-all duration-300"
             style={{ width: `${Math.max(8, readingProgress)}%` }}
           />
         </div>
 
-        {/* Real-time Document Reading Checklist */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2.5 border-t border-white/10 text-[11px] sm:text-xs">
-          <div className={`flex items-center gap-2 min-w-0 ${readingProgress >= 25 ? 'text-emerald-400 font-medium' : 'text-gray-400'}`}>
-            <CheckCircle size={14} className={`flex-shrink-0 ${readingProgress >= 25 ? 'text-emerald-400' : 'text-gray-600'}`} />
-            <span className="truncate sm:whitespace-normal">Shipping Line & B/L Format Recognition</span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-white/10 text-xs">
+          <div className={`flex items-center gap-2 ${readingProgress >= 25 ? 'text-emerald-400 font-medium' : 'text-slate-400'}`}>
+            <CheckCircle size={13} className="shrink-0" />
+            <span className="truncate">Shipping Line & B/L Number</span>
           </div>
-          <div className={`flex items-center gap-2 min-w-0 ${readingProgress >= 50 ? 'text-emerald-400 font-medium' : 'text-gray-400'}`}>
-            <CheckCircle size={14} className={`flex-shrink-0 ${readingProgress >= 50 ? 'text-emerald-400' : 'text-gray-600'}`} />
-            <span className="truncate sm:whitespace-normal">B/L No, Vessel, Voyage, POL & POD</span>
+          <div className={`flex items-center gap-2 ${readingProgress >= 50 ? 'text-emerald-400 font-medium' : 'text-slate-400'}`}>
+            <CheckCircle size={13} className="shrink-0" />
+            <span className="truncate">Vessel, Voyage, POL & POD</span>
           </div>
-          <div className={`flex items-center gap-2 min-w-0 ${readingProgress >= 70 ? 'text-emerald-400 font-medium' : 'text-gray-400'}`}>
-            <CheckCircle size={14} className={`flex-shrink-0 ${readingProgress >= 70 ? 'text-emerald-400' : 'text-gray-600'}`} />
-            <span className="truncate sm:whitespace-normal">Commercial Invoice & Incoterms</span>
+          <div className={`flex items-center gap-2 ${readingProgress >= 75 ? 'text-emerald-400 font-medium' : 'text-slate-400'}`}>
+            <CheckCircle size={13} className="shrink-0" />
+            <span className="truncate">Commercial Invoice & Terms</span>
           </div>
-          <div className={`flex items-center gap-2 min-w-0 ${readingProgress >= 85 ? 'text-emerald-400 font-medium' : 'text-gray-400'}`}>
-            <CheckCircle size={14} className={`flex-shrink-0 ${readingProgress >= 85 ? 'text-emerald-400' : 'text-gray-600'}`} />
-            <span className="truncate sm:whitespace-normal">Packing List Weights, Cartons & CBM</span>
-          </div>
-          <div className={`flex items-center gap-2 min-w-0 sm:col-span-2 ${readingProgress >= 95 ? 'text-emerald-400 font-medium' : 'text-gray-400'}`}>
-            <CheckCircle size={14} className={`flex-shrink-0 ${readingProgress >= 95 ? 'text-emerald-400' : 'text-gray-600'}`} />
-            <span className="truncate sm:whitespace-normal">ISO Containers (MSKU/CMAU) & Seals</span>
+          <div className={`flex items-center gap-2 ${readingProgress >= 95 ? 'text-emerald-400 font-medium' : 'text-slate-400'}`}>
+            <CheckCircle size={13} className="shrink-0" />
+            <span className="truncate">Containers, Weights & Seals</span>
           </div>
         </div>
       </div>
-
-      {/* Uploaded Documents Being Scanned */}
-      {uploadedDocs.length > 0 && (
-        <div className="text-left space-y-1.5 w-full overflow-hidden px-1">
-          <p className="text-[11px] sm:text-xs text-gray-400 font-medium">Scanned Documents ({uploadedDocs.length}):</p>
-          <div className="flex flex-wrap gap-1.5 sm:gap-2">
-            {uploadedDocs.map((doc, idx) => (
-              <div 
-                key={doc.id || idx} 
-                className="bg-white/5 border border-cyan-500/20 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg flex items-center gap-2 text-[11px] sm:text-xs text-gray-300 max-w-full min-w-0"
-              >
-                <FileText size={13} className="text-cyan-400 flex-shrink-0" />
-                <span className="truncate max-w-[140px] sm:max-w-[200px] text-white font-medium">{doc.name}</span>
-                <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Reassurance text */}
-      <p className="text-[11px] sm:text-xs text-gray-400 max-w-md mx-auto leading-relaxed px-2">
-        The form will open automatically once reading completes with detected fields pre-filled. Any unread information can be entered manually.
-      </p>
     </div>
   );
 
@@ -5497,75 +5475,78 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     const arrangements = formData.serviceArrangements || INITIAL_REGISTRATION_ARRANGEMENTS;
     const dplArrangedCount = Object.values(arrangements).filter(a => a.arrangedBy === 'DPL').length;
     const clientArrangedCount = Object.values(arrangements).filter(a => a.arrangedBy === 'Client').length;
+    const compShort = activeCompany?.shortName || 'Company';
 
     return (
-      <div className="glass-panel p-5 rounded-xl border border-white/10 bg-slate-900/60 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-3">
+      <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 sm:p-6 space-y-5 shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
           <div>
-            <h4 className="text-sm font-bold text-white uppercase flex items-center gap-2">
-              <Layers size={16} className="text-amber-400" />
-              <span>Operational Logistics Services & Charges (Arranged by {activeCompany?.shortName || 'Company'} vs Client)</span>
+            <h4 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+              <Layers size={18} className="text-amber-400 shrink-0" />
+              <span>Operational Logistics Services & Charges (Arranged by {compShort} vs Client)</span>
             </h4>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Items marked <span className="text-emerald-400 font-semibold">Arranged by {activeCompany?.shortName || 'Company'}</span> are automatically added to the invoice charges. Items marked <span className="text-sky-400 font-semibold">Arranged by Client</span> are excluded from invoice.
+            <p className="text-xs text-slate-300 mt-1">
+              Services marked <span className="text-emerald-400 font-semibold">Arranged by {compShort}</span> are included in the client invoice. Services marked <span className="text-sky-400 font-semibold">Arranged by Client</span> are settled directly by the client.
             </p>
           </div>
-          <div className="flex items-center gap-2 self-start sm:self-auto text-xs">
-            <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full font-semibold flex items-center gap-1">
-              <CheckCircle size={12} /> {dplArrangedCount} Invoiced by {activeCompany?.shortName || 'Company'}
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto text-xs shrink-0">
+            <span className="bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5">
+              <CheckCircle size={13} className="text-emerald-400" />
+              <span>{dplArrangedCount} {compShort} Arranged</span>
             </span>
-            <span className="bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2.5 py-1 rounded-full font-semibold flex items-center gap-1">
-              <User size={12} /> {clientArrangedCount} Client Direct
+            <span className="bg-sky-500/15 text-sky-300 border border-sky-500/30 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5">
+              <User size={13} className="text-sky-400" />
+              <span>{clientArrangedCount} Client Direct</span>
             </span>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
           {Object.entries(arrangements).map(([key, item]) => {
             const isDpl = item.arrangedBy === 'DPL';
             return (
               <div 
                 key={key} 
-                className={`p-3 rounded-xl border transition-all ${
+                className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
                   isDpl 
                     ? 'bg-emerald-950/20 border-emerald-500/30' 
-                    : 'bg-white/5 border-white/10'
+                    : 'bg-slate-950/70 border-white/10'
                 }`}
               >
-                <div className="flex items-center justify-between gap-2 mb-2.5">
+                <div className="flex items-start sm:items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <span className="text-xs font-bold text-white block truncate">{item.label}</span>
-                    <span className="text-[10px] font-mono text-gray-400 block">
-                      {isDpl ? 'Added to Client Invoice' : 'Client Settles Directly (Excluded)'}
+                    <span className="text-sm font-bold text-white block truncate">{item.label}</span>
+                    <span className={`text-xs font-medium block mt-0.5 ${isDpl ? 'text-emerald-300/90' : 'text-slate-400'}`}>
+                      {isDpl ? `Included in ${compShort} Client Invoice` : 'Client Settles Directly (Excluded from Invoice)'}
                     </span>
                   </div>
 
-                  {/* Toggle Selector Buttons */}
-                  <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/10 shrink-0">
+                  {/* Standard Toggle Selector Buttons */}
+                  <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-white/15 shrink-0">
                     <button
                       type="button"
                       onClick={() => handleToggleServiceArrangement(key, 'DPL')}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 ${
+                      className={`h-8 px-3 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
                         isDpl 
-                          ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/40' 
-                          : 'text-gray-400 hover:text-gray-200'
+                          ? 'bg-emerald-600 text-white shadow-sm' 
+                          : 'text-slate-400 hover:text-white'
                       }`}
-                      title={`Arranged by ${activeCompany?.shortName || 'Company'}: adds to client invoice`}
+                      title={`Arranged by ${compShort}: adds to client invoice`}
                     >
-                      <CheckCircle size={11} />
-                      <span>{activeCompany?.shortName || 'Company'}</span>
+                      <CheckCircle size={12} />
+                      <span>{compShort}</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleToggleServiceArrangement(key, 'Client')}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 ${
+                      className={`h-8 px-3 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
                         !isDpl 
-                          ? 'bg-sky-600 text-white shadow-md shadow-sky-900/40' 
-                          : 'text-gray-400 hover:text-gray-200'
+                          ? 'bg-sky-600 text-white shadow-sm' 
+                          : 'text-slate-400 hover:text-white'
                       }`}
                       title="Arranged by Client: excluded from client invoice"
                     >
-                      <User size={11} />
+                      <User size={12} />
                       <span>Client</span>
                     </button>
                   </div>
@@ -5573,39 +5554,37 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
                 {/* Amount Field or Client Direct Settlement Notice */}
                 {isDpl ? (
-                  /* Arranged by Company: Amount is written step-by-step for invoicing */
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-emerald-500/20">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2.5 border-t border-emerald-500/20">
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-emerald-300 font-medium flex items-center gap-1">
-                        <DollarSign size={12} className="text-emerald-400" />
-                        <span>{activeCompany?.shortName || 'Company'} Charge:</span>
+                      <span className="text-xs text-emerald-300 font-semibold flex items-center gap-1">
+                        <DollarSign size={13} className="text-emerald-400" />
+                        <span>Charge Amount:</span>
                       </span>
-                      <div className="relative w-32">
-                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] font-mono text-emerald-400/80 font-bold">PKR</span>
+                      <div className="relative w-36">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono text-emerald-400 font-bold">PKR</span>
                         <input
                           type="number"
                           value={item.amount || ''}
                           onChange={(e) => handleUpdateArrangementAmount(key, Number(e.target.value) || 0)}
-                          placeholder="Enter amount..."
-                          className="w-full pl-10 pr-2 py-1 bg-black/60 border border-emerald-500/40 rounded-lg text-xs font-mono font-bold text-emerald-300 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/30 outline-none transition-all"
+                          placeholder="0"
+                          className="w-full h-9 pl-11 pr-3 bg-slate-950 border border-emerald-500/40 rounded-lg text-sm font-mono font-bold text-emerald-300 focus:border-emerald-400 outline-none transition-all"
                         />
                       </div>
                     </div>
 
-                    <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/15 px-2.5 py-1 rounded-lg border border-emerald-500/30 whitespace-nowrap flex items-center gap-1 self-start sm:self-auto">
-                      <CheckCircle size={11} className="text-emerald-400" />
-                      <span>Invoiced: PKR {Number(item.amount || 0).toLocaleString()}</span>
+                    <span className="text-xs text-emerald-300 font-mono font-semibold bg-emerald-500/15 px-2.5 py-1 rounded-lg border border-emerald-500/30 whitespace-nowrap flex items-center gap-1.5 self-start sm:self-auto">
+                      <CheckCircle size={12} className="text-emerald-400" />
+                      <span>PKR {Number(item.amount || 0).toLocaleString()}</span>
                     </span>
                   </div>
                 ) : (
-                  /* Arranged by Client: Excluded from invoice - No amount input needed */
-                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
-                    <div className="flex items-center gap-1.5 text-sky-400/80">
-                      <User size={12} className="text-sky-400 shrink-0" />
-                      <span className="text-[11px] text-sky-300 font-medium">Client settles directly</span>
+                  <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-white/10">
+                    <div className="flex items-center gap-1.5 text-sky-300">
+                      <User size={13} className="text-sky-400 shrink-0" />
+                      <span className="text-xs font-medium">Direct settlement by Client</span>
                     </div>
-                    <span className="text-[10px] text-gray-400 font-medium bg-white/5 px-2.5 py-1 rounded-lg border border-white/10 whitespace-nowrap flex items-center gap-1">
-                      <span>⊘ Excluded from Invoice</span>
+                    <span className="text-xs text-slate-400 font-medium bg-white/5 px-2.5 py-1 rounded-lg border border-white/10 whitespace-nowrap">
+                      Excluded from Invoice
                     </span>
                   </div>
                 )}
@@ -5618,98 +5597,99 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   };
 
   const renderPrivateCargoRegistrationReview = (extracted: any, autoFilledCount: number) => {
+    const compShort = activeCompany?.shortName || 'Company';
     return (
-      <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+      <div className="space-y-5 animate-in fade-in slide-in-from-right-4">
         {/* Category Header Banner */}
-        <div className="p-4 rounded-2xl bg-amber-950/30 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30 shrink-0">
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center border border-amber-500/30 shrink-0">
               <Truck size={22} />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white">Private Cargo Transport Registration</h3>
-                <span className="text-[10px] font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full uppercase">
-                  Domestic Freight
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base sm:text-lg font-bold text-white">Private Cargo Transport Details</h3>
+                <span className="text-xs font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 rounded-lg">
+                  Step 2 of 4 • Domestic Freight
                 </span>
               </div>
-              <p className="text-xs text-amber-200/80">
-                Default Charges: <strong className="text-emerald-400">Loading Charges & Unloading Charges (Arranged by {activeCompany?.shortName || 'Company'})</strong>. Vehicle Rent, Builty, Labor & Detention as required.
+              <p className="text-xs text-slate-300 mt-0.5">
+                Verify pickup/drop-off route, cargo owner, waybill details, and service charge arrangements ({compShort} vs Client).
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
-              <CheckCircle size={14} /> {autoFilledCount} fields extracted
+            <span className="text-xs font-mono font-semibold text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+              <CheckCircle size={14} className="text-emerald-400" /> {autoFilledCount} Fields Ready
             </span>
           </div>
         </div>
 
-        {/* Bento Grid of Private Cargo Registration Fields */}
+        {/* Grid of Private Cargo Registration Fields */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {/* Card 1: Route & Locations */}
-          <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h4 className="text-amber-400 text-sm font-bold uppercase flex items-center gap-1.5">
-                <MapPin size={15} /> Pick up & Drop off Route
+          <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-4 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <MapPin size={15} /> Pickup & Drop-off Route
               </h4>
-              <span className="text-[10px] text-gray-400">Domestic Route</span>
+              <span className="text-xs text-slate-400">Domestic</span>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">
-                  Pick up Destination (Loading Point / Origin) <span className="text-red-400">*</span>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">
+                  Pickup Location (Loading Point) <span className="text-red-400">*</span>
                 </label>
                 <input 
                   type="text"
-                  className="w-full rounded-lg p-2.5 text-sm text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.pickupDestination || formData.pol || ''}
                   onChange={(e) => {
                     const val = e.target.value;
                     updateExtractedData('pickupDestination', val);
                     setFormData(prev => ({ ...prev, pol: val }));
                   }}
-                  placeholder="e.g. Karachi Port Terminal / Hub Industrial Area / Factory"
+                  placeholder="e.g. Karachi Port / Industrial Area"
                 />
               </div>
 
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">
-                  Drop off Destination (Unloading Point / Delivery) <span className="text-red-400">*</span>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">
+                  Drop-off Location (Delivery Point) <span className="text-red-400">*</span>
                 </label>
                 <input 
                   type="text"
-                  className="w-full rounded-lg p-2.5 text-sm text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.dropoffDestination || formData.pod || ''}
                   onChange={(e) => {
                     const val = e.target.value;
                     updateExtractedData('dropoffDestination', val);
                     setFormData(prev => ({ ...prev, pod: val }));
                   }}
-                  placeholder="e.g. Faisalabad Textile Mills / Lahore Dryport / Warehouse"
+                  placeholder="e.g. Faisalabad Mills / Lahore Warehouse"
                 />
               </div>
             </div>
           </div>
 
           {/* Card 2: Cargo Owner Details */}
-          <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h4 className="text-amber-400 text-sm font-bold uppercase flex items-center gap-1.5">
+          <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-4 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-1.5">
                 <User size={15} /> Cargo Owner / Consignor
               </h4>
-              <span className="text-[10px] text-gray-400">Shipper / Owner</span>
+              <span className="text-xs text-slate-400">Shipper</span>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">
                   Cargo Owner Name <span className="text-red-400">*</span>
                 </label>
                 <input 
                   type="text"
-                  className="w-full rounded-lg p-2.5 text-sm text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.cargoOwner || extracted.shipperName || ''}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -5720,12 +5700,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-300 font-medium block mb-1">Contact No</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1.5">Contact No</label>
                   <input 
                     type="text"
-                    className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono"
                     value={extracted.cargoOwnerContact || extracted.shipperContact || ''}
                     onChange={(e) => {
                       const val = e.target.value;
@@ -5736,10 +5716,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-300 font-medium block mb-1">CNIC / NTN</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1.5">CNIC / NTN</label>
                   <input 
                     type="text"
-                    className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono"
                     value={extracted.cargoOwnerCnic || ''}
                     onChange={(e) => updateExtractedData('cargoOwnerCnic', e.target.value)}
                     placeholder="42101-xxxxxxx-x"
@@ -5750,38 +5730,38 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
 
           {/* Card 3: Consignment Note & Waybill Details */}
-          <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h4 className="text-amber-400 text-sm font-bold uppercase flex items-center gap-1.5">
-                <FileText size={15} /> Consignment Waybill Information
+          <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-4 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <FileText size={15} /> Waybill & Terms
               </h4>
-              <span className="text-[10px] text-gray-400">Waybill & Terms</span>
+              <span className="text-xs text-slate-400">Builty Info</span>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">
-                  Waybill / Consignment Note Number <span className="text-red-400">*</span>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">
+                  Waybill / Builty Number <span className="text-red-400">*</span>
                 </label>
                 <input 
                   type="text"
-                  className="w-full rounded-lg p-2.5 text-sm font-mono font-semibold text-amber-300 border border-amber-500/30 bg-amber-500/5 focus:border-amber-400 outline-none"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm font-mono font-bold text-amber-300 border border-amber-500/30 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.builtyNumber || extracted.blNumber || ''}
                   onChange={(e) => {
                     const val = e.target.value;
                     updateExtractedData('builtyNumber', val);
                     updateExtractedData('blNumber', val);
                   }}
-                  placeholder="e.g. BLT-2025-9821 / KHI-892"
+                  placeholder="e.g. BLT-2025-9821"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-300 font-medium block mb-1">Builty Date</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1.5">Builty Date</label>
                   <input 
                     type="date"
-                    className="w-full rounded-lg p-2 text-xs text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                     value={extracted.builtyDate || extracted.blDate || ''}
                     onChange={(e) => {
                       const val = e.target.value;
@@ -5791,13 +5771,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-300 font-medium block mb-1">Payment Terms</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1.5">Payment Terms</label>
                   <select 
-                    className="w-full rounded-lg p-2 text-xs text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                    className="w-full h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                     value={extracted.paymentTerms || 'To-Pay'}
                     onChange={(e) => updateExtractedData('paymentTerms', e.target.value)}
                   >
-                    <option value="To-Pay">To-Pay (Unloading par)</option>
+                    <option value="To-Pay">To-Pay</option>
                     <option value="Paid">Paid (Prepaid)</option>
                     <option value="Advance">Advance Paid</option>
                     <option value="COD">Cash on Delivery</option>
@@ -5807,21 +5787,21 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </div>
           </div>
 
-          {/* Card 4: Container & Security Seal (If containerized) */}
-          <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h4 className="text-amber-400 text-sm font-bold uppercase flex items-center gap-1.5">
-                <Box size={15} /> Container & Seal Number
+          {/* Card 4: Container & Security Seal */}
+          <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-4 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <Box size={15} /> Container & Seal
               </h4>
-              <span className="text-[10px] text-gray-400">Optional / Containerized</span>
+              <span className="text-xs text-slate-400">Optional</span>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">Container Number</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Container Number</label>
                 <input 
                   type="text"
-                  className="w-full rounded-lg p-2.5 text-sm font-mono text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none uppercase"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm font-mono text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none uppercase"
                   value={extracted.containerNo || formData.containers?.[0]?.number || ''}
                   onChange={(e) => {
                     const val = e.target.value.toUpperCase();
@@ -5843,10 +5823,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               </div>
 
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">Seal Number</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Seal Number</label>
                 <input 
                   type="text"
-                  className="w-full rounded-lg p-2.5 text-sm font-mono text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm font-mono text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.sealNo || formData.containers?.[0]?.sealNo || ''}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -5858,59 +5838,59 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                       }));
                     }
                   }}
-                  placeholder="e.g. SL-984120 / Bottle Seal"
+                  placeholder="e.g. SL-984120"
                 />
               </div>
             </div>
           </div>
 
           {/* Card 5: Vehicle & Driver Information */}
-          <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h4 className="text-amber-400 text-sm font-bold uppercase flex items-center gap-1.5">
-                <Truck size={15} /> Transport Vehicle & Driver
+          <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-4 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <Truck size={15} /> Vehicle & Driver
               </h4>
-              <span className="text-[10px] text-gray-400">Driver Verification</span>
+              <span className="text-xs text-slate-400">Carrier Info</span>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">Vehicle / Truck Registration No</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Vehicle / Truck Registration No</label>
                 <input 
                   type="text"
-                  className="w-full rounded-lg p-2.5 text-sm font-mono text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none uppercase"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm font-mono text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none uppercase"
                   value={extracted.vehicleNumber || ''}
                   onChange={(e) => updateExtractedData('vehicleNumber', e.target.value.toUpperCase())}
-                  placeholder="e.g. TLA-492 / KHI-8120"
+                  placeholder="e.g. TLA-492"
                 />
               </div>
 
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="text-xs text-gray-300 font-medium block mb-1">Driver Name</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1.5">Driver Name</label>
                   <input 
                     type="text"
-                    className="w-full rounded-lg p-2 text-xs text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                    className="w-full h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                     value={extracted.driverName || ''}
                     onChange={(e) => updateExtractedData('driverName', e.target.value)}
                     placeholder="Name"
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-300 font-medium block mb-1">Driver Mobile</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1.5">Mobile</label>
                   <input 
                     type="text"
-                    className="w-full rounded-lg p-2 text-xs text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                    className="w-full h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono"
                     value={extracted.driverContact || ''}
                     onChange={(e) => updateExtractedData('driverContact', e.target.value)}
                     placeholder="03xx-xxxxxxx"
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-300 font-medium block mb-1">Driver CNIC</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1.5">CNIC</label>
                   <input 
                     type="text"
-                    className="w-full rounded-lg p-2 text-xs text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                    className="w-full h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono"
                     value={extracted.driverCnic || ''}
                     onChange={(e) => updateExtractedData('driverCnic', e.target.value)}
                     placeholder="CNIC No"
@@ -5921,45 +5901,45 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
 
           {/* Card 6: Consignee / Receiver Information */}
-          <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h4 className="text-amber-400 text-sm font-bold uppercase flex items-center gap-1.5">
-                <Building size={15} /> Consignee / Receiver Party
+          <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-4 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <Building size={15} /> Consignee / Receiver
               </h4>
-              <span className="text-[10px] text-gray-400">Delivery Recipient</span>
+              <span className="text-xs text-slate-400">Recipient</span>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">Consignee Name</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Consignee Name</label>
                 <input 
                   type="text"
-                  className="w-full rounded-lg p-2.5 text-sm text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.consigneeName || ''}
                   onChange={(e) => updateExtractedData('consigneeName', e.target.value)}
                   placeholder="e.g. Al-Madina Weaving Mills Ltd"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-gray-300 font-medium block mb-1">Receiver Contact</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1.5">Receiver Contact</label>
                   <input 
                     type="text"
-                    className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono"
                     value={extracted.consigneeContact || ''}
                     onChange={(e) => updateExtractedData('consigneeContact', e.target.value)}
                     placeholder="03xx-xxxxxxx"
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-300 font-medium block mb-1">Destination Address</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1.5">Delivery Address</label>
                   <input 
                     type="text"
-                    className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                     value={extracted.consigneeAddress || ''}
                     onChange={(e) => updateExtractedData('consigneeAddress', e.target.value)}
-                    placeholder="Sector / Industrial Zone"
+                    placeholder="City / Zone"
                   />
                 </div>
               </div>
@@ -5967,31 +5947,31 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
 
           {/* Card 7: Cargo Specifications & Commodities */}
-          <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-4 lg:col-span-3">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h4 className="text-amber-400 text-sm font-bold uppercase flex items-center gap-1.5">
-                <Package size={15} /> Cargo Specifications & Packaging
+          <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-4 lg:col-span-3 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <Package size={15} /> Cargo Specifications & Weight
               </h4>
-              <span className="text-[10px] text-gray-400">Weight & Packaging</span>
+              <span className="text-xs text-slate-400">Packaging & Weight</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
               <div className="lg:col-span-2">
-                <label className="text-xs text-gray-300 font-medium block mb-1">Cargo / Commodity Description</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Commodity Description</label>
                 <input 
                   type="text"
-                  className="w-full rounded-lg p-2.5 text-sm text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.itemName || ''}
                   onChange={(e) => updateExtractedData('itemName', e.target.value)}
-                  placeholder="e.g. Cotton Yarn Cones / Steel Coils / Rice Bags"
+                  placeholder="e.g. Cotton Yarn Cones / Steel Coils"
                 />
               </div>
 
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">Packaging Type</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Packaging Type</label>
                 <input 
                   type="text"
-                  className="w-full rounded-lg p-2.5 text-sm text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.packagingType || 'Bags / Bundles'}
                   onChange={(e) => updateExtractedData('packagingType', e.target.value)}
                   placeholder="Bags, Cartons, Crates"
@@ -5999,10 +5979,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               </div>
 
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">Total Packages</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Total Packages</label>
                 <input 
                   type="number"
-                  className="w-full rounded-lg p-2.5 text-sm text-white border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono"
                   value={extracted.packageCount || ''}
                   onChange={(e) => updateExtractedData('packageCount', parseFloat(e.target.value))}
                   placeholder="e.g. 400"
@@ -6010,10 +5990,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               </div>
 
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">Gross Weight (KG)</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Gross Weight (KG)</label>
                 <input 
                   type="number"
-                  className="w-full rounded-lg p-2.5 text-sm font-mono text-emerald-400 font-bold border border-white/15 bg-black/40 focus:border-amber-400 outline-none"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm font-mono text-emerald-400 font-bold border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.grossWeight || extracted.totalWeight || ''}
                   onChange={(e) => {
                     const val = parseFloat(e.target.value);
@@ -6027,34 +6007,34 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
         </div>
 
-        {/* Cargo Document Upload Section (Builty copy, Weight Slip, Challan) */}
-        <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-3">
+        {/* Cargo Document Upload Section */}
+        <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-3.5 shadow-md">
           <div className="flex items-center justify-between">
-            <h4 className="text-amber-400 text-sm font-bold uppercase flex items-center gap-2">
-              <UploadCloud size={16} /> Cargo Document Upload (Builty, Weight Slip, Challan)
+            <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-2">
+              <UploadCloud size={16} /> Attached Cargo Documents (Builty, Weight Slip, Challan)
             </h4>
-            <span className="text-xs text-gray-400">
-              {uploadedDocs.length} {uploadedDocs.length === 1 ? 'file attached' : 'files attached'}
+            <span className="text-xs text-slate-400 font-mono">
+              {uploadedDocs.length} {uploadedDocs.length === 1 ? 'file' : 'files'}
             </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {uploadedDocs.map((doc, docIdx) => (
-              <div key={`up_doc_${doc.id || docIdx}_${docIdx}`} className="p-3 bg-white/5 border border-white/10 rounded-xl flex items-center justify-between gap-2">
+              <div key={`up_doc_${doc.id || docIdx}_${docIdx}`} className="p-3 bg-slate-950 border border-white/10 rounded-xl flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20">
+                  <div className="w-9 h-9 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20">
                     <FileText size={16} />
                   </div>
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-white truncate">{doc.name}</p>
-                    <p className="text-[10px] text-gray-400">{(doc.size / 1024).toFixed(1)} KB</p>
+                    <p className="text-[11px] text-slate-400">{(doc.size / 1024).toFixed(1)} KB</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
                     onClick={() => setLightboxImage(doc.url)}
-                    className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+                    className="h-8 w-8 flex items-center justify-center text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
                     title="View Document"
                   >
                     <Eye size={14} />
@@ -6069,7 +6049,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                       });
                       setFiles(prev => prev.filter(f => f.name !== doc.name));
                     }}
-                    className="p-1.5 text-red-400 hover:text-red-300 rounded-lg hover:bg-red-500/10 transition-colors"
+                    className="h-8 w-8 flex items-center justify-center text-red-400 hover:text-red-300 rounded-lg hover:bg-red-500/10 transition-colors cursor-pointer"
                     title="Remove File"
                   >
                     <Trash2 size={14} />
@@ -6079,9 +6059,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             ))}
 
             {/* Quick Upload Button */}
-            <label className="p-3 border border-dashed border-amber-500/40 hover:border-amber-400 bg-amber-500/5 hover:bg-amber-500/10 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors text-amber-300 text-xs font-medium">
+            <label className="h-14 px-4 border border-dashed border-amber-500/40 hover:border-amber-400 bg-amber-500/5 hover:bg-amber-500/10 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors text-amber-300 text-xs font-semibold">
               <Plus size={16} />
-              <span>Attach Additional Document</span>
+              <span>Attach Document</span>
               <input 
                 type="file" 
                 multiple 
@@ -6096,7 +6076,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
         </div>
 
-        {/* Operational Logistics Services & Charges (Arranged by DPL vs Client) */}
+        {/* Operational Logistics Services & Charges */}
         {renderServiceArrangementsSection(false)}
       </div>
     );
@@ -6112,43 +6092,56 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     }
 
     return (
-      <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
-        {/* Compact Single-Line Document Status Bar */}
-        <div className="flex items-center justify-between gap-3 px-3 py-1.5 rounded-lg bg-emerald-950/30 border border-emerald-500/20 text-xs">
-          <div className="flex items-center gap-2 min-w-0">
-            <CheckCircle size={14} className="text-emerald-400 shrink-0" />
-            <span className="font-medium text-emerald-200 text-xs truncate">
-              Your documents have been read
-            </span>
+      <div className="space-y-5 animate-in fade-in slide-in-from-right-4">
+        {/* Step 2 Header Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-white/15 shadow-md">
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
+              <FileCheck size={20} />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base sm:text-lg font-bold text-white">Step 2: Review Extracted Shipment & Cargo Details</h3>
+                <span className="text-xs font-mono font-semibold text-emerald-300 bg-emerald-500/15 px-2.5 py-0.5 rounded-lg border border-emerald-500/30">
+                  {autoFilledCount} Fields Populated
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Verify or edit shipper, consignee, B/L, commercial invoice, and service charge arrangements below.
+              </p>
+            </div>
           </div>
-          <span className="text-[10px] font-mono text-emerald-300/90 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 shrink-0">
-            {autoFilledCount} fields read
-          </span>
+          <button
+            type="button"
+            onClick={() => setStep(1)}
+            className="h-9 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10 text-xs font-semibold flex items-center gap-1.5 self-start sm:self-auto transition cursor-pointer"
+          >
+            <UploadCloud size={14} className="text-amber-400" />
+            <span>Upload More Docs</span>
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {/* Group 1: Parties Involved */}
-          <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h4 className="text-brand-400 text-sm font-bold uppercase flex items-center gap-1.5">
-                <User size={15} /> Parties Involved
+          <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-4 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <User size={15} /> 1. Parties Involved
               </h4>
-              <span className="text-[10px] text-gray-400">Shipper & Consignee</span>
+              <span className="text-xs text-slate-400">Shipper & Consignee</span>
             </div>
 
             <div className="space-y-3">
               <div>
                 <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">Shipper Name</label>
-                  {extracted.shipperName ? (
-                    <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={10} /> Read from doc</span>
-                  ) : (
-                    <span className="text-[10px] text-amber-400/80">Manual entry</span>
+                  <label className="text-xs text-slate-300 font-semibold">Shipper Name</label>
+                  {extracted.shipperName && (
+                    <span className="text-[11px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={10} /> Auto-filled</span>
                   )}
                 </div>
                 <input 
-                  className={`w-full rounded-lg p-2.5 text-sm text-white transition-colors outline-none border ${
-                    extracted.shipperName ? 'border-emerald-500/30 bg-emerald-500/5 focus:border-emerald-400' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 text-sm text-white transition-colors outline-none border ${
+                    extracted.shipperName ? 'border-emerald-500/40 bg-emerald-950/15 focus:border-emerald-400' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.shipperName || ''} 
                   onChange={(e) => updateExtractedData('shipperName', e.target.value)} 
@@ -6157,17 +6150,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               </div>
 
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">Shipper Address</label>
-                  {extracted.shipperAddress ? (
-                    <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={10} /> Read from doc</span>
-                  ) : (
-                    <span className="text-[10px] text-amber-400/80">Manual entry</span>
-                  )}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Shipper Address</label>
                 <textarea 
-                  className={`w-full rounded-lg p-2.5 text-sm h-16 text-white transition-colors outline-none border resize-none ${
-                    extracted.shipperAddress ? 'border-emerald-500/30 bg-emerald-500/5 focus:border-emerald-400' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full rounded-xl p-3 text-sm h-16 text-white transition-colors outline-none border resize-none ${
+                    extracted.shipperAddress ? 'border-emerald-500/40 bg-emerald-950/15 focus:border-emerald-400' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.shipperAddress || ''} 
                   onChange={(e) => updateExtractedData('shipperAddress', e.target.value)} 
@@ -6175,20 +6161,20 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="text-xs text-gray-300 block mb-1">Shipper Contact</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">Shipper Contact</label>
                   <input 
-                    className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
                     value={extracted.shipperContact || ''} 
                     onChange={(e) => updateExtractedData('shipperContact', e.target.value)} 
                     placeholder="Phone No." 
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-300 block mb-1">Shipper Email</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">Shipper Email</label>
                   <input 
-                    className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
                     value={extracted.shipperEmail || ''} 
                     onChange={(e) => updateExtractedData('shipperEmail', e.target.value)} 
                     placeholder="Email" 
@@ -6200,16 +6186,14 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             <div className="space-y-3 pt-3 border-t border-white/10">
               <div>
                 <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">Consignee Name</label>
-                  {extracted.consigneeName ? (
-                    <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={10} /> Read from doc</span>
-                  ) : (
-                    <span className="text-[10px] text-amber-400/80">Manual entry</span>
+                  <label className="text-xs text-slate-300 font-semibold">Consignee Name</label>
+                  {extracted.consigneeName && (
+                    <span className="text-[11px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={10} /> Auto-filled</span>
                   )}
                 </div>
                 <input 
-                  className={`w-full rounded-lg p-2.5 text-sm text-white transition-colors outline-none border ${
-                    extracted.consigneeName ? 'border-emerald-500/30 bg-emerald-500/5 focus:border-emerald-400' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 text-sm text-white transition-colors outline-none border ${
+                    extracted.consigneeName ? 'border-emerald-500/40 bg-emerald-950/15 focus:border-emerald-400' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.consigneeName || ''} 
                   onChange={(e) => updateExtractedData('consigneeName', e.target.value)} 
@@ -6218,17 +6202,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               </div>
 
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">Consignee Address</label>
-                  {extracted.consigneeAddress ? (
-                    <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={10} /> Read from doc</span>
-                  ) : (
-                    <span className="text-[10px] text-amber-400/80">Manual entry</span>
-                  )}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Consignee Address</label>
                 <textarea 
-                  className={`w-full rounded-lg p-2.5 text-sm h-16 text-white transition-colors outline-none border resize-none ${
-                    extracted.consigneeAddress ? 'border-emerald-500/30 bg-emerald-500/5 focus:border-emerald-400' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full rounded-xl p-3 text-sm h-16 text-white transition-colors outline-none border resize-none ${
+                    extracted.consigneeAddress ? 'border-emerald-500/40 bg-emerald-950/15 focus:border-emerald-400' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.consigneeAddress || ''} 
                   onChange={(e) => updateExtractedData('consigneeAddress', e.target.value)} 
@@ -6236,20 +6213,20 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="text-xs text-gray-300 block mb-1">Consignee Contact</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">Consignee Contact</label>
                   <input 
-                    className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
                     value={extracted.consigneeContact || ''} 
                     onChange={(e) => updateExtractedData('consigneeContact', e.target.value)} 
                     placeholder="Phone No." 
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-300 block mb-1">Consignee Email</label>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">Consignee Email</label>
                   <input 
-                    className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
                     value={extracted.consigneeEmail || ''} 
                     onChange={(e) => updateExtractedData('consigneeEmail', e.target.value)} 
                     placeholder="Email" 
@@ -6260,85 +6237,76 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
 
           {/* Group 2: Shipping Line & B/L Details */}
-          <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h4 className="text-brand-400 text-sm font-bold uppercase flex items-center gap-1.5">
-                <Ship size={15} /> Bill of Lading & Maritime Route
+          <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-3.5 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <Ship size={15} /> 2. Bill of Lading & Route
               </h4>
-              <span className="text-[10px] text-blue-300 font-mono bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
-                B/L Intelligence
+              <span className="text-xs text-sky-300 font-mono bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
+                B/L & GD
               </span>
             </div>
 
             {/* Bill of Lading */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
                 <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">B/L Number</label>
-                  {extracted.blNumber && <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={9} /> Read</span>}
+                  <label className="text-xs text-slate-300 font-semibold">B/L Number</label>
+                  {extracted.blNumber && <span className="text-[11px] text-emerald-400">✓</span>}
                 </div>
                 <input 
-                  className={`w-full rounded-lg p-2 text-sm text-white font-mono outline-none border ${
-                    extracted.blNumber ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                    extracted.blNumber ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.blNumber || ''} 
                   onChange={(e) => updateExtractedData('blNumber', e.target.value)} 
-                  placeholder="e.g. MSKU12345678"
+                  placeholder="MSKU12345678"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-300 block mb-1">B/L Date</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">B/L Date</label>
                 <input 
                   type="date" 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
                   value={extracted.blDate || ''} 
                   onChange={(e) => updateExtractedData('blDate', e.target.value)} 
                 />
               </div>
             </div>
 
-            {/* Shipping Line & Vessel */}
-            <div className="grid grid-cols-2 gap-2">
+            {/* Shipping Line & Agent */}
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">Shipping Line</label>
-                  {extracted.shippingLine && <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={9} /> Read</span>}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Shipping Line</label>
                 <input 
-                  className={`w-full rounded-lg p-2 text-sm text-white outline-none border ${
-                    extracted.shippingLine ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                    extracted.shippingLine ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.shippingLine || ''} 
                   onChange={(e) => updateExtractedData('shippingLine', e.target.value)} 
-                  placeholder="e.g. Maersk, MSC, COSCO"
+                  placeholder="Maersk, MSC, COSCO"
                 />
               </div>
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">Shipping Agent</label>
-                  {extracted.shippingAgent && <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={9} /> Read</span>}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Shipping Agent</label>
                 <input 
-                  className={`w-full rounded-lg p-2 text-sm text-white outline-none border ${
-                    extracted.shippingAgent ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                    extracted.shippingAgent ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.shippingAgent || ''} 
                   onChange={(e) => updateExtractedData('shippingAgent', e.target.value)} 
-                  placeholder="e.g. RIAZEDA (PVT) LTD"
+                  placeholder="Agent Name"
                 />
               </div>
             </div>
 
             {/* Vessel Name & Voyage No */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">Vessel Name</label>
-                  {extracted.vesselName && <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={9} /></span>}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Vessel Name</label>
                 <input 
-                  className={`w-full rounded-lg p-2 text-sm text-white outline-none border ${
-                    extracted.vesselName ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                    extracted.vesselName ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.vesselName || ''} 
                   onChange={(e) => updateExtractedData('vesselName', e.target.value)} 
@@ -6346,9 +6314,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-300 block mb-1">Voyage No.</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Voyage No.</label>
                 <input 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none font-mono" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
                   value={extracted.voyageNo || ''} 
                   onChange={(e) => updateExtractedData('voyageNo', e.target.value)} 
                   placeholder="e.g. 2401E"
@@ -6357,49 +6325,43 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </div>
 
             {/* POL & POD */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">Port of Loading (POL)</label>
-                  {extracted.pol && <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={9} /></span>}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Port of Loading (POL)</label>
                 <input 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
                   value={extracted.pol || ''} 
                   onChange={(e) => updateExtractedData('pol', e.target.value)} 
-                  placeholder="e.g. Shanghai, Jebel Ali"
+                  placeholder="Karachi / QICT"
                 />
               </div>
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">Port of Discharge (POD)</label>
-                  {extracted.pod && <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={9} /></span>}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Port of Discharge (POD)</label>
                 <input 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
                   value={extracted.pod || ''} 
                   onChange={(e) => updateExtractedData('pod', e.target.value)} 
-                  placeholder="e.g. Karachi, Port Qasim"
+                  placeholder="Lahore / Quetta"
                 />
               </div>
             </div>
 
             {/* Free Days & Freight Terms */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
-                <label className="text-xs text-gray-300 block mb-1">Demurrage Free Days</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Demurrage Free Days</label>
                 <input 
                   type="number"
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
                   value={extracted.freeDays || ''} 
                   onChange={(e) => updateExtractedData('freeDays', parseInt(e.target.value) || 0)} 
-                  placeholder="e.g. 14 Days"
+                  placeholder="14"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-300 block mb-1">Freight Terms</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Freight Terms</label>
                 <select
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none"
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.freightTerms || 'Prepaid'}
                   onChange={(e) => updateExtractedData('freightTerms', e.target.value)}
                 >
@@ -6411,26 +6373,23 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </div>
 
             {/* Goods Declaration (GD/TP) & IGM */}
-            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/10">
+            <div className="grid grid-cols-2 gap-2.5 pt-2.5 border-t border-white/10">
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">( GD/TP Number )</label>
-                  {extracted.gdNo && <span className="text-[10px] text-emerald-400"><CheckCircle size={9} /></span>}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">GD / TP Number</label>
                 <input 
-                  className={`w-full rounded-lg p-2 text-sm text-white outline-none border ${
-                    extracted.gdNo ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                    extracted.gdNo ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.gdNo || ''} 
                   onChange={(e) => updateExtractedData('gdNo', e.target.value)} 
-                  placeholder="e.g. KAPE-HC-12345 / TP-98765"
+                  placeholder="KAPE-HC-12345"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-300 block mb-1">( GD/TP Date )</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">GD / TP Date</label>
                 <input 
                   type="date" 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
                   value={extracted.gdDate || ''} 
                   onChange={(e) => updateExtractedData('gdDate', e.target.value)} 
                 />
@@ -6438,20 +6397,20 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </div>
 
             {/* IGM No & Index No */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
-                <label className="text-xs text-gray-300 block mb-1">IGM No</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">IGM No</label>
                 <input 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none font-mono" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
                   value={extracted.igmNo || ''} 
                   onChange={(e) => updateExtractedData('igmNo', e.target.value)} 
                   placeholder="IGM Number"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-300 block mb-1">Index No</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Index No</label>
                 <input 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none font-mono" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
                   value={extracted.indexNo || ''} 
                   onChange={(e) => updateExtractedData('indexNo', e.target.value)} 
                   placeholder="Index No"
@@ -6461,37 +6420,34 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
 
           {/* Group 3: Commercial Invoice & Packing Specifications */}
-          <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h4 className="text-brand-400 text-sm font-bold uppercase flex items-center gap-1.5">
-                <Receipt size={15} /> Commercial Invoice & Packing List
+          <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-3.5 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <Receipt size={15} /> 3. Commercial Invoice & Cargo
               </h4>
-              <span className="text-[10px] text-amber-300 font-mono bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                Invoice & Cargo Data
+              <span className="text-xs text-amber-300 font-mono bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                Manifest
               </span>
             </div>
 
             {/* Commercial Invoice No & Date */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">Commercial Invoice No.</label>
-                  {extracted.invoiceNo && <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={9} /> Read</span>}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Commercial Invoice No.</label>
                 <input 
-                  className={`w-full rounded-lg p-2 text-sm text-white outline-none border font-mono ${
-                    extracted.invoiceNo ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border font-mono ${
+                    extracted.invoiceNo ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.invoiceNo || ''} 
                   onChange={(e) => updateExtractedData('invoiceNo', e.target.value)} 
-                  placeholder="e.g. INV-2024-8891"
+                  placeholder="INV-2025-8891"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-300 block mb-1">Invoice Date</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Invoice Date</label>
                 <input 
                   type="date" 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
                   value={extracted.invoiceDate || ''} 
                   onChange={(e) => updateExtractedData('invoiceDate', e.target.value)} 
                 />
@@ -6499,16 +6455,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </div>
 
             {/* Invoice Value & Currency */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2.5">
               <div className="col-span-2">
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">Invoice Value</label>
-                  {extracted.invoiceValue && <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={9} /> Read</span>}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Invoice Value</label>
                 <input 
                   type="number" 
-                  className={`w-full rounded-lg p-2 text-sm text-white outline-none border ${
-                    extracted.invoiceValue ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                    extracted.invoiceValue ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.invoiceValue || ''} 
                   onChange={(e) => updateExtractedData('invoiceValue', parseFloat(e.target.value))} 
@@ -6516,9 +6469,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-300 block mb-1">Currency</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Currency</label>
                 <select
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none"
+                  className="w-full h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.invoiceCurrency || 'USD'}
                   onChange={(e) => updateExtractedData('invoiceCurrency', e.target.value)}
                 >
@@ -6527,17 +6480,17 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   <option value="EUR">EUR (€)</option>
                   <option value="CNY">CNY (¥)</option>
                   <option value="GBP">GBP (£)</option>
-                  <option value="AED">AED (Dirham)</option>
+                  <option value="AED">AED</option>
                 </select>
               </div>
             </div>
 
             {/* Incoterms & HS Code */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
-                <label className="text-xs text-gray-300 block mb-1">Incoterms</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Incoterms</label>
                 <select
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none font-medium"
+                  className="w-full h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
                   value={extracted.incoTerms || 'CIF'}
                   onChange={(e) => updateExtractedData('incoTerms', e.target.value)}
                 >
@@ -6546,16 +6499,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   <option value="FOB">FOB — Free on Board</option>
                   <option value="EXW">EXW — Ex Works</option>
                   <option value="DDP">DDP — Delivered Duty Paid</option>
-                  <option value="CIP">CIP — Carriage and Insurance Paid</option>
+                  <option value="CIP">CIP — Carriage & Insurance</option>
                 </select>
               </div>
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium">HS / PCT Code</label>
-                  {extracted.hsCode && <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={9} /></span>}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">HS / PCT Code</label>
                 <input 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none font-mono" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
                   value={extracted.hsCode || ''} 
                   onChange={(e) => updateExtractedData('hsCode', e.target.value)} 
                   placeholder="e.g. 8471.30"
@@ -6565,13 +6515,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
             {/* Item Name / Description */}
             <div>
-              <div className="flex justify-between items-center mb-1">
-                <label className="text-xs text-gray-300 font-medium">Cargo Description</label>
-                {extracted.itemName && <span className="text-[10px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={9} /></span>}
-              </div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">Cargo Description</label>
               <input 
-                className={`w-full rounded-lg p-2 text-sm text-white outline-none border ${
-                  extracted.itemName ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                className={`w-full h-10 rounded-xl px-3.5 text-sm text-white outline-none border ${
+                  extracted.itemName ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                 }`}
                 value={extracted.itemName || ''} 
                 onChange={(e) => updateExtractedData('itemName', e.target.value)} 
@@ -6580,21 +6527,21 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </div>
 
             {/* Packing List: Packaging & Count */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
-                <label className="text-xs text-gray-300 block mb-1">Packaging Type</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Packaging Type</label>
                 <input 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
                   value={extracted.packagingType || ''} 
                   onChange={(e) => updateExtractedData('packagingType', e.target.value)} 
                   placeholder="Cartons, Pallets, Drums"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-300 block mb-1">No. of Packages / Cartons</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">No. of Packages</label>
                 <input 
                   type="number" 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
                   value={extracted.packageCount || ''} 
                   onChange={(e) => updateExtractedData('packageCount', parseFloat(e.target.value))} 
                   placeholder="e.g. 850"
@@ -6603,16 +6550,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </div>
 
             {/* Packing List: Gross Weight, Net Weight & Volume CBM */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2.5">
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-gray-300 font-medium truncate">Gross Wt (Kg)</label>
-                  {(extracted.grossWeight || extracted.totalWeight) && <span className="text-[10px] text-emerald-400">✓</span>}
-                </div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1 truncate">Gross Wt (KG)</label>
                 <input 
                   type="number" 
-                  className={`w-full rounded-lg p-2 text-sm text-white outline-none border ${
-                    (extracted.grossWeight || extracted.totalWeight) ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/15 bg-black/40 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-2.5 text-sm text-emerald-400 font-mono font-bold outline-none border ${
+                    (extracted.grossWeight || extracted.totalWeight) ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
                   value={extracted.grossWeight || extracted.totalWeight || ''} 
                   onChange={(e) => {
@@ -6620,123 +6564,131 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     updateExtractedData('grossWeight', val);
                     updateExtractedData('totalWeight', val);
                   }} 
-                  placeholder="Gross Kgs"
+                  placeholder="Gross KG"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-300 block mb-1 truncate">Net Wt (Kg)</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1 truncate">Net Wt (KG)</label>
                 <input 
                   type="number" 
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                  className="w-full h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
                   value={extracted.netWeight || ''} 
                   onChange={(e) => updateExtractedData('netWeight', parseFloat(e.target.value))} 
-                  placeholder="Net Kgs"
+                  placeholder="Net KG"
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-300 block mb-1 truncate">Volume (CBM)</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1 truncate">Volume (CBM)</label>
                 <input 
                   type="number" 
                   step="0.01"
-                  className="w-full rounded-lg p-2 text-sm text-white border border-white/15 bg-black/40 focus:border-brand-400 outline-none" 
+                  className="w-full h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
                   value={extracted.volumeCBM || ''} 
                   onChange={(e) => updateExtractedData('volumeCBM', parseFloat(e.target.value))} 
-                  placeholder="e.g. 54.2"
+                  placeholder="54.2"
                 />
               </div>
             </div>
           </div>
         </div>
 
-        {/* Operational Logistics Services & Charges (Arranged by DPL vs Client) */}
+        {/* Operational Logistics Services & Charges (Arranged by Company vs Client) */}
         {renderServiceArrangementsSection(false)}
       </div>
     );
   };
 
   const renderStep6_Containers = () => (
-    <div className="space-y-4 animate-in fade-in slide-in-from-right-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
-        <div>
-          <h3 className="text-lg sm:text-xl font-semibold text-white">Step 3: Containers Manifest</h3>
-          <p className="text-xs text-gray-400">Containers identified from shipping documents or added manually</p>
+    <div className="space-y-5 animate-in fade-in slide-in-from-right-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-white/15 shadow-md">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
+            <Box size={20} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base sm:text-lg font-bold text-white">Step 3: Containers Manifest</h3>
+              <span className="text-xs font-mono font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 rounded-lg">
+                {formData.containers.length} {formData.containers.length === 1 ? 'Container' : 'Containers'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 mt-0.5">
+              Verify container numbers, equipment sizes, cargo weights, and customs seal numbers.
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <span className="text-xs font-mono text-brand-300 bg-brand-500/10 border border-brand-500/20 px-3 py-1.5 rounded-lg">
-            Total: {formData.containers.length} {formData.containers.length === 1 ? 'Container' : 'Containers'}
-          </span>
-          <button 
-            type="button"
-            onClick={addContainer}
-            className="bg-brand-600 hover:bg-brand-500 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-lg shadow-brand-600/30 transition-all"
-          >
-            <Box size={16} /> Add Container
-          </button>
-        </div>
+        <button 
+          type="button"
+          onClick={addContainer}
+          className="h-10 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 shadow-md transition-all self-start sm:self-auto cursor-pointer"
+        >
+          <Plus size={16} />
+          <span>Add Container</span>
+        </button>
       </div>
       
-      {/* Mobile View (Cards) - Optimized for vertical thumb scrolling */}
-      <div className="block sm:hidden space-y-3 touch-pan-y">
+      {/* Mobile View (Cards) */}
+      <div className="block sm:hidden space-y-3.5">
         {formData.containers.map((c: any, index: number) => (
-          <div key={`cntr_card_${c.id || index}_${index}`} className="glass-panel border border-white/10 p-3.5 rounded-xl space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-bold text-brand-400 bg-brand-500/10 border border-brand-500/20 px-2 py-0.5 rounded">
+          <div key={`cntr_card_${c.id || index}_${index}`} className="rounded-2xl border border-white/15 bg-slate-900/90 p-4 space-y-3.5 shadow-md">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <span className="text-xs font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2.5 py-1 rounded-lg">
                 Container #{index + 1}
               </span>
               <button 
                 type="button"
                 onClick={() => removeContainer(c.id)}
-                className="p-1 rounded text-red-400 hover:text-red-300 hover:bg-red-500/20 transition-colors"
+                className="h-8 w-8 flex items-center justify-center rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/15 transition-colors cursor-pointer"
                 title="Remove container"
               >
-                <Trash2 size={16} />
+                <Trash2 size={15} />
               </button>
             </div>
 
             <div>
-              <label className="text-[10px] text-gray-400 uppercase font-semibold block mb-1">Container Number</label>
+              <label className="text-xs text-slate-300 font-semibold block mb-1.5">Container Number</label>
               <input 
                 type="text" 
                 placeholder="e.g. MSKU1234567"
                 value={c.number} 
                 onChange={(e) => updateContainer(c.id, 'number', e.target.value)}
-                className="glass-input rounded-lg px-3 py-2 w-full outline-none text-sm text-white font-mono"
+                className="w-full h-10 rounded-xl px-3.5 bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[10px] text-gray-400 uppercase font-semibold block mb-1">Size</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Size</label>
                 <select 
                   value={c.size} 
                   onChange={(e) => updateContainer(c.id, 'size', e.target.value)}
-                  className="glass-input rounded-lg px-2.5 py-2 w-full outline-none text-xs text-white bg-slate-900"
+                  className="w-full h-10 rounded-xl px-3 bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white"
                 >
-                  <option value="20ft" className="bg-slate-900 text-white">20ft</option>
-                  <option value="40ft" className="bg-slate-900 text-white">40ft</option>
-                  <option value="45ft" className="bg-slate-900 text-white">45ft</option>
+                  <option value="20ft">20ft Standard</option>
+                  <option value="40ft">40ft High Cube</option>
+                  <option value="45ft">45ft</option>
                 </select>
               </div>
               <div>
-                <label className="text-[10px] text-gray-400 uppercase font-semibold block mb-1">Weight (Kg)</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Weight (KG)</label>
                 <input 
                   type="number" 
                   placeholder="0"
                   value={c.weight} 
                   onChange={(e) => updateContainer(c.id, 'weight', parseFloat(e.target.value) || 0)}
-                  className="glass-input rounded-lg px-2.5 py-2 w-full outline-none text-xs text-white"
+                  className="w-full h-10 rounded-xl px-3 bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-emerald-400 font-mono font-bold"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-[10px] text-gray-400 uppercase font-semibold block mb-1">Seal Number (Optional)</label>
+              <label className="text-xs text-slate-300 font-semibold block mb-1.5">Seal Number (Optional)</label>
               <input 
                 type="text" 
                 placeholder="e.g. SL-98765"
-                value={c.seal || ''} 
+                value={c.seal || c.sealNo || ''} 
                 onChange={(e) => updateContainer(c.id, 'seal', e.target.value)}
-                className="glass-input rounded-lg px-3 py-2 w-full outline-none text-xs text-white"
+                className="w-full h-10 rounded-xl px-3.5 bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono"
               />
             </div>
           </div>
@@ -6744,65 +6696,65 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       </div>
 
       {/* Desktop View (Table) */}
-      <div className="hidden sm:block glass-panel border border-white/10 rounded-xl overflow-hidden overflow-x-auto custom-scrollbar touch-pan-y">
-        <table className="w-full text-left text-sm text-gray-200 min-w-[650px]"> 
-          <thead className="bg-white/5 uppercase text-[11px] font-semibold text-gray-300 border-b border-white/10">
+      <div className="hidden sm:block rounded-2xl border border-white/15 bg-slate-900/90 overflow-hidden overflow-x-auto custom-scrollbar shadow-md">
+        <table className="w-full text-left text-sm text-slate-200 min-w-[680px]"> 
+          <thead className="bg-slate-950 uppercase text-xs font-bold text-slate-300 border-b border-white/10">
             <tr>
-              <th className="p-3 sm:p-4 w-12 text-center">#</th>
-              <th className="p-3 sm:p-4">Container No</th>
-              <th className="p-3 sm:p-4 w-32">Size</th>
-              <th className="p-3 sm:p-4 w-36">Weight (Kg)</th>
-              <th className="p-3 sm:p-4 w-36">Seal No</th>
-              <th className="p-3 sm:p-4 w-16 text-center">Action</th>
+              <th className="py-3.5 px-4 w-14 text-center">#</th>
+              <th className="py-3.5 px-4">Container Number</th>
+              <th className="py-3.5 px-4 w-40">Container Size</th>
+              <th className="py-3.5 px-4 w-44">Gross Weight (KG)</th>
+              <th className="py-3.5 px-4 w-44">Customs Seal No</th>
+              <th className="py-3.5 px-4 w-20 text-center">Action</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/5">
+          <tbody className="divide-y divide-white/10">
             {formData.containers.map((c: any, index: number) => (
-              <tr key={`cntr_row_${c.id || index}_${index}`} className="hover:bg-white/5 transition-colors">
-                <td className="p-3 text-center text-gray-400 font-mono text-xs">{index + 1}</td>
-                <td className="p-3">
+              <tr key={`cntr_row_${c.id || index}_${index}`} className="hover:bg-white/[0.03] transition-colors">
+                <td className="p-3.5 text-center text-slate-400 font-mono text-xs font-bold">{index + 1}</td>
+                <td className="p-3.5">
                   <input 
                     type="text" 
                     placeholder="e.g. MSKU1234567"
                     value={c.number} 
                     onChange={(e) => updateContainer(c.id, 'number', e.target.value)}
-                    className="glass-input rounded-lg px-3 py-1.5 w-full outline-none text-sm text-white font-mono"
+                    className="h-10 rounded-xl px-3.5 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono font-semibold"
                   />
                 </td>
-                <td className="p-3">
+                <td className="p-3.5">
                   <select 
                     value={c.size} 
                     onChange={(e) => updateContainer(c.id, 'size', e.target.value)}
-                    className="glass-input rounded-lg px-3 py-1.5 w-full outline-none text-sm text-white bg-slate-900"
+                    className="h-10 rounded-xl px-3 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white"
                   >
-                    <option value="20ft" className="bg-slate-900 text-white">20ft</option>
-                    <option value="40ft" className="bg-slate-900 text-white">40ft</option>
-                    <option value="45ft" className="bg-slate-900 text-white">45ft</option>
+                    <option value="20ft">20ft</option>
+                    <option value="40ft">40ft</option>
+                    <option value="45ft">45ft</option>
                   </select>
                 </td>
-                <td className="p-3">
+                <td className="p-3.5">
                   <input 
                     type="number" 
                     placeholder="0"
                     value={c.weight} 
                     onChange={(e) => updateContainer(c.id, 'weight', parseFloat(e.target.value) || 0)}
-                    className="glass-input rounded-lg px-3 py-1.5 w-full outline-none text-sm text-white"
+                    className="h-10 rounded-xl px-3.5 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-emerald-400 font-mono font-bold"
                   />
                 </td>
-                <td className="p-3">
+                <td className="p-3.5">
                   <input 
                     type="text" 
-                    placeholder="Optional"
-                    value={c.seal || ''} 
+                    placeholder="Seal No (Optional)"
+                    value={c.seal || c.sealNo || ''} 
                     onChange={(e) => updateContainer(c.id, 'seal', e.target.value)}
-                    className="glass-input rounded-lg px-3 py-1.5 w-full outline-none text-sm text-white"
+                    className="h-10 rounded-xl px-3.5 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono"
                   />
                 </td>
-                <td className="p-3 text-center">
+                <td className="p-3.5 text-center">
                   <button 
                     type="button"
                     onClick={() => removeContainer(c.id)}
-                    className="p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/20 transition-colors"
+                    className="h-9 w-9 mx-auto flex items-center justify-center rounded-xl text-red-400 hover:text-red-300 hover:bg-red-500/15 transition-colors cursor-pointer"
                     title="Remove container"
                   >
                     <Trash2 size={16} />
@@ -6814,16 +6766,16 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         </table>
       </div>
 
-      <div className="p-3.5 rounded-xl bg-slate-900/60 border border-white/10 text-xs text-gray-400 flex items-center justify-between">
+      <div className="p-4 rounded-2xl bg-slate-900/90 border border-white/15 text-xs sm:text-sm text-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
         <div className="flex items-center gap-2.5">
-          <div className="p-1 rounded bg-brand-500/20 text-brand-300">
-            <Box size={14} />
+          <div className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center border border-amber-500/30 shrink-0">
+            <Box size={15} />
           </div>
           <span>
-            {formData.containers.length} container{formData.containers.length === 1 ? '' : 's'} recorded. Additional containers can be added anytime.
+            <strong className="text-white">{formData.containers.length}</strong> container{formData.containers.length === 1 ? '' : 's'} listed in manifest.
           </span>
         </div>
-        <span className="font-mono text-xs text-emerald-400 font-semibold">
+        <span className="font-mono text-sm text-emerald-400 font-bold">
           Total Cargo Weight: {formData.containers.reduce((sum: number, c: any) => sum + (Number(c.weight) || 0), 0).toLocaleString()} KG
         </span>
       </div>
@@ -6833,25 +6785,28 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   const renderStep7_Submit = () => {
     if (isCaseSubmitted) {
       return (
-        <div className="text-center py-10 px-4 animate-in zoom-in duration-300 max-w-2xl mx-auto">
-          <div className="bg-emerald-500/10 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-5 border-4 border-emerald-500/30 shadow-[0_0_30px_rgba(16,185,129,0.2)]">
-            <CheckCircle className="text-emerald-400" size={44} />
+        <div className="text-center py-10 px-4 animate-in zoom-in duration-300 max-w-2xl mx-auto space-y-6">
+          <div className="bg-emerald-500/15 rounded-full w-20 h-20 flex items-center justify-center mx-auto border-2 border-emerald-500/40 shadow-lg">
+            <CheckCircle className="text-emerald-400" size={42} />
           </div>
-          <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Case Registered Successfully!</h2>
-          <p className="text-gray-300 text-sm mb-6 max-w-lg mx-auto">
-            Your case has been registered and synced with Firebase Firestore. All cargo manifests, routes, and billing details are securely recorded.
-          </p>
+          <div className="space-y-2">
+            <h2 className="text-2xl sm:text-3xl font-bold text-white">Case Registered Successfully!</h2>
+            <p className="text-slate-300 text-sm max-w-lg mx-auto">
+              The shipment case has been registered and synchronized across all operational portals, manifests, and financial ledgers.
+            </p>
+          </div>
           
-          <div className="glass-panel inline-block rounded-2xl p-6 border border-brand-500/30 mb-8 bg-slate-900/80 shadow-xl">
-            <p className="text-xs text-gray-400 uppercase mb-1 tracking-widest font-semibold">Registered Case Number</p>
-            <p className="text-2xl sm:text-3xl font-mono text-brand-400 font-bold tracking-wider">{submittedCaseData?.caseNo || generatedCaseNo}</p>
-            <p className="text-xs text-emerald-400 mt-2 flex items-center justify-center gap-1.5 font-medium">
+          <div className="rounded-2xl p-6 border border-amber-500/30 bg-slate-900/90 shadow-xl max-w-md mx-auto">
+            <p className="text-xs text-slate-400 uppercase mb-1 tracking-wider font-semibold">Registered Case Number</p>
+            <p className="text-2xl sm:text-3xl font-mono text-amber-400 font-bold tracking-wider">{submittedCaseData?.caseNo || generatedCaseNo}</p>
+            <p className="text-xs text-emerald-400 mt-2 flex items-center justify-center gap-1.5 font-semibold">
               <CheckCircle size={14} /> Status: {submittedCaseData?.status || 'Active'}
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl mx-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl mx-auto pt-2">
             <button 
+              type="button"
               onClick={() => {
                 if (submittedCaseData) {
                   setSelectedCase(submittedCaseData);
@@ -6861,33 +6816,36 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 }
                 setIsCaseSubmitted(false);
               }} 
-              className="bg-brand-600 hover:bg-brand-500 text-white px-5 py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-brand-600/30 flex items-center justify-center gap-2"
+              className="h-11 bg-amber-500 hover:bg-amber-400 text-slate-950 px-5 rounded-xl text-sm font-bold transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
             >
               <Eye size={16} />
-              <span>Finish & View Case</span>
+              <span>Open Case Details</span>
             </button>
 
             <button 
+              type="button"
               onClick={handleStartRegistration} 
-              className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2"
+              className="h-11 bg-emerald-600 hover:bg-emerald-500 text-white px-5 rounded-xl text-sm font-bold transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
             >
               <Plus size={16} />
-              <span>Create Another Case</span>
+              <span>Register Another Case</span>
             </button>
 
             <button 
+              type="button"
               onClick={() => setShowRegistrationChargeModal(true)} 
-              className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 px-5 py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+              className="h-11 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 px-5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <DollarSign size={16} />
-              <span>Add More Charges</span>
+              <span>Add Extra Charges</span>
             </button>
 
             <button 
+              type="button"
               onClick={() => { setView('list'); setStep(1); setIsCaseSubmitted(false); }} 
-              className="bg-white/10 hover:bg-white/20 text-white px-5 py-3 rounded-xl text-sm font-semibold transition-colors border border-white/10 flex items-center justify-center gap-2"
+              className="h-11 bg-slate-800 hover:bg-slate-700 text-slate-200 px-5 rounded-xl text-sm font-semibold transition-colors border border-white/10 flex items-center justify-center gap-2 cursor-pointer"
             >
-              <span>View All Cases</span>
+              <span>Return to Case List</span>
             </button>
           </div>
         </div>
@@ -6897,39 +6855,40 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     // Step 4: Pre-submission Full Case Review
     const currentCharges = formData.charges || [];
     const totalChargesAmount = currentCharges.reduce((sum, ch) => sum + (Number(ch.amount) || 0), 0);
+    const compShort = activeCompany?.shortName || 'Company';
 
     return (
-      <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+      <div className="space-y-5 animate-in fade-in slide-in-from-right-4">
         {/* Step 4 Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-white/15 shadow-md">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-mono uppercase bg-brand-500/20 text-brand-300 px-2.5 py-0.5 rounded-full border border-brand-500/30 font-semibold">
-                Step 4 of 4: Final Review
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <span className="text-xs font-mono uppercase bg-amber-500/15 text-amber-300 px-2.5 py-0.5 rounded-lg border border-amber-500/30 font-semibold">
+                Step 4 of 4 • Final Review
               </span>
-              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+              <span className="text-xs font-mono text-emerald-300 bg-emerald-500/15 px-2.5 py-0.5 rounded-lg border border-emerald-500/30 font-semibold">
                 Ready for Registration
               </span>
             </div>
-            <h3 className="text-xl sm:text-2xl font-bold text-white">Review Case Details & Confirm</h3>
-            <p className="text-xs sm:text-sm text-gray-400">
-              Review all shipment, cargo, containers, and charges before finishing. Click Edit on any section to modify.
+            <h3 className="text-lg sm:text-xl font-bold text-white">Review Case Summary & Confirm Registration</h3>
+            <p className="text-xs text-slate-300 mt-0.5">
+              Verify route, B/L particulars, containers, and invoice charges below before registering the case.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto">
+          <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto shrink-0">
             <button
               type="button"
               onClick={() => setShowRegistrationChargeModal(true)}
-              className="text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-3.5 py-2 rounded-xl transition-colors flex items-center gap-1.5 font-medium"
+              className="h-10 px-4 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 rounded-xl text-xs sm:text-sm font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
             >
-              <Plus size={14} />
-              <span>Add More Charges</span>
+              <Plus size={15} />
+              <span>Add Charge</span>
             </button>
             <button
               type="button"
               onClick={handleFinalSubmit}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-lg shadow-emerald-600/30 transition-all hover:scale-105"
+              className="h-10 px-5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer"
             >
               <CheckCircle size={16} />
               <span>Finish & Register</span>
@@ -6938,119 +6897,119 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         </div>
 
         {/* Section 1: Route & Client Overview */}
-        <div className="glass-panel p-5 rounded-xl border border-white/10 bg-slate-900/60 space-y-3">
-          <div className="flex items-center justify-between border-b border-white/10 pb-2">
-            <h4 className="text-sm font-bold text-white uppercase flex items-center gap-2">
-              <Briefcase size={16} className="text-brand-400" />
+        <div className="rounded-2xl p-5 border border-white/15 bg-slate-900/90 space-y-3.5 shadow-md">
+          <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+            <h4 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <Briefcase size={16} className="text-amber-400" />
               <span>1. Client & Service Route</span>
             </h4>
             <button
               type="button"
               onClick={() => setStep(1)}
-              className="text-xs text-brand-300 hover:text-white bg-brand-500/10 hover:bg-brand-500/20 px-2.5 py-1 rounded-lg border border-brand-500/30 flex items-center gap-1 transition-colors"
+              className="h-8 px-3 rounded-lg text-xs font-semibold text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-white/10 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Edit size={12} />
               <span>Edit Route</span>
             </button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-            <div>
-              <span className="text-gray-400 block mb-0.5">Client / Shipper</span>
-              <span className="text-white font-semibold text-sm">{formData.client || 'General Cargo'}</span>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-1">Client / Importer</span>
+              <span className="text-white font-bold text-sm block truncate">{formData.client || 'General Cargo'}</span>
             </div>
-            <div>
-              <span className="text-gray-400 block mb-0.5">Category</span>
-              <span className="text-amber-400 font-semibold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 inline-block">
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-1">Service Category</span>
+              <span className="text-amber-300 font-semibold text-sm block truncate">
                 {formData.category}
               </span>
             </div>
-            <div>
-              <span className="text-gray-400 block mb-0.5">Port of Loading (POL)</span>
-              <span className="text-white font-medium flex items-center gap-1">
-                <MapPin size={12} className="text-red-400" /> {formData.pol || 'Karachi Port Trust'}
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-1">Port of Loading (POL)</span>
+              <span className="text-white font-semibold text-sm flex items-center gap-1.5 truncate">
+                <MapPin size={13} className="text-amber-400 shrink-0" /> {formData.pol || 'Karachi Port Trust'}
               </span>
             </div>
-            <div>
-              <span className="text-gray-400 block mb-0.5">Port of Destination (POD)</span>
-              <span className="text-white font-medium flex items-center gap-1">
-                <Anchor size={12} className="text-emerald-400" /> {formData.pod || 'Not Specified'}
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-1">Port of Destination (POD)</span>
+              <span className="text-white font-semibold text-sm flex items-center gap-1.5 truncate">
+                <Anchor size={13} className="text-emerald-400 shrink-0" /> {formData.pod || 'Not Specified'}
               </span>
             </div>
           </div>
         </div>
 
         {/* Section 2: Cargo & Shipping Details */}
-        <div className="glass-panel p-5 rounded-xl border border-white/10 bg-slate-900/60 space-y-3">
-          <div className="flex items-center justify-between border-b border-white/10 pb-2">
-            <h4 className="text-sm font-bold text-white uppercase flex items-center gap-2">
-              <FileText size={16} className="text-brand-400" />
-              <span>2. Cargo & B/L Details</span>
+        <div className="rounded-2xl p-5 border border-white/15 bg-slate-900/90 space-y-3.5 shadow-md">
+          <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+            <h4 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <FileText size={16} className="text-amber-400" />
+              <span>2. Cargo & B/L Particulars</span>
             </h4>
             <button
               type="button"
               onClick={() => setStep(2)}
-              className="text-xs text-brand-300 hover:text-white bg-brand-500/10 hover:bg-brand-500/20 px-2.5 py-1 rounded-lg border border-brand-500/30 flex items-center gap-1 transition-colors"
+              className="h-8 px-3 rounded-lg text-xs font-semibold text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-white/10 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Edit size={12} />
               <span>Edit Cargo</span>
             </button>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 text-xs">
-            <div>
-              <span className="text-gray-400 block mb-0.5">B/L or CRO Number</span>
-              <span className="text-white font-mono font-semibold">{formData.extractedData.blNumber || 'Pending'}</span>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 text-xs">
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">B/L or Waybill No</span>
+              <span className="text-white font-mono font-bold text-sm">{formData.extractedData.blNumber || 'Pending'}</span>
             </div>
-            <div>
-              <span className="text-gray-400 block mb-0.5">Consignee</span>
-              <span className="text-white font-medium">{formData.extractedData.consigneeName || 'Same as Client'}</span>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Consignee</span>
+              <span className="text-white font-semibold text-sm block truncate">{formData.extractedData.consigneeName || 'Same as Client'}</span>
             </div>
-            <div>
-              <span className="text-gray-400 block mb-0.5">Commodity / Cargo</span>
-              <span className="text-white font-medium">{formData.extractedData.itemDescription || formData.extractedData.itemName || 'Commercial Freight'}</span>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Commodity / Cargo</span>
+              <span className="text-white font-semibold text-sm block truncate">{formData.extractedData.itemDescription || formData.extractedData.itemName || 'Commercial Freight'}</span>
             </div>
-            <div>
-              <span className="text-gray-400 block mb-0.5">Total Gross Weight</span>
-              <span className="text-emerald-400 font-mono font-semibold">
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Total Gross Weight</span>
+              <span className="text-emerald-400 font-mono font-bold text-sm">
                 {formData.extractedData.totalWeight ? `${formData.extractedData.totalWeight.toLocaleString()} KG` : 'N/A'}
               </span>
             </div>
-            <div>
-              <span className="text-gray-400 block mb-0.5">Volume (CBM)</span>
-              <span className="text-white font-mono">{formData.extractedData.volumeCBM ? `${formData.extractedData.volumeCBM} CBM` : 'N/A'}</span>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Volume (CBM)</span>
+              <span className="text-white font-mono text-sm">{formData.extractedData.volumeCBM ? `${formData.extractedData.volumeCBM} CBM` : 'N/A'}</span>
             </div>
-            <div>
-              <span className="text-gray-400 block mb-0.5">Packages</span>
-              <span className="text-white font-mono">
-                {formData.extractedData.packageCount ? `${formData.extractedData.packageCount} ${formData.extractedData.packagingType || 'Packages'}` : 'N/A'}
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Packages</span>
+              <span className="text-white font-mono text-sm">
+                {formData.extractedData.packageCount ? `${formData.extractedData.packageCount} ${formData.extractedData.packagingType || 'Pkgs'}` : 'N/A'}
               </span>
             </div>
-            <div>
-              <span className="text-gray-400 block mb-0.5">Vessel / Voyage</span>
-              <span className="text-white font-medium">{formData.extractedData.vesselName || 'N/A'}</span>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Vessel / Voyage</span>
+              <span className="text-white font-semibold text-sm block truncate">{formData.extractedData.vesselName || 'N/A'}</span>
             </div>
-            <div>
-              <span className="text-gray-400 block mb-0.5">Index Number</span>
-              <span className="text-white font-mono">{formData.extractedData.indexNo || 'N/A'}</span>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Index Number</span>
+              <span className="text-white font-mono text-sm">{formData.extractedData.indexNo || 'N/A'}</span>
             </div>
           </div>
         </div>
 
         {/* Section 3: Containers Manifest */}
-        <div className="glass-panel p-5 rounded-xl border border-white/10 bg-slate-900/60 space-y-3">
-          <div className="flex items-center justify-between border-b border-white/10 pb-2">
+        <div className="rounded-2xl p-5 border border-white/15 bg-slate-900/90 space-y-3.5 shadow-md">
+          <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
             <div className="flex items-center gap-2">
-              <h4 className="text-sm font-bold text-white uppercase flex items-center gap-2">
-                <Box size={16} className="text-brand-400" />
+              <h4 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <Box size={16} className="text-amber-400" />
                 <span>3. Containers Manifest</span>
               </h4>
-              <span className="text-[10px] font-mono text-brand-300 bg-brand-500/10 border border-brand-500/20 px-2 py-0.5 rounded">
+              <span className="text-xs font-mono font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 rounded-lg">
                 {formData.containers.length} {formData.containers.length === 1 ? 'Container' : 'Containers'}
               </span>
             </div>
             <button
               type="button"
               onClick={() => setStep(3)}
-              className="text-xs text-brand-300 hover:text-white bg-brand-500/10 hover:bg-brand-500/20 px-2.5 py-1 rounded-lg border border-brand-500/30 flex items-center gap-1 transition-colors"
+              className="h-8 px-3 rounded-lg text-xs font-semibold text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-white/10 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Edit size={12} />
               <span>Edit Containers</span>
@@ -7058,27 +7017,27 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
 
           {formData.containers.length === 0 ? (
-            <p className="text-xs text-gray-400 italic py-2">No containers added yet. You can edit to add containers.</p>
+            <p className="text-xs text-slate-400 italic py-2">No containers added yet. Click Edit Containers to add.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+            <div className="overflow-x-auto rounded-xl border border-white/10">
+              <table className="w-full text-left text-xs sm:text-sm">
                 <thead>
-                  <tr className="border-b border-white/10 text-gray-400 uppercase font-semibold">
-                    <th className="py-2 px-3">#</th>
-                    <th className="py-2 px-3">Container Number</th>
-                    <th className="py-2 px-3">Size</th>
-                    <th className="py-2 px-3">Cargo Weight (KG)</th>
-                    <th className="py-2 px-3">Seal Number</th>
+                  <tr className="bg-slate-950 border-b border-white/10 text-slate-400 text-xs uppercase font-bold">
+                    <th className="py-2.5 px-3.5">#</th>
+                    <th className="py-2.5 px-3.5">Container Number</th>
+                    <th className="py-2.5 px-3.5">Size</th>
+                    <th className="py-2.5 px-3.5">Gross Weight (KG)</th>
+                    <th className="py-2.5 px-3.5">Seal Number</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5 font-mono">
+                <tbody className="divide-y divide-white/5 font-mono bg-slate-950/40">
                   {formData.containers.map((c: any, idx: number) => (
-                    <tr key={c.id || idx} className="hover:bg-white/5">
-                      <td className="py-2 px-3 text-gray-500">{idx + 1}</td>
-                      <td className="py-2 px-3 text-white font-bold">{c.number || 'Pending'}</td>
-                      <td className="py-2 px-3 text-brand-300">{c.size || '40ft'}</td>
-                      <td className="py-2 px-3 text-emerald-400 font-semibold">{c.weight ? Number(c.weight).toLocaleString() : '0'}</td>
-                      <td className="py-2 px-3 text-gray-300">{c.seal || c.sealNo || '—'}</td>
+                    <tr key={c.id || idx} className="hover:bg-white/[0.03]">
+                      <td className="py-2.5 px-3.5 text-slate-400">{idx + 1}</td>
+                      <td className="py-2.5 px-3.5 text-white font-bold">{c.number || 'Pending'}</td>
+                      <td className="py-2.5 px-3.5 text-amber-300">{c.size || '40ft'}</td>
+                      <td className="py-2.5 px-3.5 text-emerald-400 font-bold">{c.weight ? Number(c.weight).toLocaleString() : '0'}</td>
+                      <td className="py-2.5 px-3.5 text-slate-300">{c.seal || c.sealNo || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -7087,61 +7046,61 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           )}
         </div>
 
-        {/* Section 4: Operational Services Arrangement (Arranged by DPL vs Client) */}
+        {/* Section 4: Operational Services Arrangement */}
         {renderServiceArrangementsSection(true)}
 
         {/* Section 4.1: Charges & Invoicing Breakdown */}
-        <div className="glass-panel p-5 rounded-xl border border-amber-500/30 bg-slate-900/80 space-y-4">
-          <div className="flex items-center justify-between border-b border-white/10 pb-2">
+        <div className="rounded-2xl p-5 sm:p-6 border border-amber-500/30 bg-slate-900/90 space-y-4 shadow-md">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-white/10 pb-3">
             <div>
-              <h4 className="text-sm font-bold text-white uppercase flex items-center gap-2">
-                <Receipt size={16} className="text-amber-400" />
+              <h4 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <Receipt size={18} className="text-amber-400" />
                 <span>Invoice Charges & Estimated Billing Summary</span>
               </h4>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Charges automatically synced from {activeCompany?.shortName || 'Company'}-arranged services above. Client-arranged services are excluded from the invoice.
+              <p className="text-xs text-slate-300 mt-0.5">
+                Charges synced from {compShort}-arranged services above plus any custom charges. Client-arranged items are excluded.
               </p>
             </div>
             <button
               type="button"
               onClick={() => setShowRegistrationChargeModal(true)}
-              className="text-xs text-white bg-amber-600 hover:bg-amber-500 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 font-medium shadow-sm"
+              className="h-9 px-3.5 text-xs text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl transition-colors flex items-center gap-1.5 font-bold shadow-sm self-start sm:self-auto cursor-pointer"
             >
-              <Plus size={13} />
+              <Plus size={14} />
               <span>Add Custom Charge</span>
             </button>
           </div>
 
           {currentCharges.length === 0 ? (
-            <div className="p-5 text-center rounded-xl bg-white/5 border border-dashed border-white/15 text-gray-400 text-xs space-y-2">
-              <p className="text-gray-300">No automatic charges applied. Switch any service above to "{activeCompany?.shortName || 'Company'}" or add custom charges.</p>
+            <div className="p-5 text-center rounded-xl bg-slate-950/70 border border-dashed border-white/15 text-slate-300 text-xs space-y-2.5">
+              <p>No invoice charges added yet. Switch any service above to "{compShort}" or add a custom charge item.</p>
               <button
                 type="button"
                 onClick={() => setShowRegistrationChargeModal(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-semibold transition-colors"
+                className="h-9 px-4 inline-flex items-center gap-1.5 rounded-xl bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-semibold transition-colors cursor-pointer"
               >
-                <Plus size={13} />
-                <span>+ Add TP Charges / Custom Charges</span>
+                <Plus size={14} />
+                <span>Add TP / Service Charge</span>
               </button>
             </div>
           ) : (
             <div className="space-y-2">
               {currentCharges.map((ch, cIdx) => (
-                <div key={cIdx} className="flex items-center justify-between p-2.5 bg-white/5 border border-white/5 rounded-lg text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center font-mono text-[10px]">
+                <div key={cIdx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 bg-slate-950/80 border border-white/10 rounded-xl text-xs sm:text-sm">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-6 h-6 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center justify-center font-mono text-xs font-bold shrink-0">
                       {cIdx + 1}
                     </span>
-                    <span className="text-white font-medium">{ch.description}</span>
+                    <span className="text-white font-semibold">{ch.description}</span>
                     {ch.syncKey && (
-                      <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 font-mono">
-                        DPL Arranged
+                      <span className="text-[11px] text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded-md border border-emerald-500/30 font-mono">
+                        {compShort} Arranged
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="inline-flex items-center gap-1.5">
-                      <span className="text-[10px] font-mono text-emerald-500 font-bold">PKR</span>
+                  <div className="flex items-center justify-between sm:justify-end gap-3">
+                    <div className="inline-flex items-center gap-2">
+                      <span className="text-xs font-mono text-emerald-400 font-bold">PKR</span>
                       <input
                         type="number"
                         value={ch.amount ?? ''}
@@ -7163,9 +7122,8 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                             return nextState;
                           });
                         }}
-                        className="w-24 sm:w-28 bg-slate-950/90 border border-emerald-500/40 hover:border-emerald-400 focus:border-emerald-400 rounded-lg px-2 py-1 text-right font-mono font-bold text-emerald-300 text-xs outline-none transition-colors"
+                        className="w-32 h-9 bg-slate-900 border border-emerald-500/40 focus:border-emerald-400 rounded-lg px-3 text-right font-mono font-bold text-emerald-300 text-sm outline-none transition-colors"
                         placeholder="0"
-                        title="Editable Amount in PKR"
                       />
                     </div>
                     <button
@@ -7178,10 +7136,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                           setFormData(prev => ({ ...prev, charges: updated }));
                         }
                       }}
-                      className="p-1 text-red-400 hover:text-red-300 hover:bg-red-500/20 rounded transition-colors"
+                      className="h-8 w-8 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-500/15 rounded-lg transition-colors cursor-pointer"
                       title={ch.syncKey ? "Exclude from invoice (set to Client arranged)" : "Remove charge"}
                     >
-                      <Trash2 size={13} />
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
@@ -7189,11 +7147,11 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </div>
           )}
 
-          <div className="pt-3 border-t border-white/10 flex items-center justify-between">
-            <span className="text-xs sm:text-sm font-semibold uppercase text-gray-300">
-              Total Estimated Billing:
+          <div className="pt-3.5 border-t border-white/10 flex items-center justify-between">
+            <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-300">
+              Total Estimated Invoice Amount:
             </span>
-            <span className="text-lg font-bold text-amber-400 font-mono">
+            <span className="text-lg sm:text-xl font-bold text-amber-400 font-mono">
               PKR {totalChargesAmount.toLocaleString()}
             </span>
           </div>
@@ -7201,17 +7159,17 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
         {/* Section 5: Attached Documents */}
         {uploadedDocs.length > 0 && (
-          <div className="glass-panel p-4 rounded-xl border border-white/10 bg-slate-900/60 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <FileCheck size={16} className="text-emerald-400" />
-              <span className="text-xs text-gray-300 font-medium">
-                {uploadedDocs.length} Attached Shipping Document{uploadedDocs.length === 1 ? '' : 's'} verified and linked to this case.
+          <div className="rounded-2xl p-4 border border-white/15 bg-slate-900/90 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <FileCheck size={18} className="text-emerald-400 shrink-0" />
+              <span className="text-xs sm:text-sm text-slate-200 font-medium">
+                <strong>{uploadedDocs.length}</strong> Shipping Document{uploadedDocs.length === 1 ? '' : 's'} attached and linked to this case.
               </span>
             </div>
             <button
               type="button"
               onClick={() => setStep(1)}
-              className="text-xs text-brand-300 hover:text-white flex items-center gap-1"
+              className="h-8 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 hover:text-white border border-white/10 flex items-center gap-1.5 cursor-pointer"
             >
               <Edit size={12} />
               <span>Manage Docs</span>
@@ -7221,11 +7179,11 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
         {/* Step 4 Action Buttons */}
         <div className="pt-4 border-t border-white/10 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={() => setStep(3)}
-              className="bg-white/10 hover:bg-white/15 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium transition-colors border border-white/10 flex items-center gap-2"
+              className="h-11 bg-slate-800 hover:bg-slate-700 text-white px-4 rounded-xl text-xs sm:text-sm font-semibold transition-colors border border-white/15 flex items-center gap-2 cursor-pointer"
             >
               <ArrowLeft size={16} />
               <span>Back to Containers</span>
@@ -7233,26 +7191,26 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             <button
               type="button"
               onClick={() => setStep(2)}
-              className="bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-medium transition-colors border border-white/5 flex items-center gap-1.5"
+              className="h-11 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white px-4 rounded-xl text-xs sm:text-sm font-semibold transition-colors border border-white/10 flex items-center gap-1.5 cursor-pointer"
             >
               <Edit size={14} />
               <span>Edit Case Details</span>
             </button>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={() => setShowRegistrationChargeModal(true)}
-              className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center gap-1.5"
+              className="h-11 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/35 px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Plus size={15} />
-              <span>Add More Charges</span>
+              <span>Add Charge</span>
             </button>
             <button
               type="button"
               onClick={handleFinalSubmit}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 sm:px-8 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/30 transition-all hover:scale-105"
+              className="h-11 bg-emerald-600 hover:bg-emerald-500 text-white px-6 sm:px-8 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/25 transition-all cursor-pointer"
             >
               <CheckCircle size={17} />
               <span>Finish & Register Case</span>
@@ -7268,160 +7226,202 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       {view === 'list' && renderCaseList()}
       {view === 'details' && renderCaseDetails()}
       {view === 'register' && (
-        <div className="max-w-7xl mx-auto pb-12 w-full overflow-hidden">
-           <button onClick={() => setView('list')} className="text-gray-400 hover:text-white flex items-center gap-2 mb-4 text-sm font-medium transition-colors">
-              <ArrowLeft size={16} /> Cancel Registration
-           </button>
-           
-           <div className="glass-card rounded-2xl shadow-2xl flex flex-col relative w-full overflow-hidden">
-        {/* Stepper Header (hidden during full-page document reading) */}
-        {!isReadingDocuments && (
-          <div className="bg-black/30 p-3 sm:p-5 border-b border-white/5 backdrop-blur-sm z-20 rounded-t-2xl">
-            <div className="flex justify-between items-center relative max-w-xl mx-auto">
-              <div className="absolute top-1/2 left-0 w-full h-0.5 bg-white/10 -z-0 rounded"></div>
-              {[
-                { s: 1, label: 'Case & Documents' },
-                { s: 2, label: 'Data Review' },
-                { s: 3, label: 'Containers' },
-                { s: 4, label: 'Submit' }
-              ].map(({ s, label }) => (
-                <div key={s} className="relative z-10 flex flex-col items-center group cursor-default">
-                  <div 
-                    className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold border-2 sm:border-4 transition-all duration-300 shadow-lg
-                      ${step >= s 
-                        ? 'bg-brand-600 text-white border-brand-900/50 scale-105 sm:scale-110 shadow-brand-500/30' 
-                        : 'bg-slate-900 text-gray-600 border-slate-800'}`}
-                  >
-                    {s}
-                  </div>
-                  <span className={`text-[11px] mt-1.5 font-medium whitespace-nowrap hidden sm:block ${step >= s ? 'text-brand-300' : 'text-gray-500'}`}>
-                    {label}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Content Area */}
-        <div className="p-3 sm:p-6 flex-1 w-full overflow-hidden">
-          {isReadingDocuments ? (
-            <div className="min-h-[380px] sm:min-h-[440px] flex flex-col justify-center items-center w-full">
-              {renderDocumentReadingView()}
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {step === 1 && renderStep1_Merged()}
-              {step === 2 && renderStep5_DataReview()}
-              {step === 3 && renderStep6_Containers()}
-              {step === 4 && renderStep7_Submit()}
-            </div>
-          )}
-        </div>
-
-        {step < 4 && !isReadingDocuments && (
-          <div className="p-3 sm:p-5 bg-slate-900/95 border-t border-white/10 flex justify-between items-center backdrop-blur-md z-20 sticky bottom-0 rounded-b-2xl shadow-xl">
-            <button 
-              disabled={step === 1}
-              onClick={() => setStep(s => s - 1)}
-              className={`px-3 sm:px-6 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors ${step === 1 ? 'opacity-0 cursor-default pointer-events-none' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+        <div className="max-w-6xl mx-auto pb-10 w-full">
+          {/* Top Navigation Bar */}
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <button
+              type="button"
+              onClick={() => setView('list')}
+              className="h-10 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/15 text-slate-200 hover:text-white flex items-center gap-2 text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
             >
-              ← Back
+              <ArrowLeft size={16} />
+              <span>Back to Case List</span>
             </button>
-            <button 
-              onClick={() => {
-                if (step === 1) {
-                  if (!generatedCaseNo) {
-                    const freshCaseNo = generateCaseNumber();
-                    setGeneratedCaseNo(freshCaseNo);
-                    safeAppStorage.setItem('dpl_reg_caseno', freshCaseNo);
-                  }
-                  if (isOtherClient && otherClientName.trim()) {
-                    const trimmed = otherClientName.trim();
-                    saveClientToFirestore({ name: trimmed }).catch(() => {});
-                    if (!registeredClients.includes(trimmed)) {
-                      setRegisteredClients(prev => [...prev, trimmed]);
-                    }
-                  }
-                  if (files.length > 0 || uploadedDocs.length > 0) {
-                    triggerDocumentReading();
-                    return;
-                  }
-                  setStep(2);
-                  return;
-                }
-                if (step === 2) {
-                  // Auto-add container if empty when entering container step
-                  if (formData.containers.length === 0) {
-                    const totalWeight = formData.extractedData.totalWeight || 0;
-                    const extractedCntr = formData.extractedData.containerNo || `CNTR-${Math.floor(Math.random()*10000)}`;
-                    const extractedSize = formData.extractedData.containerSize || '40ft';
-                    setFormData(prev => ({
-                      ...prev,
-                      containers: [
-                        { 
-                          id: Date.now(), 
-                          number: extractedCntr, 
-                          size: (extractedSize === '20ft' || extractedSize === '45ft') ? extractedSize : '40ft', 
-                          weight: totalWeight,
-                          sealNo: prev.extractedData.sealNo || '',
-                          status: 'Pending'
-                        }
-                      ]
-                    }));
-                  }
-                  setStep(3);
-                  return;
-                }
-                if (step === 3) {
-                  setStep(4);
-                  return;
-                }
-                setStep(s => s + 1);
-              }}
-              disabled={
-                step === 1 && (files.length === 0 && uploadedDocs.length === 0) && (!formData.client || !formData.client.trim() || !formData.category)
-              }
-              className={`bg-brand-600 hover:bg-brand-500 text-white px-5 sm:px-8 py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 shadow-lg shadow-brand-600/30 transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              <span>
-                {step === 3
-                  ? 'Review & Confirm Case' 
-                  : step === 1 && (files.length > 0 || uploadedDocs.length > 0)
-                    ? 'Scan Documents & Continue'
-                    : step === 2
-                      ? 'Next: Containers'
-                      : 'Next Step'}
+            {generatedCaseNo && (
+              <span className="text-xs font-mono font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-xl">
+                Case ID: {generatedCaseNo}
               </span>
-              <ChevronRight size={16} />
-            </button>
+            )}
           </div>
-        )}
-      </div>
-    </div>
-    )}
+           
+          <div className="rounded-2xl border border-white/15 bg-slate-950/90 shadow-2xl flex flex-col relative w-full overflow-hidden">
+            {/* Clean 4-Step Progress Header (hidden during document reading) */}
+            {!isReadingDocuments && (
+              <div className="bg-slate-900/95 px-4 sm:px-6 py-4 border-b border-white/10">
+                <div className="grid grid-cols-4 gap-2 max-w-3xl mx-auto">
+                  {[
+                    { s: 1, label: 'Case & Documents', shortLabel: '1. Setup' },
+                    { s: 2, label: 'Data Review', shortLabel: '2. Review' },
+                    { s: 3, label: 'Containers', shortLabel: '3. Containers' },
+                    { s: 4, label: 'Confirm & Submit', shortLabel: '4. Confirm' }
+                  ].map(({ s, label, shortLabel }) => {
+                    const isActive = step === s;
+                    const isCompleted = step > s;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => {
+                          if (s < step || (formData.client && formData.category)) {
+                            setStep(s);
+                          }
+                        }}
+                        className={`flex items-center justify-center sm:justify-start gap-2.5 p-2 sm:px-3.5 sm:py-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                          isActive
+                            ? 'bg-amber-500/15 border-amber-500/50 text-white shadow-sm'
+                            : isCompleted
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/15'
+                            : 'bg-slate-950/60 border-white/10 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <div
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
+                            isActive
+                              ? 'bg-amber-500 text-slate-950'
+                              : isCompleted
+                              ? 'bg-emerald-500 text-slate-950'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          {isCompleted ? <Check size={14} /> : s}
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold block truncate sm:hidden">{shortLabel}</span>
+                          <span className="text-xs font-bold hidden sm:block truncate">{label}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Main Step Content Area */}
+            <div className="p-4 sm:p-6 flex-1 w-full">
+              {isReadingDocuments ? (
+                <div className="min-h-[360px] flex flex-col justify-center items-center w-full">
+                  {renderDocumentReadingView()}
+                </div>
+              ) : (
+                <div>
+                  {step === 1 && renderStep1_Merged()}
+                  {step === 2 && renderStep5_DataReview()}
+                  {step === 3 && renderStep6_Containers()}
+                  {step === 4 && renderStep7_Submit()}
+                </div>
+              )}
+            </div>
+
+            {/* Clean Sticky Footer Navigation Bar */}
+            {step < 4 && !isReadingDocuments && (
+              <div className="px-4 sm:px-6 py-4 bg-slate-900/95 border-t border-white/10 flex justify-between items-center backdrop-blur-md z-20 sticky bottom-0">
+                <button 
+                  type="button"
+                  disabled={step === 1}
+                  onClick={() => setStep(s => s - 1)}
+                  className={`h-11 px-5 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 transition-colors cursor-pointer ${
+                    step === 1 
+                      ? 'opacity-0 pointer-events-none' 
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-white/15'
+                  }`}
+                >
+                  <ArrowLeft size={16} />
+                  <span>Previous Step</span>
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    if (step === 1) {
+                      if (!generatedCaseNo) {
+                        const freshCaseNo = generateCaseNumber();
+                        setGeneratedCaseNo(freshCaseNo);
+                        safeAppStorage.setItem('dpl_reg_caseno', freshCaseNo);
+                      }
+                      if (isOtherClient && otherClientName.trim()) {
+                        const trimmed = otherClientName.trim();
+                        saveClientToFirestore({ name: trimmed }).catch(() => {});
+                        if (!registeredClients.includes(trimmed)) {
+                          setRegisteredClients(prev => [...prev, trimmed]);
+                        }
+                      }
+                      if (files.length > 0 || uploadedDocs.length > 0) {
+                        triggerDocumentReading();
+                        return;
+                      }
+                      setStep(2);
+                      return;
+                    }
+                    if (step === 2) {
+                      if (formData.containers.length === 0) {
+                        const totalWeight = formData.extractedData.totalWeight || 0;
+                        const extractedCntr = formData.extractedData.containerNo || `CNTR-${Math.floor(Math.random()*10000)}`;
+                        const extractedSize = formData.extractedData.containerSize || '40ft';
+                        setFormData(prev => ({
+                          ...prev,
+                          containers: [
+                            { 
+                              id: Date.now(), 
+                              number: extractedCntr, 
+                              size: (extractedSize === '20ft' || extractedSize === '45ft') ? extractedSize : '40ft', 
+                              weight: totalWeight,
+                              sealNo: prev.extractedData.sealNo || '',
+                              status: 'Pending'
+                            }
+                          ]
+                        }));
+                      }
+                      setStep(3);
+                      return;
+                    }
+                    if (step === 3) {
+                      setStep(4);
+                      return;
+                    }
+                    setStep(s => s + 1);
+                  }}
+                  disabled={
+                    step === 1 && (files.length === 0 && uploadedDocs.length === 0) && (!formData.client || !formData.client.trim() || !formData.category)
+                  }
+                  className="h-11 bg-amber-500 hover:bg-amber-400 text-slate-950 px-6 sm:px-8 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <span>
+                    {step === 3
+                      ? 'Review & Confirm Case' 
+                      : step === 1 && (files.length > 0 || uploadedDocs.length > 0)
+                        ? 'Scan Documents & Continue'
+                        : step === 2
+                          ? 'Next: Containers Manifest'
+                          : 'Continue to Data Review'}
+                  </span>
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Add More Charges Modal */}
       {showRegistrationChargeModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[95] flex items-start justify-center pt-8 sm:pt-14 p-4 overflow-y-auto">
-          <div className="glass-card max-w-md w-full p-6 rounded-2xl border border-white/15 bg-slate-900/95 shadow-2xl space-y-4 animate-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[95] flex items-center justify-center p-4 overflow-hidden">
+          <div className="max-w-md w-full rounded-2xl border border-white/15 bg-slate-900 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95">
+            <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between bg-slate-950/60 shrink-0">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Receipt size={18} className="text-amber-400" />
-                <span>Add Charge Item</span>
+                <span>Add Invoice Charge Item</span>
               </h3>
               <button
                 type="button"
                 onClick={() => setShowRegistrationChargeModal(false)}
-                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                className="h-8 w-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="space-y-3">
+            <div className="p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1 min-h-0">
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1.5">Quick Presets</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-2">Quick Charge Presets</label>
                 <div className="flex flex-wrap gap-1.5">
                   {[
                     { desc: 'TP Charges', amount: 18000 },
@@ -7437,56 +7437,56 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                         setNewRegChargeDesc(preset.desc);
                         if (preset.amount > 0) setNewRegChargeAmount(String(preset.amount));
                       }}
-                      className="text-[11px] px-2.5 py-1 rounded-lg bg-white/5 hover:bg-amber-500/20 text-gray-300 hover:text-amber-300 border border-white/10 hover:border-amber-500/30 transition-colors flex items-center gap-1"
+                      className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border border-white/10 hover:border-amber-500/30 transition-colors flex items-center gap-1 cursor-pointer"
                     >
-                      <Plus size={11} /> {preset.desc}
+                      <Plus size={12} /> {preset.desc}
                     </button>
                   ))}
                 </div>
               </div>
 
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">Charge Description</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Charge Description</label>
                 <input
                   type="text"
                   placeholder="e.g. TP Charges, Demurrage Surcharge, Port Lift Off"
                   value={newRegChargeDesc}
                   onChange={(e) => setNewRegChargeDesc(e.target.value)}
-                  className="glass-input w-full p-2.5 rounded-xl text-sm text-white outline-none border border-white/15 focus:border-amber-400"
+                  className="w-full h-10 px-3.5 rounded-xl text-sm text-white bg-slate-950 outline-none border border-white/15 focus:border-amber-400"
                   autoFocus
                 />
               </div>
 
               <div>
-                <label className="text-xs text-gray-300 font-medium block mb-1">Amount (PKR)</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Amount (PKR)</label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono text-gray-400">PKR</span>
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-mono text-slate-400 font-bold">PKR</span>
                   <input
                     type="number"
                     placeholder="e.g. 15000"
                     value={newRegChargeAmount}
                     onChange={(e) => setNewRegChargeAmount(e.target.value)}
-                    className="glass-input w-full pl-12 pr-3 py-2.5 rounded-xl text-sm text-emerald-400 font-mono font-bold outline-none border border-white/15 focus:border-amber-400"
+                    className="w-full h-10 pl-12 pr-3.5 rounded-xl text-sm text-emerald-400 font-mono font-bold bg-slate-950 outline-none border border-white/15 focus:border-amber-400"
                   />
                 </div>
               </div>
 
               {/* Set as Default for Client Checkbox */}
               {formData.client && (
-                <div className="p-3 bg-brand-500/10 border border-brand-500/20 rounded-xl">
+                <div className="p-3.5 bg-amber-500/10 border border-amber-500/25 rounded-xl">
                   <label className="flex items-start gap-2.5 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={isSaveAsClientDefault}
                       onChange={(e) => setIsSaveAsClientDefault(e.target.checked)}
-                      className="mt-0.5 rounded border-white/20 text-brand-500 focus:ring-brand-400 cursor-pointer"
+                      className="mt-0.5 w-4 h-4 rounded border-white/20 accent-amber-500 cursor-pointer"
                     />
                     <div className="text-xs">
-                      <span className="font-semibold text-brand-300 block">
-                        Set as Default Charge for {formData.client}
+                      <span className="font-semibold text-amber-300 block">
+                        Save as Default Charge for {formData.client}
                       </span>
-                      <span className="text-[11px] text-gray-300 leading-tight">
-                        Ye charge {formData.client} ke aainda har case aur invoice par by default automatically lagega.
+                      <span className="text-slate-300 leading-relaxed block mt-0.5">
+                        Automatically apply this charge on future cases and invoices for {formData.client}.
                       </span>
                     </div>
                   </label>
@@ -7494,11 +7494,11 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               )}
             </div>
 
-            <div className="flex justify-end gap-2.5 pt-3 border-t border-white/10">
+            <div className="px-5 py-3.5 border-t border-white/10 bg-slate-950/60 flex justify-end gap-2.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setShowRegistrationChargeModal(false)}
-                className="px-4 py-2 rounded-xl text-xs font-medium text-gray-300 hover:text-white hover:bg-white/10 transition-colors"
+                className="h-10 px-4 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -7506,7 +7506,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 type="button"
                 disabled={!newRegChargeDesc.trim() || !newRegChargeAmount || Number(newRegChargeAmount) <= 0}
                 onClick={() => handleAddRegistrationChargeItem(newRegChargeDesc, Number(newRegChargeAmount) || 0)}
-                className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-lg shadow-amber-600/30 flex items-center gap-1.5"
+                className="h-10 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 px-5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
               >
                 <Plus size={14} />
                 <span>Save Charge</span>
@@ -8762,111 +8762,110 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
       {/* Add New Port Modal (In-flow without leaving page) */}
       {showPortModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-start justify-center pt-8 sm:pt-14 p-4 overflow-y-auto animate-in fade-in duration-200">
-          <div className="glass-card p-5 sm:p-6 rounded-2xl w-full max-w-md border border-white/10 shadow-2xl bg-slate-900/95 space-y-4">
-            <div className="flex justify-between items-center pb-2 border-b border-white/10">
-              <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <Anchor size={20} className="text-brand-400" />
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-hidden animate-in fade-in duration-200">
+          <div className="rounded-2xl w-full max-w-md border border-white/15 shadow-2xl bg-slate-900 flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="px-5 py-4 border-b border-white/10 flex justify-between items-center bg-slate-950/60 shrink-0">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Anchor size={18} className="text-amber-400" />
                 <span>Add Port / Terminal</span>
               </h3>
               <button 
                 type="button"
                 onClick={() => { setShowPortModal(false); setPortTargetField(null); }}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors"
+                className="h-8 w-8 flex items-center justify-center text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <p className="text-xs text-gray-400">
-              Add a new port or terminal to the system. It will immediately be saved to the global port directory and appear in all search suggestions and dropdowns for both POL and POD.
-            </p>
+            <div className="p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1 min-h-0">
+              <p className="text-xs text-slate-400">
+                Add a new port or terminal to the global port directory for POL and POD selection.
+              </p>
 
-            <div className="space-y-3.5">
-              <div>
-                <label className="text-xs font-semibold text-gray-300 block mb-1">
-                  Port / Terminal Name <span className="text-red-400">*</span>
-                </label>
-                <input 
-                  type="text" 
-                  placeholder="e.g. Gwadar Deep Sea Port / Sialkot Dry Port / Hub Terminal" 
-                  value={newPortName}
-                  onChange={(e) => setNewPortName(e.target.value)}
-                  className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/50 border border-white/15 focus:border-brand-400"
-                  autoFocus
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-3.5">
                 <div>
-                  <label className="text-xs font-semibold text-gray-300 block mb-1">
-                    Port Code / Acronym
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    Port / Terminal Name <span className="text-red-400">*</span>
                   </label>
                   <input 
                     type="text" 
-                    placeholder="e.g. GWD, SKT" 
-                    value={newPortCode}
-                    onChange={(e) => setNewPortCode(e.target.value.toUpperCase())}
-                    className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/50 border border-white/15 focus:border-brand-400 uppercase font-mono"
+                    placeholder="e.g. Gwadar Deep Sea Port / Sialkot Dry Port" 
+                    value={newPortName}
+                    onChange={(e) => setNewPortName(e.target.value)}
+                    className="w-full h-10 rounded-xl px-3.5 outline-none text-white text-sm bg-slate-950 border border-white/15 focus:border-amber-400"
+                    autoFocus
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Port Code / Acronym
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. GWD, SKT" 
+                      value={newPortCode}
+                      onChange={(e) => setNewPortCode(e.target.value.toUpperCase())}
+                      className="w-full h-10 rounded-xl px-3.5 outline-none text-white text-sm bg-slate-950 border border-white/15 focus:border-amber-400 uppercase font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Port Type
+                    </label>
+                    <select
+                      value={newPortType}
+                      onChange={(e) => setNewPortType(e.target.value)}
+                      className="w-full h-10 rounded-xl px-3 outline-none text-white text-sm bg-slate-950 border border-white/15 focus:border-amber-400 cursor-pointer"
+                    >
+                      <option value="Dry Port" className="bg-slate-900">Dry Port (Inland)</option>
+                      <option value="Sea Port" className="bg-slate-900">Sea Port (Coastal)</option>
+                      <option value="Border Terminal" className="bg-slate-900">Border Terminal</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold text-gray-300 block mb-1">
-                    Port Type
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    Container Inquiry Link (Official Website URL)
+                  </label>
+                  <div className="relative">
+                    <ExternalLink size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input 
+                      type="url" 
+                      placeholder="e.g. https://www.kictl.com" 
+                      value={newPortInquiryLink}
+                      onChange={(e) => setNewPortInquiryLink(e.target.value)}
+                      className="w-full h-10 rounded-xl pl-9 pr-3.5 outline-none text-white text-xs bg-slate-950 border border-white/15 focus:border-amber-400 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    Destination Selection
                   </label>
                   <select
-                    value={newPortType}
-                    onChange={(e) => setNewPortType(e.target.value)}
-                    className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/50 border border-white/15 focus:border-brand-400"
+                    value={portTargetField || 'all'}
+                    onChange={(e) => setPortTargetField(e.target.value === 'all' ? null : (e.target.value as 'pol' | 'pod'))}
+                    className="w-full h-10 rounded-xl px-3.5 outline-none text-white text-xs sm:text-sm bg-slate-950 border border-white/15 focus:border-amber-400 cursor-pointer"
                   >
-                    <option value="Dry Port" className="bg-slate-900">Dry Port (Inland)</option>
-                    <option value="Sea Port" className="bg-slate-900">Sea Port (Coastal)</option>
-                    <option value="Border Terminal" className="bg-slate-900">Border Terminal</option>
+                    <option value="all" className="bg-slate-900">Add to All Port Lists (POL & POD)</option>
+                    <option value="pol" className="bg-slate-900">Add & Select as Port of Loading (POL)</option>
+                    <option value="pod" className="bg-slate-900">Add & Select as Port of Destination (POD)</option>
                   </select>
                 </div>
               </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-300 block mb-1">
-                  Container Inquiry Link (Official Website URL)
-                </label>
-                <div className="relative">
-                  <ExternalLink size={15} className="absolute left-3 top-3 text-gray-400" />
-                  <input 
-                    type="url" 
-                    placeholder="e.g. https://www.kictl.com or https://www.dpworld.com/karachi" 
-                    value={newPortInquiryLink}
-                    onChange={(e) => setNewPortInquiryLink(e.target.value)}
-                    className="w-full glass-input rounded-xl pl-9 pr-3 py-2.5 outline-none text-white text-xs bg-black/50 border border-white/15 focus:border-brand-400 font-mono"
-                  />
-                </div>
-                <p className="text-[11px] text-gray-400 mt-1">
-                  Official website link for wharfage payment checking & container status enquiry.
-                </p>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-300 block mb-1">
-                  Destination Selection
-                </label>
-                <select
-                  value={portTargetField || 'all'}
-                  onChange={(e) => setPortTargetField(e.target.value === 'all' ? null : (e.target.value as 'pol' | 'pod'))}
-                  className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/50 border border-white/15 focus:border-brand-400 cursor-pointer"
-                >
-                  <option value="all" className="bg-slate-900">🌐 Add to All Port Lists (Available in POL & POD)</option>
-                  <option value="pol" className="bg-slate-900">⚓ Add to All Lists & Select as Port of Loading (POL)</option>
-                  <option value="pod" className="bg-slate-900">📍 Add to All Lists & Select as Port of Destination (POD)</option>
-                </select>
-              </div>
             </div>
 
-            <div className="flex gap-2.5 pt-2">
+            <div className="px-5 py-3.5 border-t border-white/10 bg-slate-950/60 flex justify-end gap-2.5 shrink-0">
               <button 
                 type="button"
                 onClick={() => { setShowPortModal(false); setPortTargetField(null); }}
-                className="flex-1 bg-white/10 hover:bg-white/15 text-gray-300 py-2.5 rounded-xl font-medium text-xs sm:text-sm transition-colors"
+                className="h-10 px-4 bg-white/10 hover:bg-white/15 text-slate-300 rounded-xl font-semibold text-xs transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -8874,9 +8873,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 type="button"
                 onClick={() => handleAddPort()}
                 disabled={!newPortName.trim()}
-                className="flex-1 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white py-2.5 rounded-xl font-semibold text-xs sm:text-sm shadow-lg shadow-brand-600/20 transition-all flex items-center justify-center gap-1.5"
+                className="h-10 px-5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
-                <Plus size={16} /> {portTargetField ? 'Add & Select Port' : 'Save Port to All Lists'}
+                <Plus size={15} /> {portTargetField ? 'Add & Select Port' : 'Save Port'}
               </button>
             </div>
           </div>
@@ -8885,121 +8884,123 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
       {/* Edit Port Modal with Container Inquiry Link */}
       {showEditPortModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-start justify-center pt-8 sm:pt-14 p-4 overflow-y-auto animate-in fade-in duration-200">
-          <div className="glass-card p-5 sm:p-6 rounded-2xl w-full max-w-md border border-white/10 shadow-2xl bg-slate-900/95 space-y-4">
-            <div className="flex justify-between items-center pb-2 border-b border-white/10">
-              <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <Edit size={20} className="text-amber-400" />
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-hidden animate-in fade-in duration-200">
+          <div className="rounded-2xl w-full max-w-md border border-white/15 shadow-2xl bg-slate-900 flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="px-5 py-4 border-b border-white/10 flex justify-between items-center bg-slate-950/60 shrink-0">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Edit size={18} className="text-amber-400" />
                 <span>Edit Port & Wharfage Inquiry</span>
               </h3>
               <button 
                 type="button"
                 onClick={() => setShowEditPortModal(false)}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors"
+                className="h-8 w-8 flex items-center justify-center text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <p className="text-xs text-gray-400">
-              Select a port to modify its particulars, type, or official container inquiry / wharfage payment check website link.
-            </p>
+            <div className="p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1 min-h-0">
+              <p className="text-xs text-slate-400">
+                Select a port to modify its particulars, type, or official container inquiry link.
+              </p>
 
-            <div className="space-y-3.5">
-              <div>
-                <label className="text-xs font-semibold text-gray-300 block mb-1">
-                  Select Port to Edit <span className="text-amber-400">*</span>
-                </label>
-                <select
-                  value={selectedPortToEdit}
-                  onChange={(e) => handleSelectPortToEdit(e.target.value)}
-                  className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/60 border border-white/15 focus:border-amber-400"
-                >
-                  {ports.map((p) => (
-                    <option key={p.name} value={p.name} className="bg-slate-900">
-                      {p.name} ({p.code || 'PORT'}) {p.type ? `• ${p.type}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-300 block mb-1">
-                  Port / Terminal Name <span className="text-red-400">*</span>
-                </label>
-                <input 
-                  type="text" 
-                  value={editPortName}
-                  onChange={(e) => setEditPortName(e.target.value)}
-                  placeholder="Port Name"
-                  className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/50 border border-white/15 focus:border-amber-400"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-3.5">
                 <div>
-                  <label className="text-xs font-semibold text-gray-300 block mb-1">
-                    Port Code / Acronym
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    Select Port to Edit <span className="text-amber-400">*</span>
+                  </label>
+                  <select
+                    value={selectedPortToEdit}
+                    onChange={(e) => handleSelectPortToEdit(e.target.value)}
+                    className="w-full h-10 rounded-xl px-3.5 outline-none text-white text-sm bg-slate-950 border border-white/15 focus:border-amber-400 cursor-pointer"
+                  >
+                    {ports.map((p) => (
+                      <option key={p.name} value={p.name} className="bg-slate-900">
+                        {p.name} ({p.code || 'PORT'}) {p.type ? `• ${p.type}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    Port / Terminal Name <span className="text-red-400">*</span>
                   </label>
                   <input 
                     type="text" 
-                    value={editPortCode}
-                    onChange={(e) => setEditPortCode(e.target.value.toUpperCase())}
-                    placeholder="e.g. KICT, QICT"
-                    className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/50 border border-white/15 focus:border-amber-400 uppercase font-mono"
+                    value={editPortName}
+                    onChange={(e) => setEditPortName(e.target.value)}
+                    placeholder="Port Name"
+                    className="w-full h-10 rounded-xl px-3.5 outline-none text-white text-sm bg-slate-950 border border-white/15 focus:border-amber-400"
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Port Code / Acronym
+                    </label>
+                    <input 
+                      type="text" 
+                      value={editPortCode}
+                      onChange={(e) => setEditPortCode(e.target.value.toUpperCase())}
+                      placeholder="e.g. KICT, QICT"
+                      className="w-full h-10 rounded-xl px-3.5 outline-none text-white text-sm bg-slate-950 border border-white/15 focus:border-amber-400 uppercase font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Port Type
+                    </label>
+                    <select
+                      value={editPortType}
+                      onChange={(e) => setEditPortType(e.target.value)}
+                      className="w-full h-10 rounded-xl px-3 outline-none text-white text-sm bg-slate-950 border border-white/15 focus:border-amber-400 cursor-pointer"
+                    >
+                      <option value="Dry Port" className="bg-slate-900">Dry Port (Inland)</option>
+                      <option value="Sea Port" className="bg-slate-900">Sea Port (Coastal)</option>
+                      <option value="Border Terminal" className="bg-slate-900">Border Terminal</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold text-gray-300 block mb-1">
-                    Port Type
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    Container Inquiry Link (Wharfage Official Website)
                   </label>
-                  <select
-                    value={editPortType}
-                    onChange={(e) => setEditPortType(e.target.value)}
-                    className="w-full glass-input rounded-xl p-3 outline-none text-white text-sm bg-black/50 border border-white/15 focus:border-amber-400"
-                  >
-                    <option value="Dry Port" className="bg-slate-900">Dry Port (Inland)</option>
-                    <option value="Sea Port" className="bg-slate-900">Sea Port (Coastal)</option>
-                    <option value="Border Terminal" className="bg-slate-900">Border Terminal</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-gray-300 block mb-1">
-                  Container Inquiry Link (Wharfage Official Website)
-                </label>
-                <div className="relative">
-                  <ExternalLink size={15} className="absolute left-3 top-3 text-gray-400" />
-                  <input 
-                    type="url" 
-                    placeholder="https://www.kictl.com or official port link" 
-                    value={editPortInquiryLink}
-                    onChange={(e) => setEditPortInquiryLink(e.target.value)}
-                    className="w-full glass-input rounded-xl pl-9 pr-3 py-2.5 outline-none text-white text-xs bg-black/50 border border-white/15 focus:border-amber-400 font-mono"
-                  />
-                </div>
-                <div className="flex items-center justify-between mt-1 text-[11px]">
-                  <span className="text-gray-400">This link opens when clicking 'Check Wharfage'</span>
-                  {editPortInquiryLink && (
-                    <button
-                      type="button"
-                      onClick={() => window.open(editPortInquiryLink, '_blank', 'noopener,noreferrer')}
-                      className="text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold underline"
-                    >
-                      <ExternalLink size={11} /> Test Link
-                    </button>
-                  )}
+                  <div className="relative">
+                    <ExternalLink size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input 
+                      type="url" 
+                      placeholder="https://www.kictl.com or official port link" 
+                      value={editPortInquiryLink}
+                      onChange={(e) => setEditPortInquiryLink(e.target.value)}
+                      className="w-full h-10 rounded-xl pl-9 pr-3.5 outline-none text-white text-xs bg-slate-950 border border-white/15 focus:border-amber-400 font-mono"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between mt-1.5 text-xs">
+                    <span className="text-slate-400">Opens when clicking 'Check Wharfage'</span>
+                    {editPortInquiryLink && (
+                      <button
+                        type="button"
+                        onClick={() => window.open(editPortInquiryLink, '_blank', 'noopener,noreferrer')}
+                        className="text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold underline cursor-pointer"
+                      >
+                        <ExternalLink size={12} /> Test Link
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex gap-2.5 pt-2">
+            <div className="px-5 py-3.5 border-t border-white/10 bg-slate-950/60 flex justify-end gap-2.5 shrink-0">
               <button 
                 type="button"
                 onClick={() => setShowEditPortModal(false)}
-                className="flex-1 bg-white/10 hover:bg-white/15 text-gray-300 py-2.5 rounded-xl font-medium text-xs sm:text-sm transition-colors"
+                className="h-10 px-4 bg-white/10 hover:bg-white/15 text-slate-300 rounded-xl font-semibold text-xs transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -9007,9 +9008,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 type="button"
                 onClick={handleSaveEditedPort}
                 disabled={!editPortName.trim()}
-                className="flex-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-1.5"
+                className="h-10 px-5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
-                <Save size={16} /> Save Changes
+                <Save size={15} /> Save Changes
               </button>
             </div>
           </div>

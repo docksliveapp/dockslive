@@ -447,53 +447,50 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
   const currentCategoryArrangements = getCategoryArrangements(selectedCategory);
 
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-2 sm:p-4 overflow-hidden animate-in fade-in duration-200">
-      <div className="glass-card rounded-2xl w-full max-w-4xl border border-white/15 shadow-2xl bg-slate-900/95 max-h-[92vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-5 overflow-hidden animate-in fade-in duration-200">
+      <div className="rounded-2xl w-full max-w-4xl border border-white/15 shadow-2xl bg-slate-900 max-h-[88vh] flex flex-col overflow-hidden">
         {/* Modal Header */}
-        <div className="p-4 sm:p-5 border-b border-white/10 flex justify-between items-center bg-slate-950/70 rounded-t-2xl shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-brand-400 shrink-0 shadow-lg">
-              <Building size={22} />
+        <div className="px-5 py-4 border-b border-white/10 flex justify-between items-center bg-slate-950/90 shrink-0">
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+              <Building size={20} />
             </div>
             <div>
               <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <span>Client Profile</span>
+                <span>{isClientView ? 'Client Account Profile' : (initialClient ? 'Edit Client Profile & Tariff' : 'Register New Client & Tariff')}</span>
               </h3>
-              <p className="text-xs text-gray-400">
-                {isClientView ? 'Verified Company Particulars & Portal Security Credentials' : 'Setup client details, default case category arrangements (DPL vs Client), and default charges tariff'}
+              <p className="text-xs text-slate-400 mt-0.5">
+                {isClientView ? 'Verified company particulars & portal security credentials' : 'Configure client details, default service arrangements, and standard tariff'}
               </p>
             </div>
           </div>
           <button 
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-white p-2 rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
+            className="text-slate-400 hover:text-white h-9 w-9 rounded-xl hover:bg-white/10 flex items-center justify-center transition-colors cursor-pointer"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
         {/* Modal Scrollable Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-6 custom-scrollbar flex-1 min-h-0 text-sm overscroll-contain">
+        <div className="p-5 sm:p-6 overflow-y-auto space-y-6 custom-scrollbar flex-1 min-h-0 text-sm scroll-smooth overscroll-contain">
           
           {/* Client View Locked Banner */}
           {isClientView && (
-            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3.5 text-amber-200 shadow-lg">
+            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3.5 text-amber-200">
               <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 mt-0.5">
                 <Lock size={18} />
               </div>
               <div className="space-y-1 text-xs">
                 <h4 className="font-bold text-white text-sm flex items-center gap-2">
                   <span>Client Profile Locked (Read-Only)</span>
-                  <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-mono font-normal">
+                  <span className="text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2.5 py-0.5 rounded-md font-mono font-semibold">
                     Security Protected
                   </span>
                 </h4>
-                <p className="text-amber-200/90 leading-relaxed font-medium">
-                  All company profile particulars and universal tariff arrangements are securely locked for client access. You may update your portal password below at any time. If you forget your password, contact DPL administration for assistance.
-                </p>
-                <p className="text-gray-300 text-[11px] leading-relaxed">
-                  Profile particulars and tariff structures are strictly read-only. You may update your access password below at any time. For credential recovery, contact system administration.
+                <p className="text-slate-300 text-xs leading-relaxed">
+                  All company profile particulars and tariff arrangements are securely locked. You may update your portal password below at any time.
                 </p>
               </div>
             </div>
@@ -502,33 +499,33 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
           {/* ========================================================================= */}
           {/* SECTION 1: CLIENT / COMPANY DETAILS & DOCUMENTS */}
           {/* ========================================================================= */}
-          <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10">
-            <div className="flex items-center gap-2 text-xs font-bold text-brand-300 uppercase tracking-wider">
+          <div className="space-y-4 bg-slate-950/60 p-5 rounded-xl border border-white/10">
+            <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider border-b border-white/10 pb-2.5">
               <User size={15} />
               <span>1. Client Details & KYC Documents</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="sm:col-span-2 lg:col-span-2">
-                <label className="text-xs font-medium text-gray-300 block mb-1">
+                <label className="text-xs font-semibold text-slate-200 block mb-1.5">
                   Company Title / Business Name <span className="text-red-400">*</span>
                 </label>
                 <input 
                   type="text"
-                  placeholder="e.g. Al-Madina Logistics & Afghan Trading Co."
+                  placeholder="e.g. Al-Madina Logistics & Trading Co."
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   disabled={isClientView}
                   readOnly={isClientView}
-                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
-                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 outline-none text-sm border transition-all ${
+                    isClientView ? 'bg-slate-900 text-slate-400 border-white/10 cursor-not-allowed' : 'bg-slate-900 text-white border-white/15 focus:border-amber-400'
                   }`}
                   autoFocus={!isClientView}
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-300 block mb-1">
+                <label className="text-xs font-semibold text-slate-200 block mb-1.5">
                   Owner / CEO Name
                 </label>
                 <input 
@@ -538,14 +535,14 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   onChange={(e) => setOwnerName(e.target.value)}
                   disabled={isClientView}
                   readOnly={isClientView}
-                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
-                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 outline-none text-sm border transition-all ${
+                    isClientView ? 'bg-slate-900 text-slate-400 border-white/10 cursor-not-allowed' : 'bg-slate-900 text-white border-white/15 focus:border-amber-400'
                   }`}
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-300 block mb-1">
+                <label className="text-xs font-semibold text-slate-200 block mb-1.5">
                   Owner NIC / CNIC
                 </label>
                 <input 
@@ -555,14 +552,14 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   onChange={(e) => setCnic(e.target.value)}
                   disabled={isClientView}
                   readOnly={isClientView}
-                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
-                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 outline-none text-sm font-mono border transition-all ${
+                    isClientView ? 'bg-slate-900 text-slate-400 border-white/10 cursor-not-allowed' : 'bg-slate-900 text-white border-white/15 focus:border-amber-400'
                   }`}
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-300 block mb-1">
+                <label className="text-xs font-semibold text-slate-200 block mb-1.5">
                   Primary Contact / Phone
                 </label>
                 <input 
@@ -572,14 +569,14 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   onChange={(e) => setContact(e.target.value)}
                   disabled={isClientView}
                   readOnly={isClientView}
-                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
-                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 outline-none text-sm border transition-all ${
+                    isClientView ? 'bg-slate-900 text-slate-400 border-white/10 cursor-not-allowed' : 'bg-slate-900 text-white border-white/15 focus:border-amber-400'
                   }`}
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-300 block mb-1">
+                <label className="text-xs font-semibold text-slate-200 block mb-1.5">
                   Mobile Number
                 </label>
                 <input 
@@ -589,14 +586,14 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   onChange={(e) => setMobileNumber(e.target.value)}
                   disabled={isClientView}
                   readOnly={isClientView}
-                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
-                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 outline-none text-sm font-mono border transition-all ${
+                    isClientView ? 'bg-slate-900 text-slate-400 border-white/10 cursor-not-allowed' : 'bg-slate-900 text-white border-white/15 focus:border-amber-400'
                   }`}
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-300 block mb-1">
+                <label className="text-xs font-semibold text-slate-200 block mb-1.5">
                   WhatsApp Number
                 </label>
                 <input 
@@ -606,31 +603,31 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   onChange={(e) => setWhatsappNumber(e.target.value)}
                   disabled={isClientView}
                   readOnly={isClientView}
-                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
-                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 outline-none text-sm font-mono border transition-all ${
+                    isClientView ? 'bg-slate-900 text-slate-400 border-white/10 cursor-not-allowed' : 'bg-slate-900 text-white border-white/15 focus:border-amber-400'
                   }`}
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-300 block mb-1">
+                <label className="text-xs font-semibold text-slate-200 block mb-1.5">
                   Email Address
                 </label>
                 <input 
                   type="email"
-                  placeholder="e.g. info@almadinalogistics.pk"
+                  placeholder="e.g. info@company.pk"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={isClientView}
                   readOnly={isClientView}
-                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
-                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 outline-none text-sm border transition-all ${
+                    isClientView ? 'bg-slate-900 text-slate-400 border-white/10 cursor-not-allowed' : 'bg-slate-900 text-white border-white/15 focus:border-amber-400'
                   }`}
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-300 block mb-1">
+                <label className="text-xs font-semibold text-slate-200 block mb-1.5">
                   NTN / Tax ID
                 </label>
                 <input 
@@ -640,14 +637,14 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   onChange={(e) => setNtn(e.target.value)}
                   disabled={isClientView}
                   readOnly={isClientView}
-                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
-                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 outline-none text-sm font-mono border transition-all ${
+                    isClientView ? 'bg-slate-900 text-slate-400 border-white/10 cursor-not-allowed' : 'bg-slate-900 text-white border-white/15 focus:border-amber-400'
                   }`}
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-gray-300 block mb-1">
+                <label className="text-xs font-semibold text-slate-200 block mb-1.5">
                   STRN (Sales Tax Reg)
                 </label>
                 <input 
@@ -657,14 +654,14 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   onChange={(e) => setStrn(e.target.value)}
                   disabled={isClientView}
                   readOnly={isClientView}
-                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
-                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 outline-none text-sm font-mono border transition-all ${
+                    isClientView ? 'bg-slate-900 text-slate-400 border-white/10 cursor-not-allowed' : 'bg-slate-900 text-white border-white/15 focus:border-amber-400'
                   }`}
                 />
               </div>
 
-              <div className="sm:col-span-2 lg:col-span-3">
-                <label className="text-xs font-medium text-gray-300 block mb-1">
+              <div className="sm:col-span-2 lg:col-span-2">
+                <label className="text-xs font-semibold text-slate-200 block mb-1.5">
                   Office / Business Address
                 </label>
                 <input 
@@ -674,50 +671,50 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   onChange={(e) => setOfficeAddress(e.target.value)}
                   disabled={isClientView}
                   readOnly={isClientView}
-                  className={`w-full glass-input rounded-xl p-2.5 outline-none text-sm border ${
-                    isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 text-white border-white/15 focus:border-brand-400'
+                  className={`w-full h-10 rounded-xl px-3.5 outline-none text-sm border transition-all ${
+                    isClientView ? 'bg-slate-900 text-slate-400 border-white/10 cursor-not-allowed' : 'bg-slate-900 text-white border-white/15 focus:border-amber-400'
                   }`}
                 />
               </div>
             </div>
 
             {/* Document Uploads: Business Card, Contract Letter, CNIC, NTN */}
-            <div className="pt-3 border-t border-white/10">
-              <label className="text-xs font-bold text-gray-300 block mb-2">
+            <div className="pt-4 border-t border-white/10">
+              <label className="text-xs font-bold text-slate-200 block mb-3">
                 Attached Documents (Business Card, Contract Letter, CNIC Copy, NTN Certificate)
               </label>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                 {/* Business Card Upload */}
-                <div className="p-3 bg-black/30 border border-white/10 rounded-xl space-y-2">
+                <div className="p-3.5 bg-slate-900 border border-white/10 rounded-xl space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                      <CreditCard size={14} className="text-blue-400" /> Business Card
+                    <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                      <CreditCard size={14} className="text-sky-400" /> Business Card
                     </span>
                     {businessCardUrl && (
                       <button
                         type="button"
                         onClick={() => setPreviewDoc({ url: businessCardUrl, name: businessCardName || 'Business Card' })}
-                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1 font-semibold"
+                        className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold"
                       >
-                        <Eye size={12} /> View
+                        <Eye size={13} /> View
                       </button>
                     )}
                   </div>
                   {isClientView ? (
-                    <div className="p-2.5 bg-black/40 rounded-lg text-center text-[11px] text-gray-300 border border-white/5">
-                      {businessCardUrl ? <span className="text-emerald-400 font-medium">✓ Card on file</span> : <span className="text-gray-500">Not provided</span>}
+                    <div className="h-9 flex items-center justify-center bg-slate-950 rounded-lg text-xs text-slate-300 border border-white/5">
+                      {businessCardUrl ? <span className="text-emerald-400 font-medium">✓ Card on file</span> : <span className="text-slate-500">Not provided</span>}
                     </div>
                   ) : (
-                    <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
+                    <label className="flex items-center justify-center gap-2 h-9 px-3 border border-dashed border-white/20 hover:border-amber-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
                       <input
                         type="file"
                         accept="image/*,application/pdf"
                         className="hidden"
                         onChange={(e) => handleFileUpload(e, 'card')}
                       />
-                      <Upload size={16} className="text-gray-400 mb-1" />
-                      <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
+                      <Upload size={14} className="text-amber-400 shrink-0" />
+                      <span className="text-xs text-slate-200 font-medium truncate">
                         {uploadingDoc === 'card' ? 'Processing...' : businessCardName || (businessCardUrl ? 'Replace Card' : 'Upload Card')}
                       </span>
                     </label>
@@ -725,35 +722,35 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                 </div>
 
                 {/* Contract Letter Upload */}
-                <div className="p-3 bg-black/30 border border-white/10 rounded-xl space-y-2">
+                <div className="p-3.5 bg-slate-900 border border-white/10 rounded-xl space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
                       <FileText size={14} className="text-emerald-400" /> Contract Letter
                     </span>
                     {contractLetterUrl && (
                       <button
                         type="button"
                         onClick={() => setPreviewDoc({ url: contractLetterUrl, name: contractLetterName || 'Contract Letter' })}
-                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1 font-semibold"
+                        className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold"
                       >
-                        <Eye size={12} /> View
+                        <Eye size={13} /> View
                       </button>
                     )}
                   </div>
                   {isClientView ? (
-                    <div className="p-2.5 bg-black/40 rounded-lg text-center text-[11px] text-gray-300 border border-white/5">
-                      {contractLetterUrl ? <span className="text-emerald-400 font-medium">✓ Letter on file</span> : <span className="text-gray-500">Not provided</span>}
+                    <div className="h-9 flex items-center justify-center bg-slate-950 rounded-lg text-xs text-slate-300 border border-white/5">
+                      {contractLetterUrl ? <span className="text-emerald-400 font-medium">✓ Letter on file</span> : <span className="text-slate-500">Not provided</span>}
                     </div>
                   ) : (
-                    <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
+                    <label className="flex items-center justify-center gap-2 h-9 px-3 border border-dashed border-white/20 hover:border-amber-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
                       <input
                         type="file"
                         accept="image/*,application/pdf"
                         className="hidden"
                         onChange={(e) => handleFileUpload(e, 'contract')}
                       />
-                      <Upload size={16} className="text-gray-400 mb-1" />
-                      <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
+                      <Upload size={14} className="text-amber-400 shrink-0" />
+                      <span className="text-xs text-slate-200 font-medium truncate">
                         {uploadingDoc === 'contract' ? 'Processing...' : contractLetterName || (contractLetterUrl ? 'Replace Letter' : 'Upload Letter')}
                       </span>
                     </label>
@@ -761,35 +758,35 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                 </div>
 
                 {/* Owner CNIC Upload */}
-                <div className="p-3 bg-black/30 border border-white/10 rounded-xl space-y-2">
+                <div className="p-3.5 bg-slate-900 border border-white/10 rounded-xl space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-                      <Shield size={14} className="text-purple-400" /> Owner CNIC Copy
+                    <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                      <Shield size={14} className="text-purple-400" /> Owner CNIC
                     </span>
                     {nicDocUrl && (
                       <button
                         type="button"
                         onClick={() => setPreviewDoc({ url: nicDocUrl, name: nicDocName || 'CNIC Copy' })}
-                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1 font-semibold"
+                        className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold"
                       >
-                        <Eye size={12} /> View
+                        <Eye size={13} /> View
                       </button>
                     )}
                   </div>
                   {isClientView ? (
-                    <div className="p-2.5 bg-black/40 rounded-lg text-center text-[11px] text-gray-300 border border-white/5">
-                      {nicDocUrl ? <span className="text-emerald-400 font-medium">✓ CNIC on file</span> : <span className="text-gray-500">Not provided</span>}
+                    <div className="h-9 flex items-center justify-center bg-slate-950 rounded-lg text-xs text-slate-300 border border-white/5">
+                      {nicDocUrl ? <span className="text-emerald-400 font-medium">✓ CNIC on file</span> : <span className="text-slate-500">Not provided</span>}
                     </div>
                   ) : (
-                    <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
+                    <label className="flex items-center justify-center gap-2 h-9 px-3 border border-dashed border-white/20 hover:border-amber-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
                       <input
                         type="file"
                         accept="image/*,application/pdf"
                         className="hidden"
                         onChange={(e) => handleFileUpload(e, 'nic')}
                       />
-                      <Upload size={16} className="text-gray-400 mb-1" />
-                      <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
+                      <Upload size={14} className="text-amber-400 shrink-0" />
+                      <span className="text-xs text-slate-200 font-medium truncate">
                         {uploadingDoc === 'nic' ? 'Processing...' : nicDocName || (nicDocUrl ? 'Replace CNIC' : 'Upload CNIC')}
                       </span>
                     </label>
@@ -797,127 +794,90 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                 </div>
 
                 {/* NTN Certificate Upload */}
-                <div className="p-3 bg-black/30 border border-white/10 rounded-xl space-y-2">
+                <div className="p-3.5 bg-slate-900 border border-white/10 rounded-xl space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
                       <FileCheck size={14} className="text-cyan-400" /> NTN Certificate
                     </span>
                     {ntnDocUrl && (
                       <button
                         type="button"
                         onClick={() => setPreviewDoc({ url: ntnDocUrl, name: ntnDocName || 'NTN Certificate' })}
-                        className="text-[11px] text-brand-400 hover:text-brand-300 flex items-center gap-1 font-semibold"
+                        className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold"
                       >
-                        <Eye size={12} /> View
+                        <Eye size={13} /> View
                       </button>
                     )}
                   </div>
                   {isClientView ? (
-                    <div className="p-2.5 bg-black/40 rounded-lg text-center text-[11px] text-gray-300 border border-white/5">
-                      {ntnDocUrl ? <span className="text-emerald-400 font-medium">✓ NTN on file</span> : <span className="text-gray-500">Not provided</span>}
+                    <div className="h-9 flex items-center justify-center bg-slate-950 rounded-lg text-xs text-slate-300 border border-white/5">
+                      {ntnDocUrl ? <span className="text-emerald-400 font-medium">✓ NTN on file</span> : <span className="text-slate-500">Not provided</span>}
                     </div>
                   ) : (
-                    <label className="flex flex-col items-center justify-center p-2.5 border border-dashed border-white/20 hover:border-brand-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
+                    <label className="flex items-center justify-center gap-2 h-9 px-3 border border-dashed border-white/20 hover:border-amber-400 rounded-lg cursor-pointer bg-white/5 hover:bg-white/10 transition text-center">
                       <input
                         type="file"
                         accept="image/*,application/pdf"
                         className="hidden"
                         onChange={(e) => handleFileUpload(e, 'ntn')}
                       />
-                      <Upload size={16} className="text-gray-400 mb-1" />
-                      <span className="text-[11px] text-gray-300 font-medium truncate max-w-full">
+                      <Upload size={14} className="text-amber-400 shrink-0" />
+                      <span className="text-xs text-slate-200 font-medium truncate">
                         {uploadingDoc === 'ntn' ? 'Processing...' : ntnDocName || (ntnDocUrl ? 'Replace NTN' : 'Upload NTN')}
                       </span>
                     </label>
                   )}
                 </div>
               </div>
-
-              {/* Uploaded Files Summary List with Download Option */}
-              {((businessCardUrl) || (contractLetterUrl) || (nicDocUrl) || (ntnDocUrl)) && (
-                <div className="mt-4 p-3.5 bg-slate-900/90 rounded-xl border border-white/10 space-y-2">
-                  <h5 className="text-[11px] font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <Download size={13} className="text-brand-400" />
-                    Uploaded Documents Ledger / Files
-                  </h5>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {[
-                      { label: 'Business Card', url: businessCardUrl, name: businessCardName || 'Business_Card' },
-                      { label: 'Contract Letter', url: contractLetterUrl, name: contractLetterName || 'Contract_Letter' },
-                      { label: 'Owner CNIC Copy', url: nicDocUrl, name: nicDocName || 'CNIC_Copy' },
-                      { label: 'NTN Certificate', url: ntnDocUrl, name: ntnDocName || 'NTN_Certificate' }
-                    ].filter(f => f.url).map((file, fIdx) => (
-                      <div key={fIdx} className="flex items-center justify-between text-xs p-2 rounded-lg bg-black/40 border border-white/5 hover:border-white/10 transition-colors">
-                        <span className="text-gray-200 font-medium truncate max-w-[120px] sm:max-w-none">{file.label}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const link = document.createElement('a');
-                            link.href = file.url!;
-                            const ext = file.url!.startsWith('data:application/pdf') ? '.pdf' : '.jpg';
-                            link.download = file.name.endsWith('.pdf') || file.name.endsWith('.jpg') ? file.name : `${file.name}${ext}`;
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                          }}
-                          className="text-brand-400 hover:text-brand-300 font-bold hover:underline flex items-center gap-1 bg-brand-500/10 border border-brand-500/20 px-2 py-1 rounded text-[10px]"
-                        >
-                          <Download size={11} /> Download
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
           {/* ========================================================================= */}
           {/* SECTION 2: DEFAULT CASE CATEGORY & SERVICE ARRANGEMENTS (DPL VS CLIENT) */}
           {/* ========================================================================= */}
-          <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs font-bold text-amber-300 uppercase tracking-wider">
+          <div className="space-y-4 bg-slate-950/60 p-5 rounded-xl border border-white/10">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
                 <Shield size={15} />
                 <span>2. Default Case Category & Service Arrangement</span>
               </div>
-              <span className="text-[11px] text-gray-400">
-                Zyada tar is category ke cases register honge
+              <span className="text-xs text-slate-400">
+                Primary category & service handling preference
               </span>
             </div>
 
             <div>
-              <label className="text-xs font-medium text-gray-300 block mb-1.5">
+              <label className="text-xs font-semibold text-slate-200 block mb-1.5">
                 Primary Case Category (Default Selection) <span className="text-red-400">*</span>
               </label>
               <select
                 value={selectedCategory}
                 onChange={(e) => handleCategoryChange(e.target.value)}
                 disabled={isClientView}
-                className={`w-full glass-input rounded-xl p-2.5 outline-none text-white text-sm border ${
-                  isClientView ? 'bg-black/60 text-gray-300 border-white/10 cursor-not-allowed opacity-90' : 'bg-black/40 border-white/15 focus:border-brand-400'
+                className={`w-full h-10 rounded-xl px-3.5 outline-none text-white text-sm border transition-all ${
+                  isClientView ? 'bg-slate-900 text-slate-400 border-white/10 cursor-not-allowed' : 'bg-slate-900 border-white/15 focus:border-amber-400'
                 }`}
               >
                 {CASE_CATEGORIES_LIST.map(cat => (
                   <option key={cat} value={cat} className="bg-slate-900">
-                    {cat} {cat === 'Bonded Carrier' ? '(Most Common)' : ''}
+                    {cat} {cat === 'Bonded Carrier' ? '(Default)' : ''}
                   </option>
                 ))}
               </select>
             </div>
 
             {/* Operational Service Arrangement Toggles */}
-            <div className="space-y-2 pt-2">
+            <div className="space-y-2.5 pt-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-white">
-                  Operational Service Arrangement Fields for {selectedCategory}:
+                <span className="text-xs font-semibold text-slate-200">
+                  Service Arrangements for {selectedCategory}:
                 </span>
-                <span className="text-[11px] text-gray-400">
-                  {isClientView ? 'Service arrangements set by administration' : 'Select Arranged by DPL or Arranged by Client'}
+                <span className="text-xs text-slate-400">
+                  {isClientView ? 'Configured by Administration' : 'Choose Arranged by DPL or Arranged by Client'}
                 </span>
               </div>
 
-              <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto custom-scrollbar pr-1">
                 {Object.entries(currentCategoryArrangements).map(([key, item]) => {
                   const currentArrangement = arrangements[key] || (item.isDefaultDpl ? 'DPL' : 'Client');
                   const isDpl = currentArrangement === 'DPL';
@@ -925,45 +885,41 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   return (
                     <div 
                       key={key} 
-                      className={`p-2.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all ${
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${
                         isDpl 
-                          ? 'bg-blue-950/30 border-blue-500/30 shadow-sm' 
-                          : 'bg-black/30 border-white/10'
+                          ? 'bg-emerald-950/20 border-emerald-500/30' 
+                          : 'bg-slate-900 border-white/10'
                       }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${isDpl ? 'bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.8)]' : 'bg-amber-400'}`}></span>
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-white truncate">{item.label}</p>
-                        </div>
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${isDpl ? 'bg-emerald-400' : 'bg-sky-400'}`}></span>
+                        <p className="text-xs font-semibold text-white truncate">{item.label}</p>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0 bg-black/50 p-1 rounded-xl border border-white/10">
+                      <div className="flex items-center gap-1 shrink-0 bg-slate-950 p-1 rounded-lg border border-white/10">
                         <button
                           type="button"
                           disabled={isClientView}
                           onClick={() => !isClientView && toggleArrangement(key, 'DPL')}
-                          className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
                             isDpl 
-                              ? 'bg-blue-600 text-white shadow-md font-bold' 
-                              : 'text-gray-400 hover:text-white hover:bg-white/5'
-                          } ${isClientView ? 'cursor-not-allowed opacity-85' : 'cursor-pointer'}`}
+                              ? 'bg-emerald-600 text-white shadow' 
+                              : 'text-slate-400 hover:text-white'
+                          } ${isClientView ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
                         >
-                          {isDpl && <Check size={12} />}
-                          <span>Arranged by DPL</span>
+                          <span>DPL</span>
                         </button>
                         <button
                           type="button"
                           disabled={isClientView}
                           onClick={() => !isClientView && toggleArrangement(key, 'Client')}
-                          className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${
                             !isDpl 
-                              ? 'bg-amber-600/90 text-white shadow-md font-bold' 
-                              : 'text-gray-400 hover:text-white hover:bg-white/5'
-                          } ${isClientView ? 'cursor-not-allowed opacity-85' : 'cursor-pointer'}`}
+                              ? 'bg-sky-600 text-white shadow' 
+                              : 'text-slate-400 hover:text-white'
+                          } ${isClientView ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
                         >
-                          {!isDpl && <Check size={12} />}
-                          <span>Arranged by Client</span>
+                          <span>Client</span>
                         </button>
                       </div>
                     </div>
@@ -976,9 +932,9 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
           {/* ========================================================================= */}
           {/* SECTION 3: FINANCE & BY-DEFAULT CHARGES TARIFF */}
           {/* ========================================================================= */}
-          <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs font-bold text-emerald-300 uppercase tracking-wider">
+          <div className="space-y-4 bg-slate-950/60 p-5 rounded-xl border border-white/10">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-white/10 pb-2.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 uppercase tracking-wider">
                 <DollarSign size={15} />
                 <span>3. Finance & Default Billing Charges Tariff</span>
               </div>
@@ -986,18 +942,18 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                 <button
                   type="button"
                   onClick={handleOpenChargePicker}
-                  className="bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl shadow-md transition flex items-center gap-1.5 self-start sm:self-auto"
+                  className="h-9 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-3.5 rounded-xl shadow transition flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
                 >
-                  <Plus size={14} /> Add Charge / Add Amount
+                  <Plus size={14} /> Add Default Charge
                 </button>
               )}
             </div>
 
             {/* Charges List Table */}
-            <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
+            <div className="space-y-2.5 max-h-60 overflow-y-auto custom-scrollbar pr-1">
               {chargesList.length === 0 ? (
-                <div className="p-4 text-center text-xs text-gray-400 bg-black/20 rounded-xl border border-white/5">
-                  No default charges added yet. Click &quot;+ Add Charge / Add Amount&quot; to add default charges for this client.
+                <div className="p-5 text-center text-xs text-slate-400 bg-slate-900 rounded-xl border border-white/5">
+                  No default charges added yet. Click &quot;+ Add Default Charge&quot; to configure standard charges for this client.
                 </div>
               ) : (
                 chargesList.map((ch, idx) => {
@@ -1005,7 +961,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   return (
                     <div 
                       key={ch.id || idx} 
-                      className="p-2.5 rounded-xl border bg-black/30 border-white/10 hover:border-emerald-500/30 flex flex-col sm:flex-row sm:items-center gap-2.5 transition-all"
+                      className="p-3 rounded-xl border bg-slate-900 border-white/10 flex flex-col sm:flex-row sm:items-center gap-3 transition-all"
                     >
                       <div className="flex-1 min-w-0">
                         <input 
@@ -1019,11 +975,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                             setChargesList(updated);
                           }}
                           placeholder="Charge description"
-                          className="w-full glass-input rounded-lg p-2 text-xs text-white bg-black/40 border border-white/10 focus:border-brand-400"
+                          className="w-full h-9 rounded-lg px-3 text-xs text-white bg-slate-950 border border-white/10 focus:border-amber-400 outline-none"
                         />
                       </div>
 
-                      <div className="w-full sm:w-36">
+                      <div className="w-full sm:w-40">
                         <select
                           value={ch.category || selectedCategory}
                           disabled={isClientView}
@@ -1032,7 +988,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                             updated[idx].category = e.target.value;
                             setChargesList(updated);
                           }}
-                          className="w-full glass-input rounded-lg p-2 text-xs text-white bg-black/40 border border-white/10"
+                          className="w-full h-9 rounded-lg px-2.5 text-xs text-white bg-slate-950 border border-white/10 outline-none"
                         >
                           <option value="Freight / Haulage">Freight / Haulage</option>
                           <option value="Documentation">Documentation</option>
@@ -1045,10 +1001,10 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                       </div>
 
                       <div className="w-full sm:w-36 flex items-center gap-1.5">
-                        <span className="text-[10px] text-gray-400 font-mono">PKR</span>
+                        <span className="text-xs text-slate-400 font-mono">PKR</span>
                         <input 
                           type="number"
-                          placeholder="0 (Enter amount)"
+                          placeholder="0"
                           value={ch.defaultAmount === 0 ? '' : ch.defaultAmount}
                           disabled={isClientView}
                           readOnly={isClientView}
@@ -1057,16 +1013,16 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                             updated[idx].defaultAmount = e.target.value === '' ? 0 : Number(e.target.value);
                             setChargesList(updated);
                           }}
-                          className={`w-full glass-input rounded-lg p-2 text-xs font-mono font-bold outline-none bg-black/40 border ${
+                          className={`w-full h-9 rounded-lg px-3 text-xs font-mono font-bold outline-none border ${
                             hasAmount 
-                              ? 'text-emerald-300 border-emerald-500/50 bg-emerald-950/40' 
-                              : 'text-gray-400 border-white/10'
+                              ? 'text-emerald-300 border-emerald-500/40 bg-emerald-950/30' 
+                              : 'text-slate-400 bg-slate-950 border-white/10'
                           }`}
                         />
                       </div>
 
                       <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
-                        <label className="flex items-center gap-1 text-[11px] text-gray-300 cursor-pointer">
+                        <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
                           <input 
                             type="checkbox"
                             checked={ch.taxable ?? false}
@@ -1076,7 +1032,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                               updated[idx].taxable = e.target.checked;
                               setChargesList(updated);
                             }}
-                            className="rounded text-brand-500 focus:ring-0"
+                            className="rounded text-amber-500 focus:ring-0"
                           />
                           <span>Taxable</span>
                         </label>
@@ -1087,7 +1043,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                             onClick={() => {
                               setChargesList(chargesList.filter((_, i) => i !== idx));
                             }}
-                            className="text-red-400 hover:text-red-300 p-1.5 rounded-lg hover:bg-red-500/10 transition"
+                            className="text-red-400 hover:text-red-300 p-1.5 rounded-lg hover:bg-red-500/10 transition cursor-pointer"
                             title="Remove charge"
                           >
                             <Trash2 size={14} />
@@ -1101,16 +1057,16 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
             </div>
 
             {/* Total Default Charges Tally */}
-            <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
+            <div className="flex items-center justify-between p-3.5 bg-emerald-500/10 border border-emerald-500/25 rounded-xl">
               <div>
                 <span className="text-xs font-semibold text-emerald-300 block">
-                  Active Default Charges ({activeDefaultChargesCount} charges with amount &gt; 0):
+                  Active Default Charges ({activeDefaultChargesCount} items):
                 </span>
-                <span className="text-[10px] text-gray-400">
-                  Only charges with positive amount will be applied automatically to cases
+                <span className="text-xs text-slate-400">
+                  Automatically applied when registering cases for this client
                 </span>
               </div>
-              <span className="text-sm font-bold font-mono text-emerald-400">
+              <span className="text-base font-bold font-mono text-emerald-400">
                 PKR {totalDefaultAmount.toLocaleString()}
               </span>
             </div>
@@ -1119,64 +1075,54 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
           {/* ========================================================================= */}
           {/* CLIENT PORTAL CREDENTIALS & PASSWORD MANAGEMENT */}
           {/* ========================================================================= */}
-          <div className="bg-gradient-to-r from-purple-950/40 via-slate-900 to-brand-950/40 p-4 sm:p-5 rounded-2xl border border-purple-500/30 space-y-3.5 shadow-lg">
-            <div className="flex items-center justify-between">
+          <div className="bg-slate-950/60 p-5 rounded-xl border border-white/10 space-y-4">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
               <div className="flex items-center gap-2 text-xs font-bold text-purple-300 uppercase tracking-wider">
                 <Key size={15} className="text-purple-400" />
-                <span>Portal Security & Password Change</span>
+                <span>4. Portal Security & Login Credentials</span>
               </div>
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1">
-                <CheckCircle2 size={10} /> Password Update Enabled
+              <span className="text-xs bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-md font-semibold flex items-center gap-1">
+                <CheckCircle2 size={12} /> Active
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="text-[11px] text-gray-400 block mb-1 font-medium">Assigned User ID (Login Username)</label>
+                <label className="text-xs text-slate-300 block mb-1.5 font-semibold">Assigned User ID (Login Username)</label>
                 <input 
                   type="text"
                   value={userId}
                   readOnly
                   disabled
-                  className="w-full glass-input rounded-xl p-2.5 text-xs font-mono font-bold text-brand-300 bg-black/60 border border-white/10 cursor-not-allowed opacity-80"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm font-mono font-bold text-amber-300 bg-slate-900 border border-white/10 cursor-not-allowed"
                 />
               </div>
               <div>
-                <label className="text-[11px] text-amber-300 block mb-1 font-semibold flex items-center justify-between">
+                <label className="text-xs text-slate-200 block mb-1.5 font-semibold flex items-center justify-between">
                   <span>Portal Password</span>
-                  <span className="text-[10px] text-emerald-400 font-normal">Editable by Client</span>
+                  <span className="text-xs text-emerald-400 font-normal">Editable</span>
                 </label>
                 <input 
                   type="text"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter new password"
-                  className="w-full glass-input rounded-xl p-2.5 text-xs font-mono font-semibold text-white bg-black/50 border border-amber-500/50 focus:border-amber-400 shadow-inner"
+                  className="w-full h-10 rounded-xl px-3.5 text-sm font-mono font-semibold text-white bg-slate-900 border border-white/15 focus:border-amber-400 outline-none"
                 />
               </div>
             </div>
-
-            <div className="p-3 rounded-xl bg-black/40 border border-white/10 text-xs text-gray-300 space-y-1">
-              <p className="text-amber-200/90 font-medium">
-                💡 <strong>Password Security:</strong> You can update your portal password whenever you need by entering a new password above and clicking &quot;Update Password&quot;. If you ever forget your password, contact DPL administration to reset it for you.
-              </p>
-              <p className="text-[11px] text-gray-400">
-                You can change your portal password whenever you need. If you ever forget your password, contact DPL administration to reset it for you.
-              </p>
-            </div>
-
           </div>
 
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 sm:p-5 border-t border-white/10 flex justify-between items-center bg-slate-950/70 rounded-b-2xl shrink-0">
+        <div className="px-5 py-4 border-t border-white/10 flex justify-between items-center bg-slate-950/90 shrink-0">
           <button 
             type="button"
             onClick={onClose}
-            className="bg-white/10 hover:bg-white/15 text-gray-300 px-4 py-2.5 rounded-xl font-medium text-xs sm:text-sm transition-colors"
+            className="h-10 bg-white/10 hover:bg-white/15 text-slate-200 px-5 rounded-xl font-semibold text-xs sm:text-sm transition-colors cursor-pointer"
           >
-            Close
+            Cancel
           </button>
 
           {isClientView ? (
@@ -1184,11 +1130,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
               type="button"
               onClick={handleSavePasswordOnly}
               disabled={!password.trim() || passwordSaveSuccess}
-              className="bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl font-semibold text-xs sm:text-sm shadow-lg shadow-brand-600/30 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+              className="h-10 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 px-6 rounded-xl font-bold text-xs sm:text-sm shadow-lg transition-all flex items-center gap-2 cursor-pointer"
             >
               {passwordSaveSuccess ? (
                 <>
-                  <CheckCircle2 size={16} className="text-emerald-300" />
+                  <CheckCircle2 size={16} />
                   <span>Password Updated!</span>
                 </>
               ) : (
@@ -1203,9 +1149,9 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
               type="button"
               onClick={handleSave}
               disabled={!name.trim()}
-              className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl font-semibold text-xs sm:text-sm shadow-lg shadow-emerald-600/30 transition-all flex items-center gap-2"
+              className="h-10 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-6 rounded-xl font-bold text-xs sm:text-sm shadow-lg transition-all flex items-center gap-2 cursor-pointer"
             >
-              <CheckCircle2 size={16} /> Save Client & Apply Charges
+              <CheckCircle2 size={16} /> Save Client & Apply Tariff
             </button>
           )}
         </div>
@@ -1215,38 +1161,38 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
       {/* SECONDARY POPUP: MASTER CHARGE PICKER & ADD CUSTOM CHARGE */}
       {/* ========================================================================= */}
       {showChargePicker && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-lg z-60 flex items-start justify-center pt-3 sm:pt-6 pb-6 px-3 sm:px-4 overflow-y-auto animate-in fade-in duration-150">
-          <div className="glass-card rounded-2xl w-full max-w-xl border border-white/20 shadow-2xl bg-slate-900/98 max-h-[85vh] flex flex-col mb-6">
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-60 flex items-center justify-center p-3 sm:p-4 overflow-hidden animate-in fade-in duration-150">
+          <div className="rounded-2xl w-full max-w-xl border border-white/15 shadow-2xl bg-slate-900 max-h-[82vh] flex flex-col overflow-hidden">
             {/* Picker Header */}
-            <div className="p-4 border-b border-white/10 flex justify-between items-center bg-slate-950/80 rounded-t-2xl">
+            <div className="px-5 py-4 border-b border-white/10 flex justify-between items-center bg-slate-950 shrink-0">
               <div>
-                <h4 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <h4 className="text-base font-bold text-white flex items-center gap-2">
                   <DollarSign size={16} className="text-emerald-400" />
-                  <span>Select Charges for {name || 'Client'}</span>
+                  <span>Select Default Charges for {name || 'Client'}</span>
                 </h4>
-                <p className="text-[11px] text-gray-400">
-                  Tick any charges to add to the client&apos;s default tariff list
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Select charges to include in the client&apos;s default tariff
                 </p>
               </div>
               <button 
                 type="button"
                 onClick={() => setShowChargePicker(false)}
-                className="text-gray-400 hover:text-white p-1 rounded-lg"
+                className="text-slate-400 hover:text-white h-8 w-8 rounded-lg flex items-center justify-center hover:bg-white/10"
               >
                 <X size={18} />
               </button>
             </div>
 
             {/* Search and Add Custom Charge bar */}
-            <div className="p-3 border-b border-white/10 space-y-2.5 bg-black/30">
+            <div className="p-4 border-b border-white/10 space-y-3 bg-slate-950/50 shrink-0">
               <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input 
                   type="text"
                   placeholder="Search existing charges..."
                   value={chargeSearch}
                   onChange={(e) => setChargeSearch(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white outline-none focus:border-brand-500"
+                  className="w-full h-10 pl-10 pr-3.5 bg-slate-900 border border-white/15 rounded-xl text-sm text-white outline-none focus:border-amber-400"
                 />
               </div>
 
@@ -1254,10 +1200,10 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
               <div className="flex gap-2">
                 <input 
                   type="text"
-                  placeholder="Type new charge name (e.g. Weighbridge Token)..."
+                  placeholder="Or type custom charge name..."
                   value={customChargeInput}
                   onChange={(e) => setCustomChargeInput(e.target.value)}
-                  className="flex-1 bg-black/40 border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white outline-none focus:border-brand-400"
+                  className="flex-1 h-10 bg-slate-900 border border-white/15 rounded-xl px-3.5 text-sm text-white outline-none focus:border-amber-400"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
@@ -1269,18 +1215,18 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   type="button"
                   onClick={handleAddCustomChargeOnFly}
                   disabled={!customChargeInput.trim()}
-                  className="bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-white text-xs font-semibold px-3 py-1.5 rounded-xl transition flex items-center gap-1 shrink-0"
+                  className="h-10 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 text-xs font-bold px-4 rounded-xl transition flex items-center gap-1.5 shrink-0 cursor-pointer"
                 >
-                  <Plus size={13} /> Add New Charge
+                  <Plus size={14} /> Add Custom
                 </button>
               </div>
             </div>
 
             {/* Scrollable Charges Checklist */}
-            <div className="p-3 overflow-y-auto space-y-1.5 custom-scrollbar flex-1 max-h-72">
+            <div className="p-4 overflow-y-auto space-y-2 custom-scrollbar flex-1 min-h-0">
               {filteredPickerCharges.length === 0 ? (
-                <div className="text-center p-6 text-xs text-gray-400">
-                  No matching charges found. Type above and click &quot;Add New Charge&quot; to create it!
+                <div className="text-center p-6 text-xs text-slate-400">
+                  No matching charges found. Type above and click &quot;Add Custom&quot; to create it.
                 </div>
               ) : (
                 filteredPickerCharges.map((item, idx) => {
@@ -1289,13 +1235,13 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   return (
                     <label 
                       key={`picker_chg_${item.id || idx}_${idx}`}
-                      className={`p-2.5 rounded-xl border flex items-center justify-between gap-2.5 cursor-pointer transition ${
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition ${
                         isChecked 
-                          ? 'bg-brand-950/40 border-brand-500/40 text-white' 
-                          : 'bg-white/5 border-white/5 text-gray-300 hover:bg-white/10'
+                          ? 'bg-emerald-950/30 border-emerald-500/40 text-white' 
+                          : 'bg-slate-950/60 border-white/10 text-slate-300 hover:bg-white/5'
                       }`}
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="flex items-center gap-3 min-w-0">
                         <input 
                           type="checkbox"
                           checked={isChecked}
@@ -1305,11 +1251,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                               [item.name.toLowerCase()]: e.target.checked
                             }));
                           }}
-                          className="rounded text-brand-600 focus:ring-0"
+                          className="rounded text-emerald-500 focus:ring-0 w-4 h-4"
                         />
                         <div className="min-w-0">
                           <span className="text-xs font-semibold block truncate">{item.name}</span>
-                          <span className="text-[10px] text-gray-400">{item.category}</span>
+                          <span className="text-[11px] text-slate-400">{item.category}</span>
                         </div>
                       </div>
 
@@ -1323,24 +1269,24 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
             </div>
 
             {/* Picker Footer */}
-            <div className="p-3 border-t border-white/10 flex justify-between items-center bg-slate-950/80 rounded-b-2xl">
-              <span className="text-xs text-gray-400 font-mono">
-                {Object.values(selectedPickerCharges).filter(Boolean).length} charges selected
+            <div className="px-5 py-3.5 border-t border-white/10 flex justify-between items-center bg-slate-950 shrink-0">
+              <span className="text-xs text-slate-400 font-mono">
+                {Object.values(selectedPickerCharges).filter(Boolean).length} selected
               </span>
-              <div className="flex gap-2">
+              <div className="flex gap-2.5">
                 <button
                   type="button"
                   onClick={() => setShowChargePicker(false)}
-                  className="px-3 py-1.5 text-xs text-gray-400 hover:text-white"
+                  className="h-9 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleApplyChargesFromPicker}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-1.5 rounded-xl shadow-md transition"
+                  className="h-9 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-5 rounded-xl shadow transition cursor-pointer"
                 >
-                  OK (Add to Tariff)
+                  Apply Selected
                 </button>
               </div>
             </div>
@@ -1350,13 +1296,13 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
 
       {/* Document Quick Preview */}
       {previewDoc && (
-        <div className="fixed inset-0 bg-black/95 z-70 flex items-start justify-center pt-3 sm:pt-6 pb-6 px-3 sm:px-4 overflow-y-auto">
-          <div className="glass-card rounded-2xl w-full max-w-2xl border border-white/20 p-4 space-y-3 bg-slate-900 flex flex-col max-h-[90vh] mb-6">
-            <div className="flex justify-between items-center border-b border-white/10 pb-2">
+        <div className="fixed inset-0 bg-slate-950/95 z-70 flex items-center justify-center p-4 overflow-hidden">
+          <div className="rounded-2xl w-full max-w-2xl border border-white/20 p-5 space-y-4 bg-slate-900 flex flex-col max-h-[88vh]">
+            <div className="flex justify-between items-center border-b border-white/10 pb-3 shrink-0">
               <h4 className="text-sm font-bold text-white truncate">{previewDoc.name}</h4>
               <button 
                 onClick={() => setPreviewDoc(null)} 
-                className="text-gray-400 hover:text-white p-1 rounded-lg"
+                className="text-slate-400 hover:text-white h-8 w-8 rounded-lg flex items-center justify-center hover:bg-white/10"
               >
                 <X size={18} />
               </button>
@@ -1367,7 +1313,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
               ) : previewDoc.url ? (
                 <img src={previewDoc.url} alt={previewDoc.name} className="max-w-full max-h-[500px] object-contain rounded-xl" />
               ) : (
-                <div className="p-8 text-center text-gray-400">No preview available</div>
+                <div className="p-8 text-center text-slate-400">No preview available</div>
               )}
             </div>
           </div>

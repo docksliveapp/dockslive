@@ -24,6 +24,7 @@ import { Case, CaseStatus, UserRole, WORKFLOW_8_STEPS } from '../types';
 import { downloadCustomsDeliveryOrderPdf } from '../services/pdfExportService';
 import { PdfViewerModal } from './PdfViewerModal';
 import { useActiveCompany } from '../services/companyService';
+import { CaseTransitHistoryCard } from './CaseTransitHistoryCard';
 
 interface CompletedCaseDossierProps {
   targetCase: Case;
@@ -322,6 +323,9 @@ export const CompletedCaseDossier: React.FC<CompletedCaseDossierProps> = ({
               })}
             </div>
           </div>
+
+          {/* Permanent Transit Route Locations & Port Gate-Out / Unloading Duration History */}
+          <CaseTransitHistoryCard targetCase={targetCase} />
 
           {/* Containers & Seal Inventory */}
           <div className="glass-card p-6 rounded-2xl border border-white/10 space-y-4">
