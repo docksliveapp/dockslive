@@ -7,8 +7,10 @@ import {
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Vehicle, VehicleCategory } from '../types';
-import { fetchAllTrackingVehicles, searchTrackingVehicles, SEED_TRACKING_VEHICLES } from '../services/vehicleTrackingService';
+import { fetchAllTrackingVehicles, searchTrackingVehicles } from '../services/vehicleTrackingService';
 import { subscribeToVehicles } from '../services/dbService';
+import { useParentGroup, isUploadedLogo } from '../services/companyService';
+import { useBranding } from '../services/brandingService';
 
 interface PublicVehicleTrackingPortalProps {
   initialQuery?: string;
@@ -31,9 +33,17 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
     return '';
   });
 
+  const { parentGroup } = useParentGroup();
+  const { customLogo: globalLogo } = useBranding();
+  const mainAppLogo = (parentGroup?.logo && isUploadedLogo(parentGroup.logo))
+    ? parentGroup.logo
+    : (globalLogo && isUploadedLogo(globalLogo))
+    ? globalLogo
+    : '/logos/mak_pearl_white_emblem.svg';
+
   const [activeSearch, setActiveSearch] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE_VALID' | 'ON_TRIP' | 'EXPIRED' | 'CANCELLED_NOC'>('ALL');
-  const [vehicles, setVehicles] = useState<Vehicle[]>(SEED_TRACKING_VEHICLES);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
@@ -57,8 +67,8 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
     const loadAllVehicles = async () => {
       try {
         const allFetched = await fetchAllTrackingVehicles();
-        if (isMounted && allFetched && allFetched.length > 0) {
-          setVehicles(allFetched);
+        if (isMounted) {
+          setVehicles(Array.isArray(allFetched) ? allFetched : []);
           setLastSyncedTime(new Date().toLocaleTimeString());
         }
       } catch (err) {
@@ -70,25 +80,16 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
 
     loadAllVehicles();
 
-    // Subscribe to live vehicles updates
+    // Subscribe to live vehicles updates (including empty array after reset)
     const unsubscribe = subscribeToVehicles(
       (liveVehicles) => {
         if (!isMounted) return;
-        if (liveVehicles && Array.isArray(liveVehicles) && liveVehicles.length > 0) {
-          setVehicles((prev) => {
-            const map = new Map<string, Vehicle>();
-            prev.forEach((v) => {
-              const reg = v.registrationNumber?.trim().toUpperCase();
-              if (reg) map.set(reg, v);
-            });
-            liveVehicles.forEach((v) => {
-              const reg = v.registrationNumber?.trim().toUpperCase();
-              if (reg) map.set(reg, v);
-            });
-            return Array.from(map.values());
-          });
-          setLastSyncedTime(new Date().toLocaleTimeString());
+        const cleanList = Array.isArray(liveVehicles) ? liveVehicles : [];
+        setVehicles(cleanList);
+        if (cleanList.length === 0) {
+          setSelectedVehicle(null);
         }
+        setLastSyncedTime(new Date().toLocaleTimeString());
       },
       () => {}
     );
@@ -187,15 +188,15 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
     return { name: 'Docks (Pvt.) Ltd.', short: 'DOCKS', color: 'text-blue-800 bg-blue-50 border-blue-300' };
   };
 
-  // Filtered vehicles when browsing full fleet (no search query)
+  // Filtered vehicles ONLY when user has actively searched
   const browsableVehicles = useMemo(() => {
-    if (activeSearch) return matchingVehicles;
-    if (statusFilter === 'ALL') return vehicles;
-    return vehicles.filter(v => {
+    if (!activeSearch) return [];
+    if (statusFilter === 'ALL') return matchingVehicles;
+    return matchingVehicles.filter(v => {
       const a = getVehicleStatusAnalysis(v);
       return a.statusType === statusFilter;
     });
-  }, [vehicles, activeSearch, matchingVehicles, statusFilter]);
+  }, [activeSearch, matchingVehicles, statusFilter]);
 
   const fleetCounts = useMemo(() => {
     let active = 0, onTrip = 0, expired = 0, noc = 0;
@@ -517,83 +518,7 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#FAF9F5] text-slate-800 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-950">
-      
-      {/* 1. Top Corporate Announcement Strip (Matching docks.com.pk) */}
-      <div className="w-full bg-[#0F172A] text-slate-200 text-center py-2 px-3 text-[11px] sm:text-xs font-semibold tracking-wide border-b border-slate-800 flex items-center justify-center gap-2">
-        <span>MAK - GROUP OF COMPANIES</span>
-        <span className="text-amber-400">|</span>
-        <span className="text-slate-300 font-normal">Pakistan's Premier Multimodal Logistics Network</span>
-      </div>
-
-      {/* 2. Top Header Navigation Bar (Clean Ivory & Gold matching docks.com.pk) */}
-      <header className="border-b border-slate-200/90 bg-white/95 backdrop-blur-md sticky top-0 z-40 shadow-xs w-full max-w-full overflow-hidden">
-        <div className="max-w-6xl w-full mx-auto px-3 sm:px-6 min-h-16 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
-          
-          {/* Left: Brand Logo & Title (docks.com.pk corporate logo) */}
-          <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
-            <a
-              href="https://mak-group.com.pk"
-              className="px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs"
-              title="Back to mak-group.com.pk"
-            >
-              <ArrowLeft size={14} className="text-amber-600 shrink-0" />
-              <span>Back</span>
-            </a>
-
-            {/* MAK GROUP OF COMPANIES Brand Typography */}
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="flex flex-col">
-                <span className="text-base sm:text-lg font-black tracking-tight text-slate-900 font-serif leading-none">
-                  MAK - GROUP
-                </span>
-                <span className="text-[9px] sm:text-[10px] font-extrabold tracking-[0.2em] text-amber-600 uppercase leading-tight mt-0.5">
-                  GROUP OF COMPANIES
-                </span>
-              </div>
-              <span className="hidden sm:inline-flex text-[10px] font-bold text-amber-700 bg-amber-100/80 border border-amber-300 px-2 py-0.5 rounded-full uppercase tracking-wider ml-1">
-                Vehicle Status
-              </span>
-            </div>
-          </div>
-
-          {/* Right: Domain indicator & Switcher to Container Status */}
-          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-            <div className="text-right hidden md:block">
-              <span className="text-xs text-amber-700 font-mono font-bold block">
-                vehicle.makpk.online
-              </span>
-              <span className="text-[10px] text-slate-500 block">
-                {lastSyncedTime ? `Live synced at ${lastSyncedTime}` : 'Multi-entity real-time sync'}
-              </span>
-            </div>
-
-            {/* Link to Container Tracking (Status.makpk.online) */}
-            <button
-              type="button"
-              onClick={handleSwitchToContainer}
-              className="text-[11px] sm:text-xs text-slate-800 hover:text-amber-800 px-2.5 sm:px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 transition-colors flex items-center gap-1.5 font-semibold cursor-pointer shadow-xs shrink-0"
-              title="Open Container & Shipment Status Tracking (Status.makpk.online)"
-            >
-              <Package size={13} className="text-amber-600 shrink-0" />
-              <span>Container Status</span>
-            </button>
-
-            {/* Exit / Close Button (Only if invoked from inside the workspace) */}
-            {onExitPortal && (
-              <button
-                type="button"
-                onClick={onExitPortal}
-                className="text-[11px] sm:text-xs text-slate-600 hover:text-slate-900 px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors cursor-pointer shrink-0"
-                title="Close and return to Internal Workspace"
-              >
-                Close
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* 3. Main Body Container with docks.com.pk luxury branding */}
+      {/* Main Body Container with docks.com.pk luxury branding */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-8 min-w-0">
         
         {/* Hero Section matching Screenshot_20261012_060549_Edge.jpg */}
@@ -610,25 +535,13 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
             CONNECTING PORTS • CROSS-BORDER TRANSIT • OCEAN LINER FREIGHT
           </p>
 
-          {/* Circular Emblem matching docks.com.pk */}
+          {/* Main App Official Logo */}
           <div className="flex justify-center pt-2 pb-1">
-            <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full p-1 bg-gradient-to-br from-amber-200 via-slate-800 to-amber-300 shadow-xl flex items-center justify-center">
-              <div className="w-full h-full rounded-full bg-white border-2 border-slate-900 flex flex-col items-center justify-center text-center p-2 relative overflow-hidden">
-                <span className="font-serif font-black text-xl sm:text-2xl text-slate-900 tracking-tighter leading-none">
-                  MAK
-                </span>
-                <span className="text-[7px] sm:text-[8px] font-extrabold text-amber-700 tracking-wider uppercase leading-tight mt-0.5">
-                  GROUP OF COMPANIES
-                </span>
-                <div className="w-16 h-[1px] bg-slate-200 my-1" />
-                <div className="grid grid-cols-4 gap-1 text-[7px] font-bold text-slate-600 tracking-tight">
-                  <span className="text-blue-700">DPL</span>
-                  <span className="text-amber-700">Truckit</span>
-                  <span className="text-emerald-700">Muhib</span>
-                  <span className="text-cyan-700">Vantage</span>
-                </div>
-              </div>
-            </div>
+            <img
+              src={mainAppLogo}
+              alt={parentGroup?.name || 'MAK Group of Companies'}
+              className="w-36 sm:w-44 md:w-48 h-36 sm:h-44 md:h-48 max-h-36 sm:max-h-44 md:max-h-48 object-contain drop-shadow-[0_12px_36px_rgba(0,0,0,0.18)] select-none"
+            />
           </div>
 
           {/* Main Title */}
@@ -673,26 +586,10 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
               </button>
             </div>
           </form>
-
-          {/* Minimal Examples */}
-          <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-xs text-slate-500">
-            <span className="font-semibold text-slate-600">Sample Plates:</span>
-            {['TLB-892', 'P-9912', 'KHI-7721', 'JU-4412'].map((ex, idx) => (
-              <React.Fragment key={ex}>
-                {idx > 0 && <span>·</span>}
-                <button
-                  type="button"
-                  onClick={() => handleQuickExample(ex)}
-                  className="text-amber-700 hover:text-amber-900 font-mono font-bold hover:underline transition cursor-pointer"
-                >
-                  {ex}
-                </button>
-              </React.Fragment>
-            ))}
-          </div>
         </section>
 
-        {/* 4. Results Section: Vehicle Details on Top, Dedicated Status Field Below */}
+        {/* 4. Results Section: Shown ONLY when user searches a vehicle */}
+        {activeSearch && (
         <section className="space-y-6 animate-in fade-in duration-300">
           
           {/* If a vehicle is selected (or exact single match): Show Complete Dossier Card */}
@@ -700,14 +597,16 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
             <div className="space-y-6">
               {/* Back to Results / Switch Vehicle */}
               <div className="flex items-center justify-between gap-3 flex-wrap">
-                <button
-                  type="button"
-                  onClick={handleBackToFleetList}
-                  className="text-xs text-slate-700 hover:text-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 flex items-center gap-2 transition-colors cursor-pointer w-fit shadow-xs font-semibold"
-                >
-                  <ArrowLeft size={14} />
-                  <span>{activeSearch ? `Back to Search Results (${matchingVehicles.length})` : `Back to Fleet Directory (${vehicles.length})`}</span>
-                </button>
+                {matchingVehicles.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handleBackToFleetList}
+                    className="text-xs text-slate-700 hover:text-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 flex items-center gap-2 transition-colors cursor-pointer w-fit shadow-xs font-semibold"
+                  >
+                    <ArrowLeft size={14} />
+                    <span>{`Back to Search Results (${matchingVehicles.length})`}</span>
+                  </button>
+                )}
 
                 <div className="flex items-center gap-2">
                   <button
@@ -897,6 +796,7 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
           )}
 
         </section>
+        )}
 
       </main>
 
@@ -906,12 +806,11 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
           <div className="text-left">
             <p className="font-bold text-slate-900">MAK Group of Companies — Central Fleet &amp; Vehicle Verification Service</p>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Tower Office: State Life Building No. 7, G-Allana Road, Tower, Karachi, Pakistan.
+              Office No 13 1st Floor State Life Building No 7 G-Allana Road Tower Karachi
             </p>
           </div>
           <div className="text-right text-[11px] text-slate-500">
             <p>Support: +92-21-32330103 • fleet@makgroup.com.pk</p>
-            <p className="text-amber-700 mt-0.5 font-bold">Read-Only Verification • Zero Financial Data Disclosed</p>
           </div>
         </div>
       </footer>

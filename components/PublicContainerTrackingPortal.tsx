@@ -12,11 +12,12 @@ import {
   fetchAllTrackingCases, 
   searchTrackingCases, 
   parseTrackingTokens, 
-  SEED_TRACKING_CASES,
   extractMatchingContainers,
   MatchedContainerItem
 } from '../services/containerTrackingService';
 import { subscribeToCases } from '../services/dbService';
+import { useParentGroup, isUploadedLogo, getCompanyLogoUrl, CompanyId } from '../services/companyService';
+import { useBranding } from '../services/brandingService';
 
 interface PublicContainerTrackingPortalProps {
   initialQuery?: string;
@@ -39,9 +40,17 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
     return '';
   });
 
+  const { parentGroup } = useParentGroup();
+  const { customLogo: globalLogo } = useBranding();
+  const mainAppLogo = (parentGroup?.logo && isUploadedLogo(parentGroup.logo))
+    ? parentGroup.logo
+    : (globalLogo && isUploadedLogo(globalLogo))
+    ? globalLogo
+    : '/logos/mak_pearl_white_emblem.svg';
+
   const [activeSearch, setActiveSearch] = useState<string>('');
   const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
-  const [cases, setCases] = useState<Case[]>(SEED_TRACKING_CASES);
+  const [cases, setCases] = useState<Case[]>([]);
   const [isLoadingCases, setIsLoadingCases] = useState<boolean>(true);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
@@ -60,8 +69,8 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
     const loadAllCases = async () => {
       try {
         const allFetched = await fetchAllTrackingCases();
-        if (isMounted && allFetched && allFetched.length > 0) {
-          setCases(allFetched);
+        if (isMounted) {
+          setCases(Array.isArray(allFetched) ? allFetched : []);
           setLastSyncedTime(new Date().toLocaleTimeString());
         }
       } catch (err) {
@@ -73,19 +82,16 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
 
     loadAllCases();
 
-    // Subscribe to live updates across all companies
+    // Subscribe to live updates across all companies (including empty array after reset)
     const unsubscribe = subscribeToCases(
       (liveCases) => {
         if (!isMounted) return;
-        if (liveCases && Array.isArray(liveCases) && liveCases.length > 0) {
-          setCases((prev) => {
-            const map = new Map<string, Case>();
-            prev.forEach((c) => { if (c.caseNo || c.id) map.set(c.caseNo || c.id, c); });
-            liveCases.forEach((c) => { if (c.caseNo || c.id) map.set(c.caseNo || c.id, c); });
-            return Array.from(map.values());
-          });
-          setLastSyncedTime(new Date().toLocaleTimeString());
+        const cleanCases = Array.isArray(liveCases) ? liveCases : [];
+        setCases(cleanCases);
+        if (cleanCases.length === 0) {
+          setSelectedContainerId(null);
         }
+        setLastSyncedTime(new Date().toLocaleTimeString());
       },
       () => {},
       { allCompanies: true }
@@ -346,91 +352,7 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#FAF9F5] text-slate-800 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-950">
-      
-      {/* 1. Top Corporate Announcement Strip (Matching docks.com.pk) */}
-      <div className="w-full bg-[#0F172A] text-slate-200 text-center py-2 px-3 text-[11px] sm:text-xs font-semibold tracking-wide border-b border-slate-800 flex items-center justify-center gap-2">
-        <span>MAK - GROUP OF COMPANIES</span>
-        <span className="text-amber-400">|</span>
-        <span className="text-slate-300 font-normal">Pakistan's Premier Multimodal Logistics Network</span>
-      </div>
-
-      {/* 2. Top Header Navigation Bar (Clean Ivory & Gold matching docks.com.pk) */}
-      <header className="border-b border-slate-200/90 bg-white/95 backdrop-blur-md sticky top-0 z-40 shadow-xs w-full max-w-full overflow-hidden">
-        <div className="max-w-6xl w-full mx-auto px-3 sm:px-6 min-h-16 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
-          
-          {/* Left: Brand Logo & Title */}
-          <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
-            <a
-              href="https://mak-group.com.pk"
-              className="px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-slate-900 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs"
-              title="Back to mak-group.com.pk"
-            >
-              <ArrowLeft size={14} className="text-amber-600 shrink-0" />
-              <span>Back</span>
-            </a>
-
-            {/* MAK GROUP OF COMPANIES Brand Typography */}
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="flex flex-col">
-                <span className="text-base sm:text-lg font-black tracking-tight text-slate-900 font-serif leading-none">
-                  MAK - GROUP
-                </span>
-                <span className="text-[9px] sm:text-[10px] font-extrabold tracking-[0.2em] text-amber-600 uppercase leading-tight mt-0.5">
-                  GROUP OF COMPANIES
-                </span>
-              </div>
-              <span className="hidden sm:inline-flex text-[10px] font-bold text-amber-700 bg-amber-100/80 border border-amber-300 px-2 py-0.5 rounded-full uppercase tracking-wider ml-1">
-                Container Status
-              </span>
-            </div>
-          </div>
-
-          {/* Right: Domain indicator & Switcher to Vehicle Status */}
-          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-            <div className="text-right hidden md:block">
-              <span className="text-xs text-amber-700 font-mono font-bold block">
-                status.makpk.online
-              </span>
-              <span className="text-[10px] text-slate-500 block">
-                {lastSyncedTime ? `Live synced at ${lastSyncedTime}` : 'Multi-entity real-time sync'}
-              </span>
-            </div>
-
-            {/* Switch to Vehicle Tracker (Vehicle.makpk.online) */}
-            <button
-              type="button"
-              onClick={() => {
-                const host = (window.location.hostname || '').toLowerCase();
-                if (host.includes('makpk.online') || host.includes('mak-group.com')) {
-                  window.location.href = 'https://vehicle.makpk.online';
-                  return;
-                }
-                if (onSwitchToVehicleTracker) onSwitchToVehicleTracker();
-                else window.location.href = 'https://vehicle.makpk.online';
-              }}
-              className="text-[11px] sm:text-xs text-slate-800 hover:text-amber-800 px-2.5 sm:px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 transition-colors flex items-center gap-1.5 font-semibold cursor-pointer shadow-xs shrink-0"
-              title="Switch to Fleet & Vehicle Verification (vehicle.makpk.online)"
-            >
-              <Truck size={13} className="text-amber-600 shrink-0" />
-              <span>Vehicle Status</span>
-            </button>
-
-            {/* Exit to Internal Workspace (Only if accessed from internal app) */}
-            {onExitPortal && (
-              <button
-                type="button"
-                onClick={onExitPortal}
-                className="text-[11px] sm:text-xs text-slate-600 hover:text-slate-900 px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 transition-colors cursor-pointer shrink-0"
-                title="Return to Internal Workspace"
-              >
-                Close
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* 3. Main Body Container with docks.com.pk luxury branding */}
+      {/* Main Body Container with docks.com.pk luxury branding */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-8 min-w-0">
         
         {/* Hero Section matching Screenshot_20261012_060549_Edge.jpg */}
@@ -447,25 +369,13 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
             CONNECTING PORTS • CROSS-BORDER TRANSIT • OCEAN LINER FREIGHT
           </p>
 
-          {/* Circular Emblem matching docks.com.pk */}
+          {/* Main App Official Logo */}
           <div className="flex justify-center pt-2 pb-1">
-            <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-full p-1 bg-gradient-to-br from-amber-200 via-slate-800 to-amber-300 shadow-xl flex items-center justify-center">
-              <div className="w-full h-full rounded-full bg-white border-2 border-slate-900 flex flex-col items-center justify-center text-center p-2 relative overflow-hidden">
-                <span className="font-serif font-black text-xl sm:text-2xl text-slate-900 tracking-tighter leading-none">
-                  MAK
-                </span>
-                <span className="text-[7px] sm:text-[8px] font-extrabold text-amber-700 tracking-wider uppercase leading-tight mt-0.5">
-                  GROUP OF COMPANIES
-                </span>
-                <div className="w-16 h-[1px] bg-slate-200 my-1" />
-                <div className="grid grid-cols-4 gap-1 text-[7px] font-bold text-slate-600 tracking-tight">
-                  <span className="text-blue-700">DPL</span>
-                  <span className="text-amber-700">Truckit</span>
-                  <span className="text-emerald-700">Muhib</span>
-                  <span className="text-cyan-700">Vantage</span>
-                </div>
-              </div>
-            </div>
+            <img
+              src={mainAppLogo}
+              alt={parentGroup?.name || 'MAK Group of Companies'}
+              className="w-36 sm:w-44 md:w-48 h-36 sm:h-44 md:h-48 max-h-36 sm:max-h-44 md:max-h-48 object-contain drop-shadow-[0_12px_36px_rgba(0,0,0,0.18)] select-none"
+            />
           </div>
 
           {/* Main Title */}
@@ -510,46 +420,6 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
               </button>
             </div>
           </form>
-
-          {/* Quick Search Helper Tags */}
-          <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-xs text-slate-500">
-            <span className="font-semibold text-slate-600">Quick Examples:</span>
-            <button
-              type="button"
-              onClick={() => handleQuickExample('WHSU5957558')}
-              className="text-amber-700 hover:text-amber-900 font-mono font-bold hover:underline transition cursor-pointer"
-              title="Search by single Container Number"
-            >
-              WHSU5957558 (Single Cont)
-            </button>
-            <span>·</span>
-            <button
-              type="button"
-              onClick={() => handleQuickExample('HLCU9201840')}
-              className="text-amber-700 hover:text-amber-900 font-mono font-bold hover:underline transition cursor-pointer"
-              title="Search by B/L (Multiple Containers)"
-            >
-              HLCU9201840 (Multi Cont B/L)
-            </button>
-            <span>·</span>
-            <button
-              type="button"
-              onClick={() => handleQuickExample('TLB-892')}
-              className="text-amber-700 hover:text-amber-900 font-mono font-bold hover:underline transition cursor-pointer"
-              title="Search by Assigned Truck Plate"
-            >
-              TLB-892 (By Truck No)
-            </button>
-            <span>·</span>
-            <button
-              type="button"
-              onClick={() => handleQuickExample('DPL-26-0012')}
-              className="text-amber-700 hover:text-amber-900 font-mono font-bold hover:underline transition cursor-pointer"
-              title="Search by Case Number"
-            >
-              DPL-26-0012 (By Case No)
-            </button>
-          </div>
         </section>
 
         {/* 4. Results Presentation Area */}
@@ -634,7 +504,7 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
               </div>
             )}
 
-            {/* C. If MORE THAN 1 Container and no single container drilled in: "ek se jyada container hai to list a jayegi container number ki aur uske aage status likha Hoga is aur status ki field ke andar jo bhi work slow chal raha hoga current vah najar aaega" */}
+            {/* C. If MORE THAN 1 Container Entry across companies or current/past history: Show list and open detail page on click */}
             {!activeContainerItem && matchingContainers.length > 1 && (
               <div className="space-y-4">
                 {/* Header Summary Banner */}
@@ -645,23 +515,24 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
                     </div>
                     <div>
                       <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
-                        Multiple Containers Consignment ({matchingContainers.length} Containers Monitored)
+                        Centralized Multi-Company Container Records ({matchingContainers.length} Entries Found)
                       </h3>
                       <p className="text-xs text-slate-500">
-                        Container numbers with their assigned trucks and current live workflow stages. Click any container to view complete timeline.
+                        Showing all current and past entries across Docks, Muhib, Vantage &amp; Truckit. Click any entry below to open its full detail &amp; workflow status page.
                       </p>
                     </div>
                   </div>
                   <span className="text-xs font-bold px-3 py-1 rounded-full bg-slate-100 text-slate-800 border border-slate-300 shrink-0 font-mono">
-                    Total: {matchingContainers.length} Units
+                    Total: {matchingContainers.length} Entries
                   </span>
                 </div>
 
-                {/* Responsive Containers List with Prominent Workflow Status Field */}
+                {/* Responsive Containers List with Prominent Company & Workflow Status Field */}
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
                   <div className="divide-y divide-slate-100">
                     {matchingContainers.map((cItem, idx) => {
                       const opBadge = getOperatingCompany(cItem.companyId);
+                      const compLogo = getCompanyLogoUrl((cItem.companyId || 'docks') as CompanyId);
 
                       return (
                         <div 
@@ -669,8 +540,8 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
                           onClick={() => setSelectedContainerId(String(cItem.id))}
                           className="p-4 sm:p-5 hover:bg-amber-50/40 transition-colors cursor-pointer group flex flex-col lg:flex-row lg:items-center justify-between gap-4"
                         >
-                          {/* Container Specs & Identifiers */}
-                          <div className="space-y-2 min-w-0 flex-1">
+                          {/* Container Specs, Company & Identifiers */}
+                          <div className="space-y-2.5 min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-mono font-bold shrink-0">
                                 {idx + 1}
@@ -686,23 +557,39 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
                                   Seal: {cItem.sealNo}
                                 </span>
                               )}
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${opBadge.color} shrink-0`}>
-                                {opBadge.short}
+                              {/* Company Badge with Logo */}
+                              <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-0.5 rounded-md border ${opBadge.color} shrink-0`}>
+                                <img src={compLogo} alt={opBadge.name} className="w-4 h-4 object-contain shrink-0" />
+                                <span>{opBadge.name}</span>
+                              </span>
+                              {/* Current vs Past Record Badge */}
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
+                                cItem.isCompleted
+                                  ? 'bg-slate-100 text-slate-700 border-slate-300'
+                                  : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                              }`}>
+                                {cItem.isCompleted ? 'Past / Completed Record' : 'Current / Active Record'}
                               </span>
                             </div>
 
                             {/* Truck & Consignment Metadata */}
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+                              <div>
+                                <span>Company: <strong className="text-slate-900">{opBadge.name}</strong></span>
+                              </div>
+                              <div>
+                                <span>Case: <strong className="text-slate-900 font-mono">{cItem.caseNo}</strong></span>
+                              </div>
+                              <div>
+                                <span>B/L: <strong className="text-slate-900 font-mono">{cItem.blNumber || 'N/A'}</strong></span>
+                              </div>
                               <div className="flex items-center gap-1">
                                 <Truck size={13} className="text-emerald-700" />
                                 <span>Truck: <strong className="text-slate-900 font-mono">{cItem.vehicleNo || 'Awaiting Haulage'}</strong></span>
                                 {cItem.driverName && <span className="text-slate-500 font-normal">({cItem.driverName})</span>}
                               </div>
                               <div>
-                                <span>B/L: <strong className="text-slate-900 font-mono">{cItem.blNumber || 'N/A'}</strong></span>
-                              </div>
-                              <div>
-                                <span>Case: <strong className="text-slate-900 font-mono">{cItem.caseNo}</strong></span>
+                                <span>Date: <strong className="text-slate-800 font-mono">{cItem.registrationDate}</strong></span>
                               </div>
                               <div>
                                 <span>Category: <strong className="text-amber-800">{cItem.category}</strong></span>
@@ -764,12 +651,11 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
           <div className="text-left">
             <p className="font-bold text-slate-900">MAK Group of Companies — Public Container Tracking Service</p>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Tower Office: State Life Building No. 7, G-Allana Road, Tower, Karachi, Pakistan.
+              Office No 13 1st Floor State Life Building No 7 G-Allana Road Tower Karachi
             </p>
           </div>
           <div className="text-right text-[11px] text-slate-500">
             <p>Direct Support: +92-21-32330103 • info@makgroup.com.pk</p>
-            <p className="text-amber-700 mt-0.5 font-bold">Zero Financial Disclosures • Pure Operational Milestone Verification</p>
           </div>
         </div>
       </footer>

@@ -3197,12 +3197,13 @@ export async function wipeCompleteDatabase(): Promise<{
     try { sessionStorage.removeItem(k); } catch (_) {}
   });
 
-  // 6. Ensure all payables, finances, cases, and notifications in memory and storage are strictly empty
+  // 6. Ensure all payables, finances, cases, notifications, and activity logs in memory and storage are strictly empty
   safeAppStorage.setJSON('dpl_live_finance', []);
   safeAppStorage.setJSON('dpl_live_payables', []);
   safeAppStorage.setJSON('dpl_live_receivables', []);
   safeAppStorage.setJSON('dpl_live_cases', []);
   safeAppStorage.setJSON('dpl_live_notifications', []);
+  safeAppStorage.setJSON('dpl_system_activity_logs', []);
 
   // 7. Remove custom branding for all companies and parent group
   ['docks', 'muhib', 'vantage', 'truckit'].forEach(cId => {
@@ -3330,6 +3331,8 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
 
   // 2. Filter local storage cached arrays to remove only this company's items (preserving shared vehicles)
   try {
+    safeAppStorage.setRawItem('dpl_last_reset_timestamp', new Date().toISOString());
+
     const liveFinance = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', []);
     safeAppStorage.setJSON('dpl_live_finance', liveFinance.filter(f => !matchesActiveCompany(f.companyId, companyId)));
 
@@ -3345,6 +3348,9 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
     const liveNotifs = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []);
     safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, liveNotifs.filter(n => !matchesActiveCompany((n as any).companyId, companyId)));
     safeAppStorage.removeItem(`dpl_live_notifications_${companyId}`);
+
+    const liveActivityLogs = safeAppStorage.getJSON<any[]>('dpl_system_activity_logs', []);
+    safeAppStorage.setJSON('dpl_system_activity_logs', liveActivityLogs.filter(l => !matchesActiveCompany(l?.companyId, companyId)));
 
     // Reset this specific company's branding
     safeAppStorage.removeItem(`dpl_company_branding_v1_${companyId}`);

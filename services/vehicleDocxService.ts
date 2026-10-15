@@ -20,7 +20,7 @@ import { getActiveCompany, getActiveCompanyPrefix } from './companyService';
 export const DOCKS_COMPANY = {
   name: 'Docks (Pvt) Ltd.',
   fullLegalName: 'M/s. Docks (Pvt.) Ltd.',
-  address: 'Office No. 13 First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi',
+  address: 'Office No 13 1st Floor State Life Building No 7 G-Allana Road Tower Karachi',
   ntn: '5064083-8',
   customsNtn: '3997968',
   phone: '+92 21 3241 4500',
@@ -38,7 +38,7 @@ export function getActiveCompanyDocxDetails() {
     name: active.name,
     legalTitle: active.legalTitle || active.name,
     fullLegalName: `M/s. ${active.legalTitle || active.name}`,
-    address: active.address || 'Office No. 13 First Floor, State Life Building No. 7, G-Allana Road Tower, Karachi',
+    address: active.address || 'Office No 13 1st Floor State Life Building No 7 G-Allana Road Tower Karachi',
     ntn: active.id === 'docks' ? '5064083-8' : (active.id === 'muhib' ? '5064083-9' : '5064083-7'),
     customsNtn: '3997968',
     phone: active.phone || '+92 21 3241 4500',

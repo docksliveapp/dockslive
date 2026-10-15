@@ -25,7 +25,7 @@ const getHeaderHtml = (companyName?: string, companyAddress?: string) => {
     DOCKS (PVT) LTD  •  TRUCKIT (PVT) LTD  •  MUHIB INTL  •  VANTAGE SHIPPING
   </p>
   <p style="color: #64748b; font-family: Arial, sans-serif; font-size: 7.5pt; margin: 2px 0 0 0;">
-    Head Office: Suite 301-303, Business Avenue, P.E.C.H.S Block 6, Karachi | Tel: +92 21 34521100 | Web: www.makgroup.com.pk
+    Head Office: Office No 13 1st Floor State Life Building No 7 G-Allana Road Tower Karachi | Tel: +92-21-32330103 | Web: www.makgroup.com.pk
   </p>
   <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #e2e8f0; font-size: 8pt; color: #0F172A; font-weight: bold;">
     ISSUING OPERATING ENTITY: ${cName}
@@ -39,7 +39,7 @@ const getFooterHtml = () => {
   return `
 <div style="margin-top: 40px; padding-top: 15px; border-top: 1px solid #cbd5e1; text-align: center; font-family: Arial, sans-serif; font-size: 7.5pt; color: #64748b;">
   <p style="margin: 0; font-weight: bold; color: #334155;">
-    Head Office: Suite 301-303, Business Avenue, P.E.C.H.S Block 6, Shahrah-e-Faisal, Karachi
+    Head Office: Office No 13 1st Floor State Life Building No 7 G-Allana Road Tower Karachi
   </p>
   <p style="margin: 3px 0 0 0;">
     Official ERP Document • Issuing Authority: ${comp.legalTitle || comp.name} • Valid with authorized carrier seal

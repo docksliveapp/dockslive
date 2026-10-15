@@ -41,7 +41,8 @@ import {
   EyeOff,
   Save,
   Check,
-  UserCheck
+  UserCheck,
+  Package
 } from 'lucide-react';
 import { Case, Vehicle, FinanceEntry, AppUser, CaseStatus, UserRole } from '../types';
 import { 
@@ -66,6 +67,8 @@ import { exportTableToExcel } from '../services/excelExportService';
 import GroupAdminManagementModal, { AdminSettingsTab } from './GroupAdminManagementModal';
 import Dashboard from './Dashboard';
 import { ThemeToggleSwitch } from './ThemeToggleSwitch';
+import PublicContainerTrackingPortal from './PublicContainerTrackingPortal';
+import PublicVehicleTrackingPortal from './PublicVehicleTrackingPortal';
 
 export interface GroupAdminPortalProps {
   onExitPortal: () => void;
@@ -80,6 +83,8 @@ type PortalView =
   | 'company_muhib'
   | 'company_vantage'
   | 'company_truckit'
+  | 'container_status'
+  | 'vehicle_status'
   | 'setting_profile'
   | 'setting_logo'
   | 'setting_backup'
@@ -533,6 +538,52 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
             </div>
           </div>
 
+          {/* SECTION 2.5: CENTRALIZED STATUS & TRACKING */}
+          <div>
+            <div className="px-3 py-1 text-xs font-bold text-amber-400/90 uppercase tracking-widest font-mono">
+              Central Status & Tracking
+            </div>
+            <div className="space-y-1.5 mt-1">
+              {/* Centralized Container Status */}
+              <button
+                type="button"
+                onClick={() => handleSelectView('container_status')}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer ${
+                  activeView === 'container_status'
+                    ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 shadow-sm'
+                    : 'text-slate-200 hover:bg-white/5 hover:text-white border border-white/5 bg-white/[0.02]'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Package size={16} className={activeView === 'container_status' ? 'text-amber-400' : 'text-amber-400/80'} />
+                  <span className="text-xs font-semibold">Container Status</span>
+                </div>
+                <span className="text-[10px] font-mono bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-bold">
+                  All Co.
+                </span>
+              </button>
+
+              {/* Centralized Vehicle Status */}
+              <button
+                type="button"
+                onClick={() => handleSelectView('vehicle_status')}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer ${
+                  activeView === 'vehicle_status'
+                    ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 shadow-sm'
+                    : 'text-slate-200 hover:bg-white/5 hover:text-white border border-white/5 bg-white/[0.02]'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Truck size={16} className={activeView === 'vehicle_status' ? 'text-amber-400' : 'text-amber-400/80'} />
+                  <span className="text-xs font-semibold">Vehicle Status</span>
+                </div>
+                <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-bold">
+                  Fleet
+                </span>
+              </button>
+            </div>
+          </div>
+
           {/* SECTION 3: GROUP ADMIN SETTINGS */}
           <div>
             <div className="px-3 py-1 text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">
@@ -696,6 +747,8 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                   {activeView === 'company_muhib' && 'Muhib International'}
                   {activeView === 'company_vantage' && 'Vantage Shipping Line'}
                   {activeView === 'company_truckit' && 'Truckit (Pvt.) Ltd.'}
+                  {activeView === 'container_status' && 'Centralized Container Status (All Companies)'}
+                  {activeView === 'vehicle_status' && 'Unified Fleet & Vehicle Status'}
                   {activeView === 'setting_profile' && 'Admin Profile & Security'}
                   {activeView === 'setting_logo' && 'Logos & Branding'}
                   {activeView === 'setting_backup' && 'Backup & Recovery'}
@@ -766,7 +819,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
         </header>
 
         {/* Scrollable Main Body */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-6 custom-scrollbar space-y-6">
+        <div className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${activeView === 'container_status' || activeView === 'vehicle_status' ? 'p-0' : 'p-3 sm:p-6 space-y-6'}`}>
           
           {/* ======================================================== */}
           {/* VIEW A: CONSOLIDATED GROUP EXECUTIVE DASHBOARD            */}
@@ -1471,6 +1524,30 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 onClose={() => handleSelectView('overview')}
                 currentUserName={profileDisplayName || currentUserName}
                 initialTab={getSettingsTabFromView(activeView)}
+              />
+            </div>
+          )}
+
+          {/* ======================================================== */}
+          {/* VIEW E: CENTRALIZED CONTAINER STATUS (ALL 4 COMPANIES)   */}
+          {/* ======================================================== */}
+          {activeView === 'container_status' && (
+            <div className="min-h-full w-full animate-fade-in">
+              <PublicContainerTrackingPortal
+                onExitPortal={() => handleSelectView('overview')}
+                onSwitchToVehicleTracker={() => handleSelectView('vehicle_status')}
+              />
+            </div>
+          )}
+
+          {/* ======================================================== */}
+          {/* VIEW F: CENTRALIZED VEHICLE STATUS                       */}
+          {/* ======================================================== */}
+          {activeView === 'vehicle_status' && (
+            <div className="min-h-full w-full animate-fade-in">
+              <PublicVehicleTrackingPortal
+                onExitPortal={() => handleSelectView('overview')}
+                onSwitchToContainerTracker={() => handleSelectView('container_status')}
               />
             </div>
           )}

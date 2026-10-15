@@ -6,12 +6,12 @@ import {
   AlertTriangle, Truck, Anchor, DollarSign, Activity, 
   FileText, CheckCircle, Clock, Sparkles, RefreshCw, AlertCircle, Calendar, TrendingUp, TrendingDown, Crosshair, ArrowRight, BarChart2, Filter, X,
   Building2, MapPin, Search, Download, ShieldCheck, Globe, ChevronDown, ChevronUp,
-  Layers, CheckCircle2, Boxes
+  Layers, CheckCircle2, Boxes, Trash2
 } from 'lucide-react';
 import { LogEntry, CaseStatus, Case, Vehicle, FinanceEntry } from '../types';
 import { subscribeToCases, subscribeToVehicles, subscribeToFinances, matchesActiveCompany } from '../services/dbService';
 import { CompanyId, GROUP_COMPANIES } from '../services/companyService';
-import { subscribeToActivityLogs, ActivityLogRecord } from '../services/activityLogService';
+import { subscribeToActivityLogs, clearAllActivityLogs, ActivityLogRecord } from '../services/activityLogService';
 import { safeAppStorage } from '../services/storage';
 import { 
   calculateStationMovements, 
@@ -179,9 +179,59 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
   }, [targetCompanyId]);
 
   const filteredLiveLogs = useMemo(() => {
+    const activeCaseNumbers = new Set(
+      liveCases.map(c => String(c.caseNumber || c.id || '').trim().toUpperCase()).filter(Boolean)
+    );
+
     return liveLogs.filter((item) => {
+      const title = String(item.title || item.action || '').trim();
+      const desc = String(item.description || item.details || '').trim();
+      const combined = `${title} ${desc}`.toLowerCase();
+      const itemRole = String(item.role || item.userRole || '').toUpperCase();
+
+      // Never show automated Daily Financial History Summary entries in user activity stream
+      if (
+        title.toLowerCase().includes('daily financial history summary') ||
+        combined.includes('daily financial history summary') ||
+        String(item.id || '').startsWith('fin_daily_summary_')
+      ) {
+        return false;
+      }
+
+      // Filter out logs for cases that no longer exist after reset or deletion
+      const explicitCaseNum = String(item.caseNumber || '').trim().toUpperCase();
+      if (explicitCaseNum && !activeCaseNumbers.has(explicitCaseNum)) {
+        return false;
+      }
+      const caseMatch = `${title} ${desc}`.match(/#?(DPL-[A-Z0-9-]+)/i);
+      if (caseMatch && caseMatch[1]) {
+        const extractedCase = caseMatch[1].trim().toUpperCase();
+        if (!activeCaseNumbers.has(extractedCase)) {
+          return false;
+        }
+      }
+      if (
+        liveCases.length === 0 &&
+        (itemRole.includes('OPERATIONS') ||
+          itemRole.includes('CASE') ||
+          combined.includes('new case registered') ||
+          combined.includes('case registered'))
+      ) {
+        return false;
+      }
+
+      // Filter out financial logs when all finance records have been wiped/reset
+      if (
+        liveFinances.length === 0 &&
+        (itemRole.includes('FINANCE') ||
+          combined.includes('voucher') ||
+          combined.includes('ledger') ||
+          combined.includes('opening balance'))
+      ) {
+        return false;
+      }
+
       if (activityRoleFilter !== 'ALL') {
-        const itemRole = String(item.role || item.userRole || '').toUpperCase();
         if (activityRoleFilter === 'TRANSPORTER' && !itemRole.includes('TRANSPORTER')) return false;
         if (activityRoleFilter === 'VEHICLE_MANAGER' && !itemRole.includes('VEHICLE') && !itemRole.includes('FLEET') && !itemRole.includes('TRANSPORT')) return false;
         if (activityRoleFilter === 'LOADING_PORT_STAFF' && !itemRole.includes('LOADING')) return false;
@@ -193,14 +243,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
       }
       if (activitySearchQuery.trim()) {
         const q = activitySearchQuery.toLowerCase();
-        const matchTitle = (item.title || item.action || '').toLowerCase().includes(q);
-        const matchDesc = (item.description || item.details || '').toLowerCase().includes(q);
+        const matchTitle = title.toLowerCase().includes(q);
+        const matchDesc = desc.toLowerCase().includes(q);
         const matchUser = (item.performedBy || item.userId || '').toLowerCase().includes(q);
         return matchTitle || matchDesc || matchUser;
       }
       return true;
     });
-  }, [liveLogs, activityRoleFilter, activitySearchQuery]);
+  }, [liveLogs, liveCases, liveFinances, activityRoleFilter, activitySearchQuery]);
 
   // Compute Live Metrics from real Firestore data
   const casePendingApproval = liveCases.filter(c => c.status === CaseStatus.SHIPPING_LINE_DO).length;
@@ -568,6 +618,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
           </div>
 
           <div className="flex items-center gap-2.5 self-start sm:self-auto shrink-0">
+            {filteredLiveLogs.length > 0 && (
+              <button
+                type="button"
+                onClick={async () => {
+                  setLiveLogs([]);
+                  await clearAllActivityLogs(targetCompanyId);
+                }}
+                className="text-xs text-rose-300 hover:text-white font-semibold px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 transition active:scale-95 flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                title="Clear all activity stream records"
+              >
+                <Trash2 size={13} />
+                <span>Clear Stream</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setShowAllLogs(!showAllLogs)}
