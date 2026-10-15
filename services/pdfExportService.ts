@@ -1471,9 +1471,10 @@ export interface ClientLedgerExportData {
   companyName?: string;
   customLogo?: string | null;
   branding?: BrandingInfo;
+  returnBase64Only?: boolean;
 }
 
-export async function downloadClientLedgerPdf(data: ClientLedgerExportData): Promise<{ success: boolean; filename: string; blobUrl: string }> {
+export async function downloadClientLedgerPdf(data: ClientLedgerExportData): Promise<{ success: boolean; filename: string; blobUrl: string; base64?: string }> {
   try {
     const doc = new jsPDF({
       orientation: 'portrait',
@@ -1658,7 +1659,15 @@ export async function downloadClientLedgerPdf(data: ClientLedgerExportData): Pro
 
     const cleanClient = data.clientName.replace(/[^a-zA-Z0-9_-]/g, '_');
     const filename = `Client_Ledger_${cleanClient}_${new Date().toISOString().split('T')[0]}.pdf`;
-    return triggerDirectDownload(doc, filename);
+    const dataUri = doc.output('datauristring');
+    const base64 = dataUri.includes(',') ? dataUri.split(',')[1] : '';
+
+    if (data.returnBase64Only) {
+      return { success: true, filename, blobUrl: '', base64 };
+    }
+
+    const dl = triggerDirectDownload(doc, filename);
+    return { ...dl, base64 };
   } catch (error) {
     console.error('Failed to generate client ledger PDF:', error);
     throw error;

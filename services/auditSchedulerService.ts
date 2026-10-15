@@ -16,6 +16,7 @@ import {
 } from './dbService';
 import { safeAppStorage } from './storage';
 import { sendAppNotification } from './notificationService';
+import { createGoogleCalendarEvent, getDriveAccessToken, CORPORATE_WORKSPACE_EMAIL } from './googleDriveService';
 
 let isSchedulerInitialized = false;
 
@@ -140,6 +141,17 @@ export async function checkHearingNoticeReminders(documents: CompanyDocument[], 
             actionLabel: 'Open Hearing Notice',
             targetView: 'company_documents'
           });
+
+          if (getDriveAccessToken()) {
+            const isoDay = new Date(hTime).toISOString().split('T')[0];
+            createGoogleCalendarEvent({
+              summary: `Legal / Customs Hearing: ${doc.title}`,
+              description: `Category: ${doc.category || 'Hearings & Adjudication'}\nReference No: ${doc.referenceNo || 'N/A'}\nNotes: ${doc.notes || 'Please prepare legal/customs adjudication dossier.'}`,
+              startIso: `${isoDay}T10:00:00+05:00`,
+              endIso: `${isoDay}T11:30:00+05:00`,
+              attendeesEmails: [CORPORATE_WORKSPACE_EMAIL]
+            }).catch(() => {});
+          }
         }
       }
     }

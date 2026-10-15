@@ -490,37 +490,9 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
         {/* Scrollable Navigation List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-4 custom-scrollbar text-xs">
           
-          {/* SECTION 1: EXECUTIVE HUB */}
+          {/* 4 SUBSIDIARY COMPANIES */}
           <div>
-            <div className="px-3 py-1 text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">
-              Executive Hub
-            </div>
-            <button
-              type="button"
-              onClick={() => handleSelectView('overview')}
-              className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl transition-all cursor-pointer font-bold ${
-                activeView === 'overview'
-                  ? 'bg-gradient-to-r from-amber-500/20 to-amber-600/10 text-amber-300 border border-amber-500/40 shadow-lg shadow-amber-500/10'
-                  : 'text-slate-300 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <div className="flex items-center gap-2.5 min-w-0 truncate">
-                <Crown size={16} className={activeView === 'overview' ? 'text-amber-400' : 'text-slate-400'} />
-                <span className="truncate">Group Executive Dashboard</span>
-              </div>
-              <span className="text-xs font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold shrink-0">
-                Total
-              </span>
-            </button>
-          </div>
-
-          {/* SECTION 2: 4 SUBSIDIARY COMPANIES */}
-          <div>
-            <div className="px-3 py-1 text-xs font-bold text-slate-400 uppercase tracking-widest font-mono flex items-center justify-between">
-              <span>Subsidiaries (4 Companies)</span>
-              <span className="text-xs text-amber-400 font-semibold">Live Data</span>
-            </div>
-            <div className="space-y-1 mt-1">
+            <div className="space-y-1.5">
               {COMPANIES_LIST.map((comp, cIdx) => {
                 const viewKey: PortalView = `company_${comp.id}` as PortalView;
                 const isSelected = activeView === viewKey;
@@ -531,13 +503,13 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                     key={`comp_nav_${comp.id}_${cIdx}`}
                     type="button"
                     onClick={() => handleSelectView(viewKey)}
-                    className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl transition-all cursor-pointer text-left ${
+                    className={`w-full flex items-center justify-between gap-2 px-2.5 py-2.5 rounded-xl transition-all cursor-pointer text-left ${
                       isSelected
                         ? 'bg-amber-500/20 border border-amber-500/40 text-amber-200 shadow-md font-semibold'
                         : 'text-slate-300 hover:bg-white/5 hover:text-white border border-transparent'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1 truncate">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <div className="w-7 h-7 flex items-center justify-center p-0.5 shrink-0 bg-transparent">
                         <img 
                           src={getCompanyLogoUrl(comp.id)} 
@@ -545,9 +517,8 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                           className="max-h-full max-w-full object-contain drop-shadow-sm" 
                         />
                       </div>
-                      <div className="min-w-0 flex-1 truncate">
-                        <div className="font-bold text-xs truncate text-white">{comp.name}</div>
-                        <div className="text-xs text-slate-400 font-mono truncate">{comp.shortName} • {comp.category}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-xs leading-snug text-white">{comp.name}</div>
                       </div>
                     </div>
 
@@ -648,17 +619,6 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
 
         {/* Sidebar Footer Controls */}
         <div className="p-3 border-t border-white/10 bg-[#111724] space-y-2 shrink-0">
-          {/* Admin User Info */}
-          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-              <div className="min-w-0 truncate">
-                <span className="text-xs font-bold text-white block truncate">{profileDisplayName || currentUserName}</span>
-                <span className="text-xs font-mono text-amber-300 block truncate">Global Super Admin (@{profileUserId})</span>
-              </div>
-            </div>
-          </div>
-
           {/* Theme Switcher */}
           <div className="flex items-center justify-between px-1 py-1">
             <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold">Theme</span>

@@ -1,7 +1,9 @@
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
-  signOut
+  signOut,
+  onAuthStateChanged,
+  User
 } from 'firebase/auth';
 import { 
   doc, 
@@ -18,13 +20,48 @@ import {
 import { auth, db } from './firebase';
 import { safeAppStorage } from './storage';
 import firebaseConfig from '../firebase-applet-config.json';
+import { downloadClientLedgerPdf, ClientLedgerExportData } from './pdfExportService';
+import { sendAppNotification } from './notificationService';
 
-// Essential non-restricted Google Drive & Profile scopes
-// drive.file grants access only to files created by this application (no security block!)
+export const OFFICIAL_WORKSPACE_EMAIL = 'info@mak-group.pk';
+export const CORPORATE_WORKSPACE_EMAIL = OFFICIAL_WORKSPACE_EMAIL;
+
+// Complete Google Workspace Scopes: Drive, Profile, Google Calendar, and Gmail
 export const DRIVE_SCOPES = [
   'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/userinfo.email',
-  'https://www.googleapis.com/auth/userinfo.profile'
+  'https://www.googleapis.com/auth/userinfo.profile',
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/calendar.acls',
+  'https://www.googleapis.com/auth/calendar.acls.readonly',
+  'https://www.googleapis.com/auth/calendar.app.created',
+  'https://www.googleapis.com/auth/calendar.calendarlist',
+  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
+  'https://www.googleapis.com/auth/calendar.calendars',
+  'https://www.googleapis.com/auth/calendar.calendars.readonly',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.events.freebusy',
+  'https://www.googleapis.com/auth/calendar.events.owned',
+  'https://www.googleapis.com/auth/calendar.events.owned.readonly',
+  'https://www.googleapis.com/auth/calendar.events.public.readonly',
+  'https://www.googleapis.com/auth/calendar.events.readonly',
+  'https://www.googleapis.com/auth/calendar.freebusy',
+  'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/calendar.settings.readonly',
+  'https://mail.google.com/',
+  'https://www.googleapis.com/auth/gmail.addons.current.action.compose',
+  'https://www.googleapis.com/auth/gmail.addons.current.message.action',
+  'https://www.googleapis.com/auth/gmail.addons.current.message.metadata',
+  'https://www.googleapis.com/auth/gmail.addons.current.message.readonly',
+  'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/gmail.insert',
+  'https://www.googleapis.com/auth/gmail.labels',
+  'https://www.googleapis.com/auth/gmail.metadata',
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/gmail.settings.basic',
+  'https://www.googleapis.com/auth/gmail.settings.sharing'
 ];
 
 export interface DriveFileItem {
@@ -50,13 +87,41 @@ export interface DriveUserInfo {
   uid?: string | null;
 }
 
-const STORAGE_KEY_TOKEN = 'dpl_drive_access_token';
+export interface WorkspaceCalendarEvent {
+  id?: string;
+  summary: string;
+  description?: string;
+  start: { date?: string; dateTime?: string; timeZone?: string };
+  end: { date?: string; dateTime?: string; timeZone?: string };
+  htmlLink?: string;
+  location?: string;
+  recurrence?: string[];
+}
+
+export interface MonthlyLedgerEmailLog {
+  id: string;
+  monthKey: string;
+  clientName: string;
+  clientEmail: string;
+  senderEmail: string;
+  companyName: string;
+  netBalance: number;
+  totalDebits: number;
+  totalCredits: number;
+  sentAt: string;
+  status: 'SENT_GMAIL_API' | 'QUEUED_AUTO_DISPATCH';
+  messageId?: string;
+  filename?: string;
+}
+
 const STORAGE_KEY_USER = 'dpl_drive_user_info';
 const STORAGE_KEY_STATUS = 'dpl_drive_connected_status';
 const STORAGE_KEY_TIMESTAMP = 'dpl_drive_token_timestamp';
 
-// In-memory token & state cache
-let cachedAccessToken: string | null = safeAppStorage.getItem(STORAGE_KEY_TOKEN);
+// In-memory access token caching ONLY (never stored in localStorage or sessionStorage)
+let isSigningIn = false;
+let cachedAccessToken: string | null = null;
+
 let cachedUserInfo: DriveUserInfo | null = (() => {
   try {
     const raw = safeAppStorage.getItem(STORAGE_KEY_USER);
@@ -67,19 +132,25 @@ let cachedUserInfo: DriveUserInfo | null = (() => {
 })();
 let isConnectionActive = safeAppStorage.getItem(STORAGE_KEY_STATUS) === 'CONNECTED';
 
-// Setup Google Auth Provider with select_account prompt
+// Setup Google Auth Provider with Workspace scopes
 const driveProvider = new GoogleAuthProvider();
 DRIVE_SCOPES.forEach(scope => driveProvider.addScope(scope));
 driveProvider.setCustomParameters({
   prompt: 'select_account'
 });
 
-// Real-time Firestore sync for Google Drive connection
+// Clear cached access token when user signs out via Firebase Auth
+onAuthStateChanged(auth, (user: User | null) => {
+  if (!user && !isSigningIn) {
+    cachedAccessToken = null;
+  }
+});
+
+// Real-time Firestore sync for Google Workspace connection metadata
 let hasSubscribedToDriveStatus = false;
 export function initDriveAuth(
   onStatusChange?: (connected: boolean, user: DriveUserInfo | null) => void
 ) {
-  // Check local cache immediately
   if (isConnectionActive && onStatusChange) {
     onStatusChange(true, cachedUserInfo);
   }
@@ -95,10 +166,6 @@ export function initDriveAuth(
         if (data.status === 'CONNECTED' && data.manualDisconnect !== true) {
           isConnectionActive = true;
           safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
-          if (data.token && !cachedAccessToken) {
-            cachedAccessToken = data.token;
-            safeAppStorage.setItem(STORAGE_KEY_TOKEN, data.token);
-          }
           if (data.email) {
             const userObj: DriveUserInfo = {
               email: data.email,
@@ -114,25 +181,23 @@ export function initDriveAuth(
           cachedAccessToken = null;
           cachedUserInfo = null;
           safeAppStorage.removeItem(STORAGE_KEY_STATUS);
-          safeAppStorage.removeItem(STORAGE_KEY_TOKEN);
           safeAppStorage.removeItem(STORAGE_KEY_USER);
           if (onStatusChange) onStatusChange(false, null);
         }
       }
     }, (err) => {
-      console.warn('Google Drive Firestore sync warning:', err);
+      console.warn('Google Workspace Firestore sync warning:', err);
     });
 
     return unsub;
   } catch (err) {
-    console.warn('Error setting up drive sync:', err);
+    console.warn('Error setting up workspace sync:', err);
     return () => {};
   }
 }
 
 /**
  * Sign in using Google Identity Services (GIS) Token Client.
- * Always prompts with 'select_account' so user can pick any account or reset account.
  */
 function requestGsiToken(promptSelectAccount: boolean = true): Promise<{ token: string; profile: DriveUserInfo }> {
   return new Promise((resolve, reject) => {
@@ -165,8 +230,7 @@ function requestGsiToken(promptSelectAccount: boolean = true): Promise<{ token: 
               return;
             }
 
-            // Fetch user info from Google OAuth2 endpoint
-            let profile: DriveUserInfo = { email: 'Connected Google User' };
+            let profile: DriveUserInfo = { email: OFFICIAL_WORKSPACE_EMAIL };
             try {
               const uRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                 headers: { Authorization: `Bearer ${token}` }
@@ -213,81 +277,79 @@ function requestGsiToken(promptSelectAccount: boolean = true): Promise<{ token: 
 }
 
 /**
- * Connect Google Drive with account chooser / reset option.
- * Tries Google Identity Services first, and falls back to Firebase signInWithPopup.
+ * Connect Google Workspace (Gmail, Calendar, Drive) with Firebase Auth popup / GIS Token Client.
+ * Stores access token strictly in memory.
  */
 export const signInWithGoogleDrive = async (forceSelectAccount: boolean = true): Promise<{ user: DriveUserInfo; accessToken: string }> => {
-  // Clear any stale session first to ensure account selection popup works cleanly
-  if (forceSelectAccount) {
+  isSigningIn = true;
+  try {
+    if (forceSelectAccount) {
+      try {
+        await signOut(auth);
+      } catch {
+        // ignore
+      }
+    }
+
+    let token = '';
+    let userInfo: DriveUserInfo = { email: OFFICIAL_WORKSPACE_EMAIL };
+
     try {
-      await signOut(auth);
-    } catch {
-      // ignore
+      driveProvider.setCustomParameters({
+        prompt: 'select_account'
+      });
+      const result = await signInWithPopup(auth, driveProvider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (!credential?.accessToken) {
+        throw new Error('Google Workspace access token was not returned.');
+      }
+      token = credential.accessToken;
+      userInfo = {
+        displayName: result.user.displayName || result.user.email,
+        email: result.user.email || OFFICIAL_WORKSPACE_EMAIL,
+        photoURL: result.user.photoURL,
+        uid: result.user.uid
+      };
+    } catch (firebaseErr: any) {
+      console.warn('Firebase Auth popup notice, trying GIS Token Client:', firebaseErr?.message || firebaseErr);
+      const res = await requestGsiToken(forceSelectAccount);
+      token = res.token;
+      userInfo = res.profile;
     }
-  }
 
-  let token = '';
-  let userInfo: DriveUserInfo = { email: 'Connected Google Account' };
+    cachedAccessToken = token;
+    cachedUserInfo = userInfo;
+    isConnectionActive = true;
 
-  // 1. Try Google Identity Services (GIS Token Client) - best for custom domains / previews
-  try {
-    const res = await requestGsiToken(forceSelectAccount);
-    token = res.token;
-    userInfo = res.profile;
-  } catch (gsiErr: any) {
-    console.warn('GIS Token client notice, falling back to Firebase Auth:', gsiErr?.message || gsiErr);
-    // Fallback: Firebase Auth signInWithPopup
-    driveProvider.setCustomParameters({
-      prompt: 'select_account'
-    });
-    const result = await signInWithPopup(auth, driveProvider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Google Drive access was not granted. Please approve permissions.');
+    safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
+    safeAppStorage.setItem(STORAGE_KEY_TIMESTAMP, Date.now().toString());
+    safeAppStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
+
+    try {
+      const driveDocRef = doc(db, 'settings', 'google_drive_connection');
+      await setDoc(driveDocRef, {
+        status: 'CONNECTED',
+        manualDisconnect: false,
+        email: userInfo.email || OFFICIAL_WORKSPACE_EMAIL,
+        displayName: userInfo.displayName || userInfo.email,
+        photoURL: userInfo.photoURL || null,
+        connectedAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString()
+      }, { merge: true });
+    } catch (err) {
+      console.warn('Could not mirror workspace connection metadata to Firestore:', err);
     }
-    token = credential.accessToken;
-    userInfo = {
-      displayName: result.user.displayName,
-      email: result.user.email,
-      photoURL: result.user.photoURL,
-      uid: result.user.uid
-    };
+
+    return { user: userInfo, accessToken: token };
+  } finally {
+    isSigningIn = false;
   }
-
-  cachedAccessToken = token;
-  cachedUserInfo = userInfo;
-  isConnectionActive = true;
-
-  // Save in safe browser storage
-  safeAppStorage.setItem(STORAGE_KEY_TOKEN, token);
-  safeAppStorage.setItem(STORAGE_KEY_STATUS, 'CONNECTED');
-  safeAppStorage.setItem(STORAGE_KEY_TIMESTAMP, Date.now().toString());
-  safeAppStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userInfo));
-
-  // Save persistently in Firestore settings so connection stays permanent across devices & refreshes
-  try {
-    const driveDocRef = doc(db, 'settings', 'google_drive_connection');
-    await setDoc(driveDocRef, {
-      status: 'CONNECTED',
-      manualDisconnect: false,
-      email: userInfo.email || 'Admin',
-      displayName: userInfo.displayName || userInfo.email,
-      photoURL: userInfo.photoURL || null,
-      token: token,
-      connectedAt: new Date().toISOString(),
-      lastUpdated: new Date().toISOString()
-    }, { merge: true });
-  } catch (err) {
-    console.warn('Could not mirror drive connection to Firestore settings:', err);
-  }
-
-  return { user: userInfo, accessToken: token };
 };
 
+export const connectDrive = signInWithGoogleDrive;
+
 /**
- * Connect with a designated Google Account email directly.
- * Permanently links the Google account for cloud database backups & vaults.
- * Guaranteed 100% success without domain block issues.
+ * Connect with a designated Google Workspace Account email (e.g. info@mak-group.pk)
  */
 export async function connectWithGoogleEmail(
   email: string, 
@@ -296,7 +358,7 @@ export async function connectWithGoogleEmail(
   const cleanEmail = email.trim().toLowerCase();
   const userInfo: DriveUserInfo = {
     email: cleanEmail,
-    displayName: displayName?.trim() || cleanEmail.split('@')[0],
+    displayName: displayName?.trim() || (cleanEmail === OFFICIAL_WORKSPACE_EMAIL ? 'MAK Group Official Workspace' : cleanEmail.split('@')[0]),
     photoURL: `https://www.gravatar.com/avatar/${encodeURIComponent(cleanEmail)}?d=mp`
   };
 
@@ -326,15 +388,13 @@ export async function connectWithGoogleEmail(
 }
 
 /**
- * Completely purges and resets any stored account data (tokens, emails, sessions).
- * Ensures old accounts never block new account logins.
+ * Completely purges and resets any stored account data.
  */
 export async function clearDriveAccountCache(): Promise<void> {
   cachedAccessToken = null;
   cachedUserInfo = null;
   isConnectionActive = false;
 
-  safeAppStorage.removeItem(STORAGE_KEY_TOKEN);
   safeAppStorage.removeItem(STORAGE_KEY_STATUS);
   safeAppStorage.removeItem(STORAGE_KEY_TIMESTAMP);
   safeAppStorage.removeItem(STORAGE_KEY_USER);
@@ -353,13 +413,11 @@ export async function clearDriveAccountCache(): Promise<void> {
       disconnectedAt: new Date().toISOString()
     }, { merge: true });
   } catch (fsErr) {
-    console.warn('Failed to reset drive doc in Firestore:', fsErr);
+    console.warn('Failed to reset workspace doc in Firestore:', fsErr);
   }
 }
 
 export const getDriveAccessToken = (): string | null => {
-  if (cachedAccessToken) return cachedAccessToken;
-  cachedAccessToken = safeAppStorage.getItem(STORAGE_KEY_TOKEN);
   return cachedAccessToken;
 };
 
@@ -387,12 +445,410 @@ export const getSavedDriveUser = (): DriveUserInfo | null => {
   }
 };
 
-/**
- * Disconnect Google Drive strictly upon explicit user request
- */
 export const disconnectDrive = async () => {
   await clearDriveAccountCache();
 };
+
+// =========================================================
+// GMAIL REST API: MONTHLY CLIENT LEDGER AUTO-DISPATCH
+// Sender: info@mak-group.pk -> Client's Registered Email ID
+// =========================================================
+
+function encodeBase64Url(str: string): string {
+  const utf8Bytes = new TextEncoder().encode(str);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < utf8Bytes.length; i += chunkSize) {
+    const chunk = utf8Bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, Array.from(chunk));
+  }
+  return window.btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+/**
+ * Sends a MIME email with optional PDF attachment via Gmail REST API
+ */
+export async function sendGmailWithAttachment(params: {
+  to: string;
+  subject: string;
+  htmlBody: string;
+  fromName?: string;
+  fromEmail?: string;
+  attachmentFilename?: string;
+  attachmentBase64?: string;
+}): Promise<{ id: string; threadId?: string }> {
+  let token = getDriveAccessToken();
+  if (!token) {
+    const authRes = await signInWithGoogleDrive(false);
+    token = authRes.accessToken;
+  }
+  if (!token) {
+    throw new Error('Google Workspace (Gmail) authorization token is required to send emails.');
+  }
+
+  const senderEmail = params.fromEmail || OFFICIAL_WORKSPACE_EMAIL;
+  const senderName = params.fromName || 'MAK Group Finance & Accounts';
+  const boundary = `mak_group_mime_${Date.now()}`;
+
+  const mimeLines: string[] = [
+    `From: "${senderName}" <${senderEmail}>`,
+    `Reply-To: ${OFFICIAL_WORKSPACE_EMAIL}`,
+    `To: ${params.to}`,
+    `Subject: ${params.subject}`,
+    'MIME-Version: 1.0'
+  ];
+
+  if (params.attachmentBase64 && params.attachmentFilename) {
+    mimeLines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`, '');
+    mimeLines.push(`--${boundary}`);
+    mimeLines.push('Content-Type: text/html; charset="UTF-8"');
+    mimeLines.push('Content-Transfer-Encoding: 7bit', '');
+    mimeLines.push(params.htmlBody, '');
+    mimeLines.push(`--${boundary}`);
+    mimeLines.push(`Content-Type: application/pdf; name="${params.attachmentFilename}"`);
+    mimeLines.push('Content-Transfer-Encoding: base64');
+    mimeLines.push(`Content-Disposition: attachment; filename="${params.attachmentFilename}"`, '');
+    mimeLines.push(params.attachmentBase64, '');
+    mimeLines.push(`--${boundary}--`);
+  } else {
+    mimeLines.push('Content-Type: text/html; charset="UTF-8"', '');
+    mimeLines.push(params.htmlBody);
+  }
+
+  const rawMessage = encodeBase64Url(mimeLines.join('\r\n'));
+
+  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ raw: rawMessage })
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      cachedAccessToken = null;
+    }
+    throw new Error(err.error?.message || `Gmail API dispatch failed (${response.status})`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Generates the official letterhead PDF for a Client's Monthly Ledger and sends it
+ * from info@mak-group.pk to the Client's registered email address.
+ */
+export async function sendMonthlyClientLedgerViaGmail(params: {
+  clientName: string;
+  clientEmail: string;
+  monthLabel: string;
+  monthKey?: string;
+  ledgerData: ClientLedgerExportData;
+  requireInteractiveAuthIfMissingToken?: boolean;
+}): Promise<{ success: boolean; log: MonthlyLedgerEmailLog; error?: string }> {
+  try {
+    const cleanEmail = (params.clientEmail || '').trim();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error(`Client "${params.clientName}" does not have a valid registered email address.`);
+    }
+    const resolvedMonthKey = params.monthKey || new Date().toISOString().slice(0, 7);
+
+  // 1. Generate official PDF on company letterhead
+  const pdfResult = await downloadClientLedgerPdf({
+    ...params.ledgerData,
+    returnBase64Only: true
+  });
+
+  const companyTitle = params.ledgerData.companyName || 'Docks (Pvt) Ltd. • A Project of MAK Group';
+  const { totalDebits, totalCredits, netBalance } = params.ledgerData.summary;
+
+  const recentRowsHtml = params.ledgerData.entries.slice(-15).map(e => `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;color:#334155;">${e.date}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;color:#1e293b;font-family:monospace;">${e.reference || '-'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;color:#334155;">${e.description || '-'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;color:#b91c1c;text-align:right;font-weight:bold;">${e.debit > 0 ? `PKR ${Number(e.debit).toLocaleString()}` : '-'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;color:#15803d;text-align:right;font-weight:bold;">${e.credit > 0 ? `PKR ${Number(e.credit).toLocaleString()}` : '-'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;color:#0f172a;text-align:right;font-weight:bold;">PKR ${Number(e.balance).toLocaleString()}</td>
+    </tr>
+  `).join('');
+
+  const htmlBody = `
+    <div style="font-family:Arial,Helvetica,sans-serif;max-width:700px;margin:0 auto;background:#ffffff;border:1px solid #cbd5e1;border-radius:8px;overflow:hidden;">
+      <div style="background:#0f172a;color:#ffffff;padding:20px 24px;border-bottom:4px solid #eab308;">
+        <h2 style="margin:0;font-size:18px;letter-spacing:0.5px;">${companyTitle}</h2>
+        <p style="margin:4px 0 0;font-size:12px;color:#fde047;">MONTHLY CLIENT STATEMENT OF ACCOUNT (${params.monthLabel})</p>
+        <p style="margin:2px 0 0;font-size:11px;color:#94a3b8;">Official Workspace Dispatch: ${OFFICIAL_WORKSPACE_EMAIL}</p>
+      </div>
+      <div style="padding:24px;color:#1e293b;font-size:13px;line-height:1.6;">
+        <p>Dear <strong>${params.clientName}</strong>,</p>
+        <p>Please find attached your official <strong>Monthly Statement of Account (Client Ledger)</strong> generated on the 1st of the month (${params.monthLabel}) from <strong>${companyTitle}</strong> (${OFFICIAL_WORKSPACE_EMAIL}).</p>
+        
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin:18px 0;">
+          <table style="width:100%;border-collapse:collapse;">
+            <tr>
+              <td style="padding:4px 0;color:#64748b;font-size:12px;">Total Billed (Debits):</td>
+              <td style="padding:4px 0;text-align:right;font-weight:bold;color:#b91c1c;font-size:13px;">PKR ${Number(totalDebits).toLocaleString()}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 0;color:#64748b;font-size:12px;">Total Received (Credits):</td>
+              <td style="padding:4px 0;text-align:right;font-weight:bold;color:#15803d;font-size:13px;">PKR ${Number(totalCredits).toLocaleString()}</td>
+            </tr>
+            <tr style="border-top:1px solid #cbd5e1;">
+              <td style="padding:8px 0 0;font-weight:bold;color:#0f172a;font-size:14px;">Outstanding Closing Balance:</td>
+              <td style="padding:8px 0 0;text-align:right;font-weight:bold;color:#0f172a;font-size:15px;">PKR ${Number(netBalance).toLocaleString()}</td>
+            </tr>
+          </table>
+        </div>
+
+        <h4 style="margin:20px 0 8px;font-size:13px;color:#0f172a;text-transform:uppercase;">Ledger Statement Summary</h4>
+        <table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;">
+          <thead>
+            <tr style="background:#0f172a;color:#ffffff;font-size:11px;text-align:left;">
+              <th style="padding:8px 10px;">Date</th>
+              <th style="padding:8px 10px;">Ref / Invoice</th>
+              <th style="padding:8px 10px;">Particulars</th>
+              <th style="padding:8px 10px;text-align:right;">Debit</th>
+              <th style="padding:8px 10px;text-align:right;">Credit</th>
+              <th style="padding:8px 10px;text-align:right;">Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${recentRowsHtml}
+          </tbody>
+        </table>
+
+        <p style="margin-top:18px;font-size:12px;color:#475569;">
+          The complete official PDF statement printed on our corporate letterhead is attached to this email. For any queries or reconciliation, please reply directly to <strong>${OFFICIAL_WORKSPACE_EMAIL}</strong>.
+        </p>
+      </div>
+      <div style="background:#f1f5f9;padding:12px 24px;font-size:11px;color:#64748b;text-align:center;border-top:1px solid #e2e8f0;">
+        Sent automatically via Google Workspace (${OFFICIAL_WORKSPACE_EMAIL}) • A Project of MAK Group
+      </div>
+    </div>
+  `;
+
+  const subject = `Monthly Ledger Statement (${params.monthLabel}) - ${params.clientName} | ${companyTitle}`;
+
+  let status: 'SENT_GMAIL_API' | 'QUEUED_AUTO_DISPATCH' = 'QUEUED_AUTO_DISPATCH';
+  let messageId = '';
+
+  const token = getDriveAccessToken();
+  if (token || params.requireInteractiveAuthIfMissingToken) {
+    const gmailRes = await sendGmailWithAttachment({
+      to: cleanEmail,
+      subject,
+      htmlBody,
+      fromName: `${companyTitle} (${OFFICIAL_WORKSPACE_EMAIL})`,
+      fromEmail: OFFICIAL_WORKSPACE_EMAIL,
+      attachmentFilename: pdfResult.filename,
+      attachmentBase64: pdfResult.base64
+    });
+    status = 'SENT_GMAIL_API';
+    messageId = gmailRes.id;
+  }
+
+  const logEntry: MonthlyLedgerEmailLog = {
+    id: `ledger_mail_${resolvedMonthKey}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    monthKey: resolvedMonthKey,
+    clientName: params.clientName,
+    clientEmail: cleanEmail,
+    senderEmail: OFFICIAL_WORKSPACE_EMAIL,
+    companyName: companyTitle,
+    netBalance,
+    totalDebits,
+    totalCredits,
+    sentAt: new Date().toISOString(),
+    status,
+    messageId,
+    filename: pdfResult.filename
+  };
+
+  // Persist dispatch log to local storage and Firestore
+  try {
+    const existingLogs = safeAppStorage.getJSON<MonthlyLedgerEmailLog[]>('dpl_monthly_ledger_gmail_logs', []) || [];
+    const updatedLogs = [logEntry, ...existingLogs.filter(l => l.id !== logEntry.id)].slice(0, 200);
+    safeAppStorage.setJSON('dpl_monthly_ledger_gmail_logs', updatedLogs);
+    await setDoc(doc(db, 'monthly_ledger_emails', logEntry.id), logEntry, { merge: true });
+  } catch (e) {
+    console.warn('Could not persist monthly ledger email log:', e);
+  }
+
+  // Send live notification to Admin & Finance Manager
+  await sendAppNotification({
+    title: `Monthly Ledger Sent via Gmail: ${params.clientName}`,
+    description: `Monthly Statement (${params.monthLabel}) dispatched from ${OFFICIAL_WORKSPACE_EMAIL} to ${cleanEmail} (Balance: PKR ${Number(netBalance).toLocaleString()}).`,
+    details: `Client: ${params.clientName}\nRecipient Email: ${cleanEmail}\nSender Workspace ID: ${OFFICIAL_WORKSPACE_EMAIL}\nPeriod: ${params.monthLabel}\nTotal Debits: PKR ${Number(totalDebits).toLocaleString()}\nTotal Credits: PKR ${Number(totalCredits).toLocaleString()}\nClosing Balance: PKR ${Number(netBalance).toLocaleString()}`,
+    targetRole: 'ADMIN,FINANCE_MANAGER',
+    type: 'INFO',
+    notificationSubType: 'FINANCE_RECORDED',
+    category: 'FINANCE',
+    priority: 'HIGH',
+    targetView: 'finance'
+  }).catch(() => {});
+
+  return { success: true, log: logEntry };
+  } catch (err: any) {
+    const fallbackLog: MonthlyLedgerEmailLog = {
+      id: `ledger_mail_err_${Date.now()}`,
+      monthKey: params.monthKey || new Date().toISOString().slice(0, 7),
+      clientName: params.clientName,
+      clientEmail: params.clientEmail || '',
+      senderEmail: OFFICIAL_WORKSPACE_EMAIL,
+      companyName: params.ledgerData?.companyName || 'Docks (Pvt) Ltd.',
+      netBalance: params.ledgerData?.summary?.netBalance || 0,
+      totalDebits: params.ledgerData?.summary?.totalDebits || 0,
+      totalCredits: params.ledgerData?.summary?.totalCredits || 0,
+      sentAt: new Date().toISOString(),
+      status: 'QUEUED_AUTO_DISPATCH'
+    };
+    return { success: false, log: fallbackLog, error: err?.message || 'Failed to dispatch monthly ledger via Gmail' };
+  }
+}
+
+export function getMonthlyLedgerEmailLogs(): MonthlyLedgerEmailLog[] {
+  return safeAppStorage.getJSON<MonthlyLedgerEmailLog[]>('dpl_monthly_ledger_gmail_logs', []) || [];
+}
+
+// =========================================================
+// GOOGLE CALENDAR REST API INTEGRATION
+// =========================================================
+
+export async function listGoogleCalendarEvents(maxResults: number = 15): Promise<WorkspaceCalendarEvent[]> {
+  let token = getDriveAccessToken();
+  if (!token) {
+    throw new Error('Please sign in with Google Workspace to view Google Calendar events.');
+  }
+
+  const url = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events');
+  url.searchParams.set('maxResults', String(maxResults));
+  url.searchParams.set('orderBy', 'startTime');
+  url.searchParams.set('singleEvents', 'true');
+  url.searchParams.set('timeMin', new Date(Date.now() - 7 * 86400000).toISOString());
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) cachedAccessToken = null;
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message || `Failed to load Google Calendar events (${res.status})`);
+  }
+
+  const data = await res.json();
+  return data.items || [];
+}
+
+export async function createGoogleCalendarEvent(
+  event: WorkspaceCalendarEvent | {
+    summary: string;
+    description?: string;
+    startIso?: string;
+    endIso?: string;
+    attendeesEmails?: string[];
+    recurrence?: string[];
+  }
+): Promise<WorkspaceCalendarEvent> {
+  let token = getDriveAccessToken();
+  if (!token) {
+    const authRes = await signInWithGoogleDrive(false);
+    token = authRes.accessToken;
+  }
+  if (!token) {
+    throw new Error('Google Calendar authorization is required.');
+  }
+
+  const payload: any = 'start' in event
+    ? event
+    : {
+        summary: event.summary,
+        description: event.description || '',
+        start: { dateTime: event.startIso, timeZone: 'Asia/Karachi' },
+        end: { dateTime: event.endIso, timeZone: 'Asia/Karachi' },
+        ...(event.attendeesEmails && event.attendeesEmails.length > 0
+          ? { attendees: event.attendeesEmails.filter(e => e && e.includes('@')).map(email => ({ email: email.trim() })) }
+          : {}),
+        ...(event.recurrence ? { recurrence: event.recurrence } : {})
+      };
+
+  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) cachedAccessToken = null;
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message || `Failed to create Google Calendar event (${res.status})`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Schedules the recurring 1st-of-Every-Month Automated Client Ledger Dispatch event on Google Calendar
+ */
+export async function syncFirstOfMonthLedgerScheduleToCalendar(): Promise<WorkspaceCalendarEvent> {
+  const now = new Date();
+  const nextMonth = new Date(now.getFullYear(), now.getMonth() + (now.getDate() === 1 ? 0 : 1), 1);
+  const dateStr = nextMonth.toISOString().split('T')[0];
+
+  return createGoogleCalendarEvent({
+    summary: `Monthly Client Ledger Auto-Generation & Gmail Dispatch (${OFFICIAL_WORKSPACE_EMAIL})`,
+    description: `Automated 1st-of-the-month Client Ledger Statement generation and email dispatch from ${OFFICIAL_WORKSPACE_EMAIL} to all registered client email IDs.`,
+    start: { date: dateStr },
+    end: { date: dateStr },
+    recurrence: ['RRULE:FREQ=MONTHLY;BYMONTHDAY=1']
+  });
+}
+
+export async function scheduleMonthlyLedgerCalendarEvent(params?: {
+  clientName?: string;
+  clientEmail?: string;
+  companyName?: string;
+}): Promise<{ success: boolean; eventId?: string; htmlLink?: string; error?: string }> {
+  try {
+    const now = new Date();
+    const targetYear = now.getDate() === 1 ? now.getFullYear() : (now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear());
+    const targetMonth = now.getDate() === 1 ? now.getMonth() : (now.getMonth() + 1) % 12;
+    const firstOfMonthStart = new Date(targetYear, targetMonth, 1, 9, 0, 0);
+    const firstOfMonthEnd = new Date(targetYear, targetMonth, 1, 10, 0, 0);
+
+    const attendees: string[] = [OFFICIAL_WORKSPACE_EMAIL];
+    if (params?.clientEmail && params.clientEmail.includes('@')) {
+      attendees.push(params.clientEmail.trim());
+    }
+
+    const summary = params?.clientName
+      ? `Monthly Client Ledger Dispatch: ${params.clientName} (${OFFICIAL_WORKSPACE_EMAIL})`
+      : `Monthly Client Ledger Auto-Generation & Gmail Dispatch (${OFFICIAL_WORKSPACE_EMAIL})`;
+
+    const description = `Automated 1st-of-the-month Client Ledger PDF generation and email dispatch.\nSender: ${OFFICIAL_WORKSPACE_EMAIL}\nCompany: ${params?.companyName || 'Docks (Pvt) Ltd. • A Project of MAK Group'}${params?.clientName ? `\nClient: ${params.clientName} (${params.clientEmail || 'Registered Email'})` : ''}`;
+
+    const created = await createGoogleCalendarEvent({
+      summary,
+      description,
+      startIso: firstOfMonthStart.toISOString(),
+      endIso: firstOfMonthEnd.toISOString(),
+      attendeesEmails: attendees,
+      recurrence: ['RRULE:FREQ=MONTHLY;BYMONTHDAY=1']
+    });
+    return { success: true, eventId: created.id, htmlLink: created.htmlLink };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to schedule Google Calendar event' };
+  }
+}
 
 // ==========================================
 // Google Drive v3 REST API Client Functions

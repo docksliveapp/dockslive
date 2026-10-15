@@ -4,7 +4,7 @@ import {
   Search, Filter, Download, CreditCard, Banknote, Briefcase, X, Save, Calendar, Camera,
   BookOpen, ChevronDown, ChevronUp, CheckCircle2, User, Layers, RefreshCw, AlertCircle, ArrowRight,
   Eye, Loader2, Share2, Upload, Zap, Trash2, Building, Truck, Clock, ShieldCheck, ArrowLeft,
-  ArrowLeftRight, FileSpreadsheet, UserPlus, FileCheck, Paperclip
+  ArrowLeftRight, FileSpreadsheet, UserPlus, FileCheck, Paperclip, Mail
 } from 'lucide-react';
 import Logo from './Logo';
 import { LegalDocumentHeader, LegalDocumentFooter } from './LegalDocumentHeader';
@@ -56,6 +56,15 @@ import { getStandardChargesForCategory } from '../services/customsComplianceServ
 import { getCategoryArrangements, getArrangementCharges } from '../services/categoryTariffService';
 import { useActiveCompany, getActiveCompanyPrefix } from '../services/companyService';
 import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
+import {
+  OFFICIAL_WORKSPACE_EMAIL,
+  sendMonthlyClientLedgerViaGmail,
+  syncFirstOfMonthLedgerScheduleToCalendar,
+  getMonthlyLedgerEmailLogs,
+  signInWithGoogleDrive,
+  getDriveAccessToken,
+  MonthlyLedgerEmailLog
+} from '../services/googleDriveService';
 
 const INITIAL_FINANCE_DATA: FinanceEntry[] = [];
 
@@ -182,6 +191,13 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
   // Registered Clients Management
   const [clientList, setClientList] = useState<string[]>(DEFAULT_CLIENTS);
+  const [registeredClients, setRegisteredClients] = useState<Client[]>([]);
+  const [isSendingLedgerEmail, setIsSendingLedgerEmail] = useState(false);
+  const [isSyncingCalendar, setIsSyncingCalendar] = useState(false);
+  const [workspaceStatusMsg, setWorkspaceStatusMsg] = useState<string | null>(null);
+  const [ledgerEmailLogs, setLedgerEmailLogs] = useState<MonthlyLedgerEmailLog[]>(() => getMonthlyLedgerEmailLogs());
+  const [editingClientEmail, setEditingClientEmail] = useState<string>('');
+  const [isEditingClientEmail, setIsEditingClientEmail] = useState(false);
   const [selectedLedgerClient, setSelectedLedgerClient] = useState<string>(() => {
     return safeAppStorage.getItem('dpl_finance_client') || '';
   });
@@ -489,6 +505,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
   // 5. Synchronize clients from Firestore
   useEffect(() => {
     const unsubscribe = subscribeToClients((clientsFromDb) => {
+      setRegisteredClients(clientsFromDb || []);
       const dbNames = (clientsFromDb || []).map(c => c.name?.trim()).filter(Boolean);
       const caseNames = cases.map(c => c.clientName?.trim()).filter(Boolean);
       const financeParties = [...financeData, ...receivables].map(f => f.party?.trim()).filter(Boolean);
@@ -2050,6 +2067,286 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       setPdfErrorMessage('Failed to generate invoice PDF.');
     } finally {
       setIsExportingPdf(false);
+    }
+  };
+
+  // Helper to resolve a client's registered email address (entered when adding the client)
+  const getRegisteredEmailForClient = (clientNameStr: string): string => {
+    if (!clientNameStr) return '';
+    const target = clientNameStr.trim().toLowerCase().replace(/\s+/g, ' ');
+    const foundClient = registeredClients.find(c => {
+      const n = (c.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      return n === target || n.includes(target) || target.includes(n);
+    });
+    if (foundClient?.email && foundClient.email.includes('@')) {
+      return foundClient.email.trim();
+    }
+    const foundUser = users.find(u => {
+      if (u.role !== UserRole.CLIENT) return false;
+      const cn = (u.clientName || u.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      return cn === target || cn.includes(target) || target.includes(cn);
+    });
+    if (foundUser?.email && foundUser.email.includes('@')) {
+      return foundUser.email.trim();
+    }
+    return '';
+  };
+
+  // Build ledger entries & summary for any client name (used for 1st-of-month auto email dispatch)
+  const buildClientLedgerSnapshot = (targetClientName: string) => {
+    const entries: LedgerEntry[] = [];
+    const targetClient = targetClientName.trim().toLowerCase().replace(/\s+/g, ' ');
+    const matchClient = (candidate?: string) => {
+      if (!candidate) return false;
+      const c = candidate.trim().toLowerCase().replace(/\s+/g, ' ');
+      return c === targetClient || c.includes(targetClient) || targetClient.includes(c);
+    };
+
+    entries.push({
+      id: `open_${targetClientName}`,
+      date: '2026-04-01',
+      reference: 'OPN-BAL',
+      description: 'Account Opening Balance',
+      debit: 0,
+      credit: 0,
+      balance: 0,
+      type: 'INFO',
+      party: targetClientName
+    });
+
+    cases.forEach((c) => {
+      const clientCandidate = c.clientName || c.client || c.importer || (c.extractedData as any)?.cargoOwner || (c.extractedData as any)?.importerName;
+      if (matchClient(clientCandidate) && c.status !== 'CANCELLED') {
+        const charges = getCaseChargesList(c);
+        const invNo = c.invoiceNo || c.caseNo || `INV-${c.id}`;
+        charges.forEach((ch, idx) => {
+          const chargeDate = (ch as any).date || c.createdAt || c.registrationDate || new Date().toISOString().split('T')[0];
+          entries.push({
+            id: `case_${c.id}_ch_${idx}`,
+            date: chargeDate,
+            reference: invNo,
+            description: `Invoice: ${ch.description} - Case ${c.caseNo}`,
+            debit: Number(ch.amount) || 0,
+            credit: 0,
+            balance: 0,
+            type: 'DEBIT',
+            party: targetClientName
+          });
+        });
+      }
+    });
+
+    receivables.forEach((r) => {
+      if (matchClient(r.party)) {
+        const isAlreadyAdded = entries.some(e =>
+          (r.caseNo && e.reference && e.reference.includes(r.caseNo)) ||
+          (r.reference && e.reference && e.reference.includes(r.reference))
+        );
+        if (!isAlreadyAdded) {
+          entries.push({
+            id: `recv_${r.id}`,
+            date: r.date,
+            reference: r.reference || r.caseNo || `INV-${r.id}`,
+            description: `Invoice: ${r.description}`,
+            debit: Number(r.amount) || 0,
+            credit: 0,
+            balance: 0,
+            type: 'DEBIT',
+            party: targetClientName
+          });
+        }
+      }
+    });
+
+    financeData.forEach((f) => {
+      if (matchClient(f.party) && f.type === 'INCOME') {
+        entries.push({
+          id: `pay_${f.id}`,
+          date: f.date,
+          reference: f.reference || `REC-${f.id}`,
+          description: `Payment Received: ${f.description}`,
+          debit: 0,
+          credit: Number(f.amount) || 0,
+          balance: 0,
+          type: 'CREDIT',
+          party: targetClientName
+        });
+      }
+    });
+
+    entries.sort((a, b) => {
+      if (a.reference === 'OPN-BAL') return -1;
+      if (b.reference === 'OPN-BAL') return 1;
+      return new Date(a.date).getTime() - new Date(b.date).getTime();
+    });
+
+    let currentBal = 0;
+    entries.forEach((entry) => {
+      currentBal = currentBal + entry.debit - entry.credit;
+      entry.balance = currentBal;
+    });
+
+    const totalDebits = entries.reduce((s, e) => s + e.debit, 0);
+    const totalCredits = entries.reduce((s, e) => s + e.credit, 0);
+    const netBalance = entries.length > 0 ? entries[entries.length - 1].balance : 0;
+    const clientCases = cases.filter(c => matchClient(c.clientName || c.client));
+    const totalContainers = clientCases.reduce((sum, c) => sum + (c.containers?.length || 1), 0);
+
+    return {
+      entries,
+      summary: {
+        totalDebits,
+        totalCredits,
+        netBalance,
+        totalCases: clientCases.length,
+        totalContainers
+      }
+    };
+  };
+
+  // Automatic 1st-of-the-month Monthly Client Ledger generation & Gmail dispatch (from info@mak-group.pk to Client's registered email)
+  useEffect(() => {
+    const checkAndAutoSendMonthlyClientLedgers = async () => {
+      const now = new Date();
+      // Runs automatically on the 1st of every month
+      if (now.getDate() !== 1) return;
+      if (clientList.length === 0) return;
+
+      const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const monthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+      for (const cName of clientList) {
+        const clientEmail = getRegisteredEmailForClient(cName);
+        if (!clientEmail) continue;
+
+        const cleanKey = cName.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const autoSentFlagKey = `dpl_auto_monthly_ledger_gmail_${currentMonthKey}_${cleanKey}`;
+        if (safeAppStorage.getItem(autoSentFlagKey)) continue;
+
+        const snap = buildClientLedgerSnapshot(cName);
+        if (snap.entries.length <= 1 && snap.summary.netBalance === 0) continue;
+
+        try {
+          safeAppStorage.setItem(autoSentFlagKey, new Date().toISOString());
+          const logItem = await sendMonthlyClientLedgerViaGmail({
+            clientName: cName,
+            clientEmail,
+            monthLabel,
+            monthKey: currentMonthKey,
+            ledgerData: {
+              clientName: cName,
+              statementDate: `${now.toLocaleDateString()} (1st of Month Statement - ${monthLabel})`,
+              summary: snap.summary,
+              entries: snap.entries.map(e => ({
+                date: e.date,
+                reference: e.reference || '',
+                description: e.description,
+                debit: e.debit,
+                credit: e.credit,
+                balance: e.balance
+              })),
+              companyName,
+              customLogo: activeLogo,
+              branding
+            },
+            requireInteractiveAuthIfMissingToken: false
+          });
+          setLedgerEmailLogs(getMonthlyLedgerEmailLogs());
+          console.log(`Auto-dispatched 1st-of-month ledger for ${cName} to ${clientEmail}:`, logItem.status);
+        } catch (e) {
+          console.warn(`Auto-dispatch notice for ${cName}:`, e);
+        }
+      }
+    };
+
+    checkAndAutoSendMonthlyClientLedgers();
+  }, [clientList, registeredClients, users, cases, receivables, financeData]);
+
+  // Send Monthly Client Ledger via Gmail (info@mak-group.pk -> Client's Registered Email)
+  const handleSendSelectedClientLedgerGmail = async () => {
+    if (!selectedLedgerClient) return;
+    const targetEmail = getRegisteredEmailForClient(selectedLedgerClient);
+    if (!targetEmail) {
+      setIsEditingClientEmail(true);
+      setWorkspaceStatusMsg(`Please save a registered email address for "${selectedLedgerClient}" first so the ledger can be emailed from ${OFFICIAL_WORKSPACE_EMAIL}.`);
+      return;
+    }
+
+    setIsSendingLedgerEmail(true);
+    setWorkspaceStatusMsg(null);
+    try {
+      const now = new Date();
+      const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const monthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      const entriesToExport = filteredClientLedgerEntries.length > 0 ? filteredClientLedgerEntries : clientLedgerEntries;
+
+      const logRes = await sendMonthlyClientLedgerViaGmail({
+        clientName: selectedLedgerClient,
+        clientEmail: targetEmail,
+        monthLabel,
+        monthKey: currentMonthKey,
+        ledgerData: {
+          clientName: selectedLedgerClient,
+          statementDate: `${now.toLocaleDateString()} (${monthLabel})`,
+          summary: clientSummary,
+          entries: entriesToExport.map(e => ({
+            date: e.date,
+            reference: e.reference || '',
+            description: e.description,
+            debit: e.debit,
+            credit: e.credit,
+            balance: e.balance
+          })),
+          companyName,
+          customLogo: activeLogo,
+          branding
+        },
+        requireInteractiveAuthIfMissingToken: true
+      });
+
+      setLedgerEmailLogs(getMonthlyLedgerEmailLogs());
+      setWorkspaceStatusMsg(
+        `Monthly Ledger Statement PDF sent from ${OFFICIAL_WORKSPACE_EMAIL} to ${targetEmail} (${selectedLedgerClient})!`
+      );
+      setTimeout(() => setWorkspaceStatusMsg(null), 8000);
+    } catch (err: any) {
+      setWorkspaceStatusMsg(`Gmail Dispatch Notice: ${err.message || 'Please authorize Google Workspace (info@mak-group.pk) to send emails.'}`);
+    } finally {
+      setIsSendingLedgerEmail(false);
+    }
+  };
+
+  // Save/update client email directly if missing
+  const handleSaveClientEmailInline = async () => {
+    if (!selectedLedgerClient || !editingClientEmail.trim() || !editingClientEmail.includes('@')) {
+      return;
+    }
+    const cleanEmail = editingClientEmail.trim();
+    const target = selectedLedgerClient.trim().toLowerCase();
+    const existingClient = registeredClients.find(c => (c.name || '').trim().toLowerCase() === target);
+    if (existingClient) {
+      await saveClientToFirestore({ ...existingClient, email: cleanEmail });
+    } else {
+      await saveClientToFirestore({ name: selectedLedgerClient, email: cleanEmail });
+    }
+    setIsEditingClientEmail(false);
+    setEditingClientEmail('');
+    setWorkspaceStatusMsg(`Email "${cleanEmail}" saved for ${selectedLedgerClient}. Monthly ledgers on the 1st will automatically be sent from ${OFFICIAL_WORKSPACE_EMAIL}.`);
+    setTimeout(() => setWorkspaceStatusMsg(null), 6000);
+  };
+
+  // Sync 1st-of-month ledger schedule to Google Calendar
+  const handleSyncLedgerScheduleToCalendar = async () => {
+    setIsSyncingCalendar(true);
+    setWorkspaceStatusMsg(null);
+    try {
+      await syncFirstOfMonthLedgerScheduleToCalendar();
+      setWorkspaceStatusMsg(`1st-of-Every-Month Automated Client Ledger Schedule synced to Google Calendar (${OFFICIAL_WORKSPACE_EMAIL})!`);
+      setTimeout(() => setWorkspaceStatusMsg(null), 7000);
+    } catch (err: any) {
+      setWorkspaceStatusMsg(`Google Calendar Sync Notice: ${err.message || 'Please sign in with Google Workspace first.'}`);
+    } finally {
+      setIsSyncingCalendar(false);
     }
   };
 
@@ -4168,8 +4465,26 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 </button>
               </div>
 
-              {/* Export Buttons */}
+              {/* Export & Google Workspace Auto-Gmail / Calendar Buttons */}
               <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
+                <button 
+                  onClick={handleSendSelectedClientLedgerGmail}
+                  disabled={isSendingLedgerEmail}
+                  className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all shadow-md shadow-amber-500/20 cursor-pointer disabled:opacity-50"
+                  title={`Send Official Monthly Ledger PDF from ${OFFICIAL_WORKSPACE_EMAIL} to Client's Email`}
+                >
+                  {isSendingLedgerEmail ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
+                  <span>Send via Gmail ({OFFICIAL_WORKSPACE_EMAIL})</span>
+                </button>
+                <button 
+                  onClick={handleSyncLedgerScheduleToCalendar}
+                  disabled={isSyncingCalendar}
+                  className="px-3 py-2 bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                  title="Schedule 1st-of-Every-Month Auto Ledger Reminder in Google Calendar"
+                >
+                  {isSyncingCalendar ? <Loader2 size={14} className="animate-spin" /> : <Calendar size={14} />}
+                  <span>Sync 1st-of-Month Calendar</span>
+                </button>
                 <button 
                   onClick={handleDownloadClientLedger}
                   disabled={isExportingPdf}
@@ -4189,6 +4504,100 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 </button>
               </div>
             </div>
+
+            {/* Google Workspace (info@mak-group.pk) 1st-of-Month Auto-Email Status Strip */}
+            <div className="bg-slate-900/80 p-3.5 rounded-xl border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 no-print">
+              <div className="flex items-center gap-3 flex-wrap text-xs">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold">
+                  <Mail size={13} />
+                  <span>Auto Monthly Ledger Dispatch (1st of Every Month)</span>
+                </span>
+                <span className="text-gray-300">
+                  Sender Workspace ID: <strong className="text-amber-300 font-mono">{OFFICIAL_WORKSPACE_EMAIL}</strong>
+                </span>
+                <span className="text-gray-500">→</span>
+                <span className="text-gray-300 flex items-center gap-1.5">
+                  Client Email ({selectedLedgerClient}):{' '}
+                  {getRegisteredEmailForClient(selectedLedgerClient) ? (
+                    <strong className="text-emerald-400 font-mono">{getRegisteredEmailForClient(selectedLedgerClient)}</strong>
+                  ) : (
+                    <span className="text-rose-400 font-semibold">No Email Saved</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingClientEmail(getRegisteredEmailForClient(selectedLedgerClient));
+                      setIsEditingClientEmail(!isEditingClientEmail);
+                    }}
+                    className="text-[11px] px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-amber-300 font-semibold ml-1"
+                  >
+                    {getRegisteredEmailForClient(selectedLedgerClient) ? 'Edit Email' : '+ Add Client Email'}
+                  </button>
+                </span>
+              </div>
+
+              { !getDriveAccessToken() && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await signInWithGoogleDrive(true);
+                      setWorkspaceStatusMsg(`Google Workspace (${OFFICIAL_WORKSPACE_EMAIL}) connected for Gmail & Calendar!`);
+                    } catch (e: any) {
+                      setWorkspaceStatusMsg(e.message || 'Google Workspace sign-in canceled.');
+                    }
+                  }}
+                  className="gsi-material-button px-3 py-1.5 rounded-lg bg-white text-slate-900 hover:bg-gray-100 font-bold text-xs flex items-center gap-2 shadow shrink-0 cursor-pointer"
+                >
+                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4 block">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                  </svg>
+                  <span>Sign in with Google ({OFFICIAL_WORKSPACE_EMAIL})</span>
+                </button>
+              )}
+            </div>
+
+            {isEditingClientEmail && (
+              <div className="bg-slate-950/90 p-3.5 rounded-xl border border-amber-500/40 flex flex-wrap items-center gap-2.5 no-print">
+                <span className="text-xs font-bold text-white">
+                  Client Email for {selectedLedgerClient}:
+                </span>
+                <input
+                  type="email"
+                  value={editingClientEmail}
+                  onChange={(e) => setEditingClientEmail(e.target.value)}
+                  placeholder="Enter client email (e.g. accounts@clientcompany.com)"
+                  className="flex-1 min-w-[240px] bg-slate-900 border border-white/15 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-amber-400"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveClientEmailInline}
+                  className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs"
+                >
+                  Save Client Email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingClientEmail(false)}
+                  className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 text-xs"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {workspaceStatusMsg && (
+              <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-2 no-print">
+                <span className="flex items-center gap-2">
+                  <CheckCircle2 size={15} className="text-amber-400 shrink-0" />
+                  <span>{workspaceStatusMsg}</span>
+                </span>
+                <button onClick={() => setWorkspaceStatusMsg(null)} className="text-gray-400 hover:text-white">✕</button>
+              </div>
+            )}
 
             {/* Date Range Selection Bar */}
             <div className="bg-slate-900/60 p-3.5 rounded-xl border border-white/10 flex flex-wrap items-center justify-between gap-3 no-print">

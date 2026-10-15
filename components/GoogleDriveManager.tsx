@@ -20,9 +20,11 @@ import {
   Mail,
   X,
   Sparkles,
-  Info
+  Info,
+  Calendar
 } from 'lucide-react';
 import { 
+  connectDrive,
   disconnectDrive, 
   getSavedDriveUser,
   initDriveAuth,
@@ -33,6 +35,8 @@ import {
   listDatabaseBackupsFromDrive, 
   fetchBackupFileJson, 
   deleteDriveFile, 
+  scheduleMonthlyLedgerCalendarEvent,
+  CORPORATE_WORKSPACE_EMAIL,
   DriveFileItem,
   DriveUserInfo
 } from '../services/googleDriveService';
@@ -47,7 +51,7 @@ interface GoogleDriveManagerProps {
   attachedMode?: boolean;
 }
 
-const DEFAULT_USER_EMAIL = 'docks.live.app@gmail.com';
+const DEFAULT_USER_EMAIL = CORPORATE_WORKSPACE_EMAIL;
 
 export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({ 
   attachedMode = false 
@@ -122,21 +126,48 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
     const targetEmail = customEmail || accountInputEmail;
     
     if (!targetEmail.trim() || !targetEmail.includes('@')) {
-      setErrorMessage('Please enter a valid Google Account email address (e.g. docks.live.app@gmail.com).');
+      setErrorMessage('Please enter a valid Google Workspace email address (e.g. info@mak-group.pk).');
       return;
     }
 
     try {
-      const user = await connectWithGoogleEmail(targetEmail, accountInputName || targetEmail.split('@')[0]);
+      const user = await connectWithGoogleEmail(targetEmail, accountInputName || 'MAK Group Corporate Workspace');
       setIsConnected(true);
       setSavedUser(user);
       setIsAccountModalOpen(false);
       setErrorMessage(null);
-      setSuccessMessage(`Google Account "${user.email}" successfully connected! Cloud Vault is active.`);
+      setSuccessMessage(`Google Workspace "${user.email}" connected! Cloud Vault, Gmail Auto-Mailer & Calendar are active.`);
       setTimeout(() => setSuccessMessage(null), 6000);
       loadBackups();
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to connect account.');
+    }
+  };
+
+  const handleOAuthPopupSignIn = async () => {
+    setErrorMessage(null);
+    try {
+      await connectDrive();
+      const u = getSavedDriveUser();
+      setIsConnected(true);
+      if (u) setSavedUser(u);
+      setIsAccountModalOpen(false);
+      setSuccessMessage(`Google Workspace OAuth authorized (${u?.email || CORPORATE_WORKSPACE_EMAIL}) for Drive, Gmail & Google Calendar!`);
+      setTimeout(() => setSuccessMessage(null), 6000);
+      loadBackups();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Google Workspace OAuth authorization failed.');
+    }
+  };
+
+  const handleSyncCalendarSchedule = async () => {
+    setErrorMessage(null);
+    const res = await scheduleMonthlyLedgerCalendarEvent();
+    if (res.success) {
+      setSuccessMessage('1st-of-Month Client Ledger Generation & Auto-Gmail Schedule synced to Google Calendar!');
+      setTimeout(() => setSuccessMessage(null), 6000);
+    } else {
+      setErrorMessage(res.error || 'Please authorize Google Workspace OAuth to sync with Google Calendar.');
     }
   };
 
@@ -421,28 +452,38 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
               </div>
             )}
 
-            {/* Recommended 1-Click Fast Connect */}
+            {/* Recommended 1-Click Fast Connect & OAuth Authorization */}
             <div className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 space-y-2.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
                   <Sparkles size={15} />
-                  <span>Quick Connect (Recommended)</span>
+                  <span>Google Workspace (Drive + Gmail + Calendar)</span>
                 </div>
                 <span className="text-[10px] bg-amber-500/30 text-amber-200 px-2 py-0.5 rounded-full font-semibold">
-                  Zero Error Guarantee
+                  info@mak-group.pk
                 </span>
               </div>
               <p className="text-xs text-gray-300 leading-relaxed">
-                Connect your verified Google account directly. This permanently activates your cloud vault with continuous backup sync and avoids browser popup blocks.
+                Authorize Google Workspace OAuth to enable automated 1st-of-month Client Ledger PDF emails from <strong>info@mak-group.pk</strong>, Google Calendar reminders, and Google Drive backups.
               </p>
-              <button
-                type="button"
-                onClick={() => handleConnectDirectEmail(undefined, DEFAULT_USER_EMAIL)}
-                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs shadow-md transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <CheckCircle2 size={16} />
-                <span>Connect as {DEFAULT_USER_EMAIL} (1-Click)</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleOAuthPopupSignIn}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs shadow-md transition-all active:scale-[0.99] flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Mail size={15} />
+                  <span>Authorize Google OAuth</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleConnectDirectEmail(undefined, DEFAULT_USER_EMAIL)}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs shadow-md transition-all active:scale-[0.99] flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <CheckCircle2 size={15} />
+                  <span>Quick Connect ({DEFAULT_USER_EMAIL})</span>
+                </button>
+              </div>
             </div>
 
             {/* Custom Account Form */}
@@ -598,8 +639,8 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
               <span className="text-emerald-400 font-bold font-mono">Firestore Cloud</span>
             </div>
             <div className="flex items-center justify-between text-gray-300">
-              <span>Backup Redundancy:</span>
-              <span className="text-amber-300 font-bold font-mono">Google Drive Cloud Vault</span>
+              <span>Monthly Ledger Sender:</span>
+              <span className="text-amber-300 font-bold font-mono">{CORPORATE_WORKSPACE_EMAIL}</span>
             </div>
             <div className="flex items-center justify-between text-gray-300">
               <span>Connected Account:</span>
@@ -610,24 +651,29 @@ export const GoogleDriveManager: React.FC<GoogleDriveManagerProps> = ({
           </div>
         </div>
 
-        {/* Card 3: Database Restore Vault */}
+        {/* Card 3: Google Calendar & Monthly Ledger Auto-Mailer */}
         <div className="bg-slate-900/80 border border-white/10 rounded-3xl p-6 shadow-xl flex flex-col justify-between backdrop-blur-md">
           <div>
             <div className="w-12 h-12 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 mb-4">
-              <RotateCcw size={24} />
+              <Calendar size={24} />
             </div>
             <h3 className="text-lg font-bold text-white mb-1">
-              Instant System Recovery
+              1st-of-Month Ledger &amp; Calendar
             </h3>
             <p className="text-xs text-gray-400 leading-relaxed mb-4">
-              Restore the entire system database state (cases, accounts, vehicles) from any previous Google Drive backup snapshot with zero downtime.
+              On the 1st of every month, each client&apos;s monthly ledger PDF is automatically emailed from <strong>{CORPORATE_WORKSPACE_EMAIL}</strong> to the client&apos;s registered email and synced with Google Calendar.
             </p>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-black/40 border border-white/5 text-xs text-gray-400">
-            <p className="text-[11px] leading-snug">
-              Select any archive from the table below to inspect records and trigger one-click restore.
-            </p>
+          <div className="space-y-2 pt-3 border-t border-white/10">
+            <button
+              type="button"
+              onClick={handleSyncCalendarSchedule}
+              className="w-full py-2.5 px-3 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"
+            >
+              <Calendar size={14} />
+              <span>Sync 1st-of-Month Calendar Schedule</span>
+            </button>
           </div>
         </div>
       </div>
