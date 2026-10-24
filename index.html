@@ -80,6 +80,7 @@
           var savedTheme = localStorage.getItem('dpl_app_theme');
           var isCharcoal = savedTheme === 'charcoal' || savedTheme === 'dark';
           var themeClass = isCharcoal ? 'theme-charcoal' : 'theme-pearl';
+          document.documentElement.classList.remove('theme-pearl', 'theme-charcoal');
           document.documentElement.classList.add(themeClass);
           document.documentElement.setAttribute('data-theme', isCharcoal ? 'charcoal' : 'pearl');
         } catch (_) {}
@@ -97,10 +98,12 @@
         }
       });
     </script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
-      /* Prevent Mobile Browser Force-Dark Inversion */
+      /* Prevent Mobile Browser Force-Dark Inversion & Enforce International Typography */
       :root, html, body {
         color-scheme: only light !important;
         forced-color-adjust: none !important;
@@ -112,7 +115,9 @@
         overflow-x: hidden;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
-        font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
       }
       #root {
         min-height: 100%;

@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-display: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   --color-brand-50: #f0f9ff;
@@ -23,7 +23,7 @@
 }
 
 /* ==========================================================================
-   1. EXECUTIVE TYPOGRAPHY, SMOOTH SCROLLING & BASE RESET
+   1. INTERNATIONAL EXECUTIVE TYPOGRAPHY, SMOOTH MOTION & BASE RESET
    ========================================================================== */
 :root,
 html,
@@ -31,7 +31,8 @@ body {
   color-scheme: only light !important;
   forced-color-adjust: none !important;
   -webkit-forced-color-adjust: none !important;
-  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -43,6 +44,8 @@ body {
   scroll-behavior: smooth;
   margin: 0;
   padding: 0;
+  font-size: 15px;
+  line-height: 1.55;
 }
 
 #root {
@@ -54,20 +57,58 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.022em;
+  line-height: 1.22;
+  font-weight: 700;
+}
+
+.font-mono,
+[class*="font-mono"],
+table td,
+table th {
+  font-variant-numeric: tabular-nums;
 }
 
 .font-mono,
 [class*="font-mono"] {
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace !important;
-  font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
 
+/* Smooth Executive Animations */
+@keyframes makFadeInSmooth {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes makGlassScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.985) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: makFadeInSmooth 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-glass-in {
+  animation: makGlassScaleIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 /* ==========================================================================
-   2. THEME 1: CHARCOAL DARK (DEFAULT EXECUTIVE OBSIDIAN SLATE)
+   2. THEME 1: CHARCOAL DARK (EXECUTIVE OBSIDIAN GLASS)
    ========================================================================== */
 :root,
 html.theme-charcoal,
@@ -78,12 +119,12 @@ body.theme-charcoal {
   --text-primary: #F8FAFC;
   --text-secondary: #CBD5E1;
   --text-muted: #94A3B8;
-  --glass-bg: rgba(20, 28, 44, 0.85);
-  --glass-card-bg: linear-gradient(145deg, rgba(24, 34, 52, 0.92) 0%, rgba(15, 22, 34, 0.96) 100%);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.45);
-  --input-bg: rgba(15, 23, 42, 0.75);
-  --input-border: rgba(255, 255, 255, 0.12);
+  --glass-bg: rgba(20, 28, 44, 0.84);
+  --glass-card-bg: linear-gradient(145deg, rgba(24, 34, 52, 0.90) 0%, rgba(15, 22, 34, 0.95) 100%);
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-shadow: 0 12px 32px -6px rgba(0, 0, 0, 0.48), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  --input-bg: rgba(15, 23, 42, 0.78);
+  --input-border: rgba(255, 255, 255, 0.14);
 }
 
 html.theme-charcoal body,
@@ -99,86 +140,96 @@ body.theme-charcoal {
 
 .glass-panel {
   background: var(--glass-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
   border: 1px solid var(--glass-border);
-  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-card {
   background: var(--glass-card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
-  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-input {
   background: var(--input-bg);
   border: 1px solid var(--input-border);
   color: var(--text-primary);
-  transition: all 0.2s ease;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-input:focus {
-  border-color: #0ea5e9;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.18);
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3.5px rgba(2, 132, 199, 0.16);
   outline: none;
 }
 
 /* ==========================================================================
-   3. THEME 2: PEARL WHITE (EYE-FRIENDLY WARM ALABASTER & SATIN IVORY)
+   3. THEME 2: PEARL WHITE GLASSY (SIGNATURE ULTRA-LUXURY FROSTED ALABASTER)
    ========================================================================== */
 html.theme-pearl,
 body.theme-pearl {
-  --bg-primary: #F4F6F9;
-  --bg-secondary: #EDF1F7;
-  --bg-elevated: #FFFFFF;
+  --bg-primary: #F4F7FB;
+  --bg-secondary: #EDF2F8;
+  --bg-elevated: rgba(255, 255, 255, 0.88);
   --text-primary: #0F172A;
   --text-secondary: #334155;
   --text-muted: #64748B;
-  --glass-bg: #FFFFFF;
-  --glass-card-bg: #FFFFFF;
-  --glass-border: #E2E8F0;
-  --glass-shadow: 0 2px 12px -2px rgba(15, 23, 42, 0.05), 0 1px 3px 0 rgba(15, 23, 42, 0.03);
-  --input-bg: #FFFFFF;
+  --glass-bg: rgba(255, 255, 255, 0.84);
+  --glass-card-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.85) 100%);
+  --glass-border: rgba(226, 232, 240, 0.95);
+  --glass-shadow: 0 10px 30px -6px rgba(15, 23, 42, 0.055), 0 2px 8px -2px rgba(15, 23, 42, 0.03), inset 0 1px 0 0 rgba(255, 255, 255, 0.95);
+  --input-bg: rgba(255, 255, 255, 0.94);
   --input-border: #CBD5E1;
 }
 
 html.theme-pearl body,
 body.theme-pearl {
-  background-color: #F4F6F9 !important;
+  background-color: #F4F7FB !important;
   background-image:
-    radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.9) 0%, transparent 50%),
-    linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%) !important;
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.98) 0%, transparent 48%),
+    radial-gradient(circle at 88% 12%, rgba(224, 242, 254, 0.55) 0%, transparent 42%),
+    radial-gradient(circle at 50% 100%, rgba(254, 243, 199, 0.35) 0%, transparent 50%),
+    linear-gradient(180deg, #FAFBFD 0%, #F1F5F9 100%) !important;
   color: #0F172A !important;
+  background-attachment: fixed;
 }
 
-/* Primary Cards & Panels in Pearl White */
+/* Primary Cards & Panels in Pearl White Glassy */
 body.theme-pearl .glass-panel,
 body.theme-pearl .glass-card {
-  background: #FFFFFF !important;
-  border: 1px solid #E2E8F0 !important;
-  box-shadow: 0 2px 12px -2px rgba(15, 23, 42, 0.05), 0 1px 3px 0 rgba(15, 23, 42, 0.03) !important;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.84) 100%) !important;
+  backdrop-filter: blur(22px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(180%) !important;
+  border: 1px solid rgba(226, 232, 240, 0.95) !important;
+  box-shadow: 0 10px 30px -6px rgba(15, 23, 42, 0.055), 0 2px 8px -2px rgba(15, 23, 42, 0.03), inset 0 1px 0 0 rgba(255, 255, 255, 0.95) !important;
   color: #0F172A;
 }
 
-/* App Shell & Navigation Surfaces in Pearl White */
+/* App Shell & Navigation Surfaces in Pearl White Glassy */
+body.theme-pearl aside,
 body.theme-pearl aside.glass-panel,
+body.theme-pearl header,
 body.theme-pearl header.glass-panel {
-  background: rgba(255, 255, 255, 0.96) !important;
-  border-color: #E2E8F0 !important;
-  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.05) !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+  backdrop-filter: blur(24px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(190%) !important;
+  border-color: rgba(226, 232, 240, 0.95) !important;
+  box-shadow: 0 4px 24px -4px rgba(15, 23, 42, 0.045), inset 0 1px 0 0 rgba(255, 255, 255, 0.9) !important;
 }
 
-/* Modal Backdrops in Pearl White */
+/* Modal Backdrops in Pearl White Glassy */
 body.theme-pearl .fixed.inset-0[class*="bg-black/"] {
-  background-color: rgba(15, 23, 42, 0.45) !important;
-  backdrop-filter: blur(6px) !important;
+  background-color: rgba(15, 23, 42, 0.38) !important;
+  backdrop-filter: blur(8px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(140%) !important;
 }
 
-/* Dark Slate, Hex & Dark Gradient Containers Adapted to Crisp Pearl Surfaces */
+/* Dark Slate, Hex & Dark Gradient Containers Adapted to Crisp Pearl Glassy Surfaces */
 body.theme-pearl [class*="bg-slate-900"],
 body.theme-pearl [class*="bg-slate-950"],
 body.theme-pearl [class*="bg-slate-850"],
@@ -214,9 +265,12 @@ body.theme-pearl [class*="to-[#10141D]"],
 body.theme-pearl [class*="to-[#111724]"],
 body.theme-pearl [class*="via-[#111724]"],
 body.theme-pearl [class*="via-[#161A24]"] {
-  background-color: #FFFFFF !important;
-  background-image: linear-gradient(145deg, #FFFFFF 0%, #F8FAFC 100%) !important;
-  border-color: #E2E8F0 !important;
+  background-color: rgba(255, 255, 255, 0.90) !important;
+  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.88) 100%) !important;
+  backdrop-filter: blur(20px) saturate(170%);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  border-color: rgba(226, 232, 240, 0.95) !important;
+  box-shadow: 0 8px 26px -6px rgba(15, 23, 42, 0.05), 0 2px 6px -1px rgba(15, 23, 42, 0.025), inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
   color: #0F172A;
 }
 
@@ -239,27 +293,29 @@ body.theme-pearl [class*="bg-white/[0.04]"],
 body.theme-pearl [class*="bg-white/5"],
 body.theme-pearl [class*="bg-white/10"]:not(button),
 body.theme-pearl [class*="from-white/5"] {
-  background-color: #F8FAFC !important;
-  background-image: none !important;
+  background-color: rgba(248, 250, 252, 0.88) !important;
+  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.92) 0%, rgba(241, 245, 249, 0.82) 100%) !important;
   border-color: #E2E8F0 !important;
   color: #1E293B;
 }
 
 body.theme-pearl button[class*="bg-slate-800"],
 body.theme-pearl button[class*="bg-gray-800"] {
-  background-color: #F1F5F9 !important;
-  background-image: none !important;
+  background-color: rgba(241, 245, 249, 0.92) !important;
+  background-image: linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 100%) !important;
   border-color: #CBD5E1 !important;
   color: #0F172A !important;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.04);
 }
 
 body.theme-pearl button[class*="bg-slate-800"]:hover,
 body.theme-pearl button[class*="bg-gray-800"]:hover {
   background-color: #E2E8F0 !important;
+  background-image: linear-gradient(180deg, #F8FAFC 0%, #E2E8F0 100%) !important;
   color: #0F172A !important;
 }
 
-/* Soft Tinted Card & Gradient Backgrounds in Pearl White */
+/* Soft Tinted Glassy Card & Gradient Backgrounds in Pearl White */
 body.theme-pearl [class*="bg-emerald-950"],
 body.theme-pearl [class*="bg-emerald-900/"],
 body.theme-pearl [class*="bg-emerald-500/10"],
@@ -273,8 +329,8 @@ body.theme-pearl [class*="from-teal-950"],
 body.theme-pearl [class*="from-teal-900"],
 body.theme-pearl [class*="from-lime-950"],
 body.theme-pearl [class*="from-lime-900"] {
-  background-color: #ECFDF5 !important;
-  background-image: linear-gradient(145deg, #FFFFFF 0%, #ECFDF5 100%) !important;
+  background-color: rgba(236, 253, 245, 0.88) !important;
+  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(236, 253, 245, 0.88) 100%) !important;
   border-color: #A7F3D0 !important;
 }
 
@@ -293,8 +349,8 @@ body.theme-pearl [class*="from-yellow-950"],
 body.theme-pearl [class*="from-yellow-900"],
 body.theme-pearl [class*="from-orange-950"],
 body.theme-pearl [class*="from-orange-900"] {
-  background-color: #FFFBEB !important;
-  background-image: linear-gradient(145deg, #FFFFFF 0%, #FFFBEB 100%) !important;
+  background-color: rgba(255, 251, 235, 0.88) !important;
+  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 251, 235, 0.88) 100%) !important;
   border-color: #FDE68A !important;
 }
 
@@ -321,8 +377,8 @@ body.theme-pearl [class*="from-sky-950"],
 body.theme-pearl [class*="from-sky-900"],
 body.theme-pearl [class*="from-blue-500/10"],
 body.theme-pearl [class*="from-brand-500/10"] {
-  background-color: #EFF6FF !important;
-  background-image: linear-gradient(145deg, #FFFFFF 0%, #EFF6FF 100%) !important;
+  background-color: rgba(239, 246, 255, 0.88) !important;
+  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(239, 246, 255, 0.88) 100%) !important;
   border-color: #BFDBFE !important;
 }
 
@@ -340,8 +396,8 @@ body.theme-pearl [class*="to-rose-950"],
 body.theme-pearl [class*="from-red-950"],
 body.theme-pearl [class*="from-red-900"],
 body.theme-pearl [class*="from-red-500/10"] {
-  background-color: #FFF1F2 !important;
-  background-image: linear-gradient(145deg, #FFFFFF 0%, #FFF1F2 100%) !important;
+  background-color: rgba(255, 241, 242, 0.88) !important;
+  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 241, 242, 0.88) 100%) !important;
   border-color: #FECDD3 !important;
 }
 
@@ -361,35 +417,37 @@ body.theme-pearl [class*="from-indigo-900"],
 body.theme-pearl [class*="to-indigo-950"],
 body.theme-pearl [class*="from-violet-950"],
 body.theme-pearl [class*="from-violet-900"] {
-  background-color: #F5F3FF !important;
-  background-image: linear-gradient(145deg, #FFFFFF 0%, #F5F3FF 100%) !important;
+  background-color: rgba(245, 243, 255, 0.88) !important;
+  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(245, 243, 255, 0.88) 100%) !important;
   border-color: #DDD6FE !important;
 }
 
-/* Borders in Pearl White */
+/* Borders in Pearl White Glassy */
 body.theme-pearl [class*="border-white/"],
 body.theme-pearl [class*="border-slate-800"],
 body.theme-pearl [class*="border-slate-700"] {
-  border-color: #E2E8F0 !important;
+  border-color: rgba(226, 232, 240, 0.95) !important;
 }
 
-/* Inputs, Selects & Textareas in Pearl White */
+/* Inputs, Selects & Textareas in Pearl White Glassy */
 body.theme-pearl input:not([type="checkbox"]):not([type="radio"]),
 body.theme-pearl select,
 body.theme-pearl textarea,
 body.theme-pearl .glass-input {
-  background-color: #FFFFFF !important;
+  background-color: rgba(255, 255, 255, 0.95) !important;
   border: 1px solid #CBD5E1 !important;
   color: #0F172A !important;
-  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.03);
+  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.03), inset 0 1px 0 0 rgba(255, 255, 255, 0.8);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
 body.theme-pearl input:not([type="checkbox"]):not([type="radio"]):focus,
 body.theme-pearl select:focus,
 body.theme-pearl textarea:focus,
 body.theme-pearl .glass-input:focus {
+  background-color: #FFFFFF !important;
   border-color: #0284C7 !important;
-  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.14) !important;
+  box-shadow: 0 0 0 3.5px rgba(2, 132, 199, 0.14) !important;
 }
 
 body.theme-pearl input::placeholder,
@@ -397,24 +455,36 @@ body.theme-pearl textarea::placeholder {
   color: #94A3B8 !important;
 }
 
-/* Tables in Pearl White */
+/* Executive Tables & Lists in Pearl White Glassy */
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
 body.theme-pearl table th {
-  background-color: #F8FAFC !important;
-  color: #475569 !important;
+  background-color: rgba(248, 250, 252, 0.96) !important;
+  backdrop-filter: blur(12px);
+  color: #334155 !important;
   border-color: #E2E8F0 !important;
   font-weight: 700;
+  letter-spacing: 0.03em;
 }
 
 body.theme-pearl table td {
   border-color: #F1F5F9 !important;
-  color: #1E293B !important;
+  color: #0F172A !important;
+  transition: background-color 0.15s ease;
+}
+
+body.theme-pearl table tbody tr {
+  transition: background-color 0.18s ease, transform 0.18s ease;
 }
 
 body.theme-pearl table tbody tr:hover {
-  background-color: #F8FAFC !important;
+  background-color: rgba(241, 245, 249, 0.78) !important;
 }
 
-/* Typography Hierarchy in Pearl White */
+/* Typography Hierarchy in Pearl White Glassy */
 body.theme-pearl h1,
 body.theme-pearl h2,
 body.theme-pearl h3,
@@ -444,7 +514,7 @@ body.theme-pearl .text-gray-500 {
   color: #64748B !important;
 }
 
-/* High-Contrast Semantic Ink in Pearl White */
+/* High-Contrast Semantic Ink in Pearl White Glassy */
 body.theme-pearl .text-amber-200,
 body.theme-pearl .text-amber-300,
 body.theme-pearl .text-amber-400,
@@ -489,7 +559,7 @@ body.theme-pearl .text-indigo-400 {
 }
 
 /* ==========================================================================
-   4. CRITICAL FIX: SOLID FILLED BUTTONS, ACTIVE TABS & BADGES IN PEARL WHITE
+   4. SOLID FILLED BUTTONS, ACTIVE TABS & BADGES IN PEARL WHITE
       Always preserve crisp #FFFFFF text & icons on solid colored backgrounds!
    ========================================================================== */
 body.theme-pearl .bg-slate-700 {
@@ -613,39 +683,49 @@ body.theme-pearl .from-red-600 * {
 }
 
 /* ==========================================================================
-   5. LUXURY INTERACTIVE BUTTONS & SCROLLBARS
+   5. LUXURY INTERACTIVE BUTTONS, CARDS & SCROLLBARS
    ========================================================================== */
+button,
+[role="button"] {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
 .btn-charcoal-primary {
   background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
   color: #FFFFFF;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 4px 14px -2px rgba(15, 23, 42, 0.25);
-  transition: all 0.2s ease;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 6px 18px -3px rgba(15, 23, 42, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.btn-charcoal-primary:hover {
+.btn-charcoal-primary:hover:not(:disabled) {
   background: linear-gradient(135deg, #334155 0%, #1E293B 100%);
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px -3px rgba(15, 23, 42, 0.35);
+  box-shadow: 0 10px 24px -4px rgba(15, 23, 42, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
 }
 
 .btn-pearl-light {
-  background: #FFFFFF;
-  color: #1E293B;
+  background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+  color: #0F172A;
   border: 1px solid #CBD5E1;
-  box-shadow: 0 2px 6px -1px rgba(15, 23, 42, 0.06);
-  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px -1px rgba(15, 23, 42, 0.05), inset 0 1px 0 0 #FFFFFF;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.btn-pearl-light:hover {
+.btn-pearl-light:hover:not(:disabled) {
   background: #F8FAFC;
   border-color: #94A3B8;
+  transform: translateY(-0.5px);
 }
 
 .custom-scrollbar {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+  scrollbar-color: rgba(148, 163, 184, 0.38) transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar,
@@ -661,13 +741,13 @@ body.theme-pearl .from-red-600 * {
 
 .custom-scrollbar::-webkit-scrollbar-thumb,
 .overflow-x-auto::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.38);
   border-radius: 9999px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover,
 .overflow-x-auto::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.55);
+  background: rgba(100, 116, 139, 0.58);
 }
 
 .no-scrollbar {
@@ -681,7 +761,52 @@ body.theme-pearl .from-red-600 * {
 }
 
 /* ==========================================================================
-   6. PRINT & A4 REPORT HELPERS
+   6. MULTI-SCREEN ARCHITECTURE: DESKTOP, LAPTOP, TABLET & MOBILE LAYOUTS
+   ========================================================================== */
+
+/* Mobile Screens (< 640px): Ergonomic touch targets, smooth horizontal table scroll, compact cards */
+@media (max-width: 639px) {
+  :root, html, body {
+    font-size: 14px;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px !important; /* Prevents iOS Safari auto-zoom on input focus */
+  }
+
+  table th,
+  table td {
+    padding-left: 0.625rem !important;
+    padding-right: 0.625rem !important;
+    white-space: nowrap;
+  }
+}
+
+/* Tablet Screens (640px - 1023px): Balanced two-column grids and medium table density */
+@media (min-width: 640px) and (max-width: 1023px) {
+  :root, html, body {
+    font-size: 14.5px;
+  }
+}
+
+/* Laptop Screens (1024px - 1439px): High-precision executive workspace proportions */
+@media (min-width: 1024px) and (max-width: 1439px) {
+  :root, html, body {
+    font-size: 14.5px;
+  }
+}
+
+/* Large Desktop & Widescreen Monitors (1440px+): Generous executive breathing room */
+@media (min-width: 1440px) {
+  :root, html, body {
+    font-size: 15px;
+  }
+}
+
+/* ==========================================================================
+   7. PRINT & A4 LEGAL REPORT HELPERS
    ========================================================================== */
 @media print {
   @page {

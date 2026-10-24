@@ -45,13 +45,24 @@ export function matchesActiveCompany(itemCompanyId?: string, targetCompanyId?: s
 }
 
 /**
- * Sanitizes an object recursively to ensure it is 100% compliant with Firestore:
- * - Replaces any browser File or Blob instances with clean JSON objects.
+ * Sanitizes an object recursively to ensure it is 100% compliant with Firestore and protected against corruption/injection:
+ * - Blocks prototype pollution keys (__proto__, constructor, prototype).
+ * - Replaces any browser File or Blob instances with clean JSON metadata objects.
+ * - Converts NaN / Infinity numbers to 0 so Firestore never rejects a numeric write.
  * - Removes undefined keys or values that cause Firestore serialization exceptions.
  */
+const FORBIDDEN_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 function sanitizeForFirestore(obj: any): any {
   if (obj === undefined) return null;
+  if (typeof obj === 'number') {
+    return Number.isFinite(obj) ? obj : 0;
+  }
   if (obj === null || typeof obj !== 'object') return obj;
+
+  if (obj instanceof Date) {
+    return isNaN(obj.getTime()) ? new Date().toISOString() : obj.toISOString();
+  }
 
   if (obj instanceof File || obj instanceof Blob) {
     return {
@@ -68,6 +79,7 @@ function sanitizeForFirestore(obj: any): any {
 
   const clean: Record<string, any> = {};
   for (const key of Object.keys(obj)) {
+    if (FORBIDDEN_OBJECT_KEYS.has(key)) continue;
     const val = obj[key];
     if (val !== undefined) {
       // Guard against large base64 dataUrls (>150KB) that cause Firestore 1MB document rejection

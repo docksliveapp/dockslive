@@ -5,10 +5,10 @@ import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 
 // Global Build Version - Auto-invalidates stale caches on every refresh / domain open
-const APP_BUILD_VERSION = '2026.10.14-live-v15';
+const APP_BUILD_VERSION = '2026.10.21-luxury-pearl-v16';
 
 try {
-  // Always clear browser CacheStorage so old JS/HTML bundles never persist
+  // Always clear browser CacheStorage so old JS/HTML/CSS bundles never persist
   if (typeof caches !== 'undefined') {
     caches.keys().then((names) => {
       names.forEach((name) => {
@@ -27,7 +27,7 @@ try {
   }
 
   // Purge stale temporary UI/draft cache keys on every page load/refresh
-  // while preserving dpl_live_cases and dpl_live_clients so large uploaded PDFs/images are never lost
+  // while preserving all live operational data (dpl_live_*) synced with Firestore
   const staleCacheKeys = [
     'dpl_reg_draft_active',
     'dpl_reg_step',

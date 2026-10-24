@@ -7,7 +7,7 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Core Security & Auth Helpers
+    // Core Security & Validation Helpers
     function isSignedIn() {
       return request.auth != null;
     }
@@ -15,148 +15,206 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.email == 'makeyourflyeasy@gmail.com' ||
+        request.auth.token.email == 'docks.live.app@gmail.com' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    function isValidDocId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 160;
+    }
+
+    function isValidPayload() {
+      return request.resource.data is map && request.resource.data.keys().size() <= 200;
     }
 
     // Connection health ping
     match /test/{docId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      allow write: if isValidDocId(docId) && isValidPayload();
     }
 
     // Logistics & Customs Cases
     match /cases/{caseId} {
       allow read: if true;
-      allow create, update, delete: if true;
+      allow create, update: if isValidDocId(caseId) && isValidPayload();
+      allow delete: if isValidDocId(caseId);
     }
 
     // Registered Clients Directory
     match /clients/{clientId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(clientId) && isValidPayload();
+      allow delete: if isValidDocId(clientId);
     }
 
     // Financial Ledger Transactions
     match /finances/{financeId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(financeId) && isValidPayload();
+      allow delete: if isValidDocId(financeId);
     }
     match /finance/{financeId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(financeId) && isValidPayload();
+      allow delete: if isValidDocId(financeId);
     }
 
     // Transport Vehicles & Fleet
     match /vehicles/{vehicleId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(vehicleId) && isValidPayload();
+      allow delete: if isValidDocId(vehicleId);
     }
 
     // Registered App Users
     match /users/{userId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(userId) && isValidPayload();
+      allow delete: if isValidDocId(userId);
     }
 
     // Action Center Notifications & Tasks
     match /notifications/{notificationId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(notificationId) && isValidPayload();
+      allow delete: if isValidDocId(notificationId);
     }
 
     // Company Settings & Profile
     match /settings/{settingId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(settingId) && isValidPayload();
+      allow delete: if isValidDocId(settingId);
     }
 
     // Database Backups & Cloud Vault Snapshots
     match /database_backups/{backupId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(backupId) && isValidPayload();
+      allow delete: if isValidDocId(backupId);
     }
 
     // Registered Utility & Office Vendors
     match /vendors/{vendorId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(vendorId) && isValidPayload();
+      allow delete: if isValidDocId(vendorId);
     }
 
     // Recurring Monthly Templates
     match /recurring_templates/{templateId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(templateId) && isValidPayload();
+      allow delete: if isValidDocId(templateId);
     }
 
     // Staff Ledgers
     match /staff_ledgers/{ledgerId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(ledgerId) && isValidPayload();
+      allow delete: if isValidDocId(ledgerId);
     }
 
     // Staff Loading Bills
     match /staff_loading_bills/{billId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(billId) && isValidPayload();
+      allow delete: if isValidDocId(billId);
     }
 
     // Staff Private Ledgers (Isolated Port Staff Accounts)
     match /staff_private_ledgers/{ledgerId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(ledgerId) && isValidPayload();
+      allow delete: if isValidDocId(ledgerId);
     }
 
     // Available Vehicles Fleet
     match /available_vehicles/{vehicleId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(vehicleId) && isValidPayload();
+      allow delete: if isValidDocId(vehicleId);
     }
 
     // Transporter Requests
     match /transporter_requests/{requestId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(requestId) && isValidPayload();
+      allow delete: if isValidDocId(requestId);
     }
 
     // Destination Staff & Port Officers
     match /destination_staff/{staffId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(staffId) && isValidPayload();
+      allow delete: if isValidDocId(staffId);
     }
 
     // Activity Logs
     match /activity_logs/{logId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(logId) && isValidPayload();
+      allow delete: if isValidDocId(logId);
     }
 
     // Company Branding & Custom Logos
     match /branding/{brandingId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(brandingId) && isValidPayload();
+      allow delete: if isValidDocId(brandingId);
     }
 
     // Company Official Documents Archive
     match /company_documents/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(docId) && isValidPayload();
+      allow delete: if isValidDocId(docId);
     }
 
     // Company Document Categories
     match /company_document_categories/{catId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(catId) && isValidPayload();
+      allow delete: if isValidDocId(catId);
     }
 
     // Personal Ledger Accounts & Entries (Private Per-User Ledgers)
     match /personal_ledger_accounts/{accountId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(accountId) && isValidPayload();
+      allow delete: if isValidDocId(accountId);
     }
     match /personal_ledger_entries/{entryId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(entryId) && isValidPayload();
+      allow delete: if isValidDocId(entryId);
     }
 
     // Payables & Receivables Ledgers
     match /payables/{payableId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(payableId) && isValidPayload();
+      allow delete: if isValidDocId(payableId);
     }
     match /receivables/{receivableId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(receivableId) && isValidPayload();
+      allow delete: if isValidDocId(receivableId);
     }
 
     // Fleet Drivers Directory
     match /drivers/{driverId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(driverId) && isValidPayload();
+      allow delete: if isValidDocId(driverId);
     }
 
     // Cloud-Synced User Work Drafts (Auto-saved in-progress work across disconnections)
     match /work_drafts/{draftId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if isValidDocId(draftId) && isValidPayload();
+      allow delete: if isValidDocId(draftId);
     }
 
     // Admin Authorizations
