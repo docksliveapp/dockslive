@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   X, Printer, Calendar, Search, DollarSign, Building, 
   ArrowDownLeft, ArrowUpRight, FileText, CheckCircle, Clock, 
@@ -6,7 +7,7 @@ import {
 } from 'lucide-react';
 import { Client, Case, FinanceEntry } from '../types';
 import { LegalDocumentHeader, LegalDocumentFooter } from './LegalDocumentHeader';
-import { downloadGeneralLedgerPdf } from '../services/pdfExportService';
+import { downloadClientLedgerPdf, formatPdfDate } from '../services/pdfExportService';
 
 interface ClientLedgerModalProps {
   isOpen: boolean;
@@ -63,26 +64,34 @@ export const ClientLedgerModal: React.FC<ClientLedgerModalProps> = ({
 
   // 1. Add Case Invoices (Debit)
   clientCases.forEach(c => {
-    // Calculate total case amount
     const chargesSum = Array.isArray(c.charges)
       ? c.charges.reduce((sum, ch) => sum + (Number(ch.amount || (ch as any).defaultAmount) || 0), 0)
       : 0;
     const totalBilled = Number(c.totalAmount) || chargesSum || 0;
 
     const caseDate = c.createdAt 
-      ? new Date(c.createdAt).toISOString().split('T')[0]
-      : (c.registrationDate || c.date || todayStr);
+      ? String(c.createdAt).split('T')[0]
+      : String(c.registrationDate || c.date || todayStr).split('T')[0];
 
-    const ref = c.caseNo || c.caseNumber || (c.invoiceNo) || `CASE-${c.id}`;
-    const blInfo = c.extractedData?.blNumber || c.blNumber || (c as any).gdNumber || 'N/A';
+    const ref = c.caseNo || c.caseNumber || c.invoiceNo || `CASE-${c.id}`;
+    const cntrs = Array.isArray(c.containers) && c.containers.length > 0 ? c.containers : [];
+    const cntrQty = cntrs.length || 1;
+    const rawNos = cntrs.map(cn => (cn.number || '').trim()).filter(Boolean);
+    const cntrNoText = rawNos.length > 0 ? rawNos.join(', ') : (c.containerNumber || c.extractedData?.containerNo || 'N/A');
+    const rawSizes = cntrs.map(cn => (cn.size || '').trim()).filter(Boolean);
+    const cntrSizeText = rawSizes.length > 0 ? Array.from(new Set(rawSizes)).join('/') : ((c as any).containerSize || c.extractedData?.containerSize || '40ft');
+    const cntrNarration = `Cntr No: ${cntrNoText} | Size: ${cntrSizeText} | Qty: ${cntrQty}`;
 
     if (totalBilled > 0) {
+      const chargeLabel = Array.isArray(c.charges) && c.charges.length > 0
+        ? c.charges.map(ch => ch.description).filter(Boolean).join(', ')
+        : (c.category || 'Logistics Charges');
       rawRows.push({
         id: `case_${c.id}`,
         date: caseDate,
         type: 'INVOICE',
         refNumber: ref,
-        description: `Case Billing: ${c.category || 'Logistics'} - ${c.pol || ''} to ${c.pod || ''} (BL: ${blInfo})`,
+        description: `${chargeLabel} | ${cntrNarration}`,
         debit: totalBilled,
         credit: 0
       });
@@ -94,8 +103,8 @@ export const ClientLedgerModal: React.FC<ClientLedgerModalProps> = ({
         id: `case_adv_${c.id}`,
         date: caseDate,
         type: 'PAYMENT',
-        refNumber: `ADV-${ref}`,
-        description: `Advance Payment Received on Case ${ref}`,
+        refNumber: ref,
+        description: `Advance Payment Received | ${cntrNarration}`,
         debit: 0,
         credit: Number(c.advancePaid)
       });
@@ -167,9 +176,9 @@ export const ClientLedgerModal: React.FC<ClientLedgerModalProps> = ({
     window.print();
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-start justify-center pt-3 sm:pt-6 pb-6 px-2 sm:px-4 overflow-y-auto animate-in fade-in duration-150">
-      <div className="glass-card rounded-2xl w-full max-w-5xl border border-white/15 shadow-2xl bg-slate-900/98 mb-6 max-h-[94vh] flex flex-col">
+  return createPortal(
+    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+      <div className="glass-card rounded-2xl w-full max-w-5xl border border-white/15 shadow-2xl bg-slate-900/98 my-auto max-h-[calc(100dvh-1rem)] sm:max-h-[92dvh] flex flex-col overflow-hidden">
         {/* Official Legal Document Header for Print Output */}
         <div className="hidden print:block p-4 bg-white">
           <LegalDocumentHeader 
@@ -205,16 +214,20 @@ export const ClientLedgerModal: React.FC<ClientLedgerModalProps> = ({
             <button
               type="button"
               onClick={() => {
-                downloadGeneralLedgerPdf({
-                  accountFilter: client.name,
-                  generatedDate: new Date().toLocaleDateString(),
-                  totalDebits: totalDebit,
-                  totalCredits: totalCredit,
-                  closingBalance: currentOutstanding,
+                const totalCntrs = clientCases.reduce((s, c) => s + (c.containers?.length || 1), 0);
+                downloadClientLedgerPdf({
+                  clientName: client.name,
+                  statementDate: new Date().toISOString().split('T')[0],
+                  companyId: (client as any).companyId,
+                  summary: {
+                    totalDebits: totalDebit,
+                    totalCredits: totalCredit,
+                    netBalance: currentOutstanding,
+                    totalCases: clientCases.length,
+                    totalContainers: totalCntrs
+                  },
                   entries: filteredRows.map(r => ({
-                    date: r.date,
-                    party: client.name,
-                    category: r.type,
+                    date: String(r.date || '').split('T')[0],
                     reference: r.refNumber,
                     description: r.description,
                     debit: r.debit,
@@ -337,8 +350,8 @@ export const ClientLedgerModal: React.FC<ClientLedgerModalProps> = ({
                 <thead>
                   <tr className="bg-slate-950/80 border-b border-white/10 text-[11px] text-gray-400 font-semibold uppercase tracking-wider">
                     <th className="p-3">Date</th>
-                    <th className="p-3">Ref / Case #</th>
-                    <th className="p-3">Description</th>
+                    <th className="p-3">Case No</th>
+                    <th className="p-3">Description / Narration</th>
                     <th className="p-3 text-right">Debit (Billed)</th>
                     <th className="p-3 text-right">Credit (Received)</th>
                     <th className="p-3 text-right">Running Balance</th>
@@ -347,7 +360,7 @@ export const ClientLedgerModal: React.FC<ClientLedgerModalProps> = ({
                 <tbody className="divide-y divide-white/5">
                   {filteredRows.map((row, idx) => (
                     <tr key={`cl_led_modal_row_${row.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
-                      <td className="p-3 font-mono text-gray-300 whitespace-nowrap">{row.date}</td>
+                      <td className="p-3 font-mono text-gray-300 whitespace-nowrap">{formatPdfDate(row.date)}</td>
                       <td className="p-3 font-mono font-medium text-brand-300 whitespace-nowrap">
                         {row.refNumber}
                       </td>
@@ -390,6 +403,7 @@ export const ClientLedgerModal: React.FC<ClientLedgerModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

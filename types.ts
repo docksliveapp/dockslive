@@ -53,7 +53,9 @@ export interface Container {
   number: string;
   size: '20ft' | '40ft' | '45ft';
   weight: number;
+  tareWeight?: number;
   sealNo?: string;
+  shipperSealNo?: string;
   vehicleNo?: string;
   driverName?: string;
   driverContact?: string;
@@ -162,6 +164,7 @@ export interface ExtractedData {
   consigneeContact?: string;
   consigneeEmail?: string;
   shippingAgent?: string;
+  clearingAgent?: string;
   shippingLine?: string;
   blNumber?: string;
   blDate?: string;
@@ -169,6 +172,7 @@ export interface ExtractedData {
   pod?: string;
   placeOfDelivery?: string;
   voyageNo?: string;
+  feederVessel?: string;
   freightTerms?: string;
   freeDays?: string;
   notifyPartyName?: string;
@@ -185,12 +189,14 @@ export interface ExtractedData {
   totalWeight?: number;
   grossWeight?: number;
   netWeight?: number;
+  tareWeight?: number;
   volumeCBM?: number;
   // Customs & Manifest Details
   gdNo?: string;
   gdNumber?: string;
   tpNumber?: string;
   gdDate?: string;
+  cfdNo?: string;
   vesselName?: string;
   igmNo?: string;
   igmDate?: string;
@@ -204,6 +210,17 @@ export interface ExtractedData {
   containerNo?: string;
   containerSize?: string;
   sealNo?: string;
+  shipperSealNo?: string;
+  ccsuSealNo?: string;
+  // Bonded Carrier & PCCSS Form "A" / Transport Note Fields
+  carrierName?: string;
+  serialNo?: string;
+  sealingDate?: string;
+  pccssOfficer?: string;
+  assessedValuePkr?: number;
+  totalDutyTaxesPkr?: number;
+  exchangeRate?: number;
+  bankName?: string;
   // Pakistan Customs & International Logistics Regulatory Fields
   gdType?: string; // 'TP Filing', 'Afghan Transit (ATT)', 'Home Consumption (GD-HC)', 'Into-Bond (GD-IB)', 'Ex-Bond (GD-EB)', 'Export (GD-EXP)', 'TIR Carnet'
   ntnNumber?: string; // Importer / Client NTN
@@ -330,6 +347,9 @@ export interface CaseCharge {
   category?: string;
   description: string;
   amount: number;
+  unitRate?: number;
+  containerCount?: number;
+  perContainerBreakdown?: string;
   defaultAmount?: number;
   taxable?: boolean;
   notes?: string;
@@ -1021,6 +1041,7 @@ export interface DestinationStaff {
   address?: string;
   commissionOrSalary?: number;
   baseRate?: number;
+  defaultPerContainerCharge?: number; // By default per-container charge received at destination to remit to Karachi Head Office (Internal Company Transaction)
   paymentType?: 'Monthly Salary' | 'Per Case Commission' | 'Daily Rate' | 'MONTHLY_SALARY' | 'PER_CASE_COMMISSION' | 'DAILY_RATE';
   status: 'Active' | 'Inactive' | 'ACTIVE' | 'INACTIVE';
   notes?: string;
@@ -1032,13 +1053,17 @@ export interface StaffLedgerEntry {
   id: string;
   staffId: number | string;
   staffName: string;
-  type: 'SALARY' | 'DAILY_ROUTINE' | 'DAILY'; // Salary/Fuel/Loan vs Daily Khana Peena / Petty Cash
+  type: 'SALARY' | 'DAILY_ROUTINE' | 'DAILY' | 'CONTAINER_CHARGES'; // Salary/Fuel/Loan vs Daily Khana Peena / Petty Cash vs Destination Per-Container Remittance
   date: string;
   description: string;
-  category?: string; // 'Monthly Salary', 'Fuel Allowance', 'Mobile Allowance', 'Loan / Advance', 'Daily Meal / Chai', 'Market Purchase', 'Cash Return', 'Settlement'
-  debit: number; // For Salary: Salary payable, Loan given. For Daily: Cash given to staff for purchases
-  credit: number; // For Salary: Salary paid, Loan recovered. For Daily: Expense bill submitted, Cash balance returned
+  category?: string; // 'Monthly Salary', 'Fuel Allowance', 'Mobile Allowance', 'Loan / Advance', 'Daily Meal / Chai', 'Market Purchase', 'Cash Return', 'Settlement', 'Internal Company Transaction (Per Container Charge)'
+  debit: number; // For Salary: Salary payable, Loan given. For Daily: Cash given to staff. For Container Charges: Amount received by Destination Staff payable to Karachi Head Office
+  credit: number; // For Salary: Salary paid, Loan recovered. For Daily: Expense bill submitted. For Container Charges: Amount remitted to Karachi Head Office
   balance: number;
+  caseNo?: string;
+  containerCount?: number;
+  perContainerRate?: number;
+  isInternalCompanyTransaction?: boolean;
   receiptUrl?: string;
   notes?: string;
   settled?: boolean;
@@ -1337,6 +1362,8 @@ export interface AppUser {
   ntnDoc?: string;
   businessCard?: string;
   baseSalary?: number;
+  defaultPerContainerCharge?: number; // By default per-container charge for Destination Staff (Remittance to Karachi Head Office)
+  assignedStation?: string; // Assigned terminal / destination port station
   allowances?: {
     mobile?: number;
     fuel?: number;

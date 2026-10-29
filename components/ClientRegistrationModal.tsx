@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Building, User, Phone, Mail, MapPin, FileText, DollarSign, Plus, Trash2, 
   Check, X, Upload, Eye, Search, AlertCircle, Shield, CheckCircle2, ChevronRight, 
@@ -572,20 +573,20 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
 
   const currentCategoryArrangements = getCategoryArrangements(selectedCategory);
 
-  return (
-    <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-5 overflow-hidden animate-in fade-in duration-200">
-      <div className="rounded-2xl w-full max-w-4xl border border-white/15 shadow-2xl bg-slate-900 max-h-[88vh] flex flex-col overflow-hidden">
+  return createPortal(
+    <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[9999] flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
+      <div className="rounded-2xl w-full max-w-5xl border border-white/15 shadow-2xl bg-slate-900 max-h-[calc(100dvh-1rem)] sm:max-h-[92dvh] my-auto flex flex-col overflow-hidden">
         {/* Modal Header */}
-        <div className="px-5 py-4 border-b border-white/10 flex justify-between items-center bg-slate-950/90 shrink-0">
-          <div className="flex items-center gap-3.5">
+        <div className="px-5 py-4 border-b border-white/10 flex justify-between items-center bg-slate-950/95 shrink-0 sticky top-0 z-10">
+          <div className="flex items-center gap-3.5 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
               <Building size={20} />
             </div>
-            <div>
-              <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+            <div className="min-w-0">
+              <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 truncate">
                 <span>{isClientView ? 'Client Account Profile' : (initialClient ? 'Edit Client Profile & Tariff' : 'Register New Client & Tariff')}</span>
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 mt-0.5 truncate">
                 {isClientView ? 'Verified company particulars & portal security credentials' : 'Configure client details, default service arrangements, and standard tariff'}
               </p>
             </div>
@@ -593,7 +594,8 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
           <button 
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-white h-9 w-9 rounded-xl hover:bg-white/10 flex items-center justify-center transition-colors cursor-pointer"
+            className="text-slate-300 hover:text-white h-9 w-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            title="Close"
           >
             <X size={18} />
           </button>
@@ -1288,8 +1290,8 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
       {/* SECONDARY POPUP: MASTER CHARGE PICKER & ADD CUSTOM CHARGE */}
       {/* ========================================================================= */}
       {showChargePicker && (
-        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-60 flex items-center justify-center p-3 sm:p-4 overflow-hidden animate-in fade-in duration-150">
-          <div className="rounded-2xl w-full max-w-xl border border-white/15 shadow-2xl bg-slate-900 max-h-[82vh] flex flex-col overflow-hidden">
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-60 flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="rounded-2xl w-full max-w-xl border border-white/15 shadow-2xl bg-slate-900 max-h-[calc(100dvh-1.5rem)] sm:max-h-[86dvh] my-auto flex flex-col overflow-hidden">
             {/* Picker Header */}
             <div className="px-5 py-4 border-b border-white/10 flex justify-between items-center bg-slate-950 shrink-0">
               <div>
@@ -1447,7 +1449,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
 
       {/* Document Quick Preview */}
       {previewDoc && (
-        <div className="fixed inset-0 bg-slate-950/95 z-70 flex items-center justify-center p-4 overflow-hidden">
+        <div className="fixed inset-0 bg-slate-950/95 z-[10010] flex items-center justify-center p-4 overflow-hidden">
           <div className="rounded-2xl w-full max-w-2xl border border-white/20 p-5 space-y-4 bg-slate-900 flex flex-col max-h-[88vh]">
             <div className="flex justify-between items-center border-b border-white/10 pb-3 shrink-0">
               <h4 className="text-sm font-bold text-white truncate">{previewDoc.name}</h4>
@@ -1470,6 +1472,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };

@@ -143,71 +143,19 @@ export default defineConfig(({ mode }) => {
                     }
                   }
 
-                  const extractionInstruction = body.prompt || `You are an expert shipping document and Pakistan Customs logistics OCR system.
-Extract all logistics, customs, and shipping fields from the attached documents (Weighment Certificate, PCCSS Form "A" - Agent, Transport Note Appendix-I, Goods Declaration GD-1 TP, Bill of Lading, Commercial Invoice, Packing List) into valid JSON with these keys:
-- shippingLine: (e.g. "CMA CGM", "WAN HAI LINES", "COSCO Shipping", "Maersk", "MSC")
-- blNumber: Bill of Lading number (e.g. "SWA0449647", "027G657324")
-- blDate: B/L issuance date (YYYY-MM-DD, e.g. "2026-04-01", "2026-06-12")
-- vesselName: Ocean Vessel name (e.g. "COSCO PRINCE RUPERT", "COSCO NEW YORK")
-- voyageNo: Ocean Voyage (e.g. "004", "149W")
-- pol: Port of Loading (e.g. "Shantou, China", "Shanghai, China")
-- pod: Port of Discharge (e.g. "Karachi Port (SAPT)", "Karachi, Pakistan")
-- placeOfDelivery: Final Destination (e.g. "MCC Appraisement West Lahore-Import", "Karachi, Pakistan")
-- freightTerms: (e.g. "FREIGHT PREPAID", "FREIGHT COLLECT")
-- freeDays: Free demurrage/detention time if stated
-- shipperName: Shipper / Exporter / Consignor (e.g. "YIWU TONGGANG IMPORT AND EXPORT CO., LTD", "HANGZHOU BAOFENG IMP. & EXP. CO., LTD")
-- shipperAddress: Shipper complete address
-- shipperCountry: Country of origin / shipper country (e.g. "China")
-- shipperContact: Shipper phone number
-- shipperEmail: Shipper email address
-- consigneeName: Importer / Consignee / Customer (e.g. "U.S TRADERS", "ALFA TEXTILE")
-- consigneeAddress: Importer / Consignee complete address
-- consigneeContact: Importer phone number (e.g. "0092 321 6464924")
-- consigneeEmail: Importer email address (e.g. "usmanrajaa@yahoo.com")
-- ntnNumber: Importer NTN / Tax ID (e.g. "5041761", "A629270-8")
-- notifyPartyName: Notify party name if present
-- notifyPartyAddress: Notify party address
-- shippingAgent: Shipping Agent references (e.g. "RIAZEDA (PVT) LTD", "CMA CGM PAKISTAN PVT LTD")
-- gdNo: Goods Declaration / TP number (e.g. "KAPS-TP-186918-01-05-2026")
-- gdDate: GD filing date (YYYY-MM-DD, e.g. "2026-05-01")
-- tpNumber: Transshipment Permit number (e.g. "KAPS-TP-186918-01-05-2026")
-- igmNo: Import General Manifest number (e.g. "PKKHISAPT_230426123555")
-- igmDate: IGM date (YYYY-MM-DD, e.g. "2026-04-23")
-- indexNo: Manifest index number (e.g. "383")
-- vehicleNumber: External truck registration or transport unit number (e.g. "TLG799")
-- carrierName: Bonded carrier company (e.g. "TRUCKIT (PRIVATE) LIMITED", "Docks (Pvt) Ltd")
-- invoiceNo: Commercial invoice number (e.g. "AZ26-02TH", "ZK1353/225")
-- invoiceDate: Commercial invoice date (YYYY-MM-DD, e.g. "2026-03-26", "2026-06-09")
-- invoiceValue: Total invoice value as number (e.g. 19356, 53256)
-- invoiceCurrency: Currency code (e.g. "USD", "EUR", "PKR")
-- incoTerms: Commercial terms (e.g. "CFR", "CIF", "FOB", "D/P AT SIGHT")
-- itemName: Commercial goods description (e.g. "ASSORTED TOYS", "MICRO VELVET FABRIC")
-- itemType: High level classification (e.g. "Toys & Consumer Goods", "Textile Fabric")
-- hsCode: Harmonized tariff code (e.g. "9503.0090", "5801.3700")
-- packagingType: Packaging description (e.g. "CARTONS", "ROLLS", "BALES")
-- packageCount: Total quantity of packages as number (e.g. 460, 225)
-- totalWeight: Gross weight in KG (convert MT to KG, e.g. 11.685 MT = 11685, 13410)
-- grossWeight: Gross weight in KG (e.g. 11685, 13410)
-- netWeight: Net weight in KG (e.g. 10185, 12680)
-- volumeCBM: Total volume in CBM (e.g. 68.0)
-- containers: Array of container objects:
-  [
-    {
-      "number": "ECMU8087489",
-      "size": "45ft",
-      "weight": 11685,
-      "sealNo": "Bolt-3580312"
-    }
-  ]
-- suggestedCategory: "Bonded Carrier" (if Transshipment Permit TP or upcountry dry port), or "Ocean Freight Import"
-- docCategoryDetected: Summary of detected documents
+                  if (body.extractedText && typeof body.extractedText === 'string' && body.extractedText.trim()) {
+                    parts.push({
+                      text: `EXTRACTED PDF TEXT LAYER ACROSS ALL PAGES:\n${body.extractedText.slice(0, 60000)}`
+                    });
+                  }
 
-Return ONLY valid JSON.`;
+                  const extractionInstruction = body.prompt || `You are an expert shipping document and Pakistan Customs logistics OCR system.
+Carefully read EVERY page of the attached document(s) — including multi-page PDFs containing PCCSS Form "A" - Agent, Transport Note (Appendix-I), Terminal Gate Pass (KICT / SAPT / QICT), One-Customs WeBOC Amend Vehicle before Sealing, Goods Declaration (GD-I / TP), Clearing/Forwarding Agent Letterheads, FBR Tax Verification, CNIC copies, Bill of Lading (B/L), Commercial Invoice, and Packing List — and merge all information across all pages into valid JSON.`;
 
                   parts.push({ text: extractionInstruction });
 
                   let apiResponse: any = null;
-                  const models = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+                  const models = ['gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
                   for (const m of models) {
                     try {
                       apiResponse = await ai.models.generateContent({
@@ -223,9 +171,10 @@ Return ONLY valid JSON.`;
                     }
                   }
 
+                  const rawText = (apiResponse?.text || '{}').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
                   res.statusCode = 200;
                   res.setHeader('Content-Type', 'application/json');
-                  res.end(apiResponse?.text || '{}');
+                  res.end(rawText || '{}');
                 } catch (err: any) {
                   console.error('Server OCR endpoint error:', err);
                   res.statusCode = 500;

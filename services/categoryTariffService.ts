@@ -22,6 +22,7 @@ export interface ServiceArrangementItem {
  */
 export const CATEGORY_SERVICE_ARRANGEMENTS: Record<string, Record<string, ServiceArrangementItem>> = {
   "Bonded Carrier": {
+    tp_charges: { label: 'Transshipment Permit (TP) & Bonded Carrier Charges', arrangedBy: 'DPL', amount: 0, isDefaultDpl: true },
     loading_charges: { label: 'Loading / Labor Handling Charges', arrangedBy: 'Client', amount: 0 },
     do_charges: { label: 'Shipping Line Delivery Order (DO) Charges', arrangedBy: 'Client', amount: 0 },
     security_deposit: { label: 'DO Security Deposit / Guarantee', arrangedBy: 'Client', amount: 0 },
@@ -191,6 +192,9 @@ export function doesChargeMatchArrangement(chargeDesc: string, arrKey: string, a
   if (!c) return false;
   if (c === l || c.includes(l) || l.includes(c)) return true;
 
+  if (k.includes('tp_charges') && (c.includes('tp ') || c.startsWith('tp') || c.includes('transshipment') || c.includes('transhipment') || c.includes('bonded carrier'))) {
+    return true;
+  }
   if ((k.includes('do_charges') || k === 'delivery_order' || k === 'delivery_order_charges' || k === 'line_do') &&
       (c.includes('delivery order') || c.includes('do charges') || c === 'do fee') && !c.includes('dry port') && !c.includes('deposit')) {
     return true;
@@ -239,42 +243,82 @@ export function getCategoryArrangements(category: string): Record<string, Servic
   const key = normalizeCategoryKey(category);
   const found = CATEGORY_SERVICE_ARRANGEMENTS[key];
   if (found) {
-    // Return a fresh deep clone
     return JSON.parse(JSON.stringify(found));
   }
   return JSON.parse(JSON.stringify(CATEGORY_SERVICE_ARRANGEMENTS['Bonded Carrier']));
 }
 
 /**
+ * Scales Bonded Carrier charges by the number of containers in the case:
+ * - Every default or manual charge in a Bonded Carrier case is a per-container rate (`unitRate`).
+ * - Total charge `amount = unitRate * Math.max(1, containers.length)`.
+ * - Includes container-wise breakdown string (e.g., "MSKU1177491: PKR 3,000 | TEMU8045938: PKR 3,000").
+ */
+export function scaleBondedCarrierChargesByContainers(
+  charges: CaseCharge[],
+  category: string,
+  containers: Array<{ number?: string }> = []
+): CaseCharge[] {
+  const normCat = normalizeCategoryKey(category || 'Bonded Carrier');
+  if (normCat !== 'Bonded Carrier') {
+    return charges || [];
+  }
+
+  const cntrCount = Math.max(1, Array.isArray(containers) && containers.length > 0 ? containers.length : 1);
+  const cntrLabels = Array.isArray(containers) && containers.length > 0
+    ? containers.map((c, idx) => (c?.number && String(c.number).trim()) ? String(c.number).trim() : `Container #${idx + 1}`)
+    : ['Container #1'];
+
+  return (charges || []).map(ch => {
+    const unitRate = Number(ch.unitRate ?? ch.defaultAmount ?? ch.amount) || 0;
+    const totalAmount = unitRate * cntrCount;
+    const perContainerBreakdown = cntrLabels
+      .map(label => `${label}: PKR ${unitRate.toLocaleString()}`)
+      .join(' • ');
+
+    return {
+      ...ch,
+      unitRate,
+      defaultAmount: ch.defaultAmount ?? unitRate,
+      containerCount: cntrCount,
+      amount: totalAmount,
+      perContainerBreakdown
+    };
+  });
+}
+
+/**
  * Generates CaseCharge array from service arrangements where arrangedBy === 'DPL' and amount > 0.
  */
-export function getArrangementCharges(arrangements: Record<string, ServiceArrangementItem>): CaseCharge[] {
-  return Object.entries(arrangements)
+export function getArrangementCharges(
+  arrangements: Record<string, ServiceArrangementItem>,
+  category: string = 'Bonded Carrier',
+  containers: Array<{ number?: string }> = []
+): CaseCharge[] {
+  const rawCharges: CaseCharge[] = Object.entries(arrangements)
     .filter(([_, item]) => item.arrangedBy === 'DPL' && Number(item.amount) > 0)
     .map(([key, item]) => ({
       id: `ch_arr_${key}`,
       syncKey: key,
       description: item.label,
+      unitRate: Number(item.amount),
+      defaultAmount: Number(item.amount),
       amount: Number(item.amount),
       arrangedBy: 'DPL',
       taxable: true
     }));
+
+  return scaleBondedCarrierChargesByContainers(rawCharges, category, containers);
 }
 
 /**
- * Core Category-Wise Client Default Charges Resolver:
- * - Default charges are stored per Client AND per Case Category.
- * - When a client is added, a Primary Case Category is selected (since most of that client's cases belong to that category)
- *   and default charges are saved with user-entered amounts for that category.
- * - When registering a case for that client in that category, those default charges automatically apply.
- * - If the Case Category is changed to another category, default charges from the previous category do NOT apply;
- *   only default charges saved specifically for the new category apply (or Nil/empty if none are saved yet for that category,
- *   requiring fresh entry — and any charge ticked as "Save as Default" in the new category is saved for that new category!).
+ * Core Category-Wise Client Default Charges Resolver
  */
 export function resolveCaseCharges(
   client: Client | undefined,
   category: string,
-  existingArrangements?: Record<string, ServiceArrangementItem>
+  existingArrangements?: Record<string, ServiceArrangementItem>,
+  containers: Array<{ number?: string }> = []
 ): {
   arrangements: Record<string, ServiceArrangementItem>;
   charges: CaseCharge[];
@@ -309,36 +353,40 @@ export function resolveCaseCharges(
   });
 
   if (categorySpecificDefaults.length > 0) {
-    const clientCharges: CaseCharge[] = categorySpecificDefaults.map((ch, idx) => ({
-      id: ch.id || `ch_clt_${Date.now()}_${idx}`,
-      category: targetNormCat,
-      description: ch.description,
-      amount: Number(ch.defaultAmount) || 0,
-      taxable: ch.taxable ?? false,
-      arrangedBy: 'DPL'
-    }));
+    const rawClientCharges: CaseCharge[] = categorySpecificDefaults.map((ch, idx) => {
+      const unitRate = Number(ch.defaultAmount) || 0;
+      return {
+        id: ch.id || `ch_clt_${Date.now()}_${idx}`,
+        category: targetNormCat,
+        description: ch.description,
+        unitRate,
+        defaultAmount: unitRate,
+        amount: unitRate,
+        taxable: ch.taxable ?? false,
+        arrangedBy: 'DPL'
+      };
+    });
 
-    // Synchronize matching operational service arrangement items for this category
+    // Synchronize matching operational service arrangement items for this category (store unitRate in arrangement.amount)
     Object.keys(mergedArrangements).forEach((k) => {
       const arr = mergedArrangements[k];
-      const match = clientCharges.find(c => doesChargeMatchArrangement(c.description, k, arr.label));
+      const match = rawClientCharges.find(c => doesChargeMatchArrangement(c.description, k, arr.label));
       if (match) {
         mergedArrangements[k].arrangedBy = 'DPL';
-        mergedArrangements[k].amount = match.amount;
+        mergedArrangements[k].amount = match.unitRate ?? match.amount;
         (match as any).syncKey = k;
       }
     });
 
     return {
       arrangements: mergedArrangements,
-      charges: clientCharges,
+      charges: scaleBondedCarrierChargesByContainers(rawClientCharges, targetNormCat, containers),
       isClientCustomDefault: true,
       clientName: client?.name
     };
   }
 
-  // If no default charges exist for this client in this specific category, return Nil (empty charges)
-  const categoryCharges = getArrangementCharges(mergedArrangements);
+  const categoryCharges = getArrangementCharges(mergedArrangements, targetNormCat, containers);
 
   return {
     arrangements: mergedArrangements,

@@ -88,8 +88,6 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
     }
   }, [isOpen, initialDocType, preSelectedIds, initialSelectedVehicles]);
 
-  if (!isOpen) return null;
-
   // Common configuration state
   const todayStr = new Date().toISOString().slice(0, 10);
   const [letterDate, setLetterDate] = useState<string>(todayStr);
@@ -140,6 +138,25 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
     const d = new Date(letterDate || todayStr);
     return calculateSixMonthsExpiry(d);
   }, [letterDate, todayStr]);
+
+  // State for universal read-only document preview modal
+  const [previewDocState, setPreviewDocState] = useState<{
+    isOpen: boolean;
+    file: Blob | string | null;
+    filename: string;
+    title: string;
+    fileType?: 'docx' | 'pdf' | 'xlsx' | 'image' | 'auto';
+    verificationItems: DataMappingCheckItem[];
+  }>({
+    isOpen: false,
+    file: null,
+    filename: '',
+    title: '',
+    fileType: 'docx',
+    verificationItems: []
+  });
+
+  if (!isOpen) return null;
 
   const toggleSelectVehicle = (id: number) => {
     setSelectedIds(prev => 
@@ -269,23 +286,6 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
       setIsGenerating(false);
     }
   };
-
-  // State for universal read-only document preview modal
-  const [previewDocState, setPreviewDocState] = useState<{
-    isOpen: boolean;
-    file: Blob | string | null;
-    filename: string;
-    title: string;
-    fileType?: 'docx' | 'pdf' | 'xlsx' | 'image' | 'auto';
-    verificationItems: DataMappingCheckItem[];
-  }>({
-    isOpen: false,
-    file: null,
-    filename: '',
-    title: '',
-    fileType: 'docx',
-    verificationItems: []
-  });
 
   const handlePreviewCustomsPdf = async () => {
     if (selectedVehicles.length === 0) return;

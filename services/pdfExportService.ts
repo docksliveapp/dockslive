@@ -5,6 +5,7 @@ import {
   getActiveCompany, 
   getActiveCompanyPrefix, 
   isUploadedLogo,
+  getCompanyUploadedLogo,
   getParentGroupInfo,
   DEFAULT_PARENT_GROUP,
   CompanyId,
@@ -35,30 +36,167 @@ export interface BrandingInfo {
 }
 
 let cachedMakLogoPngUrl: string | null = null;
+const circularLogoCache = new Map<string, string>();
 
 /**
- * Generates an ultra-crisp, high-DPI vector PNG of the official MAK Group of Companies logo.
- * Renders the iconic architectural modern M-A-K letterforms, arched dome A,
- * metallic gradient, horizontal divider, and "GROUP OF COMPANIES" text on a 2x Retina canvas.
+ * Formats any date or ISO timestamp (e.g., "2026-10-26T11:42:23.511Z" or "2026-04-01")
+ * into a clean Day-Month-Year ("DD-MM-YYYY") date string.
  */
-export async function getMakGroupLetterheadLogoPngUrl(): Promise<string> {
-  if (cachedMakLogoPngUrl) return cachedMakLogoPngUrl;
-  if (typeof window === 'undefined') return '';
+export function formatPdfDate(dateInput?: string | null): string {
+  const formatDmy = (d: Date) => {
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
 
-  const parentGroup = getParentGroupInfo();
-  if (parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
-    return parentGroup.logo;
+  if (!dateInput) return formatDmy(new Date());
+  const raw = String(dateInput).trim();
+  if (!raw) return formatDmy(new Date());
+
+  const datePart = raw.includes('T') ? raw.split('T')[0] : raw.split(' ')[0];
+
+  // Match YYYY-MM-DD or YYYY/MM/DD
+  const ymdMatch = datePart.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (ymdMatch) {
+    return `${ymdMatch[3].padStart(2, '0')}-${ymdMatch[2].padStart(2, '0')}-${ymdMatch[1]}`;
+  }
+
+  // Match DD-MM-YYYY or DD/MM/YYYY (or MM/DD/YYYY if second part > 12)
+  const dmyMatch = datePart.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmyMatch) {
+    const p1 = parseInt(dmyMatch[1], 10);
+    const p2 = parseInt(dmyMatch[2], 10);
+    if (p1 <= 12 && p2 > 12) {
+      return `${String(p2).padStart(2, '0')}-${String(p1).padStart(2, '0')}-${dmyMatch[3]}`;
+    }
+    return `${String(p1).padStart(2, '0')}-${String(p2).padStart(2, '0')}-${dmyMatch[3]}`;
+  }
+
+  const parsed = new Date(raw);
+  if (!isNaN(parsed.getTime())) {
+    return formatDmy(parsed);
+  }
+
+  return cleanPdfText(datePart).substring(0, 12);
+}
+
+/**
+ * Ensures SVG data URLs have explicit width/height attributes before drawing to canvas
+ * so HTMLImageElement never reports naturalWidth/naturalHeight as 0.
+ */
+function normalizeSvgDataUrlForCanvas(sourceUrl: string): string {
+  try {
+    if (!sourceUrl.startsWith('data:image/svg+xml')) return sourceUrl;
+    const commaIdx = sourceUrl.indexOf(',');
+    if (commaIdx === -1) return sourceUrl;
+    const header = sourceUrl.slice(0, commaIdx);
+    const payload = sourceUrl.slice(commaIdx + 1);
+    const isBase64 = header.includes(';base64');
+    let svgText = isBase64 ? atob(payload) : decodeURIComponent(payload);
+    if (!/<svg[^>]*\bwidth=/i.test(svgText)) {
+      svgText = svgText.replace(/<svg\b/i, '<svg width="480" height="480"');
+    }
+    return `data:image/svg+xml;base64,${btoa(svgText)}`;
+  } catch {
+    return sourceUrl;
+  }
+}
+
+/**
+ * Renders any logo image URL onto a 100% transparent, un-framed square canvas (object-contain)
+ * so the original uploaded logo shape (square, rectangular, circular, or transparent PNG/SVG)
+ * is preserved as-is without any circle frame or distortion.
+ */
+async function renderCircularLogoBadgePng(sourceUrl: string): Promise<string> {
+  if (!sourceUrl || typeof window === 'undefined') return '';
+  if (circularLogoCache.has(sourceUrl)) {
+    return circularLogoCache.get(sourceUrl)!;
   }
 
   return new Promise((resolve) => {
     try {
+      const normalizedSrc = normalizeSvgDataUrlForCanvas(sourceUrl);
+      const img = new Image();
+      if (!normalizedSrc.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
+      img.onload = () => {
+        try {
+          const size = 480;
+          const canvas = document.createElement('canvas');
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(sourceUrl);
+
+          // Keep 100% transparent background with zero border/circle frame
+          ctx.clearRect(0, 0, size, size);
+
+          const iw = img.naturalWidth || img.width || size;
+          const ih = img.naturalHeight || img.height || size;
+          const scale = Math.min(size / iw, size / ih);
+          const drawW = iw * scale;
+          const drawH = ih * scale;
+          const drawX = (size - drawW) / 2;
+          const drawY = (size - drawH) / 2;
+
+          ctx.drawImage(img, drawX, drawY, drawW, drawH);
+
+          const outUrl = canvas.toDataURL('image/png');
+          circularLogoCache.set(sourceUrl, outUrl);
+          resolve(outUrl);
+        } catch {
+          resolve('');
+        }
+      };
+      img.onerror = () => resolve('');
+      img.src = normalizedSrc;
+    } catch {
+      resolve('');
+    }
+  });
+}
+
+/**
+ * Generates an ultra-crisp, high-DPI transparent PNG of the official MAK Group of Companies logo
+ * (or renders the uploaded Main App Document Logo / Main Logo transparently without any circle frame).
+ */
+export async function getMakGroupLetterheadLogoPngUrl(): Promise<string> {
+  const parentGroup = getParentGroupInfo();
+  if (parentGroup?.documentLogo && isUploadedLogo(parentGroup.documentLogo)) {
+    const docBadge = await renderCircularLogoBadgePng(parentGroup.documentLogo);
+    if (docBadge) return docBadge;
+  }
+  if (parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
+    const mainBadge = await renderCircularLogoBadgePng(parentGroup.logo);
+    if (mainBadge) return mainBadge;
+  }
+
+  if (cachedMakLogoPngUrl) return cachedMakLogoPngUrl;
+  if (typeof window === 'undefined') return '';
+
+  return new Promise((resolve) => {
+    try {
+      const size = 500;
       const canvas = document.createElement('canvas');
-      canvas.width = 1120;
-      canvas.height = 500;
+      canvas.width = size;
+      canvas.height = size;
       const ctx = canvas.getContext('2d');
       if (!ctx) return resolve('');
 
-      // Premium Charcoal Gradient matching MAK Logo
+      const cx = size / 2;
+      const cy = size / 2;
+
+      // Keep 100% transparent background (no circle border)
+      ctx.clearRect(0, 0, size, size);
+
+      // Scale original 1120x500 MAK emblem centered inside transparent square
+      ctx.save();
+      const scale = 0.42;
+      ctx.translate(cx - (1120 * scale) / 2, cy - (500 * scale) / 2 + 6);
+      ctx.scale(scale, scale);
+
       const grad = ctx.createLinearGradient(0, 0, 1120, 500);
       grad.addColorStop(0, '#1E293B');
       grad.addColorStop(0.5, '#0F172A');
@@ -84,7 +222,7 @@ export async function getMakGroupLetterheadLogoPngUrl(): Promise<string> {
       ctx.closePath();
       ctx.fill();
 
-      // Letter "A" (Domed arch outer contour)
+      // Letter "A"
       ctx.beginPath();
       ctx.moveTo(465, 340);
       ctx.lineTo(465, 150);
@@ -99,7 +237,8 @@ export async function getMakGroupLetterheadLogoPngUrl(): Promise<string> {
       ctx.fill();
 
       // Counter cutout of "A"
-      ctx.fillStyle = '#FFFFFF';
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
       ctx.beginPath();
       ctx.moveTo(560, 200);
       ctx.lineTo(630, 200);
@@ -108,6 +247,7 @@ export async function getMakGroupLetterheadLogoPngUrl(): Promise<string> {
       ctx.bezierCurveTo(572, 105, 560, 118, 560, 145);
       ctx.closePath();
       ctx.fill();
+      ctx.restore();
 
       // Letter "K" Column
       ctx.fillStyle = grad;
@@ -133,15 +273,16 @@ export async function getMakGroupLetterheadLogoPngUrl(): Promise<string> {
 
       // Horizontal Divider Bar
       ctx.beginPath();
-      ctx.roundRect(50, 375, 1020, 9, 4.5);
+      ctx.roundRect(50, 375, 1020, 10, 5);
       ctx.fill();
 
       // Subtitle: "GROUP OF COMPANIES"
       ctx.fillStyle = grad;
-      ctx.font = '900 42px "Montserrat", "Inter", sans-serif';
+      ctx.font = '900 44px "Montserrat", "Inter", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'alphabetic';
-      ctx.fillText('G R O U P   O F   C O M P A N I E S', 560, 445);
+      ctx.fillText('GROUP OF COMPANIES', 560, 445);
+      ctx.restore();
 
       const dataUrl = canvas.toDataURL('image/png');
       cachedMakLogoPngUrl = dataUrl;
@@ -161,13 +302,25 @@ export async function getCompanyMonogramLogoPngUrl(companyId?: string): Promise<
 }
 
 /**
- * Resolves the official letterhead logo. Per user instructions, all 4 corporate entities
- * share the unified MAK GROUP OF COMPANIES letterhead.
+ * Resolves the TOP letterhead logo strictly from the Main App (MAK Group of Companies) settings:
+ * 1. Main App Document Logo (parentGroup.documentLogo) uploaded in Main App Settings
+ * 2. Main App Splash/Login Logo (parentGroup.logo) uploaded in Main App Settings
+ * 3. Default transparent MAK Group of Companies emblem
+ * Note: Operating subsidiary company logos (DPL, TRK, MHB, VSL) are rendered strictly at the bottom stamp.
  */
-export async function resolvePdfLogoUrl(customLogo?: string | null): Promise<string> {
+export async function resolvePdfLogoUrl(_customLogo?: string | null): Promise<string> {
   const parentGroup = getParentGroupInfo();
+  if (parentGroup?.documentLogo && isUploadedLogo(parentGroup.documentLogo)) {
+    const rendered = await renderCircularLogoBadgePng(parentGroup.documentLogo);
+    if (rendered) return rendered;
+  }
   if (parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
-    return parentGroup.logo;
+    const rendered = await renderCircularLogoBadgePng(parentGroup.logo);
+    if (rendered) return rendered;
+  }
+  if (DEFAULT_PARENT_GROUP.documentLogo) {
+    const rendered = await renderCircularLogoBadgePng(DEFAULT_PARENT_GROUP.documentLogo);
+    if (rendered) return rendered;
   }
   return await getMakGroupLetterheadLogoPngUrl();
 }
@@ -187,10 +340,7 @@ export function cleanPdfText(str?: string | null): string {
 
 /**
  * Draws the unified MAK GROUP OF COMPANIES official letterhead header.
- * Uniform across ALL generated documents (Invoices, Ledgers, Receipts, Vouchers,
- * DOs, NOCs, Dossiers, and Company Legal Records).
- * Includes dynamic height computation to strictly prevent text overlap ("text per text charha"),
- * A4 precision sizing, business-class English, and a clear executive Subject line.
+ * Uses a 1:1 circular logo emblem and dynamic line-height progression so text never overlaps.
  */
 export async function drawPdfCorporateHeader(
   doc: jsPDF,
@@ -206,7 +356,7 @@ export async function drawPdfCorporateHeader(
 ): Promise<number> {
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 14;
-  const startY = 10.5;
+  const startY = 9.5;
 
   // 1. Top Luxury Executive Accent Bars
   doc.setFillColor(15, 23, 42); // Deep Slate-900
@@ -215,107 +365,113 @@ export async function drawPdfCorporateHeader(
   doc.setFillColor(accent[0], accent[1], accent[2]);
   doc.rect(0, 4.5, pageWidth, 1.5, 'F');
 
-  // 2. High-Res MAK Group of Companies Vector Logo
-  const logoUrl = await resolvePdfLogoUrl();
-  const logoW = 32;
-  const logoH = 15;
+  // 2. High-Res Circular MAK Group of Companies Logo (1:1 aspect ratio circle)
+  const logoUrl = await resolvePdfLogoUrl(options.branding?.customLogo);
+  const logoDiameter = 18;
   let logoDrawn = false;
 
   if (logoUrl) {
     try {
       const format = logoUrl.includes('image/jpeg') || logoUrl.includes('image/jpg') ? 'JPEG' : 'PNG';
-      doc.addImage(logoUrl, format, margin, startY, logoW, logoH);
+      doc.addImage(logoUrl, format, margin, startY, logoDiameter, logoDiameter);
       logoDrawn = true;
     } catch (e) {
-      console.warn('Could not draw MAK logo into PDF:', e);
+      console.warn('Could not draw circular MAK logo into PDF:', e);
     }
   }
 
-  const textStartX = logoDrawn ? margin + logoW + 4.5 : margin;
+  const textStartX = logoDrawn ? margin + logoDiameter + 4.5 : margin;
 
   // 3. Clean and prepare right-aligned metadata
   const cleanTitle = cleanPdfText(options.title) || 'OFFICIAL DOCUMENT';
   const cleanRef = options.refNo ? cleanPdfText(options.refNo) : undefined;
-  const cleanDate = options.date ? cleanPdfText(options.date) : undefined;
+  const cleanDate = options.date ? formatPdfDate(options.date) : undefined;
   const cleanSubRef = options.subRef ? cleanPdfText(options.subRef) : undefined;
 
-  // Measure right block to allocate space and guarantee zero overlap
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  let maxRightTextWidth = doc.getTextWidth(cleanTitle);
-  if (cleanRef) {
-    doc.setFontSize(8.0);
-    maxRightTextWidth = Math.max(maxRightTextWidth, doc.getTextWidth(cleanRef));
-  }
-  const rightColWidth = Math.max(50, maxRightTextWidth + 4);
-  const maxLeftWidth = Math.max(55, (pageWidth - margin) - textStartX - rightColWidth - 4);
+  const rightColMaxWidth = 56;
+  const maxLeftWidth = Math.max(85, (pageWidth - margin) - textStartX - rightColMaxWidth - 4);
 
-  // 4. Left Column: Unified MAK Group Conglomerate Identity
-  // Conglomerate Name
+  // 4. Left Column: Unified MAK Group Conglomerate Identity with dynamic Y tracking (zero overlap)
+  let currLeftY = startY + 4.2;
+
+  // Line 1: Conglomerate Name
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
   doc.setTextColor(15, 23, 42);
-  doc.text('MAK GROUP OF COMPANIES', textStartX, startY + 4.0, { maxWidth: maxLeftWidth });
+  const titleLines = doc.splitTextToSize('MAK GROUP OF COMPANIES', maxLeftWidth);
+  doc.text(titleLines, textStartX, currLeftY);
+  currLeftY += (titleLines.length * 4.2);
 
-  // Tagline / Category
+  // Line 2: Tagline / Category
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.2);
+  doc.setFontSize(6.0);
   doc.setTextColor(180, 83, 9);
-  doc.text('PREMIER MULTI-ENTITY LOGISTICS, CUSTOMS & TRADE CONGLOMERATE', textStartX, startY + 8.0, { maxWidth: maxLeftWidth });
+  const taglineLines = doc.splitTextToSize('PREMIER MULTI-ENTITY LOGISTICS, CUSTOMS & TRADE CONGLOMERATE', maxLeftWidth);
+  doc.text(taglineLines, textStartX, currLeftY);
+  currLeftY += (taglineLines.length * 3.1) + 0.5;
 
-  // 4 Subsidiary Entities Bar (Uniform across all 4 companies)
+  // Line 3: 4 Subsidiary Entities Bar
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(5.4);
   doc.setTextColor(71, 85, 105);
   const entitiesLine = 'DOCKS (PVT) LTD  |  TRUCKIT (PVT) LTD  |  MUHIB INTL  |  VANTAGE SHIPPING';
-  doc.text(entitiesLine, textStartX, startY + 11.5, { maxWidth: maxLeftWidth });
+  const entityLines = doc.splitTextToSize(entitiesLine, maxLeftWidth);
+  doc.text(entityLines, textStartX, currLeftY);
+  currLeftY += (entityLines.length * 2.9) + 0.4;
 
-  // Customs Bonded & Intermodal Freight Operations note
+  // Line 4: Customs Bonded & Intermodal Freight Operations note
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(5.0);
   doc.setTextColor(100, 116, 139);
-  doc.text('Customs Bonded Carrier  |  Fleet Haulage  |  Ocean Freight  |  Forwarding', textStartX, startY + 14.5, { maxWidth: maxLeftWidth });
+  const opsLines = doc.splitTextToSize('Customs Bonded Carrier  |  Fleet Haulage  |  Ocean Freight  |  Forwarding', maxLeftWidth);
+  doc.text(opsLines, textStartX, currLeftY);
+  currLeftY += (opsLines.length * 2.6);
 
-  const currLeftY = startY + 15.0;
-
-  // 5. Right Column: Document Classification & Identification
+  // 5. Right Column: Document Classification & Identification (wrapped cleanly if long)
   let currRightY = startY + 4.0;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
+  doc.setFontSize(9.5);
   doc.setTextColor(accent[0], accent[1], accent[2]);
-  doc.text(cleanTitle.toUpperCase(), pageWidth - margin, currRightY, { align: 'right' });
+  const rightTitleLines = doc.splitTextToSize(cleanTitle.toUpperCase(), rightColMaxWidth);
+  doc.text(rightTitleLines, pageWidth - margin, currRightY, { align: 'right' });
+  currRightY += (rightTitleLines.length * 3.8);
 
   if (cleanRef) {
-    currRightY += 4.4;
+    currRightY += 0.6;
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.0);
+    doc.setFontSize(7.5);
     doc.setTextColor(15, 23, 42);
-    doc.text(cleanRef, pageWidth - margin, currRightY, { align: 'right' });
+    const refWrapped = doc.splitTextToSize(cleanRef, rightColMaxWidth);
+    doc.text(refWrapped, pageWidth - margin, currRightY, { align: 'right' });
+    currRightY += (refWrapped.length * 3.3);
   }
 
   if (cleanDate) {
-    currRightY += 3.8;
+    currRightY += 0.4;
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.2);
+    doc.setFontSize(7.0);
     doc.setTextColor(100, 116, 139);
     doc.text(`Date: ${cleanDate}`, pageWidth - margin, currRightY, { align: 'right' });
+    currRightY += 3.3;
   }
 
   if (cleanSubRef) {
-    currRightY += 3.5;
+    currRightY += 0.3;
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.8);
+    doc.setFontSize(6.6);
     doc.setTextColor(100, 116, 139);
-    doc.text(cleanSubRef, pageWidth - margin, currRightY, { align: 'right' });
+    const subRefWrapped = doc.splitTextToSize(cleanSubRef, rightColMaxWidth);
+    doc.text(subRefWrapped, pageWidth - margin, currRightY, { align: 'right' });
+    currRightY += (subRefWrapped.length * 3.0);
   }
 
-  // 6. Horizontal Divider Line (strictly computed below both columns and logo)
-  const dividerY = Math.max(currLeftY, currRightY, startY + logoH) + 3.2;
+  // 6. Horizontal Divider Line (strictly computed below both columns and circular logo)
+  const dividerY = Math.max(currLeftY, currRightY, startY + logoDiameter) + 2.8;
   doc.setDrawColor(203, 213, 225);
   doc.setLineWidth(0.5);
   doc.line(margin, dividerY, pageWidth - margin, dividerY);
 
-  // 7. Executive Business-Class Subject Line (Clean, standard font, beautiful spacing)
+  // 7. Executive Business-Class Subject Line
   const subjectText = options.subject 
     ? cleanPdfText(options.subject).toUpperCase()
     : (options.title ? `OFFICIAL RECORD: ${cleanTitle.toUpperCase()}` : '');
@@ -327,7 +483,7 @@ export async function drawPdfCorporateHeader(
     doc.roundedRect(margin, subBoxY, pageWidth - (margin * 2), 6.6, 1, 1, 'FD');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.6);
+    doc.setFontSize(7.5);
     doc.setTextColor(30, 41, 59);
     doc.text(`SUBJECT: ${subjectText}`, margin + 4, subBoxY + 4.5);
 
@@ -458,40 +614,134 @@ export function drawOfficialCompanyStampOnly(
 }
 
 /**
- * Draws the issuing company signature and official stamp block.
- * Dynamically switches company details for the bottom signature section
- * while keeping the top letterhead uniform.
+ * Infers the operating subsidiary CompanyId from a case number, reference prefix, or explicit companyId.
  */
-export function drawIssuingCompanySignatureAndStamp(
+export function resolveOperatingCompanyFromRef(
+  companyId?: CompanyId | string,
+  refOrCaseNo?: string | null
+): CompanyId {
+  if (companyId && (companyId === 'docks' || companyId === 'truckit' || companyId === 'muhib' || companyId === 'vantage')) {
+    return companyId;
+  }
+  const refUpper = String(refOrCaseNo || '').toUpperCase().trim();
+  if (refUpper.startsWith('TRK-') || refUpper.includes('TRUCKIT')) return 'truckit';
+  if (refUpper.startsWith('MHB-') || refUpper.includes('MUHIB')) return 'muhib';
+  if (refUpper.startsWith('VSL-') || refUpper.includes('VANTAGE')) return 'vantage';
+  if (refUpper.startsWith('DPL-') || refUpper.includes('DOCKS')) return 'docks';
+  return getActiveCompany().id;
+}
+
+/**
+ * Generates a transparent PNG for a specific operating subsidiary company (Docks, Truckit, Muhib, Vantage)
+ * preserving its original uploaded shape without any circle frame.
+ */
+async function getOperatingCompanyCircularLogoPng(
+  companyId: CompanyId,
+  customLogoHint?: string | null
+): Promise<string> {
+  const comp = GROUP_COMPANIES[companyId] || getActiveCompany();
+
+  // 1. Check uploaded logo for this specific operating company in Company Settings
+  const uploadedForComp = getCompanyUploadedLogo(companyId);
+  if (uploadedForComp && isUploadedLogo(uploadedForComp)) {
+    const badge = await renderCircularLogoBadgePng(uploadedForComp);
+    if (badge) return badge;
+  }
+
+  // 2. Check stored branding for this company
+  const compBranding = getStoredBranding(comp);
+  if (compBranding?.customLogo && isUploadedLogo(compBranding.customLogo)) {
+    const badge = await renderCircularLogoBadgePng(compBranding.customLogo);
+    if (badge) return badge;
+  }
+
+  // 3. Check customLogoHint passed from active view/caller
+  if (customLogoHint && isUploadedLogo(customLogoHint)) {
+    const badge = await renderCircularLogoBadgePng(customLogoHint);
+    if (badge) return badge;
+  }
+
+  // 4. Check active company branding / uploaded logo across any configured company slot
+  const activeBranding = getStoredBranding();
+  if (activeBranding?.customLogo && isUploadedLogo(activeBranding.customLogo)) {
+    const badge = await renderCircularLogoBadgePng(activeBranding.customLogo);
+    if (badge) return badge;
+  }
+
+  // 5. Check if any of the 4 company slots has an uploaded logo matching this company
+  const allIds: CompanyId[] = ['docks', 'truckit', 'muhib', 'vantage'];
+  for (const cid of allIds) {
+    const anyUploaded = getCompanyUploadedLogo(cid);
+    if (anyUploaded && isUploadedLogo(anyUploaded)) {
+      const badge = await renderCircularLogoBadgePng(anyUploaded);
+      if (badge) return badge;
+    }
+  }
+
+  // 6. Render the subsidiary company's official SVG emblem transparently if available
+  if (comp.logo) {
+    const svgBadge = await renderCircularLogoBadgePng(comp.logo);
+    if (svgBadge) return svgBadge;
+  }
+
+  return await getMakGroupLetterheadLogoPngUrl();
+}
+
+/**
+ * Draws the Operating Subsidiary Company attribution block (Circular Logo + Company Name + Official Stamp)
+ * at the bottom of Client Ledgers, Invoices, and Case Dossiers so it is clear which company added the client
+ * and managed the case.
+ */
+export async function drawIssuingCompanySignatureAndStamp(
   doc: jsPDF,
   y: number,
   title: string = 'OFFICIAL CARRIER SEAL',
-  companyId?: CompanyId
-): void {
-  const active = companyId ? GROUP_COMPANIES[companyId] : getActiveCompany();
+  companyId?: CompanyId,
+  refHint?: string,
+  customLogoHint?: string | null
+): Promise<void> {
+  const resolvedId = resolveOperatingCompanyFromRef(companyId, refHint);
+  const active = GROUP_COMPANIES[resolvedId] || getActiveCompany();
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 14;
 
-  // Left Column: ISSUING ENTITY (Active Company)
+  // Draw subtle attribution box on the left for the handling company
+  const leftBoxW = pageWidth - (margin * 2) - 64;
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.4);
+  doc.roundedRect(margin, y, leftBoxW, 22, 2, 2, 'FD');
+
+  // Draw circular subsidiary logo inside left attribution box
+  let textStartX = margin + 4;
+  try {
+    const subLogoPng = await getOperatingCompanyCircularLogoPng(resolvedId, customLogoHint);
+    if (subLogoPng) {
+      doc.addImage(subLogoPng, 'PNG', margin + 3, y + 2.5, 17, 17);
+      textStartX = margin + 23;
+    }
+  } catch (_) {}
+
+  // Left Column: HANDLING / ISSUING COMPANY
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.0);
-  doc.setTextColor(100, 116, 139);
-  doc.text('ISSUING ENTITY / OPERATOR:', margin + 4, y + 5);
+  doc.setFontSize(6.3);
+  doc.setTextColor(180, 83, 9);
+  doc.text('CLIENT & CASE MANAGED BY (OPERATING COMPANY):', textStartX, y + 5.5);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9.5);
+  doc.setFontSize(9.2);
   doc.setTextColor(15, 23, 42);
-  doc.text(`FOR & ON BEHALF OF: ${active.legalTitle.toUpperCase()}`, margin + 4, y + 11);
+  doc.text(cleanPdfText(active.legalTitle || active.name).toUpperCase(), textStartX, y + 11.2);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.2);
+  doc.setFontSize(6.8);
   doc.setTextColor(71, 85, 105);
-  doc.text(`${active.category} • Carrier Code: ${active.prefix}`, margin + 4, y + 16);
-  doc.text('Authorized Commercial Representative / Terminal In-Charge', margin + 4, y + 21);
+  doc.text(`${cleanPdfText(active.category)}  |  Company Code: ${active.prefix}`, textStartX, y + 15.8);
+  doc.text('A Subsidiary of MAK Group of Companies', textStartX, y + 19.6);
 
   // Right Column: Active Company Official Stamp
-  const stampX = pageWidth - margin - 60;
-  drawOfficialCompanyStampOnly(doc, stampX, y, title, companyId);
+  const stampX = pageWidth - margin - 58;
+  drawOfficialCompanyStampOnly(doc, stampX, y, title, resolvedId);
 }
 
 /**
@@ -754,16 +1004,16 @@ export async function downloadCasePdf(
         doc.setFontSize(6.5);
         doc.setTextColor(100, 116, 139);
         doc.text(
-          `Invoice Ref: INV-${cleanPdfText(targetCase.caseNo)}  |  Terms: Immediate upon receipt  |  Currency: PKR  |  Status: ${targetCase.status === 'Completed' ? 'Fully Settled' : 'Payment Due'}`,
+          `Case / Invoice / Voucher No: ${cleanPdfText(targetCase.caseNo)}  |  Terms: Immediate upon receipt  |  Currency: PKR  |  Status: ${targetCase.status === 'Completed' ? 'Fully Settled' : 'Payment Due'}`,
           margin + 4,
           currentY
         );
         currentY += 3;
       }
 
-      // Official Company Seal Stamp
-      const sigX = pageWidth - margin - 52;
-      drawOfficialCompanyStampOnly(doc, sigX, currentY, 'OFFICIAL RECORD STAMP');
+      // Operating Company Attribution (Logo + Company Name + Stamp) at bottom
+      const caseCompanyId = resolveOperatingCompanyFromRef((targetCase as any).companyId, targetCase.caseNo);
+      await drawIssuingCompanySignatureAndStamp(doc, currentY, 'OFFICIAL RECORD STAMP', caseCompanyId, targetCase.caseNo, b.customLogo);
 
       renderFooter(1, 1);
 
@@ -872,9 +1122,9 @@ export async function downloadCasePdf(
       doc.text(`PKR ${totalAmount.toLocaleString()}`, pageWidth - margin - 4, currentY + 5.5, { align: 'right' });
       currentY += 16;
 
-      // Official Company Stamp Only
-      const sigX = pageWidth - margin - 60;
-      drawOfficialCompanyStampOnly(doc, sigX, currentY, 'OFFICIAL INVOICE STAMP');
+      // Operating Company Attribution (Logo + Company Name + Stamp) at bottom
+      const invCompanyId = resolveOperatingCompanyFromRef((targetCase as any).companyId, targetCase.caseNo);
+      await drawIssuingCompanySignatureAndStamp(doc, currentY, 'OFFICIAL INVOICE STAMP', invCompanyId, targetCase.caseNo, b.customLogo);
 
       renderFooter(1, 1);
     }
@@ -1318,6 +1568,7 @@ export interface ReceivableInvoiceData {
   category?: string;
   status?: string;
   companyName?: string;
+  companyId?: CompanyId | string;
   customLogo?: string | null;
   branding?: BrandingInfo;
   lineItems?: Array<{ description: string; qty?: number; rate?: number; amount: number }>;
@@ -1430,9 +1681,9 @@ export async function downloadReceivableInvoicePdf(data: ReceivableInvoiceData):
 
     currentY += 18;
 
-    // Official Company Stamp Only (Per SRS: Invoices carry official company stamp only)
-    const sigX = pageWidth - margin - 60;
-    drawOfficialCompanyStampOnly(doc, sigX, currentY, 'OFFICIAL INVOICE STAMP');
+    // Operating Company Attribution (Circular Logo + Company Name + Official Stamp)
+    const resolvedCompId = resolveOperatingCompanyFromRef(data.companyId, data.reference || data.invoiceNo);
+    await drawIssuingCompanySignatureAndStamp(doc, currentY, 'OFFICIAL INVOICE STAMP', resolvedCompId, data.reference || data.invoiceNo, data.customLogo || data.branding?.customLogo);
 
     // Corporate footer with company address and contact numbers
     drawPdfCorporateFooter(doc, 'ERP Verified Invoice', data.branding);
@@ -1469,6 +1720,7 @@ export interface ClientLedgerExportData {
     balance: number;
   }>;
   companyName?: string;
+  companyId?: CompanyId | string;
   customLogo?: string | null;
   branding?: BrandingInfo;
   returnBase64Only?: boolean;
@@ -1561,10 +1813,10 @@ export async function downloadClientLedgerPdf(data: ClientLedgerExportData): Pro
       doc.setTextColor(255, 255, 255);
 
       doc.text('DATE', margin + 2, currentY + 4.8);
-      doc.text('REF / VOUCHER', 35, currentY + 4.8);
-      doc.text('DESCRIPTION / NARRATION', 66, currentY + 4.8);
-      doc.text('DEBIT (PKR)', 148, currentY + 4.8, { align: 'right' });
-      doc.text('CREDIT (PKR)', 172, currentY + 4.8, { align: 'right' });
+      doc.text('CASE NO', 38, currentY + 4.8);
+      doc.text('DESCRIPTION / NARRATION', 74, currentY + 4.8);
+      doc.text('DEBIT (PKR)', 150, currentY + 4.8, { align: 'right' });
+      doc.text('CREDIT (PKR)', 173, currentY + 4.8, { align: 'right' });
       doc.text('BALANCE', pageWidth - margin - 2, currentY + 4.8, { align: 'right' });
       currentY += 7;
     };
@@ -1575,12 +1827,13 @@ export async function downloadClientLedgerPdf(data: ClientLedgerExportData): Pro
 
     for (let idx = 0; idx < data.entries.length; idx++) {
       const entry = data.entries[idx];
+      const cleanDateStr = formatPdfDate(entry.date);
 
-      // Cleanly wrap reference and description with strict boundary widths
-      const refLines = doc.splitTextToSize(entry.reference || '-', 28);
-      const descLines = doc.splitTextToSize(entry.description || '-', 58);
-      const lineCount = Math.min(2, Math.max(refLines.length, descLines.length));
-      const rowHeight = lineCount > 1 ? 9.5 : 6.5;
+      // Cleanly wrap Case No and Description / Narration (with Container No, Size & Qty) without truncation
+      const refLines = doc.splitTextToSize(cleanPdfText(entry.reference || '-'), 34);
+      const descLines = doc.splitTextToSize(cleanPdfText(entry.description || '-'), 58);
+      const lineCount = Math.min(3, Math.max(refLines.length, descLines.length));
+      const rowHeight = lineCount === 1 ? 6.8 : lineCount === 2 ? 10.0 : 13.2;
 
       if (currentY + rowHeight > pageHeight - 25) {
         doc.addPage();
@@ -1594,42 +1847,46 @@ export async function downloadClientLedgerPdf(data: ClientLedgerExportData): Pro
         doc.rect(margin, currentY, pageWidth - (margin * 2), rowHeight, 'F');
       }
 
+      const numY = currentY + (lineCount === 1 ? 4.5 : lineCount === 2 ? 5.6 : 7.0);
+
+      // DATE (Clean YYYY-MM-DD, never overflows into Case No column)
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
+      doc.setFontSize(7.3);
       doc.setTextColor(71, 85, 105);
-      doc.text(entry.date, margin + 2, currentY + 4.4);
+      doc.text(cleanDateStr, margin + 2, numY);
 
-      // REF / VOUCHER (Wrapped, max 28mm width, strictly separated from Description)
+      // CASE NO (Same for Case, Invoice & Voucher)
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.1);
       doc.setTextColor(30, 41, 59);
-      if (lineCount > 1 && refLines.length > 1) {
-        doc.text(refLines[0], 35, currentY + 3.8);
-        doc.text(refLines[1], 35, currentY + 7.5);
+      if (refLines.length > 1) {
+        doc.text(refLines[0], 38, currentY + 3.8);
+        doc.text(refLines[1], 38, currentY + 7.4);
       } else {
-        doc.text(refLines[0] || '-', 35, currentY + (lineCount > 1 ? 5.5 : 4.4));
+        doc.text(refLines[0] || '-', 38, numY);
       }
 
-      // DESCRIPTION / NARRATION (Wrapped, max 58mm width, strictly separated from Debit)
+      // DESCRIPTION / NARRATION (Full Charge + Container No + Container Size + Container Quantity)
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.1);
       doc.setTextColor(15, 23, 42);
-      if (lineCount > 1 && descLines.length > 1) {
-        doc.text(descLines[0], 66, currentY + 3.8);
-        const secondLine = descLines.length > 2 
-          ? (descLines[1].length > 30 ? descLines[1].substring(0, 28) + '...' : descLines[1] + '...')
-          : descLines[1];
-        doc.text(secondLine, 66, currentY + 7.5);
+      if (descLines.length === 1) {
+        doc.text(descLines[0] || '-', 74, numY);
       } else {
-        doc.text(descLines[0] || '-', 66, currentY + (lineCount > 1 ? 5.5 : 4.4));
+        for (let l = 0; l < Math.min(3, descLines.length); l++) {
+          doc.text(descLines[l], 74, currentY + 3.8 + (l * 3.5));
+        }
       }
-
-      const numY = currentY + (lineCount > 1 ? 5.5 : 4.4);
 
       // DEBIT
       doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
       doc.setTextColor(entry.debit > 0 ? 185 : 156, entry.debit > 0 ? 28 : 163, entry.debit > 0 ? 28 : 175);
-      doc.text(entry.debit > 0 ? Number(entry.debit).toLocaleString() : '-', 148, numY, { align: 'right' });
+      doc.text(entry.debit > 0 ? Number(entry.debit).toLocaleString() : '-', 150, numY, { align: 'right' });
 
       // CREDIT
       doc.setTextColor(entry.credit > 0 ? 22 : 156, entry.credit > 0 ? 163 : 163, entry.credit > 0 ? 74 : 175);
-      doc.text(entry.credit > 0 ? Number(entry.credit).toLocaleString() : '-', 172, numY, { align: 'right' });
+      doc.text(entry.credit > 0 ? Number(entry.credit).toLocaleString() : '-', 173, numY, { align: 'right' });
 
       // BALANCE
       doc.setTextColor(15, 23, 42);
@@ -1653,6 +1910,26 @@ export async function downloadClientLedgerPdf(data: ClientLedgerExportData): Pro
     doc.text('OUTSTANDING CLOSING BALANCE:', margin + 4, currentY + 5.5);
     doc.setTextColor(data.summary.netBalance > 0 ? 185 : 22, data.summary.netBalance > 0 ? 28 : 163, data.summary.netBalance > 0 ? 28 : 74);
     doc.text(`PKR ${Number(data.summary.netBalance).toLocaleString()}`, pageWidth - margin - 2, currentY + 5.5, { align: 'right' });
+
+    currentY += 12;
+    if (currentY > pageHeight - 44) {
+      doc.addPage();
+      pageNum++;
+      await drawHeader(pageNum);
+      currentY += 4;
+    }
+
+    // Operating Company Attribution (Circular Logo + Company Name + Official Stamp) at bottom of Client Ledger
+    const firstCaseRef = data.entries.find(e => e.reference && e.reference !== 'OPN-BAL')?.reference || '';
+    const ledgerCompId = resolveOperatingCompanyFromRef(data.companyId, firstCaseRef);
+    await drawIssuingCompanySignatureAndStamp(
+      doc,
+      currentY,
+      'VERIFIED LEDGER STAMP',
+      ledgerCompId,
+      firstCaseRef,
+      data.customLogo || data.branding?.customLogo
+    );
 
     // Corporate footer with company address and contact numbers
     drawPdfCorporateFooter(doc, 'ERP Verified Client Statement', data.branding);
@@ -1763,13 +2040,13 @@ export async function downloadCashbookLedgerPdf(data: CashbookLedgerExportData):
       doc.setFontSize(7.5);
       doc.setTextColor(255, 255, 255);
 
-      doc.text('DATE', margin + 3, currentY + 4.8);
-      doc.text('REF / SERIAL', margin + 22, currentY + 4.8);
-      doc.text('PARTY / BENEFICIARY', margin + 46, currentY + 4.8);
-      doc.text('DESCRIPTION & MODE', margin + 82, currentY + 4.8);
+      doc.text('DATE', margin + 2, currentY + 4.8);
+      doc.text('REF / SERIAL', margin + 23, currentY + 4.8);
+      doc.text('PARTY / BENEFICIARY', margin + 47, currentY + 4.8);
+      doc.text('DESCRIPTION & MODE', margin + 83, currentY + 4.8);
       doc.text('INFLOW (PKR)', pageWidth - margin - 52, currentY + 4.8, { align: 'right' });
       doc.text('OUTFLOW (PKR)', pageWidth - margin - 26, currentY + 4.8, { align: 'right' });
-      doc.text('BALANCE', pageWidth - margin - 4, currentY + 4.8, { align: 'right' });
+      doc.text('BALANCE', pageWidth - margin - 2, currentY + 4.8, { align: 'right' });
       currentY += 7;
     };
 
@@ -1794,22 +2071,22 @@ export async function downloadCashbookLedgerPdf(data: CashbookLedgerExportData):
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.2);
       doc.setTextColor(71, 85, 105);
-      doc.text(entry.date || '-', margin + 3, currentY + 4.4);
+      doc.text(formatPdfDate(entry.date), margin + 2, currentY + 4.4);
 
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(37, 99, 235);
-      doc.text((entry.reference || '-').substring(0, 12), margin + 22, currentY + 4.4);
+      doc.text(cleanPdfText(entry.reference || '-').substring(0, 12), margin + 23, currentY + 4.4);
 
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(15, 23, 42);
-      const partyStr = (entry.party || '-').length > 20 ? (entry.party || '-').substring(0, 18) + '..' : (entry.party || '-');
-      doc.text(partyStr, margin + 46, currentY + 4.4);
+      const partyStr = cleanPdfText(entry.party || '-').length > 20 ? cleanPdfText(entry.party || '-').substring(0, 18) + '..' : cleanPdfText(entry.party || '-');
+      doc.text(partyStr, margin + 47, currentY + 4.4);
 
       const modeStr = entry.paymentMethod === 'BANK' ? (entry.bankName ? `[${entry.bankName}]` : '[Bank]') : '[Cash]';
-      const descFull = `${entry.description || '-'} ${modeStr}`;
+      const descFull = `${cleanPdfText(entry.description || '-')} ${modeStr}`;
       const desc = descFull.length > 30 ? descFull.substring(0, 28) + '..' : descFull;
       doc.setTextColor(71, 85, 105);
-      doc.text(desc, margin + 82, currentY + 4.4);
+      doc.text(desc, margin + 83, currentY + 4.4);
 
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(entry.inflow > 0 ? 22 : 156, entry.inflow > 0 ? 163 : 163, entry.inflow > 0 ? 74 : 175);
@@ -1819,7 +2096,7 @@ export async function downloadCashbookLedgerPdf(data: CashbookLedgerExportData):
       doc.text(entry.outflow > 0 ? Number(entry.outflow).toLocaleString() : '-', pageWidth - margin - 26, currentY + 4.4, { align: 'right' });
 
       doc.setTextColor(15, 23, 42);
-      doc.text(Number(entry.balance).toLocaleString(), pageWidth - margin - 4, currentY + 4.4, { align: 'right' });
+      doc.text(Number(entry.balance).toLocaleString(), pageWidth - margin - 2, currentY + 4.4, { align: 'right' });
 
       currentY += 6.5;
     }
@@ -1938,13 +2215,13 @@ export async function downloadGeneralLedgerPdf(data: GeneralLedgerExportData): P
       doc.setFontSize(7.5);
       doc.setTextColor(255, 255, 255);
 
-      doc.text('DATE', margin + 3, currentY + 4.8);
-      doc.text('PARTY / ACCOUNT', margin + 22, currentY + 4.8);
-      doc.text('REF', margin + 55, currentY + 4.8);
-      doc.text('DESCRIPTION', margin + 74, currentY + 4.8);
+      doc.text('DATE', margin + 2, currentY + 4.8);
+      doc.text('PARTY / ACCOUNT', margin + 23, currentY + 4.8);
+      doc.text('REF', margin + 56, currentY + 4.8);
+      doc.text('DESCRIPTION', margin + 75, currentY + 4.8);
       doc.text('DEBIT (PKR)', pageWidth - margin - 52, currentY + 4.8, { align: 'right' });
       doc.text('CREDIT (PKR)', pageWidth - margin - 26, currentY + 4.8, { align: 'right' });
-      doc.text('BALANCE', pageWidth - margin - 4, currentY + 4.8, { align: 'right' });
+      doc.text('BALANCE', pageWidth - margin - 2, currentY + 4.8, { align: 'right' });
       currentY += 7;
     };
 
@@ -1969,15 +2246,15 @@ export async function downloadGeneralLedgerPdf(data: GeneralLedgerExportData): P
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.2);
       doc.setTextColor(71, 85, 105);
-      doc.text(entry.date, margin + 3, currentY + 4.4);
+      doc.text(formatPdfDate(entry.date), margin + 2, currentY + 4.4);
 
-      const partyStr = entry.party.length > 18 ? entry.party.substring(0, 16) + '..' : entry.party;
-      doc.text(partyStr, margin + 22, currentY + 4.4);
-      doc.text((entry.reference || '-').substring(0, 10), margin + 55, currentY + 4.4);
+      const partyStr = cleanPdfText(entry.party || '-').length > 18 ? cleanPdfText(entry.party || '-').substring(0, 16) + '..' : cleanPdfText(entry.party || '-');
+      doc.text(partyStr, margin + 23, currentY + 4.4);
+      doc.text(cleanPdfText(entry.reference || '-').substring(0, 10), margin + 56, currentY + 4.4);
 
-      const desc = entry.description.length > 28 ? entry.description.substring(0, 26) + '..' : entry.description;
+      const desc = cleanPdfText(entry.description || '-').length > 28 ? cleanPdfText(entry.description || '-').substring(0, 26) + '..' : cleanPdfText(entry.description || '-');
       doc.setTextColor(15, 23, 42);
-      doc.text(desc, margin + 74, currentY + 4.4);
+      doc.text(desc, margin + 75, currentY + 4.4);
 
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(entry.debit > 0 ? 185 : 156, entry.debit > 0 ? 28 : 163, entry.debit > 0 ? 28 : 175);
@@ -1987,7 +2264,7 @@ export async function downloadGeneralLedgerPdf(data: GeneralLedgerExportData): P
       doc.text(entry.credit > 0 ? Number(entry.credit).toLocaleString() : '-', pageWidth - margin - 26, currentY + 4.4, { align: 'right' });
 
       doc.setTextColor(15, 23, 42);
-      doc.text(Number(entry.balance).toLocaleString(), pageWidth - margin - 4, currentY + 4.4, { align: 'right' });
+      doc.text(Number(entry.balance).toLocaleString(), pageWidth - margin - 2, currentY + 4.4, { align: 'right' });
 
       currentY += 6.5;
     }

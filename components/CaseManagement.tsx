@@ -88,6 +88,7 @@ import {
   getArrangementCharges,
   resolveCaseCharges,
   saveChargeAsClientDefault,
+  scaleBondedCarrierChargesByContainers,
   CATEGORY_SERVICE_ARRANGEMENTS,
   ServiceArrangementItem,
   normalizeCategoryKey
@@ -496,14 +497,71 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
   useEffect(() => {
     const unsubscribeClients = subscribeToClients((clientsList) => {
-      setClientsData(clientsList);
-      const dbNames = clientsList.map(c => c.name).filter(Boolean);
-      const caseNames = cases.map(c => c.clientName).filter(Boolean);
-      const combined = Array.from(new Set([...DEFAULT_CLIENTS, ...dbNames, ...caseNames]));
+      // Identify consignee names from cases so we don't confuse B/L consignees with Registered Clients
+      const consigneeNamesSet = new Set(
+        cases
+          .map(c => (c.extractedData?.consigneeName || '').trim().toLowerCase())
+          .filter(Boolean)
+      );
+
+      // Real registered clients: clients explicitly created with details or whose name is not merely an auto-saved consignee
+      const realClientsList = clientsList.filter(c => {
+        const cName = (c.name || '').trim().toLowerCase();
+        if (!cName) return false;
+        const hasClientDetails = Boolean(
+          c.ownerName || c.contact || c.mobileNumber || c.email || c.ntn || c.officeAddress || (c.defaultCharges && c.defaultCharges.length > 0)
+        );
+        if (hasClientDetails) return true;
+        return !consigneeNamesSet.has(cName);
+      });
+
+      const effectiveClientsList = realClientsList.length > 0 ? realClientsList : clientsList;
+      setClientsData(effectiveClientsList);
+
+      const dbNames = effectiveClientsList.map(c => c.name).filter(Boolean);
+      const validCaseClientNames = cases
+        .filter(c => {
+          const cName = (c.clientName || '').trim().toLowerCase();
+          const consName = (c.extractedData?.consigneeName || '').trim().toLowerCase();
+          return Boolean(cName) && cName !== consName;
+        })
+        .map(c => c.clientName)
+        .filter(Boolean);
+
+      const combined = Array.from(new Set([...DEFAULT_CLIENTS, ...dbNames, ...validCaseClientNames]));
       setRegisteredClients(combined);
+
+      // Auto-repair any existing case where clientName was mistakenly overwritten by extractedData.consigneeName
+      if (dbNames.length > 0) {
+        const primaryRegisteredClient = dbNames[0];
+        let anyRepaired = false;
+        const repairedCases = cases.map(c => {
+          const cClient = (c.clientName || '').trim();
+          const cConsignee = (c.extractedData?.consigneeName || '').trim();
+          if (cClient && cConsignee && cClient.toLowerCase() === cConsignee.toLowerCase() && !dbNames.some(n => n.toLowerCase() === cClient.toLowerCase())) {
+            anyRepaired = true;
+            const fixedCase = { ...c, clientName: primaryRegisteredClient };
+            updateCaseInFirestore(fixedCase).catch(() => {});
+            return fixedCase;
+          }
+          return c;
+        });
+
+        if (anyRepaired) {
+          setCases(repairedCases);
+          safeAppStorage.setJSON('dpl_live_cases', repairedCases);
+          if (selectedCase) {
+            const matchFixed = repairedCases.find(rc => rc.id === selectedCase.id || rc.caseNo === selectedCase.caseNo);
+            if (matchFixed && matchFixed.clientName !== selectedCase.clientName) {
+              setSelectedCase(matchFixed);
+              safeAppStorage.setJSON('dpl_selected_case', matchFixed);
+            }
+          }
+        }
+      }
     });
     return () => unsubscribeClients();
-  }, [cases]);
+  }, [cases, selectedCase?.id]);
 
   // User role state
   const [mockUserRole, setMockUserRole] = useState(UserRole.ADMIN);
@@ -557,15 +615,15 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       const foundClient = clientsData.find(c => c.name?.toLowerCase() === clientName.toLowerCase());
       const defaultCat = foundClient?.defaultCaseCategory || getClientDefaultCategory(clientName) || formData.category || 'Bonded Carrier';
       
-      // Resolve charges & arrangements based on category & client default rules
-      const resolved = resolveCaseCharges(foundClient, defaultCat);
+      // Resolve charges & arrangements based on category & client default rules (scaled by containers for Bonded Carrier)
+      const resolved = resolveCaseCharges(foundClient, defaultCat, undefined, formData.containers);
 
       setFormData(prev => ({
         ...prev,
         client: clientName,
         category: defaultCat,
         serviceArrangements: resolved.arrangements as any,
-        charges: resolved.charges
+        charges: scaleBondedCarrierChargesByContainers(resolved.charges, defaultCat, prev.containers)
       }));
 
       if (resolved.isClientCustomDefault) {
@@ -1095,6 +1153,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             id: `ch_arr_${key}_${Date.now()}`,
             syncKey: key,
             description: currentItem.label,
+            unitRate: Number(currentItem.amount),
             amount: Number(currentItem.amount),
             arrangedBy: 'DPL',
             taxable: true
@@ -1105,17 +1164,23 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         updatedCharges = updatedCharges.filter(c => c.syncKey !== key);
       }
 
+      const scaledCharges = scaleBondedCarrierChargesByContainers(
+        updatedCharges,
+        prev.category || 'Bonded Carrier',
+        prev.containers
+      );
+
       const updatedFormData = {
         ...prev,
         serviceArrangements: updatedArrangements,
-        charges: updatedCharges
+        charges: scaledCharges
       };
       safeAppStorage.setJSON('dpl_reg_formdata', updatedFormData);
       return updatedFormData;
     });
   };
 
-  // Update Estimated Amount for Service Arrangement
+  // Update Estimated Amount for Service Arrangement (Per Container Rate in Bonded Carrier)
   const handleUpdateArrangementAmount = (key: string, newAmount: number) => {
     setFormData(prev => {
       const catArr = getCategoryArrangements(prev.category || 'Bonded Carrier');
@@ -1135,12 +1200,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       if (currentItem.arrangedBy === 'DPL') {
         const exists = updatedCharges.some(c => c.syncKey === key);
         if (exists) {
-          updatedCharges = updatedCharges.map(c => c.syncKey === key ? { ...c, amount: newAmount } : c);
+          updatedCharges = updatedCharges.map(c => c.syncKey === key ? { ...c, unitRate: newAmount, amount: newAmount } : c);
         } else if (newAmount > 0) {
           updatedCharges.push({
             id: `ch_arr_${key}_${Date.now()}`,
             syncKey: key,
             description: currentItem.label,
+            unitRate: newAmount,
             amount: newAmount,
             arrangedBy: 'DPL',
             taxable: true
@@ -1148,10 +1214,16 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         }
       }
 
+      const scaledCharges = scaleBondedCarrierChargesByContainers(
+        updatedCharges,
+        prev.category || 'Bonded Carrier',
+        prev.containers
+      );
+
       const updatedFormData = {
         ...prev,
         serviceArrangements: updatedArrangements,
-        charges: updatedCharges
+        charges: scaledCharges
       };
       safeAppStorage.setJSON('dpl_reg_formdata', updatedFormData);
       return updatedFormData;
@@ -1169,16 +1241,26 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
   const handleAddRegistrationChargeItem = async (desc: string, amount: number) => {
     if (!desc.trim() || amount <= 0) return;
-    const newCharge: CaseCharge = {
+    const baseCharge: CaseCharge = {
       id: `ch_${Date.now()}`,
       category: formData.category,
       description: desc.trim(),
+      unitRate: amount,
       amount: amount,
       taxable: true
     };
+    const [newCharge] = scaleBondedCarrierChargesByContainers(
+      [baseCharge],
+      formData.category || 'Bonded Carrier',
+      formData.containers
+    );
 
     if (isCaseSubmitted && submittedCaseData) {
-      const updatedCharges = [...(submittedCaseData.charges || []), newCharge];
+      const updatedCharges = scaleBondedCarrierChargesByContainers(
+        [...(submittedCaseData.charges || []), newCharge],
+        submittedCaseData.category || 'Bonded Carrier',
+        submittedCaseData.containers
+      );
       const updatedCase: Case = { ...submittedCaseData, charges: updatedCharges };
       setSubmittedCaseData(updatedCase);
       setCases(prev => prev.map(c => c.id === updatedCase.id ? updatedCase : c));
@@ -1187,7 +1269,11 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       const existing = formData.charges || [];
       setFormData(prev => ({
         ...prev,
-        charges: [...existing, newCharge]
+        charges: scaleBondedCarrierChargesByContainers(
+          [...existing, newCharge],
+          prev.category || 'Bonded Carrier',
+          prev.containers
+        )
       }));
     }
 
@@ -1607,7 +1693,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     }
   }, [view, isClientUser, effectiveClientName, clientsData]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, replaceExisting: boolean = false) => {
     const inputEl = e.target;
     try {
       if (inputEl && inputEl.files && inputEl.files.length > 0) {
@@ -1617,7 +1703,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         setIsAttachingFiles(true);
         // Defer processing to next frame so the mobile browser can smoothly finish returning from OS Activity
         setTimeout(() => {
-          processFiles(selected).finally(() => {
+          processFiles(selected, undefined, replaceExisting).finally(() => {
             setIsAttachingFiles(false);
           });
         }, 40);
@@ -1628,7 +1714,11 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     }
   };
 
-  const processFiles = async (newFiles: File[], categoryHint?: 'BL' | 'INVOICE' | 'PACKING_LIST' | 'ALL_IN_ONE') => {
+  const processFiles = async (
+    newFiles: File[],
+    categoryHint?: 'BL' | 'INVOICE' | 'PACKING_LIST' | 'ALL_IN_ONE',
+    replaceExisting: boolean = false
+  ) => {
     if (!newFiles || newFiles.length === 0) return;
     try {
       const newDocRecords: UploadedDocRecord[] = [];
@@ -1677,9 +1767,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         });
       }
 
-      setFiles(prev => [...prev, ...newFiles]);
+      setFiles(prev => (replaceExisting ? [...newFiles] : [...prev, ...newFiles]));
       setUploadedDocs(prev => {
-        const combined = [...prev, ...newDocRecords];
+        const combined = replaceExisting ? [...newDocRecords] : [...prev, ...newDocRecords];
         try {
           const safeRecords = combined.map(d => ({
             id: d.id,
@@ -1696,25 +1786,25 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         return combined;
       });
 
-      // Keep view smoothly focused on the documents section without jumping to the top
-      setTimeout(() => {
-        if (documentsSectionRef.current) {
-          documentsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-      }, 80);
+      // Automatically read and extract fields immediately when files are uploaded in Step 1 or re-uploaded in Step 2
+      if (newDocRecords.length > 0) {
+        setTimeout(() => {
+          triggerDocumentReading(newDocRecords, true);
+        }, 120);
+      }
     } catch (error) {
       console.warn("Processing notice:", error);
     }
   };
 
-  const triggerDocumentReading = async () => {
+  const triggerDocumentReading = async (overrideNewDocs?: UploadedDocRecord[], forceOverwrite: boolean = true) => {
     setIsReadingDocuments(true);
     setReadingProgress(12);
     setReadingPhase('Enhancing scan contrast & analyzing shipping line format...');
 
     const timer1 = setTimeout(() => {
       setReadingProgress(35);
-      setReadingPhase('Reading B/L header, Maersk/MSC/COSCO line & B/L Number...');
+      setReadingPhase('Reading B/L header, Maersk/MSC/COSCO/Evergreen line & B/L Number...');
     }, 400);
 
     const timer2 = setTimeout(() => {
@@ -1733,20 +1823,29 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     }, 2100);
 
     try {
-      // Gather all documents (both direct File objects and uploaded docs without duplicates)
+      // Gather documents to read: if overrideNewDocs is provided, prioritize reading the newly uploaded document(s) cleanly
       const combinedDocs: any[] = [];
       const seenNames = new Set<string>();
 
-      for (const f of files) {
-        if (f && f.name && !seenNames.has(f.name)) {
-          seenNames.add(f.name);
-          combinedDocs.push(f);
+      if (overrideNewDocs && Array.isArray(overrideNewDocs) && overrideNewDocs.length > 0) {
+        for (const d of overrideNewDocs) {
+          if (d && d.name && !seenNames.has(d.name)) {
+            seenNames.add(d.name);
+            combinedDocs.push(d);
+          }
         }
-      }
-      for (const d of uploadedDocs) {
-        if (d && d.name && !seenNames.has(d.name)) {
-          seenNames.add(d.name);
-          combinedDocs.push(d);
+      } else {
+        for (const d of uploadedDocs) {
+          if (d && d.name && !seenNames.has(d.name)) {
+            seenNames.add(d.name);
+            combinedDocs.push(d);
+          }
+        }
+        for (const f of files) {
+          if (f && f.name && !seenNames.has(f.name)) {
+            seenNames.add(f.name);
+            combinedDocs.push(f);
+          }
         }
       }
 
@@ -1762,80 +1861,107 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
       if (data && typeof data === 'object' && Object.keys(data).length > 0) {
         setFormData(prev => {
-          const merged = { ...prev.extractedData, ...data };
-          let updatedContainers = [...prev.containers];
+          const merged = forceOverwrite ? { ...data } : { ...prev.extractedData, ...data };
+          let updatedContainers = forceOverwrite ? [] : [...prev.containers];
 
           if (data.containers && Array.isArray(data.containers) && data.containers.length > 0) {
             updatedContainers = data.containers.map((c: any, idx: number) => ({
               id: Date.now() + idx,
-              number: c.number || `CNTR-${Math.floor(1000 + Math.random() * 9000)}`,
-              size: c.size === '20ft' || c.size === '45ft' ? c.size : '40ft',
+              number: c.number || data.containerNo || `CNTR-${Math.floor(1000 + Math.random() * 9000)}`,
+              size: c.size === '20ft' || c.size === '45ft' ? c.size : (data.containerSize === '20ft' || data.containerSize === '45ft' ? data.containerSize : '40ft'),
               weight: c.weight || data.totalWeight || data.grossWeight || 0,
-              sealNo: c.sealNo || '',
+              tareWeight: c.tareWeight || data.tareWeight || undefined,
+              sealNo: c.sealNo || data.sealNo || data.ccsuSealNo || '',
+              shipperSealNo: c.shipperSealNo || data.shipperSealNo || '',
+              vehicleNo: c.vehicleNo || data.vehicleNumber || '',
+              driverName: c.driverName || data.driverName || '',
+              driverCnic: c.driverCnic || data.driverCnic || '',
+              driverContact: c.driverContact || data.driverContact || '',
               status: 'Pending'
             }));
-          } else if ((data.totalWeight || data.grossWeight) && updatedContainers.length === 0) {
+          } else if ((data.containerNo || data.totalWeight || data.grossWeight) && updatedContainers.length === 0) {
             updatedContainers = [
               {
                 id: Date.now(),
-                number: `CNTR-${Math.floor(1000 + Math.random() * 9000)}`,
-                size: '40ft',
-                weight: data.totalWeight || data.grossWeight,
+                number: data.containerNo || `CNTR-${Math.floor(1000 + Math.random() * 9000)}`,
+                size: data.containerSize === '20ft' || data.containerSize === '45ft' ? data.containerSize : '40ft',
+                weight: data.totalWeight || data.grossWeight || 0,
+                tareWeight: data.tareWeight || undefined,
+                sealNo: data.sealNo || data.ccsuSealNo || '',
+                shipperSealNo: data.shipperSealNo || '',
+                vehicleNo: data.vehicleNumber || '',
+                driverName: data.driverName || '',
+                driverCnic: data.driverCnic || '',
+                driverContact: data.driverContact || '',
                 status: 'Pending'
               }
             ];
           }
 
-          // Auto-fill client from consignee if empty
-          const candidateClient = prev.client || data.consigneeName || '';
-
-          // Auto-register extracted client into registeredClients list so it appears in dropdowns
-          if (data.consigneeName && !registeredClients.includes(data.consigneeName)) {
-            setRegisteredClients(prevList => {
-              if (prevList.includes(data.consigneeName)) return prevList;
-              const nextList = [...prevList, data.consigneeName];
-              safeAppStorage.setJSON('dpl_registered_clients', nextList);
-              return nextList;
-            });
-          }
+          // Keep Registered Client strictly separate from Consignee Name (never overwrite formData.client with consigneeName)
+          const candidateClient = prev.client || '';
 
           // Auto-fill category if empty or detected
           let candidateCategory = prev.category;
           if (!candidateCategory) {
-            if (data.builtyNumber || data.pickupDestination || data.dropoffDestination) {
+            if (data.builtyNumber && !data.blNumber && !data.gdNo) {
               candidateCategory = 'Transportation of Private Cargo';
+            } else if (data.tpNumber || (data.gdNo && /TP/i.test(data.gdNo)) || data.carrierName || data.serialNo) {
+              candidateCategory = 'Bonded Carrier';
             } else {
               candidateCategory = data.suggestedCategory || (
                 (data.consigneeAddress && (data.consigneeAddress.toUpperCase().includes('BARA') || data.consigneeAddress.toUpperCase().includes('AFGHAN') || data.consigneeAddress.toUpperCase().includes('KHYBER')))
                   ? 'Bonded Carrier'
-                  : 'Ocean Freight Import'
+                  : 'Bonded Carrier'
               );
             }
           }
 
-          // Auto-fill POL & POD if found
-          let candidatePol = prev.pol || data.pickupDestination || '';
-          if (!candidatePol && data.pol) {
+          const matchPortName = (rawPort?: string): string => {
+            if (!rawPort) return '';
+            const rawLower = rawPort.toLowerCase();
+            const rawUpper = rawPort.toUpperCase();
+            if (rawUpper.includes('LRDP') || (rawUpper.includes('LAHORE') && rawUpper.includes('RAILWAY'))) {
+              const ldp = ports.find(p => p.name.toLowerCase().includes('lahore dry port'));
+              return ldp ? ldp.name : 'Lahore Dry Port';
+            }
+            if (rawUpper.includes('NLC') && rawUpper.includes('LAHORE')) {
+              const lnlc = ports.find(p => p.name.toLowerCase().includes('lahore nlc'));
+              return lnlc ? lnlc.name : 'Lahore NLC Dry Port';
+            }
             const matchedPort = ports.find(p => 
-              p.name.toLowerCase().includes(data.pol.toLowerCase()) || 
-              data.pol.toLowerCase().includes(p.name.toLowerCase()) || 
-              (p.code && data.pol.toUpperCase().includes(p.code.toUpperCase()))
+              p.name.toLowerCase().includes(rawLower) || 
+              rawLower.includes(p.name.toLowerCase()) || 
+              (p.code && p.code.length >= 3 && rawUpper.includes(p.code.toUpperCase()))
             );
-            candidatePol = matchedPort ? matchedPort.name : data.pol;
+            return matchedPort ? matchedPort.name : rawPort;
+          };
+
+          // For Bonded Carrier / TP cases, the domestic transit route is from Pakistan Entry Sea Port (pod/pickupDestination) to Exit Dry Port (placeOfDelivery/dropoffDestination)
+          const isBondedOrTp = candidateCategory === 'Bonded Carrier' || Boolean(data.tpNumber || (data.gdNo && /TP/i.test(data.gdNo)));
+          let candidatePol = forceOverwrite ? '' : (prev.pol || '');
+          if (!candidatePol) {
+            if (isBondedOrTp && (data.pickupDestination || (data.pod && /SAPT|KICT|QICT|KPT|KARACHI|GWADAR|PICT/i.test(data.pod)))) {
+              candidatePol = matchPortName(data.pickupDestination || data.pod);
+            } else {
+              candidatePol = matchPortName(data.pickupDestination || data.pol);
+            }
           }
 
-          let candidatePod = prev.pod || data.dropoffDestination || '';
-          if (!candidatePod && data.pod) {
-            const matchedPort = ports.find(p => 
-              p.name.toLowerCase().includes(data.pod.toLowerCase()) || 
-              data.pod.toLowerCase().includes(p.name.toLowerCase()) || 
-              (p.code && data.pod.toUpperCase().includes(p.code.toUpperCase()))
-            );
-            candidatePod = matchedPort ? matchedPort.name : data.pod;
+          let candidatePod = forceOverwrite ? '' : (prev.pod || '');
+          if (!candidatePod) {
+            if (isBondedOrTp && (data.dropoffDestination || data.placeOfDelivery)) {
+              candidatePod = matchPortName(data.dropoffDestination || data.placeOfDelivery);
+            } else {
+              candidatePod = matchPortName(data.dropoffDestination || data.placeOfDelivery || data.pod);
+            }
           }
 
           const foundClient = clientsData.find(c => c.name?.toLowerCase() === candidateClient.toLowerCase());
-          const resolved = resolveCaseCharges(foundClient, candidateCategory);
+          const resolved = resolveCaseCharges(foundClient, candidateCategory, prev.serviceArrangements as any, updatedContainers);
+          const nextCharges = prev.charges && prev.charges.length > 0
+            ? scaleBondedCarrierChargesByContainers(prev.charges, candidateCategory, updatedContainers)
+            : resolved.charges;
 
           return {
             ...prev,
@@ -1846,7 +1972,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             containers: updatedContainers,
             extractedData: merged,
             serviceArrangements: resolved.arrangements as any,
-            charges: prev.charges && prev.charges.length > 0 ? prev.charges : resolved.charges
+            charges: nextCharges
           };
         });
       }
@@ -1964,44 +2090,118 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   };
 
   const addContainer = () => {
-    const totalWeight = formData.extractedData.totalWeight || 0;
-    const count = formData.containers.length + 1;
-    setFormData((prev) => ({
-      ...prev,
-      containers: [
+    setFormData((prev) => {
+      const nextContainers = [
         ...prev.containers, 
         { 
           id: Date.now(), 
           number: `CNTR-${Math.floor(Math.random()*10000)}`, 
-          size: '40ft', 
+          size: '40ft' as const, 
           weight: 0,
-          status: 'Pending'
+          status: 'Pending' as const
         }
-      ]
-    }));
+      ];
+      return {
+        ...prev,
+        containers: nextContainers,
+        charges: scaleBondedCarrierChargesByContainers(
+          prev.charges || [],
+          prev.category || 'Bonded Carrier',
+          nextContainers
+        )
+      };
+    });
   };
 
   const updateContainer = (id: number, field: string, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      containers: prev.containers.map(c => c.id === id ? { ...c, [field]: value } : c)
-    }));
+    setFormData(prev => {
+      const nextContainers = prev.containers.map((c, idx) => {
+        if (c.id !== id) return c;
+        const updated: any = { ...c, [field]: value };
+        if (field === 'seal' || field === 'sealNo') {
+          updated.seal = value;
+          updated.sealNo = value;
+        }
+        return updated;
+      });
+      const first = nextContainers[0];
+      const nextExtracted = { ...prev.extractedData };
+      if (first && first.id === id) {
+        if (field === 'number') nextExtracted.containerNo = value;
+        if (field === 'size') nextExtracted.containerSize = value;
+        if (field === 'weight') {
+          nextExtracted.grossWeight = value;
+          nextExtracted.totalWeight = value;
+        }
+        if (field === 'seal' || field === 'sealNo') {
+          nextExtracted.sealNo = value;
+          nextExtracted.ccsuSealNo = value;
+        }
+        if (field === 'shipperSealNo') nextExtracted.shipperSealNo = value;
+        if (field === 'vehicleNo') nextExtracted.vehicleNumber = value;
+        if (field === 'driverName') nextExtracted.driverName = value;
+        if (field === 'driverCnic') nextExtracted.driverCnic = value;
+      }
+      return {
+        ...prev,
+        containers: nextContainers,
+        extractedData: nextExtracted,
+        charges: scaleBondedCarrierChargesByContainers(
+          prev.charges || [],
+          prev.category || 'Bonded Carrier',
+          nextContainers
+        )
+      };
+    });
   };
 
   const removeContainer = (id: number) => {
     if (window.confirm("Are you sure you want to remove this container?")) {
-      setFormData(prev => ({
+      setFormData(prev => {
+        const nextContainers = prev.containers.filter(c => c.id !== id);
+        return {
           ...prev,
-          containers: prev.containers.filter(c => c.id !== id)
-      }));
+          containers: nextContainers,
+          charges: scaleBondedCarrierChargesByContainers(
+            prev.charges || [],
+            prev.category || 'Bonded Carrier',
+            nextContainers
+          )
+        };
+      });
     }
   }
 
   const updateExtractedData = (field: string, value: any) => {
-    setFormData(prev => ({
+    setFormData(prev => {
+      const nextExtracted: any = { ...prev.extractedData, [field]: value };
+      if (field === 'sealNo' || field === 'ccsuSealNo') {
+        nextExtracted.sealNo = value;
+        nextExtracted.ccsuSealNo = value;
+      }
+      let nextContainers = prev.containers;
+      if (prev.containers.length > 0) {
+        const first = { ...prev.containers[0] };
+        let touched = false;
+        if (field === 'containerNo') { first.number = value; touched = true; }
+        if (field === 'containerSize') { first.size = value; touched = true; }
+        if (field === 'grossWeight' || field === 'totalWeight') { first.weight = Number(value) || 0; touched = true; }
+        if (field === 'tareWeight') { first.tareWeight = Number(value) || 0; touched = true; }
+        if (field === 'sealNo' || field === 'ccsuSealNo') { first.seal = value; first.sealNo = value; touched = true; }
+        if (field === 'shipperSealNo') { first.shipperSealNo = value; touched = true; }
+        if (field === 'vehicleNumber') { first.vehicleNo = value; touched = true; }
+        if (field === 'driverName') { first.driverName = value; touched = true; }
+        if (field === 'driverCnic') { first.driverCnic = value; touched = true; }
+        if (touched) {
+          nextContainers = [first, ...prev.containers.slice(1)];
+        }
+      }
+      return {
         ...prev,
-        extractedData: { ...prev.extractedData, [field]: value }
-    }));
+        extractedData: nextExtracted,
+        containers: nextContainers
+      };
+    });
   };
 
   const handleFinalSubmit = () => {
@@ -2098,10 +2298,53 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         }
       });
 
+      const ext = formData.extractedData || {};
+      const primaryContainer = formData.containers?.[0];
+      const prefilledWorkflowDetails: Record<string, any> = {};
+      if (ext.shippingLine || ext.shippingAgent) {
+        prefilledWorkflowDetails[CaseStatus.SHIPPING_LINE_DO] = {
+          status: CaseStatus.SHIPPING_LINE_DO,
+          shippingLine: ext.shippingLine || '',
+          shippingAgent: ext.shippingAgent || '',
+          clientDoShippingLine: ext.shippingLine || '',
+          clientDoFavorOf: ext.clearingAgent || ext.consigneeName || formData.client || ''
+        };
+      }
+      if (ext.gdNo || ext.gdDate || ext.itemName) {
+        prefilledWorkflowDetails[CaseStatus.TP_FILING] = {
+          status: CaseStatus.TP_FILING,
+          tpGdNumber: ext.gdNo || '',
+          tpFilingDate: ext.gdDate || '',
+          tpItemDescription: ext.itemDescription || ext.itemName || ''
+        };
+      }
+      if (ext.vehicleNumber || primaryContainer?.vehicleNo || ext.driverName || primaryContainer?.driverName) {
+        prefilledWorkflowDetails[CaseStatus.VEHICLE_ASSIGNMENT] = {
+          status: CaseStatus.VEHICLE_ASSIGNMENT,
+          assignedVehicleNo: ext.vehicleNumber || primaryContainer?.vehicleNo || '',
+          driverName: ext.driverName || primaryContainer?.driverName || '',
+          driverCnic: ext.driverCnic || primaryContainer?.driverCnic || ''
+        };
+      }
+      if (ext.sealNo || ext.ccsuSealNo || primaryContainer?.seal) {
+        prefilledWorkflowDetails[CaseStatus.LOADING_PORT_PROCESS] = {
+          status: CaseStatus.LOADING_PORT_PROCESS,
+          customsSealNumber: ext.sealNo || ext.ccsuSealNo || primaryContainer?.seal || '',
+          officer: ext.pccssOfficer || ''
+        };
+      }
+
+      const resolvedClientName = (formData.client || '').trim() || registeredClients[0] || '';
+      if (!resolvedClientName) {
+        alert('Please select the Client Name before registering the case.');
+        setStep(1);
+        return;
+      }
+
       const newCase: Case = {
           id: Date.now().toString(),
           caseNo: finalCaseNo,
-          clientName: formData.client,
+          clientName: resolvedClientName,
           category: formData.category,
           subCategory: supportsSubCategories(formData.category) ? (formData.subCategory || 'Standard Container / General Cargo') : undefined,
           status: requiresApproval ? 'Pending Approval' : initialStepStatus, 
@@ -2112,11 +2355,16 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           createdAt: new Date().toISOString(),
           pol: formData.pol,
           pod: formData.pod,
+          containerNumber: primaryContainer?.number || ext.containerNo || '',
+          blNumber: ext.blNumber || '',
+          igmNo: ext.igmNo || '',
+          invoiceNo: finalCaseNo,
           containers: formData.containers,
           extractedData: formData.extractedData,
           documents: serializableDocs,
           charges: finalCharges,
-          serviceArrangements: formData.serviceArrangements
+          serviceArrangements: formData.serviceArrangements,
+          workflowDetails: prefilledWorkflowDetails
       };
       const updatedCases = [newCase, ...cases.filter(c => c.caseNo !== newCase.caseNo)];
       setCases(updatedCases);
@@ -2144,8 +2392,8 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         }).catch(e => console.warn("Could not dispatch case notif:", e));
       }
 
-      if (formData.client) {
-        saveClientToFirestore({ name: formData.client }).catch(() => {});
+      if (resolvedClientName && !clientsData.some(c => c.name?.trim().toLowerCase() === resolvedClientName.toLowerCase())) {
+        saveClientToFirestore({ name: resolvedClientName }).catch(() => {});
       }
 
       // Registration is complete! Clean up draft keys from storage and online Firestore
@@ -3255,7 +3503,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                                 } else if (col.key === 'pod' && !val) {
                                   val = row.extractedData?.pod || row.extractedData?.placeOfDelivery || '-';
                                 } else if (col.key === 'clientName' && !val) {
-                                  val = row.extractedData?.consigneeName || row.client || '-';
+                                  val = row.client || '-';
                                 }
 
                                 if (col.key === 'caseNo') {
@@ -3916,9 +4164,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                         </button>
                       )}
 
-                      {targetCase?.status === CaseStatus.SHIPPING_LINE_DO && effectiveRole !== UserRole.CLIENT && (
+                      {(targetCase?.approvalStatus === 'PENDING' || (targetCase?.status as any) === 'Pending Approval') && isOfficeStaffRole(effectiveRole) && (
                           <button onClick={handleApproveCase} className="bg-green-600 hover:bg-green-500 text-white px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 text-xs sm:text-sm shadow-lg shadow-green-600/20 animate-pulse font-medium">
-                              <CheckCircle size={15} /> Approve & Process
+                              <CheckCircle size={15} /> Approve & Process (Client Case)
                           </button>
                       )}
                       
@@ -4117,11 +4365,41 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
             {/* Header / Title Section */}
             <div className="bg-black/20 p-6 border-b border-white/10 print:bg-gray-100 print:border-b print:border-gray-300">
-               <div className="flex justify-between items-center">
+               <div className="flex flex-wrap justify-between items-center gap-4">
                   <div className="flex items-center gap-4">
                      <div className="flex flex-col justify-center">
                         <h2 className="text-2xl sm:text-3xl font-bold text-white print:text-black leading-tight mb-1">{targetCase?.caseNo}</h2>
-                        <p className="text-brand-300 print:text-black text-base sm:text-lg font-semibold">{targetCase?.clientName}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs uppercase tracking-wider font-bold text-slate-400 print:text-gray-600">Client:</span>
+                          <p className="text-brand-300 print:text-black text-base sm:text-lg font-semibold">
+                            {targetCase?.clientName || 'Select Client'}
+                          </p>
+                          {!isClientUser && registeredClients.length > 0 && (
+                            <select
+                              value={registeredClients.includes(targetCase?.clientName) ? targetCase?.clientName : ''}
+                              onChange={(e) => {
+                                const newClientName = e.target.value;
+                                if (!newClientName) return;
+                                const updated = { ...targetCase, clientName: newClientName };
+                                setSelectedCase(updated);
+                                if (isEditingCase) setEditedCase(updated);
+                                const updatedList = cases.map(c => c.id === updated.id ? updated : c);
+                                setCases(updatedList);
+                                safeAppStorage.setJSON('dpl_live_cases', updatedList);
+                                safeAppStorage.setJSON('dpl_selected_case', updated);
+                                updateCaseInFirestore(updated).catch(() => {});
+                                setDraftToast(`✓ Client updated to "${newClientName}"`);
+                              }}
+                              className="no-print ml-1 bg-slate-900/90 hover:bg-slate-800 text-xs text-amber-300 border border-amber-500/30 rounded-lg px-2.5 py-1 outline-none focus:border-amber-400 cursor-pointer font-medium transition-colors"
+                              title="Change Registered Client for this Case"
+                            >
+                              <option value="" disabled>Change Client...</option>
+                              {registeredClients.map(cl => (
+                                <option key={cl} value={cl} className="bg-slate-900 text-white">{cl}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
                      </div>
                   </div>
                   <div className="text-right">
@@ -4140,6 +4418,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                {/* Client & Route Info */}
                <div className="bg-white/5 rounded-xl p-5 border border-white/5 print:bg-transparent print:border print:border-gray-300">
                   <h3 className="text-brand-300 print:text-black font-bold uppercase text-xs mb-4 border-b border-white/10 pb-2 print:border-gray-300">Case Info</h3>
+                  <Field label="Client Name" value={targetCase?.clientName} onChange={(v) => setEditedCase({...targetCase, clientName: v})} />
                   <Field label="Category" value={targetCase?.category} onChange={(v) => setEditedCase({...targetCase, category: v})} />
                   <Field label="Port of Loading" value={targetCase?.pol} onChange={(v) => setEditedCase({...targetCase, pol: v})} />
                   <Field label="Port of Destination" value={targetCase?.pod} onChange={(v) => setEditedCase({...targetCase, pod: v})} />
@@ -4977,7 +5256,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
                   <User size={14} className="text-amber-400" />
-                  <span>Client / Importer / Shipper <span className="text-red-400">*</span></span>
+                  <span>Registered Client Name <span className="text-red-400">*</span></span>
                 </label>
                 {isClientUser && (
                   <span className="text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-md flex items-center gap-1">
@@ -5090,7 +5369,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     onChange={(e) => {
                       const newCat = e.target.value;
                       const foundClient = clientsData.find(c => c.name?.toLowerCase() === formData.client?.toLowerCase());
-                      const resolved = resolveCaseCharges(foundClient, newCat);
+                      const resolved = resolveCaseCharges(foundClient, newCat, undefined, formData.containers);
                       setFormData({ 
                         ...formData, 
                         category: newCat,
@@ -5551,56 +5830,67 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
                 {/* Amount Field or Client Direct Settlement Notice */}
                 {isDpl ? (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2.5 border-t border-emerald-500/20">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-emerald-300 font-semibold flex items-center gap-1">
-                        <DollarSign size={13} className="text-emerald-400" />
-                        <span>Charge Amount:</span>
-                      </span>
-                      <div className="relative w-36">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono text-emerald-400 font-bold">PKR</span>
-                        <input
-                          type="number"
-                          value={item.amount || ''}
-                          onChange={(e) => handleUpdateArrangementAmount(key, Number(e.target.value) || 0)}
-                          placeholder="0"
-                          className="w-full h-9 pl-11 pr-3 bg-slate-950 border border-emerald-500/40 rounded-lg text-sm font-mono font-bold text-emerald-300 focus:border-emerald-400 outline-none transition-all"
-                        />
+                  <div className="flex flex-col gap-2 pt-2.5 border-t border-emerald-500/20">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-emerald-300 font-semibold flex items-center gap-1">
+                          <DollarSign size={13} className="text-emerald-400" />
+                          <span>{normalizeCategoryKey(formData.category) === 'Bonded Carrier' ? 'Per Container Rate:' : 'Charge Amount:'}</span>
+                        </span>
+                        <div className="relative w-36">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono text-emerald-400 font-bold">PKR</span>
+                          <input
+                            type="number"
+                            value={item.amount || ''}
+                            onChange={(e) => handleUpdateArrangementAmount(key, Number(e.target.value) || 0)}
+                            placeholder="0"
+                            className="w-full h-9 pl-11 pr-3 bg-slate-950 border border-emerald-500/40 rounded-lg text-sm font-mono font-bold text-emerald-300 focus:border-emerald-400 outline-none transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-emerald-300 font-mono font-semibold bg-emerald-500/15 px-2.5 py-1 rounded-lg border border-emerald-500/30 whitespace-nowrap flex items-center gap-1.5">
+                          <CheckCircle size={12} className="text-emerald-400" />
+                          <span>
+                            {normalizeCategoryKey(formData.category) === 'Bonded Carrier' && formData.containers.length > 1
+                              ? `PKR ${(Number(item.amount || 0) * formData.containers.length).toLocaleString()} (${formData.containers.length} × ${Number(item.amount || 0).toLocaleString()})`
+                              : `PKR ${Number(item.amount || 0).toLocaleString()}`}
+                          </span>
+                        </span>
+                        {formData.client && Number(item.amount) > 0 && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const clientObj = clientsData.find(c => c.name?.toLowerCase() === formData.client?.toLowerCase());
+                              if (!clientObj) return;
+                              try {
+                                const updatedClient = await saveChargeAsClientDefault(clientObj, {
+                                  description: item.label,
+                                  amount: Number(item.amount),
+                                  category: formData.category || 'Bonded Carrier',
+                                  caseCategory: formData.category || 'Bonded Carrier',
+                                  taxable: true
+                                });
+                                setClientsData(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+                                setDraftToast(`✓ Saved "${item.label}" (PKR ${Number(item.amount).toLocaleString()} per container) as default for ${formData.client} in ${formData.category}!`);
+                              } catch (err) {
+                                console.warn("Could not save default arrangement charge:", err);
+                              }
+                            }}
+                            className="text-[11px] px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-semibold transition cursor-pointer whitespace-nowrap"
+                            title={`Save per-container default charge for ${formData.client} under ${formData.category}`}
+                          >
+                            Save as Default ({formData.category})
+                          </button>
+                        )}
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-emerald-300 font-mono font-semibold bg-emerald-500/15 px-2.5 py-1 rounded-lg border border-emerald-500/30 whitespace-nowrap flex items-center gap-1.5">
-                        <CheckCircle size={12} className="text-emerald-400" />
-                        <span>PKR {Number(item.amount || 0).toLocaleString()}</span>
-                      </span>
-                      {formData.client && Number(item.amount) > 0 && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const clientObj = clientsData.find(c => c.name?.toLowerCase() === formData.client?.toLowerCase());
-                            if (!clientObj) return;
-                            try {
-                              const updatedClient = await saveChargeAsClientDefault(clientObj, {
-                                description: item.label,
-                                amount: Number(item.amount),
-                                category: formData.category || 'Bonded Carrier',
-                                caseCategory: formData.category || 'Bonded Carrier',
-                                taxable: true
-                              });
-                              setClientsData(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
-                              setDraftToast(`✓ Saved "${item.label}" (PKR ${Number(item.amount).toLocaleString()}) as default for ${formData.client} in ${formData.category}!`);
-                            } catch (err) {
-                              console.warn("Could not save default arrangement charge:", err);
-                            }
-                          }}
-                          className="text-[11px] px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-semibold transition cursor-pointer whitespace-nowrap"
-                          title={`Save as default charge for ${formData.client} under ${formData.category}`}
-                        >
-                          Save as Default ({formData.category})
-                        </button>
-                      )}
-                    </div>
+                    {normalizeCategoryKey(formData.category) === 'Bonded Carrier' && Number(item.amount) > 0 && formData.containers.length > 0 && (
+                      <div className="text-[11px] text-amber-300/90 font-mono bg-amber-500/10 border border-amber-500/25 rounded-lg px-2.5 py-1">
+                        {formData.containers.map((c, idx) => `${c.number || `Container #${idx + 1}`}: PKR ${Number(item.amount).toLocaleString()}`).join('  •  ')}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-white/10">
@@ -5643,10 +5933,32 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <span className="text-xs font-mono font-semibold text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
               <CheckCircle size={14} className="text-emerald-400" /> {autoFilledCount} Fields Ready
             </span>
+            {(uploadedDocs.length > 0 || files.length > 0) && (
+              <button
+                type="button"
+                onClick={() => triggerDocumentReading(undefined, true)}
+                disabled={isReadingDocuments}
+                className="h-9 px-3.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={isReadingDocuments ? 'animate-spin text-amber-400' : 'text-amber-400'} />
+                <span>{isReadingDocuments ? 'Reading...' : 'Read Again'}</span>
+              </button>
+            )}
+            <label className="h-9 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/30 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm">
+              <UploadCloud size={14} className="text-white" />
+              <span>{isReadingDocuments || isAttachingFiles ? 'Reading File...' : 'Upload Again & Read'}</span>
+              <input
+                type="file"
+                multiple
+                accept="*/*"
+                onChange={(e) => handleFileUpload(e, true)}
+                className="hidden"
+              />
+            </label>
           </div>
         </div>
 
@@ -6109,12 +6421,14 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
   const renderStep5_DataReview = () => {
     const extracted = formData.extractedData || {};
-    const autoFilledCount = Object.values(extracted).filter(v => v !== undefined && v !== null && String(v).trim() !== '').length;
+    const autoFilledCount = Object.entries(extracted).filter(([k, v]) => k !== 'containers' && v !== undefined && v !== null && String(v).trim() !== '').length;
 
     const isPrivateCargo = formData.category === 'Transportation of Private Cargo' || formData.category?.toLowerCase().includes('private');
     if (isPrivateCargo) {
       return renderPrivateCargoRegistrationReview(extracted, autoFilledCount);
     }
+
+    const firstContainer = formData.containers?.[0];
 
     return (
       <div className="space-y-5 animate-in fade-in slide-in-from-right-4">
@@ -6132,18 +6446,38 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                Verify or edit shipper, consignee, B/L, commercial invoice, and service charge arrangements below.
+                All fields extracted from B/L, GD-I/TP, Commercial Invoice, Packing List, PCCSS Form &quot;A&quot;, Transport Note, and WeBOC are populated below.
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setStep(1)}
-            className="h-9 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10 text-xs font-semibold flex items-center gap-1.5 self-start sm:self-auto transition cursor-pointer"
-          >
-            <UploadCloud size={14} className="text-amber-400" />
-            <span>Upload More Docs</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            {(uploadedDocs.length > 0 || files.length > 0) && (
+              <button
+                type="button"
+                onClick={() => triggerDocumentReading(undefined, true)}
+                disabled={isReadingDocuments}
+                className="h-9 px-3.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                title="Re-read the currently uploaded document and refresh all fields"
+              >
+                <RefreshCw size={14} className={isReadingDocuments ? 'animate-spin text-amber-400' : 'text-amber-400'} />
+                <span>{isReadingDocuments ? 'Reading...' : 'Read Again'}</span>
+              </button>
+            )}
+            <label
+              className="h-9 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/30 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+              title="Upload the file again directly here to re-read and populate all fields"
+            >
+              <UploadCloud size={14} className="text-white" />
+              <span>{isReadingDocuments || isAttachingFiles ? 'Reading File...' : 'Upload Again & Read'}</span>
+              <input
+                type="file"
+                multiple
+                accept="*/*"
+                onChange={(e) => handleFileUpload(e, true)}
+                className="hidden"
+              />
+            </label>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -6153,7 +6487,53 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-1.5">
                 <User size={15} /> 1. Parties Involved
               </h4>
-              <span className="text-xs text-slate-400">Shipper & Consignee</span>
+              <span className="text-xs text-slate-400">Client, Shipper, Consignee & Agent</span>
+            </div>
+
+            {/* Registered Client Selector (Strictly separate from B/L Consignee) */}
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-amber-300 font-bold flex items-center gap-1.5">
+                  <User size={13} className="text-amber-400" />
+                  <span>Registered Client Name <span className="text-red-400">*</span></span>
+                </label>
+                <span className="text-[11px] text-slate-300">Billing Client</span>
+              </div>
+              {isClientUser ? (
+                <div className="text-sm font-bold text-white px-3 py-2 rounded-lg bg-slate-950 border border-emerald-500/30">
+                  {formData.client || effectiveClientName}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <select
+                    className="flex-1 h-10 rounded-xl px-3 text-sm text-white bg-slate-950 border border-amber-500/40 focus:border-amber-400 outline-none cursor-pointer"
+                    value={formData.client}
+                    onChange={(e) => {
+                      if (e.target.value === '__ADD_NEW_CLIENT__') {
+                        setShowAddClientModal(true);
+                      } else {
+                        handleClientSelect(e.target.value);
+                      }
+                    }}
+                  >
+                    <option value="" className="bg-slate-900 text-slate-400">-- Select Registered Client --</option>
+                    {registeredClients.map(c => (
+                      <option key={c} value={c} className="bg-slate-900 text-white">{c}</option>
+                    ))}
+                    <option value="__ADD_NEW_CLIENT__" className="bg-slate-900 text-amber-300 font-semibold">
+                      + Add New Client...
+                    </option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddClientModal(true)}
+                    className="h-10 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shrink-0 cursor-pointer"
+                    title="Add New Client"
+                  >
+                    + New
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="space-y-3">
@@ -6190,7 +6570,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 <div>
                   <label className="text-xs text-slate-300 font-semibold block mb-1">Shipper Contact</label>
                   <input 
-                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
+                    className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                      extracted.shipperContact ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                    }`} 
                     value={extracted.shipperContact || ''} 
                     onChange={(e) => updateExtractedData('shipperContact', e.target.value)} 
                     placeholder="Phone No." 
@@ -6211,7 +6593,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             <div className="space-y-3 pt-3 border-t border-white/10">
               <div>
                 <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs text-slate-300 font-semibold">Consignee Name</label>
+                  <label className="text-xs text-slate-300 font-semibold">Consignee / Importer Name</label>
                   {extracted.consigneeName && (
                     <span className="text-[11px] text-emerald-400 flex items-center gap-0.5"><CheckCircle size={10} /> Auto-filled</span>
                   )}
@@ -6242,7 +6624,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 <div>
                   <label className="text-xs text-slate-300 font-semibold block mb-1">Consignee Contact</label>
                   <input 
-                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
+                    className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                      extracted.consigneeContact ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                    }`} 
                     value={extracted.consigneeContact || ''} 
                     onChange={(e) => updateExtractedData('consigneeContact', e.target.value)} 
                     placeholder="Phone No." 
@@ -6251,12 +6635,55 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 <div>
                   <label className="text-xs text-slate-300 font-semibold block mb-1">Consignee Email</label>
                   <input 
-                    className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
+                    className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                      extracted.consigneeEmail ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                    }`} 
                     value={extracted.consigneeEmail || ''} 
                     onChange={(e) => updateExtractedData('consigneeEmail', e.target.value)} 
                     placeholder="Email" 
                   />
                 </div>
+              </div>
+
+              {/* NTN, STRN & Clearing Agent */}
+              <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-white/10">
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">Importer NTN No.</label>
+                  <input 
+                    className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                      extracted.ntnNumber ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                    }`} 
+                    value={extracted.ntnNumber || ''} 
+                    onChange={(e) => updateExtractedData('ntnNumber', e.target.value)} 
+                    placeholder="NTN Number" 
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">STRN Number</label>
+                  <input 
+                    className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                      extracted.strnNumber ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                    }`} 
+                    value={extracted.strnNumber || ''} 
+                    onChange={(e) => updateExtractedData('strnNumber', e.target.value)} 
+                    placeholder="STRN Number" 
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-xs text-slate-300 font-semibold">Clearing / Forwarding Agent</label>
+                  {extracted.clearingAgent && <span className="text-[11px] text-emerald-400">✓</span>}
+                </div>
+                <input 
+                  className={`w-full h-10 rounded-xl px-3.5 text-sm text-white outline-none border ${
+                    extracted.clearingAgent ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
+                  value={extracted.clearingAgent || ''} 
+                  onChange={(e) => updateExtractedData('clearingAgent', e.target.value)} 
+                  placeholder="Clearing Agent & License No." 
+                />
               </div>
             </div>
           </div>
@@ -6268,7 +6695,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 <Ship size={15} /> 2. Bill of Lading & Route
               </h4>
               <span className="text-xs text-sky-300 font-mono bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
-                B/L & GD
+                B/L & GD-I
               </span>
             </div>
 
@@ -6285,14 +6712,16 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   }`}
                   value={extracted.blNumber || ''} 
                   onChange={(e) => updateExtractedData('blNumber', e.target.value)} 
-                  placeholder="MSKU12345678"
+                  placeholder="SWA0463766"
                 />
               </div>
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">B/L Date</label>
                 <input 
                   type="date" 
-                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                    extracted.blDate ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.blDate || ''} 
                   onChange={(e) => updateExtractedData('blDate', e.target.value)} 
                 />
@@ -6309,7 +6738,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   }`}
                   value={extracted.shippingLine || ''} 
                   onChange={(e) => updateExtractedData('shippingLine', e.target.value)} 
-                  placeholder="Maersk, MSC, COSCO"
+                  placeholder="Shipping Line"
                 />
               </div>
               <div>
@@ -6335,16 +6764,18 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   }`}
                   value={extracted.vesselName || ''} 
                   onChange={(e) => updateExtractedData('vesselName', e.target.value)} 
-                  placeholder="e.g. MSC OSCAR"
+                  placeholder="e.g. XIN LONG YUN 86"
                 />
               </div>
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">Voyage No.</label>
                 <input 
-                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                    extracted.voyageNo ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.voyageNo || ''} 
                   onChange={(e) => updateExtractedData('voyageNo', e.target.value)} 
-                  placeholder="e.g. 2401E"
+                  placeholder="e.g. 2627W"
                 />
               </div>
             </div>
@@ -6354,21 +6785,38 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">Port of Loading (POL)</label>
                 <input 
-                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                    extracted.pol ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.pol || ''} 
                   onChange={(e) => updateExtractedData('pol', e.target.value)} 
-                  placeholder="Karachi / QICT"
+                  placeholder="Port of Loading"
                 />
               </div>
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">Port of Discharge (POD)</label>
                 <input 
-                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                    extracted.pod ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.pod || ''} 
                   onChange={(e) => updateExtractedData('pod', e.target.value)} 
-                  placeholder="Lahore / Quetta"
+                  placeholder="Port of Discharge"
                 />
               </div>
+            </div>
+
+            {/* Place of Delivery / Final Dry Port */}
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">Place of Delivery / Destination Dry Port</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                  extracted.placeOfDelivery ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.placeOfDelivery || ''} 
+                onChange={(e) => updateExtractedData('placeOfDelivery', e.target.value)} 
+                placeholder="e.g. LAHORE DRY PORT / MUGHALPURA"
+              />
             </div>
 
             {/* Free Days & Freight Terms */}
@@ -6407,38 +6855,55 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   }`}
                   value={extracted.gdNo || ''} 
                   onChange={(e) => updateExtractedData('gdNo', e.target.value)} 
-                  placeholder="KAPE-HC-12345"
+                  placeholder="KAPS-TP-52611-24-09-2026"
                 />
               </div>
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">GD / TP Date</label>
                 <input 
                   type="date" 
-                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                    extracted.gdDate ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.gdDate || ''} 
                   onChange={(e) => updateExtractedData('gdDate', e.target.value)} 
                 />
               </div>
             </div>
 
-            {/* IGM No & Index No */}
-            <div className="grid grid-cols-2 gap-2.5">
+            {/* IGM No, IGM Date & Index No */}
+            <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">IGM No</label>
                 <input 
-                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
+                  className={`w-full h-10 rounded-xl px-2.5 text-sm text-white font-mono outline-none border ${
+                    extracted.igmNo ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.igmNo || ''} 
                   onChange={(e) => updateExtractedData('igmNo', e.target.value)} 
-                  placeholder="IGM Number"
+                  placeholder="IGM No"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">IGM Date</label>
+                <input 
+                  type="date"
+                  className={`w-full h-10 rounded-xl px-2 text-xs text-white outline-none border ${
+                    extracted.igmDate ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
+                  value={extracted.igmDate || ''} 
+                  onChange={(e) => updateExtractedData('igmDate', e.target.value)} 
                 />
               </div>
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">Index No</label>
                 <input 
-                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
+                  className={`w-full h-10 rounded-xl px-2.5 text-sm text-white font-mono outline-none border ${
+                    extracted.indexNo ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.indexNo || ''} 
                   onChange={(e) => updateExtractedData('indexNo', e.target.value)} 
-                  placeholder="Index No"
+                  placeholder="Index"
                 />
               </div>
             </div>
@@ -6451,7 +6916,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 <Receipt size={15} /> 3. Commercial Invoice & Cargo
               </h4>
               <span className="text-xs text-amber-300 font-mono bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                Manifest
+                Manifest & GD
               </span>
             </div>
 
@@ -6465,14 +6930,16 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   }`}
                   value={extracted.invoiceNo || ''} 
                   onChange={(e) => updateExtractedData('invoiceNo', e.target.value)} 
-                  placeholder="INV-2025-8891"
+                  placeholder="SP260807AZ03"
                 />
               </div>
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">Invoice Date</label>
                 <input 
                   type="date" 
-                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                    extracted.invoiceDate ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.invoiceDate || ''} 
                   onChange={(e) => updateExtractedData('invoiceDate', e.target.value)} 
                 />
@@ -6485,6 +6952,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 <label className="text-xs text-slate-300 font-semibold block mb-1">Invoice Value</label>
                 <input 
                   type="number" 
+                  step="0.01"
                   className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
                     extracted.invoiceValue ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`}
@@ -6510,17 +6978,43 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               </div>
             </div>
 
+            {/* Payment Terms & Endorsing Bank */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Payment Terms</label>
+                <input 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                    extracted.paymentTerms ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
+                  value={extracted.paymentTerms || ''} 
+                  onChange={(e) => updateExtractedData('paymentTerms', e.target.value)} 
+                  placeholder="e.g. D/P (Documents against Payment)"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Bank Name</label>
+                <input 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                    extracted.bankName ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
+                  value={extracted.bankName || ''} 
+                  onChange={(e) => updateExtractedData('bankName', e.target.value)} 
+                  placeholder="e.g. HabibMetro Bank"
+                />
+              </div>
+            </div>
+
             {/* Incoterms & HS Code */}
             <div className="grid grid-cols-2 gap-2.5">
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">Incoterms</label>
                 <select
                   className="w-full h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
-                  value={extracted.incoTerms || 'CIF'}
+                  value={extracted.incoTerms || 'CFR'}
                   onChange={(e) => updateExtractedData('incoTerms', e.target.value)}
                 >
-                  <option value="CIF">CIF — Cost, Insurance & Freight</option>
                   <option value="CFR">CFR — Cost & Freight</option>
+                  <option value="CIF">CIF — Cost, Insurance & Freight</option>
                   <option value="FOB">FOB — Free on Board</option>
                   <option value="EXW">EXW — Ex Works</option>
                   <option value="DDP">DDP — Delivered Duty Paid</option>
@@ -6530,10 +7024,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">HS / PCT Code</label>
                 <input 
-                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                    extracted.hsCode ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.hsCode || ''} 
                   onChange={(e) => updateExtractedData('hsCode', e.target.value)} 
-                  placeholder="e.g. 8471.30"
+                  placeholder="e.g. 9503.0090"
                 />
               </div>
             </div>
@@ -6556,7 +7052,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">Packaging Type</label>
                 <input 
-                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none" 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                    extracted.packagingType ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.packagingType || ''} 
                   onChange={(e) => updateExtractedData('packagingType', e.target.value)} 
                   placeholder="Cartons, Pallets, Drums"
@@ -6566,10 +7064,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 <label className="text-xs text-slate-300 font-semibold block mb-1">No. of Packages</label>
                 <input 
                   type="number" 
-                  className="w-full h-10 rounded-xl px-3 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                    extracted.packageCount ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.packageCount || ''} 
                   onChange={(e) => updateExtractedData('packageCount', parseFloat(e.target.value))} 
-                  placeholder="e.g. 850"
+                  placeholder="e.g. 649"
                 />
               </div>
             </div>
@@ -6596,7 +7096,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 <label className="text-xs text-slate-300 font-semibold block mb-1 truncate">Net Wt (KG)</label>
                 <input 
                   type="number" 
-                  className="w-full h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
+                  className={`w-full h-10 rounded-xl px-2.5 text-sm text-white font-mono outline-none border ${
+                    extracted.netWeight ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.netWeight || ''} 
                   onChange={(e) => updateExtractedData('netWeight', parseFloat(e.target.value))} 
                   placeholder="Net KG"
@@ -6607,12 +7109,212 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 <input 
                   type="number" 
                   step="0.01"
-                  className="w-full h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none font-mono" 
+                  className={`w-full h-10 rounded-xl px-2.5 text-sm text-white font-mono outline-none border ${
+                    extracted.volumeCBM ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
                   value={extracted.volumeCBM || ''} 
                   onChange={(e) => updateExtractedData('volumeCBM', parseFloat(e.target.value))} 
-                  placeholder="54.2"
+                  placeholder="68.0"
                 />
               </div>
+            </div>
+
+            {/* GD-I Assessed Value & Customs Duty/Taxes (PKR) */}
+            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-white/10">
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1 truncate">Assessed Value (PKR)</label>
+                <input 
+                  type="number" 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                    extracted.assessedValuePkr ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
+                  value={extracted.assessedValuePkr || ''} 
+                  onChange={(e) => updateExtractedData('assessedValuePkr', parseFloat(e.target.value))} 
+                  placeholder="Assessed Value PKR"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1 truncate">Duty & Taxes (PKR)</label>
+                <input 
+                  type="number" 
+                  className={`w-full h-10 rounded-xl px-3 text-sm text-amber-300 font-mono font-bold outline-none border ${
+                    extracted.totalDutyTaxesPkr ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
+                  value={extracted.totalDutyTaxesPkr || ''} 
+                  onChange={(e) => updateExtractedData('totalDutyTaxesPkr', parseFloat(e.target.value))} 
+                  placeholder="Total Duty/Taxes PKR"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Group 4: Bonded Carrier, Vehicle, Driver & PCCSS Customs Sealing (Form "A" / Transport Note / WeBOC) */}
+        <div className="rounded-2xl border border-emerald-500/30 bg-slate-900/90 p-5 space-y-4 shadow-md">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2.5">
+            <h4 className="text-emerald-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-2">
+              <Truck size={16} /> 4. Bonded Carrier, Vehicle, Driver & Customs Sealing (PCCSS Form &quot;A&quot; / Transport Note / WeBOC)
+            </h4>
+            <span className="text-xs text-emerald-300 font-mono bg-emerald-500/15 px-2.5 py-0.5 rounded border border-emerald-500/30 self-start sm:self-auto">
+              Auto-Synced with Container Manifest
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">Bonded Carrier Name</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                  extracted.carrierName ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.carrierName || ''} 
+                onChange={(e) => updateExtractedData('carrierName', e.target.value)} 
+                placeholder="DYNAMIC PRIVATE LIMITED"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">Container Number</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono font-bold outline-none border ${
+                  (extracted.containerNo || firstContainer?.number) ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.containerNo || firstContainer?.number || ''} 
+                onChange={(e) => updateExtractedData('containerNo', e.target.value)} 
+                placeholder="TEMU8045938"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">Container Size & Tare Wt</label>
+              <div className="grid grid-cols-2 gap-2">
+                <select 
+                  className="h-10 rounded-xl px-2.5 text-sm text-white border border-white/15 bg-slate-950 focus:border-amber-400 outline-none"
+                  value={extracted.containerSize || firstContainer?.size || '40ft'}
+                  onChange={(e) => updateExtractedData('containerSize', e.target.value)}
+                >
+                  <option value="20ft">20ft</option>
+                  <option value="40ft">40ft</option>
+                  <option value="45ft">45ft</option>
+                </select>
+                <input 
+                  type="number"
+                  className={`h-10 rounded-xl px-2.5 text-sm text-white font-mono outline-none border ${
+                    extracted.tareWeight ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  }`} 
+                  value={extracted.tareWeight || firstContainer?.tareWeight || ''} 
+                  onChange={(e) => updateExtractedData('tareWeight', parseFloat(e.target.value))} 
+                  placeholder="Tare KG"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">Vehicle / Truck Reg No.</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-amber-300 font-mono font-bold outline-none border ${
+                  (extracted.vehicleNumber || firstContainer?.vehicleNo) ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.vehicleNumber || firstContainer?.vehicleNo || ''} 
+                onChange={(e) => updateExtractedData('vehicleNumber', e.target.value)} 
+                placeholder="TMT400"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">Driver Name (Form-A)</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                  (extracted.driverName || firstContainer?.driverName) ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.driverName || firstContainer?.driverName || ''} 
+                onChange={(e) => updateExtractedData('driverName', e.target.value)} 
+                placeholder="IMRAN KHAN"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">Driver CNIC No.</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                  (extracted.driverCnic || firstContainer?.driverCnic) ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.driverCnic || firstContainer?.driverCnic || ''} 
+                onChange={(e) => updateExtractedData('driverCnic', e.target.value)} 
+                placeholder="2120358707593"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">CCSU / Customs Seal No.</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-emerald-300 font-mono font-bold outline-none border ${
+                  (extracted.sealNo || extracted.ccsuSealNo || firstContainer?.seal) ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.sealNo || extracted.ccsuSealNo || firstContainer?.seal || ''} 
+                onChange={(e) => updateExtractedData('sealNo', e.target.value)} 
+                placeholder="N9622854"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">Shipper / Line Seal No.</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                  (extracted.shipperSealNo || firstContainer?.shipperSealNo) ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.shipperSealNo || firstContainer?.shipperSealNo || ''} 
+                onChange={(e) => updateExtractedData('shipperSealNo', e.target.value)} 
+                placeholder="SN26973873"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">PCCSS Form &quot;A&quot; Serial No.</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                  extracted.serialNo ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.serialNo || ''} 
+                onChange={(e) => updateExtractedData('serialNo', e.target.value)} 
+                placeholder="SAPT/103497"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">Sealing Date & Time</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                  extracted.sealingDate ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.sealingDate || ''} 
+                onChange={(e) => updateExtractedData('sealingDate', e.target.value)} 
+                placeholder="2026-09-26"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">PCCSS / CCSU Officer</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
+                  extracted.pccssOfficer ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.pccssOfficer || ''} 
+                onChange={(e) => updateExtractedData('pccssOfficer', e.target.value)} 
+                placeholder="ZULFIQAR ALI ZARDARI"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold block mb-1">Terminal CFD No.</label>
+              <input 
+                className={`w-full h-10 rounded-xl px-3 text-sm text-white font-mono outline-none border ${
+                  extracted.cfdNo ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                }`} 
+                value={extracted.cfdNo || ''} 
+                onChange={(e) => updateExtractedData('cfdNo', e.target.value)} 
+                placeholder="SAPT-CFD-10644-26-09-2026"
+              />
             </div>
           </div>
         </div>
@@ -6632,13 +7334,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-base sm:text-lg font-bold text-white">Step 3: Containers Manifest</h3>
+              <h3 className="text-base sm:text-lg font-bold text-white">Step 3: Containers, Vehicle & Sealing Manifest</h3>
               <span className="text-xs font-mono font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 rounded-lg">
                 {formData.containers.length} {formData.containers.length === 1 ? 'Container' : 'Containers'}
               </span>
             </div>
             <p className="text-xs text-slate-300 mt-0.5">
-              Verify container numbers, equipment sizes, cargo weights, and customs seal numbers.
+              Verify container numbers, equipment sizes, cargo weights, customs/shipper seal numbers, assigned vehicle, and driver particulars.
             </p>
           </div>
         </div>
@@ -6674,7 +7376,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               <label className="text-xs text-slate-300 font-semibold block mb-1.5">Container Number</label>
               <input 
                 type="text" 
-                placeholder="e.g. MSKU1234567"
+                placeholder="e.g. TEMU8045938"
                 value={c.number} 
                 onChange={(e) => updateContainer(c.id, 'number', e.target.value)}
                 className="w-full h-10 rounded-xl px-3.5 bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono"
@@ -6706,15 +7408,60 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               </div>
             </div>
 
-            <div>
-              <label className="text-xs text-slate-300 font-semibold block mb-1.5">Seal Number (Optional)</label>
-              <input 
-                type="text" 
-                placeholder="e.g. SL-98765"
-                value={c.seal || c.sealNo || ''} 
-                onChange={(e) => updateContainer(c.id, 'seal', e.target.value)}
-                className="w-full h-10 rounded-xl px-3.5 bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">CCSU / Customs Seal</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. N9622854"
+                  value={c.seal || c.sealNo || ''} 
+                  onChange={(e) => updateContainer(c.id, 'seal', e.target.value)}
+                  className="w-full h-10 rounded-xl px-3 bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-emerald-300 font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Shipper Seal No</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. SN26973873"
+                  value={c.shipperSealNo || ''} 
+                  onChange={(e) => updateContainer(c.id, 'shipperSealNo', e.target.value)}
+                  className="w-full h-10 rounded-xl px-3 bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2.5">
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Vehicle No</label>
+                <input 
+                  type="text" 
+                  placeholder="TMT400"
+                  value={c.vehicleNo || ''} 
+                  onChange={(e) => updateContainer(c.id, 'vehicleNo', e.target.value)}
+                  className="w-full h-10 rounded-xl px-2.5 bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-amber-300 font-mono font-bold"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Driver Name</label>
+                <input 
+                  type="text" 
+                  placeholder="IMRAN KHAN"
+                  value={c.driverName || ''} 
+                  onChange={(e) => updateContainer(c.id, 'driverName', e.target.value)}
+                  className="w-full h-10 rounded-xl px-2.5 bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-300 font-semibold block mb-1.5">Driver CNIC</label>
+                <input 
+                  type="text" 
+                  placeholder="2120358707593"
+                  value={c.driverCnic || ''} 
+                  onChange={(e) => updateContainer(c.id, 'driverCnic', e.target.value)}
+                  className="w-full h-10 rounded-xl px-2.5 bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono"
+                />
+              </div>
             </div>
           </div>
         ))}
@@ -6722,60 +7469,100 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
       {/* Desktop View (Table) */}
       <div className="hidden sm:block rounded-2xl border border-white/15 bg-slate-900/90 overflow-hidden overflow-x-auto custom-scrollbar shadow-md">
-        <table className="w-full text-left text-sm text-slate-200 min-w-[680px]"> 
+        <table className="w-full text-left text-sm text-slate-200 min-w-[960px]"> 
           <thead className="bg-slate-950 uppercase text-xs font-bold text-slate-300 border-b border-white/10">
             <tr>
-              <th className="py-3.5 px-4 w-14 text-center">#</th>
-              <th className="py-3.5 px-4">Container Number</th>
-              <th className="py-3.5 px-4 w-40">Container Size</th>
-              <th className="py-3.5 px-4 w-44">Gross Weight (KG)</th>
-              <th className="py-3.5 px-4 w-44">Customs Seal No</th>
-              <th className="py-3.5 px-4 w-20 text-center">Action</th>
+              <th className="py-3.5 px-3 w-12 text-center">#</th>
+              <th className="py-3.5 px-3">Container No</th>
+              <th className="py-3.5 px-3 w-28">Size</th>
+              <th className="py-3.5 px-3 w-36">Gross Wt (KG)</th>
+              <th className="py-3.5 px-3 w-36">Customs Seal</th>
+              <th className="py-3.5 px-3 w-36">Shipper Seal</th>
+              <th className="py-3.5 px-3 w-32">Vehicle No</th>
+              <th className="py-3.5 px-3 w-40">Driver Name</th>
+              <th className="py-3.5 px-3 w-40">Driver CNIC</th>
+              <th className="py-3.5 px-3 w-16 text-center">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/10">
             {formData.containers.map((c: any, index: number) => (
               <tr key={`cntr_row_${c.id || index}_${index}`} className="hover:bg-white/[0.03] transition-colors">
-                <td className="p-3.5 text-center text-slate-400 font-mono text-xs font-bold">{index + 1}</td>
-                <td className="p-3.5">
+                <td className="p-3 text-center text-slate-400 font-mono text-xs font-bold">{index + 1}</td>
+                <td className="p-3">
                   <input 
                     type="text" 
-                    placeholder="e.g. MSKU1234567"
+                    placeholder="e.g. TEMU8045938"
                     value={c.number} 
                     onChange={(e) => updateContainer(c.id, 'number', e.target.value)}
-                    className="h-10 rounded-xl px-3.5 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono font-semibold"
+                    className="h-10 rounded-xl px-3 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono font-semibold"
                   />
                 </td>
-                <td className="p-3.5">
+                <td className="p-3">
                   <select 
                     value={c.size} 
                     onChange={(e) => updateContainer(c.id, 'size', e.target.value)}
-                    className="h-10 rounded-xl px-3 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white"
+                    className="h-10 rounded-xl px-2.5 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white"
                   >
                     <option value="20ft">20ft</option>
                     <option value="40ft">40ft</option>
                     <option value="45ft">45ft</option>
                   </select>
                 </td>
-                <td className="p-3.5">
+                <td className="p-3">
                   <input 
                     type="number" 
                     placeholder="0"
                     value={c.weight} 
                     onChange={(e) => updateContainer(c.id, 'weight', parseFloat(e.target.value) || 0)}
-                    className="h-10 rounded-xl px-3.5 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-emerald-400 font-mono font-bold"
+                    className="h-10 rounded-xl px-3 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-emerald-400 font-mono font-bold"
                   />
                 </td>
-                <td className="p-3.5">
+                <td className="p-3">
                   <input 
                     type="text" 
-                    placeholder="Seal No (Optional)"
+                    placeholder="Customs Seal"
                     value={c.seal || c.sealNo || ''} 
                     onChange={(e) => updateContainer(c.id, 'seal', e.target.value)}
-                    className="h-10 rounded-xl px-3.5 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono"
+                    className="h-10 rounded-xl px-3 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-emerald-300 font-mono font-semibold"
                   />
                 </td>
-                <td className="p-3.5 text-center">
+                <td className="p-3">
+                  <input 
+                    type="text" 
+                    placeholder="Shipper Seal"
+                    value={c.shipperSealNo || ''} 
+                    onChange={(e) => updateContainer(c.id, 'shipperSealNo', e.target.value)}
+                    className="h-10 rounded-xl px-3 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono"
+                  />
+                </td>
+                <td className="p-3">
+                  <input 
+                    type="text" 
+                    placeholder="Vehicle No"
+                    value={c.vehicleNo || ''} 
+                    onChange={(e) => updateContainer(c.id, 'vehicleNo', e.target.value)}
+                    className="h-10 rounded-xl px-3 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-amber-300 font-mono font-bold"
+                  />
+                </td>
+                <td className="p-3">
+                  <input 
+                    type="text" 
+                    placeholder="Driver Name"
+                    value={c.driverName || ''} 
+                    onChange={(e) => updateContainer(c.id, 'driverName', e.target.value)}
+                    className="h-10 rounded-xl px-3 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white"
+                  />
+                </td>
+                <td className="p-3">
+                  <input 
+                    type="text" 
+                    placeholder="Driver CNIC"
+                    value={c.driverCnic || ''} 
+                    onChange={(e) => updateContainer(c.id, 'driverCnic', e.target.value)}
+                    className="h-10 rounded-xl px-3 w-full bg-slate-950 border border-white/15 focus:border-amber-400 outline-none text-sm text-white font-mono"
+                  />
+                </td>
+                <td className="p-3 text-center">
                   <button 
                     type="button"
                     onClick={() => removeContainer(c.id)}
@@ -6897,7 +7684,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </div>
             <h3 className="text-lg sm:text-xl font-bold text-white">Review Case Summary & Confirm Registration</h3>
             <p className="text-xs text-slate-300 mt-0.5">
-              Verify route, B/L particulars, containers, and invoice charges below before registering the case.
+              Verify route, B/L, GD-I/TP, Bonded Carrier, vehicle/driver, containers, and invoice charges before registering.
             </p>
           </div>
 
@@ -6939,8 +7726,8 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
             <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
-              <span className="text-slate-400 block mb-1">Client / Importer</span>
-              <span className="text-white font-bold text-sm block truncate">{formData.client || 'General Cargo'}</span>
+              <span className="text-slate-400 block mb-1">Registered Client Name</span>
+              <span className="text-white font-bold text-sm block truncate">{formData.client || 'Not Selected'}</span>
             </div>
             <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
               <span className="text-slate-400 block mb-1">Service Category</span>
@@ -6957,18 +7744,18 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
               <span className="text-slate-400 block mb-1">Port of Destination (POD)</span>
               <span className="text-white font-semibold text-sm flex items-center gap-1.5 truncate">
-                <Anchor size={13} className="text-emerald-400 shrink-0" /> {formData.pod || 'Not Specified'}
+                <Anchor size={13} className="text-emerald-400 shrink-0" /> {formData.pod || formData.extractedData.placeOfDelivery || 'Not Specified'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Section 2: Cargo & Shipping Details */}
+        {/* Section 2: Cargo, B/L, GD-I & Bonded Carrier Particulars */}
         <div className="rounded-2xl p-5 border border-white/15 bg-slate-900/90 space-y-3.5 shadow-md">
           <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
             <h4 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
               <FileText size={16} className="text-amber-400" />
-              <span>2. Cargo & B/L Particulars</span>
+              <span>2. Cargo, B/L, GD-I & Bonded Carrier Particulars</span>
             </h4>
             <button
               type="button"
@@ -6976,7 +7763,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               className="h-8 px-3 rounded-lg text-xs font-semibold text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-white/10 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Edit size={12} />
-              <span>Edit Cargo</span>
+              <span>Edit Cargo & Docs</span>
             </button>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 text-xs">
@@ -6985,36 +7772,72 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               <span className="text-white font-mono font-bold text-sm">{formData.extractedData.blNumber || 'Pending'}</span>
             </div>
             <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
-              <span className="text-slate-400 block mb-0.5">Consignee</span>
-              <span className="text-white font-semibold text-sm block truncate">{formData.extractedData.consigneeName || 'Same as Client'}</span>
+              <span className="text-slate-400 block mb-0.5">GD / TP Number</span>
+              <span className="text-amber-300 font-mono font-bold text-sm block truncate">{formData.extractedData.gdNo || 'N/A'}</span>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Consignee & NTN</span>
+              <span className="text-white font-semibold text-sm block truncate">
+                {formData.extractedData.consigneeName || 'Same as Client'}
+                {formData.extractedData.ntnNumber ? ` (NTN: ${formData.extractedData.ntnNumber})` : ''}
+              </span>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Clearing Agent</span>
+              <span className="text-white font-semibold text-sm block truncate">{formData.extractedData.clearingAgent || 'N/A'}</span>
             </div>
             <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
               <span className="text-slate-400 block mb-0.5">Commodity / Cargo</span>
               <span className="text-white font-semibold text-sm block truncate">{formData.extractedData.itemDescription || formData.extractedData.itemName || 'Commercial Freight'}</span>
             </div>
             <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
-              <span className="text-slate-400 block mb-0.5">Total Gross Weight</span>
+              <span className="text-slate-400 block mb-0.5">Total Gross / Net Weight</span>
               <span className="text-emerald-400 font-mono font-bold text-sm">
                 {formData.extractedData.totalWeight ? `${formData.extractedData.totalWeight.toLocaleString()} KG` : 'N/A'}
+                {formData.extractedData.netWeight ? ` / ${formData.extractedData.netWeight.toLocaleString()} KG` : ''}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
-              <span className="text-slate-400 block mb-0.5">Volume (CBM)</span>
-              <span className="text-white font-mono text-sm">{formData.extractedData.volumeCBM ? `${formData.extractedData.volumeCBM} CBM` : 'N/A'}</span>
-            </div>
-            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
-              <span className="text-slate-400 block mb-0.5">Packages</span>
+              <span className="text-slate-400 block mb-0.5">Packages & Volume</span>
               <span className="text-white font-mono text-sm">
                 {formData.extractedData.packageCount ? `${formData.extractedData.packageCount} ${formData.extractedData.packagingType || 'Pkgs'}` : 'N/A'}
+                {formData.extractedData.volumeCBM ? ` • ${formData.extractedData.volumeCBM} CBM` : ''}
               </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
               <span className="text-slate-400 block mb-0.5">Vessel / Voyage</span>
-              <span className="text-white font-semibold text-sm block truncate">{formData.extractedData.vesselName || 'N/A'}</span>
+              <span className="text-white font-semibold text-sm block truncate">
+                {formData.extractedData.vesselName || 'N/A'}
+                {formData.extractedData.voyageNo ? ` (${formData.extractedData.voyageNo})` : ''}
+              </span>
             </div>
             <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
-              <span className="text-slate-400 block mb-0.5">Index Number</span>
-              <span className="text-white font-mono text-sm">{formData.extractedData.indexNo || 'N/A'}</span>
+              <span className="text-slate-400 block mb-0.5">IGM & Index No</span>
+              <span className="text-white font-mono text-sm">
+                {formData.extractedData.igmNo ? `IGM ${formData.extractedData.igmNo}` : 'N/A'}
+                {formData.extractedData.indexNo ? ` / Idx ${formData.extractedData.indexNo}` : ''}
+              </span>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Commercial Invoice</span>
+              <span className="text-white font-mono text-sm block truncate">
+                {formData.extractedData.invoiceNo || 'N/A'}
+                {formData.extractedData.invoiceValue ? ` (${formData.extractedData.invoiceCurrency || 'USD'} ${formData.extractedData.invoiceValue.toLocaleString()})` : ''}
+              </span>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Vehicle & Driver (Form-A)</span>
+              <span className="text-amber-300 font-mono font-bold text-sm block truncate">
+                {formData.extractedData.vehicleNumber || formData.containers?.[0]?.vehicleNo || 'N/A'}
+                {formData.extractedData.driverName ? ` • ${formData.extractedData.driverName}` : ''}
+              </span>
+            </div>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-white/5">
+              <span className="text-slate-400 block mb-0.5">Customs & Shipper Seal</span>
+              <span className="text-emerald-300 font-mono font-bold text-sm block truncate">
+                {formData.extractedData.sealNo || formData.extractedData.ccsuSealNo || 'N/A'}
+                {formData.extractedData.shipperSealNo ? ` / ${formData.extractedData.shipperSealNo}` : ''}
+              </span>
             </div>
           </div>
         </div>
@@ -7052,7 +7875,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                     <th className="py-2.5 px-3.5">Container Number</th>
                     <th className="py-2.5 px-3.5">Size</th>
                     <th className="py-2.5 px-3.5">Gross Weight (KG)</th>
-                    <th className="py-2.5 px-3.5">Seal Number</th>
+                    <th className="py-2.5 px-3.5">Customs Seal</th>
+                    <th className="py-2.5 px-3.5">Shipper Seal</th>
+                    <th className="py-2.5 px-3.5">Vehicle / Driver</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5 font-mono bg-slate-950/40">
@@ -7062,7 +7887,11 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                       <td className="py-2.5 px-3.5 text-white font-bold">{c.number || 'Pending'}</td>
                       <td className="py-2.5 px-3.5 text-amber-300">{c.size || '40ft'}</td>
                       <td className="py-2.5 px-3.5 text-emerald-400 font-bold">{c.weight ? Number(c.weight).toLocaleString() : '0'}</td>
-                      <td className="py-2.5 px-3.5 text-slate-300">{c.seal || c.sealNo || '—'}</td>
+                      <td className="py-2.5 px-3.5 text-emerald-300 font-semibold">{c.seal || c.sealNo || '—'}</td>
+                      <td className="py-2.5 px-3.5 text-slate-300">{c.shipperSealNo || '—'}</td>
+                      <td className="py-2.5 px-3.5 text-amber-300">
+                        {c.vehicleNo || '—'}{c.driverName ? ` (${c.driverName})` : ''}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -7110,65 +7939,93 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </div>
           ) : (
             <div className="space-y-2">
-              {currentCharges.map((ch, cIdx) => (
-                <div key={cIdx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 bg-slate-950/80 border border-white/10 rounded-xl text-xs sm:text-sm">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center justify-center font-mono text-xs font-bold shrink-0">
-                      {cIdx + 1}
-                    </span>
-                    <span className="text-white font-semibold">{ch.description}</span>
-                    {ch.syncKey && (
-                      <span className="text-[11px] text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded-md border border-emerald-500/30 font-mono">
-                        {compShort} Arranged
+              {currentCharges.map((ch, cIdx) => {
+                const isBonded = normalizeCategoryKey(formData.category) === 'Bonded Carrier';
+                const cCount = Math.max(1, formData.containers?.length || 1);
+                const unitRate = ch.unitRate !== undefined && ch.unitRate > 0 ? Number(ch.unitRate) : Math.round((Number(ch.amount) || 0) / cCount);
+                return (
+                <div key={cIdx} className="flex flex-col gap-2 p-3 bg-slate-950/80 border border-white/10 rounded-xl text-xs sm:text-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <span className="w-6 h-6 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center justify-center font-mono text-xs font-bold shrink-0">
+                        {cIdx + 1}
                       </span>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between sm:justify-end gap-3">
-                    <div className="inline-flex items-center gap-2">
-                      <span className="text-xs font-mono text-emerald-400 font-bold">PKR</span>
-                      <input
-                        type="number"
-                        value={ch.amount ?? ''}
-                        onChange={(e) => {
-                          const newAmt = Number(e.target.value) || 0;
-                          setFormData(prev => {
-                            const updated = [...(prev.charges || [])];
-                            updated[cIdx] = { ...updated[cIdx], amount: newAmt };
-                            const syncKey = ch.syncKey;
-                            let updatedArr = prev.serviceArrangements;
-                            if (syncKey && updatedArr && updatedArr[syncKey]) {
-                              updatedArr = {
-                                ...updatedArr,
-                                [syncKey]: { ...updatedArr[syncKey], amount: newAmt }
-                              };
-                            }
-                            const nextState = { ...prev, charges: updated, serviceArrangements: updatedArr };
-                            safeAppStorage.setJSON('dpl_reg_formdata', nextState);
-                            return nextState;
-                          });
-                        }}
-                        className="w-32 h-9 bg-slate-900 border border-emerald-500/40 focus:border-emerald-400 rounded-lg px-3 text-right font-mono font-bold text-emerald-300 text-sm outline-none transition-colors"
-                        placeholder="0"
-                      />
+                      <span className="text-white font-semibold">{ch.description}</span>
+                      {ch.syncKey && (
+                        <span className="text-[11px] text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded-md border border-emerald-500/30 font-mono">
+                          {compShort} Arranged
+                        </span>
+                      )}
+                      {isBonded && (
+                        <span className="text-[11px] text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded-md border border-amber-500/30 font-mono">
+                          PKR {unitRate.toLocaleString()} × {cCount} Container{cCount === 1 ? '' : 's'} = PKR {(Number(ch.amount) || 0).toLocaleString()}
+                        </span>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (ch.syncKey) {
-                          handleToggleServiceArrangement(ch.syncKey, 'Client');
-                        } else {
-                          const updated = currentCharges.filter((_, idx) => idx !== cIdx);
-                          setFormData(prev => ({ ...prev, charges: updated }));
-                        }
-                      }}
-                      className="h-8 w-8 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-500/15 rounded-lg transition-colors cursor-pointer"
-                      title={ch.syncKey ? "Exclude from invoice (set to Client arranged)" : "Remove charge"}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="flex items-center justify-between sm:justify-end gap-3">
+                      <div className="inline-flex items-center gap-2">
+                        <span className="text-xs font-mono text-emerald-400 font-bold">
+                          {isBonded ? 'Per Cntr PKR' : 'PKR'}
+                        </span>
+                        <input
+                          type="number"
+                          value={isBonded ? (unitRate || '') : (ch.amount ?? '')}
+                          onChange={(e) => {
+                            const enteredVal = Number(e.target.value) || 0;
+                            setFormData(prev => {
+                              const updated = [...(prev.charges || [])];
+                              if (normalizeCategoryKey(prev.category) === 'Bonded Carrier') {
+                                updated[cIdx] = { ...updated[cIdx], unitRate: enteredVal, amount: enteredVal };
+                              } else {
+                                updated[cIdx] = { ...updated[cIdx], amount: enteredVal };
+                              }
+                              const scaled = scaleBondedCarrierChargesByContainers(
+                                updated,
+                                prev.category || 'Bonded Carrier',
+                                prev.containers
+                              );
+                              const syncKey = ch.syncKey;
+                              let updatedArr = prev.serviceArrangements;
+                              if (syncKey && updatedArr && updatedArr[syncKey]) {
+                                updatedArr = {
+                                  ...updatedArr,
+                                  [syncKey]: { ...updatedArr[syncKey], amount: enteredVal }
+                                };
+                              }
+                              const nextState = { ...prev, charges: scaled, serviceArrangements: updatedArr };
+                              safeAppStorage.setJSON('dpl_reg_formdata', nextState);
+                              return nextState;
+                            });
+                          }}
+                          className="w-32 h-9 bg-slate-900 border border-emerald-500/40 focus:border-emerald-400 rounded-lg px-3 text-right font-mono font-bold text-emerald-300 text-sm outline-none transition-colors"
+                          placeholder="0"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (ch.syncKey) {
+                            handleToggleServiceArrangement(ch.syncKey, 'Client');
+                          } else {
+                            const updated = currentCharges.filter((_, idx) => idx !== cIdx);
+                            setFormData(prev => ({ ...prev, charges: updated }));
+                          }
+                        }}
+                        className="h-8 w-8 flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-500/15 rounded-lg transition-colors cursor-pointer"
+                        title={ch.syncKey ? "Exclude from invoice (set to Client arranged)" : "Remove charge"}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
+                  {isBonded && ch.perContainerBreakdown && (
+                    <div className="text-[11px] font-mono text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-lg">
+                      Container Breakdown: {ch.perContainerBreakdown}
+                    </div>
+                  )}
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
 
@@ -7287,7 +8144,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                         key={s}
                         type="button"
                         onClick={() => {
-                          if (s < step || (formData.client && formData.category)) {
+                          if (step === 1 && s > 1 && (files.length > 0 || uploadedDocs.length > 0) && Object.keys(formData.extractedData || {}).length === 0) {
+                            triggerDocumentReading();
+                          } else if (s < step || (formData.client && formData.category) || uploadedDocs.length > 0) {
                             setStep(s);
                           }
                         }}

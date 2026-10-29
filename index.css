@@ -76,35 +76,64 @@ table th {
   letter-spacing: -0.01em;
 }
 
-/* Smooth Executive Animations */
+/* Smooth Executive Animations:
+   CRITICAL: Do NOT include `transform`, `filter`, or `perspective` inside keyframes
+   used on page wrappers, because any active keyframe effect targeting `transform`
+   (even `transform: none` with `forwards`) causes the browser to turn that element
+   into a containing block that traps descendant `position: fixed` modals! */
 @keyframes makFadeInSmooth {
   from {
     opacity: 0;
-    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
 @keyframes makGlassScaleIn {
   from {
     opacity: 0;
-    transform: scale(0.985) translateY(4px);
   }
   to {
     opacity: 1;
-    transform: scale(1) translateY(0);
   }
 }
 
 .animate-fade-in {
-  animation: makFadeInSmooth 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: makFadeInSmooth 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
 }
 
 .animate-glass-in {
-  animation: makGlassScaleIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: makGlassScaleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* ==========================================================================
+   1B. UNIVERSAL MODAL & VIEWPORT SCROLLING GUARANTEE
+   Ensures all `fixed inset-0` modals are anchored to the viewport, never clip
+   their top header / close button or bottom actions, and scroll smoothly.
+   ========================================================================== */
+.fixed.inset-0 {
+  position: fixed !important;
+  top: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  max-height: 100dvh !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent flexbox `items-center` upward overflow clipping on tall modals */
+.fixed.inset-0.flex.items-center > div:not(.fixed):not(.absolute) {
+  margin-top: auto;
+  margin-bottom: auto;
+  max-height: calc(100dvh - 1.5rem) !important;
 }
 
 /* ==========================================================================
@@ -119,11 +148,11 @@ body.theme-charcoal {
   --text-primary: #F8FAFC;
   --text-secondary: #CBD5E1;
   --text-muted: #94A3B8;
-  --glass-bg: rgba(20, 28, 44, 0.84);
-  --glass-card-bg: linear-gradient(145deg, rgba(24, 34, 52, 0.90) 0%, rgba(15, 22, 34, 0.95) 100%);
+  --glass-bg: rgba(20, 28, 44, 0.94);
+  --glass-card-bg: linear-gradient(145deg, rgba(24, 34, 52, 0.96) 0%, rgba(15, 22, 34, 0.98) 100%);
   --glass-border: rgba(255, 255, 255, 0.09);
   --glass-shadow: 0 12px 32px -6px rgba(0, 0, 0, 0.48), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
-  --input-bg: rgba(15, 23, 42, 0.78);
+  --input-bg: rgba(15, 23, 42, 0.85);
   --input-border: rgba(255, 255, 255, 0.14);
 }
 
@@ -138,21 +167,19 @@ body.theme-charcoal {
   background-attachment: fixed;
 }
 
+/* NOTE: Do NOT apply backdrop-filter to general containers that may wrap `.fixed` modals,
+   as CSS specification makes any backdrop-filter element trap `position: fixed` children! */
 .glass-panel {
   background: var(--glass-bg);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
   border: 1px solid var(--glass-border);
-  transition: background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-card {
   background: var(--glass-card-bg);
-  backdrop-filter: blur(24px) saturate(170%);
-  -webkit-backdrop-filter: blur(24px) saturate(170%);
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
-  transition: background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-input {
@@ -175,15 +202,15 @@ html.theme-pearl,
 body.theme-pearl {
   --bg-primary: #F4F7FB;
   --bg-secondary: #EDF2F8;
-  --bg-elevated: rgba(255, 255, 255, 0.88);
+  --bg-elevated: rgba(255, 255, 255, 0.96);
   --text-primary: #0F172A;
   --text-secondary: #334155;
   --text-muted: #64748B;
-  --glass-bg: rgba(255, 255, 255, 0.84);
-  --glass-card-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.85) 100%);
+  --glass-bg: rgba(255, 255, 255, 0.95);
+  --glass-card-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%);
   --glass-border: rgba(226, 232, 240, 0.95);
-  --glass-shadow: 0 10px 30px -6px rgba(15, 23, 42, 0.055), 0 2px 8px -2px rgba(15, 23, 42, 0.03), inset 0 1px 0 0 rgba(255, 255, 255, 0.95);
-  --input-bg: rgba(255, 255, 255, 0.94);
+  --glass-shadow: 0 10px 30px -6px rgba(15, 23, 42, 0.06), 0 2px 8px -2px rgba(15, 23, 42, 0.03), inset 0 1px 0 0 rgba(255, 255, 255, 0.98);
+  --input-bg: #FFFFFF;
   --input-border: #CBD5E1;
 }
 
@@ -202,11 +229,9 @@ body.theme-pearl {
 /* Primary Cards & Panels in Pearl White Glassy */
 body.theme-pearl .glass-panel,
 body.theme-pearl .glass-card {
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.84) 100%) !important;
-  backdrop-filter: blur(22px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(22px) saturate(180%) !important;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.94) 100%) !important;
   border: 1px solid rgba(226, 232, 240, 0.95) !important;
-  box-shadow: 0 10px 30px -6px rgba(15, 23, 42, 0.055), 0 2px 8px -2px rgba(15, 23, 42, 0.03), inset 0 1px 0 0 rgba(255, 255, 255, 0.95) !important;
+  box-shadow: 0 10px 30px -6px rgba(15, 23, 42, 0.055), 0 2px 8px -2px rgba(15, 23, 42, 0.03), inset 0 1px 0 0 rgba(255, 255, 255, 0.98) !important;
   color: #0F172A;
 }
 
@@ -215,23 +240,23 @@ body.theme-pearl aside,
 body.theme-pearl aside.glass-panel,
 body.theme-pearl header,
 body.theme-pearl header.glass-panel {
-  background: rgba(255, 255, 255, 0.88) !important;
-  backdrop-filter: blur(24px) saturate(190%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(190%) !important;
+  background: rgba(255, 255, 255, 0.95) !important;
   border-color: rgba(226, 232, 240, 0.95) !important;
-  box-shadow: 0 4px 24px -4px rgba(15, 23, 42, 0.045), inset 0 1px 0 0 rgba(255, 255, 255, 0.9) !important;
+  box-shadow: 0 4px 24px -4px rgba(15, 23, 42, 0.045), inset 0 1px 0 0 rgba(255, 255, 255, 0.95) !important;
 }
 
 /* Modal Backdrops in Pearl White Glassy */
-body.theme-pearl .fixed.inset-0[class*="bg-black/"] {
-  background-color: rgba(15, 23, 42, 0.38) !important;
-  backdrop-filter: blur(8px) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(8px) saturate(140%) !important;
+body.theme-pearl .fixed.inset-0[class*="bg-black/"],
+body.theme-pearl .fixed.inset-0[class*="bg-slate-950/"] {
+  background-color: rgba(15, 23, 42, 0.44) !important;
+  backdrop-filter: blur(6px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(6px) saturate(140%) !important;
 }
 
-/* Dark Slate, Hex & Dark Gradient Containers Adapted to Crisp Pearl Glassy Surfaces */
+/* Dark Slate, Hex & Dark Gradient Containers Adapted to Crisp Pearl Glassy Surfaces
+   (NO backdrop-filter here so descendant `position: fixed` modals are never trapped!) */
 body.theme-pearl [class*="bg-slate-900"],
-body.theme-pearl [class*="bg-slate-950"],
+body.theme-pearl [class*="bg-slate-950"]:not(.fixed),
 body.theme-pearl [class*="bg-slate-850"],
 body.theme-pearl [class*="bg-gray-900"],
 body.theme-pearl [class*="bg-[#090C12]"],
@@ -265,12 +290,10 @@ body.theme-pearl [class*="to-[#10141D]"],
 body.theme-pearl [class*="to-[#111724]"],
 body.theme-pearl [class*="via-[#111724]"],
 body.theme-pearl [class*="via-[#161A24]"] {
-  background-color: rgba(255, 255, 255, 0.90) !important;
-  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.88) 100%) !important;
-  backdrop-filter: blur(20px) saturate(170%);
-  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  background-color: #FFFFFF !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #F8FAFC 100%) !important;
   border-color: rgba(226, 232, 240, 0.95) !important;
-  box-shadow: 0 8px 26px -6px rgba(15, 23, 42, 0.05), 0 2px 6px -1px rgba(15, 23, 42, 0.025), inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 26px -6px rgba(15, 23, 42, 0.05), 0 2px 6px -1px rgba(15, 23, 42, 0.025), inset 0 1px 0 0 #FFFFFF;
   color: #0F172A;
 }
 
@@ -293,15 +316,15 @@ body.theme-pearl [class*="bg-white/[0.04]"],
 body.theme-pearl [class*="bg-white/5"],
 body.theme-pearl [class*="bg-white/10"]:not(button),
 body.theme-pearl [class*="from-white/5"] {
-  background-color: rgba(248, 250, 252, 0.88) !important;
-  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.92) 0%, rgba(241, 245, 249, 0.82) 100%) !important;
+  background-color: #F8FAFC !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #F1F5F9 100%) !important;
   border-color: #E2E8F0 !important;
   color: #1E293B;
 }
 
 body.theme-pearl button[class*="bg-slate-800"],
 body.theme-pearl button[class*="bg-gray-800"] {
-  background-color: rgba(241, 245, 249, 0.92) !important;
+  background-color: #F1F5F9 !important;
   background-image: linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 100%) !important;
   border-color: #CBD5E1 !important;
   color: #0F172A !important;
@@ -329,8 +352,8 @@ body.theme-pearl [class*="from-teal-950"],
 body.theme-pearl [class*="from-teal-900"],
 body.theme-pearl [class*="from-lime-950"],
 body.theme-pearl [class*="from-lime-900"] {
-  background-color: rgba(236, 253, 245, 0.88) !important;
-  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(236, 253, 245, 0.88) 100%) !important;
+  background-color: #ECFDF5 !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #ECFDF5 100%) !important;
   border-color: #A7F3D0 !important;
 }
 
@@ -349,8 +372,8 @@ body.theme-pearl [class*="from-yellow-950"],
 body.theme-pearl [class*="from-yellow-900"],
 body.theme-pearl [class*="from-orange-950"],
 body.theme-pearl [class*="from-orange-900"] {
-  background-color: rgba(255, 251, 235, 0.88) !important;
-  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 251, 235, 0.88) 100%) !important;
+  background-color: #FFFBEB !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #FFFBEB 100%) !important;
   border-color: #FDE68A !important;
 }
 
@@ -377,8 +400,8 @@ body.theme-pearl [class*="from-sky-950"],
 body.theme-pearl [class*="from-sky-900"],
 body.theme-pearl [class*="from-blue-500/10"],
 body.theme-pearl [class*="from-brand-500/10"] {
-  background-color: rgba(239, 246, 255, 0.88) !important;
-  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(239, 246, 255, 0.88) 100%) !important;
+  background-color: #EFF6FF !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #EFF6FF 100%) !important;
   border-color: #BFDBFE !important;
 }
 
@@ -396,8 +419,8 @@ body.theme-pearl [class*="to-rose-950"],
 body.theme-pearl [class*="from-red-950"],
 body.theme-pearl [class*="from-red-900"],
 body.theme-pearl [class*="from-red-500/10"] {
-  background-color: rgba(255, 241, 242, 0.88) !important;
-  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 241, 242, 0.88) 100%) !important;
+  background-color: #FFF1F2 !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #FFF1F2 100%) !important;
   border-color: #FECDD3 !important;
 }
 
@@ -417,8 +440,8 @@ body.theme-pearl [class*="from-indigo-900"],
 body.theme-pearl [class*="to-indigo-950"],
 body.theme-pearl [class*="from-violet-950"],
 body.theme-pearl [class*="from-violet-900"] {
-  background-color: rgba(245, 243, 255, 0.88) !important;
-  background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(245, 243, 255, 0.88) 100%) !important;
+  background-color: #F5F3FF !important;
+  background-image: linear-gradient(145deg, #FFFFFF 0%, #F5F3FF 100%) !important;
   border-color: #DDD6FE !important;
 }
 
@@ -434,10 +457,10 @@ body.theme-pearl input:not([type="checkbox"]):not([type="radio"]),
 body.theme-pearl select,
 body.theme-pearl textarea,
 body.theme-pearl .glass-input {
-  background-color: rgba(255, 255, 255, 0.95) !important;
+  background-color: #FFFFFF !important;
   border: 1px solid #CBD5E1 !important;
   color: #0F172A !important;
-  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.03), inset 0 1px 0 0 rgba(255, 255, 255, 0.8);
+  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.03), inset 0 1px 0 0 #FFFFFF;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
@@ -462,8 +485,7 @@ table {
 }
 
 body.theme-pearl table th {
-  background-color: rgba(248, 250, 252, 0.96) !important;
-  backdrop-filter: blur(12px);
+  background-color: #F8FAFC !important;
   color: #334155 !important;
   border-color: #E2E8F0 !important;
   font-weight: 700;
@@ -477,11 +499,11 @@ body.theme-pearl table td {
 }
 
 body.theme-pearl table tbody tr {
-  transition: background-color 0.18s ease, transform 0.18s ease;
+  transition: background-color 0.18s ease;
 }
 
 body.theme-pearl table tbody tr:hover {
-  background-color: rgba(241, 245, 249, 0.78) !important;
+  background-color: #F1F5F9 !important;
 }
 
 /* Typography Hierarchy in Pearl White Glassy */
@@ -687,11 +709,7 @@ body.theme-pearl .from-red-600 * {
    ========================================================================== */
 button,
 [role="button"] {
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-button:active:not(:disabled) {
-  transform: scale(0.985);
+  transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn-charcoal-primary {
@@ -704,7 +722,6 @@ button:active:not(:disabled) {
 
 .btn-charcoal-primary:hover:not(:disabled) {
   background: linear-gradient(135deg, #334155 0%, #1E293B 100%);
-  transform: translateY(-1px);
   box-shadow: 0 10px 24px -4px rgba(15, 23, 42, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
 }
 
@@ -719,13 +736,12 @@ button:active:not(:disabled) {
 .btn-pearl-light:hover:not(:disabled) {
   background: #F8FAFC;
   border-color: #94A3B8;
-  transform: translateY(-0.5px);
 }
 
 .custom-scrollbar {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.38) transparent;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar,
@@ -741,13 +757,13 @@ button:active:not(:disabled) {
 
 .custom-scrollbar::-webkit-scrollbar-thumb,
 .overflow-x-auto::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.38);
+  background: rgba(148, 163, 184, 0.45);
   border-radius: 9999px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover,
 .overflow-x-auto::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.58);
+  background: rgba(100, 116, 139, 0.65);
 }
 
 .no-scrollbar {

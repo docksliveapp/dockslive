@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   X, MapPin, User, Phone, CreditCard, DollarSign, 
   CheckCircle, Shield, FileText, Save, AlertTriangle, Key, Lock, Check
@@ -11,7 +12,7 @@ interface DestinationStaffModalProps {
   isOpen: boolean;
   onClose: () => void;
   staffToEdit?: DestinationStaff | null;
-  onSaved?: () => void;
+  onSaved?: (savedStaff?: DestinationStaff, savedUser?: AppUser) => void;
 }
 
 export const COMMON_STATIONS = [
@@ -56,6 +57,7 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
     address: '',
     paymentType: 'MONTHLY_SALARY',
     baseRate: 40000,
+    defaultPerContainerCharge: 0,
     status: 'ACTIVE',
     notes: ''
   });
@@ -71,7 +73,8 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
   useEffect(() => {
     if (staffToEdit) {
       setFormData({
-        ...staffToEdit
+        ...staffToEdit,
+        defaultPerContainerCharge: Number(staffToEdit.defaultPerContainerCharge) || 0
       });
       setUserId(staffToEdit.userId || `DEST-${Date.now().toString().slice(-4)}`);
       setPassword(staffToEdit.password || 'dpl01234');
@@ -91,6 +94,7 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
         address: '',
         paymentType: 'MONTHLY_SALARY',
         baseRate: 40000,
+        defaultPerContainerCharge: 0,
         status: 'ACTIVE',
         notes: ''
       });
@@ -128,6 +132,7 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
         role: formData.role || 'Loading Agent',
         status: formData.status || 'ACTIVE',
         baseRate: Number(formData.baseRate) || 0,
+        defaultPerContainerCharge: Number(formData.defaultPerContainerCharge) || 0,
         userId: userId.trim(),
         password: password.trim(),
         loginEnabled: loginEnabled,
@@ -138,9 +143,10 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
 
       await saveDestinationStaffToFirestore(payload);
 
+      let createdAppUser: AppUser | undefined;
       if (loginEnabled && userId.trim() && password.trim()) {
         const primaryRole = assignedRoles[0] || UserRole.DESTINATION_PORT_STAFF;
-        const appUser: AppUser = {
+        createdAppUser = {
           id: Date.now() % 10000000,
           userId: userId.trim(),
           password: password.trim(),
@@ -148,16 +154,18 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
           role: primaryRole,
           roles: assignedRoles.length > 0 ? assignedRoles : [primaryRole],
           designation: `${formData.role || 'Port Staff'} (${formData.station || 'Station'})`,
+          assignedStation: formData.station || 'Karachi Port (KPT)',
           contact: formData.phone.trim(),
           email: `${userId.trim().toLowerCase()}@makgroup.com.pk`,
           status: formData.status === 'INACTIVE' ? 'SUSPENDED' : 'ACTIVE',
           allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage'],
-          baseSalary: Number(formData.baseRate) || 40000
+          baseSalary: Number(formData.baseRate) || 40000,
+          defaultPerContainerCharge: Number(formData.defaultPerContainerCharge) || 0
         };
-        await saveUserToFirestore(appUser);
+        await saveUserToFirestore(createdAppUser);
       }
 
-      if (onSaved) onSaved();
+      if (onSaved) onSaved(payload as DestinationStaff, createdAppUser);
       onClose();
     } catch (err: any) {
       console.error('Error saving destination staff:', err);
@@ -167,9 +175,9 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-md overflow-hidden animate-in fade-in duration-200">
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-white/15 rounded-3xl shadow-2xl max-h-[92vh] flex flex-col overflow-hidden">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200">
+      <div className="relative w-full max-w-3xl bg-slate-900 border border-white/15 rounded-3xl shadow-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[92dvh] my-auto flex flex-col overflow-hidden">
         
         {/* Header */}
         <div className="flex justify-between items-center p-4 sm:p-5 border-b border-white/10 bg-slate-900/95 backdrop-blur-md shrink-0">
@@ -356,6 +364,30 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
                 />
               </div>
 
+              {/* By Default Per Container Charges (Remittance to Karachi Head Office - Internal Company Transaction) */}
+              <div className="sm:col-span-2 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="text-amber-300 font-bold block text-xs">
+                      By Default Per Container Charges (PKR) — Payable to Karachi Head Office
+                    </label>
+                    <p className="text-[11px] text-gray-300 mt-0.5">
+                      Jitne container is destination staff ko assign honge, ye per-container charges automatically iske ledger mein add ho jayenge jo isne Karachi Head Office send karne honge (Internal Company Transaction).
+                    </p>
+                  </div>
+                  <div className="sm:w-52 shrink-0">
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="e.g. 5000"
+                      value={formData.defaultPerContainerCharge || ''}
+                      onChange={(e) => setFormData({ ...formData, defaultPerContainerCharge: Number(e.target.value) || 0 })}
+                      className="w-full glass-input rounded-xl p-2.5 bg-black/60 border border-amber-400/50 text-amber-300 font-mono font-black text-sm outline-none focus:border-amber-400"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="sm:col-span-2">
                 <label className="text-gray-300 font-medium block mb-1">Operational Notes / Special Duties</label>
                 <input 
@@ -444,6 +476,7 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

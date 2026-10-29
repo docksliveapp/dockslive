@@ -541,7 +541,26 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     }
   };
 
-  const getNotificationIcon = (n: AppNotification) => {
+  const formatRelativeTime = (n: AppNotification): string => {
+    const rawTime = (n as any).updatedAt || n.timestamp;
+    if (!rawTime) return 'Just now';
+    const parsed = new Date(rawTime).getTime();
+    if (!isNaN(parsed) && parsed > 0) {
+      const diffSec = Math.max(0, Math.floor((Date.now() - parsed) / 1000));
+      if (diffSec < 45) return 'Just now';
+      const diffMin = Math.floor(diffSec / 60);
+      if (diffMin < 60) return `${diffMin}m`;
+      const diffHr = Math.floor(diffMin / 60);
+      if (diffHr < 24) return `${diffHr}h`;
+      const diffDays = Math.floor(diffHr / 24);
+      if (diffDays === 1) return 'Yesterday';
+      if (diffDays < 7) return `${diffDays}d`;
+      return new Date(parsed).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    }
+    return String(n.timestamp || 'Recent');
+  };
+
+  const getNotificationAvatarStyle = (n: AppNotification) => {
     const subType = n.notificationSubType || '';
     const text = `${n.title || ''} ${n.description || ''} ${subType}`.toLowerCase();
 
@@ -556,28 +575,249 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       text.includes('noc') ||
       text.includes('veh_')
     ) {
-      return <Truck size={18} className="text-amber-500" />;
+      return {
+        bg: isPearl ? 'bg-amber-100 border-amber-200 text-amber-600' : 'bg-amber-500/20 border-amber-500/30 text-amber-400',
+        badgeBg: 'bg-amber-500',
+        icon: <Truck size={20} />
+      };
     }
 
     switch (subType) {
       case 'PAYMENT_APPROVAL':
+      case 'INVOICE_CHARGE_NOTIFICATION':
       case 'BUYING':
-        return <DollarSign size={18} className="text-emerald-500" />;
+        return {
+          bg: isPearl ? 'bg-emerald-100 border-emerald-200 text-emerald-600' : 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400',
+          badgeBg: 'bg-emerald-500',
+          icon: <DollarSign size={20} />
+        };
       case 'CLIENT_REGISTRATION_APPROVAL':
-        return <ShieldCheck size={18} className="text-purple-500" />;
+        return {
+          bg: isPearl ? 'bg-purple-100 border-purple-200 text-purple-600' : 'bg-purple-500/20 border-purple-500/30 text-purple-400',
+          badgeBg: 'bg-purple-500',
+          icon: <ShieldCheck size={20} />
+        };
       case 'WORKFLOW_TASK':
       case 'CASE_APPROVAL':
-        return <FileText size={18} className="text-sky-500" />;
+        return {
+          bg: isPearl ? 'bg-blue-100 border-blue-200 text-blue-600' : 'bg-blue-500/20 border-blue-500/30 text-blue-400',
+          badgeBg: 'bg-blue-500',
+          icon: <FileText size={20} />
+        };
       case 'FINANCE_RECORDED':
-        return <CheckCircle2 size={18} className="text-teal-500" />;
+        return {
+          bg: isPearl ? 'bg-teal-100 border-teal-200 text-teal-600' : 'bg-teal-500/20 border-teal-500/30 text-teal-400',
+          badgeBg: 'bg-teal-500',
+          icon: <CheckCircle2 size={20} />
+        };
       case 'DELETION_APPROVAL':
       case 'CANCELLATION_APPROVAL':
-        return <AlertTriangle size={18} className="text-rose-500" />;
+        return {
+          bg: isPearl ? 'bg-rose-100 border-rose-200 text-rose-600' : 'bg-rose-500/20 border-rose-500/30 text-rose-400',
+          badgeBg: 'bg-rose-500',
+          icon: <AlertTriangle size={20} />
+        };
       case 'EDIT_APPROVAL':
-        return <Info size={18} className="text-sky-500" />;
+        return {
+          bg: isPearl ? 'bg-sky-100 border-sky-200 text-sky-600' : 'bg-sky-500/20 border-sky-500/30 text-sky-400',
+          badgeBg: 'bg-sky-500',
+          icon: <Info size={20} />
+        };
       default:
-        return <Bell size={18} className="text-amber-500" />;
+        return {
+          bg: isPearl ? 'bg-blue-100 border-blue-200 text-blue-600' : 'bg-blue-500/20 border-blue-500/30 text-blue-400',
+          badgeBg: 'bg-blue-500',
+          icon: <Bell size={20} />
+        };
     }
+  };
+
+  const newNotifications = useMemo(
+    () => filteredNotifications.filter(n => n.status === 'PENDING'),
+    [filteredNotifications]
+  );
+
+  const earlierNotifications = useMemo(
+    () => filteredNotifications.filter(n => n.status !== 'PENDING'),
+    [filteredNotifications]
+  );
+
+  const renderNotificationRow = (n: AppNotification, idx: number) => {
+    const isPending = n.status === 'PENDING';
+    const avatarStyle = getNotificationAvatarStyle(n);
+    const isPaymentApproval =
+      n.notificationSubType === 'PAYMENT_APPROVAL' ||
+      n.approvalData?.actionType === 'VERIFY_PAYMENT';
+
+    const isApproval =
+      isPaymentApproval ||
+      n.notificationSubType === 'URGENT_PAYABLE_APPROVAL' ||
+      n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
+      n.notificationSubType === 'CASE_APPROVAL' ||
+      n.notificationSubType === 'DELETION_APPROVAL' ||
+      n.notificationSubType === 'CANCELLATION_APPROVAL' ||
+      n.notificationSubType === 'EDIT_APPROVAL' ||
+      n.approvalData?.actionType === 'APPROVE_URGENT_PAYABLE' ||
+      n.approvalData?.actionType === 'APPROVE_NOC' ||
+      n.approvalData?.actionType === 'APPROVE_CLIENT';
+
+    return (
+      <div
+        key={`live_notif_${n.id || idx}_${idx}`}
+        onClick={() => handleCardClick(n)}
+        className={`group relative flex items-start gap-3.5 px-3.5 py-3 rounded-2xl transition-all cursor-pointer select-none ${
+          isPearl
+            ? isPending
+              ? 'bg-blue-50/80 hover:bg-blue-100/70'
+              : 'bg-transparent hover:bg-slate-100/90'
+            : isPending
+              ? 'bg-blue-500/10 hover:bg-blue-500/15'
+              : 'bg-transparent hover:bg-white/[0.06]'
+        }`}
+      >
+        {/* Left Avatar Circle with Category Mini-Badge (Facebook/Instagram style) */}
+        <div className="relative shrink-0 mt-0.5">
+          <div className={`w-12 h-12 rounded-full border flex items-center justify-center shadow-xs ${avatarStyle.bg}`}>
+            {avatarStyle.icon}
+          </div>
+          <span
+            className={`absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full ${avatarStyle.badgeBg} text-white flex items-center justify-center ring-2 ${
+              isPearl ? 'ring-white' : 'ring-slate-900'
+            }`}
+          >
+            <Bell size={10} />
+          </span>
+        </div>
+
+        {/* Center Notification Text + Inline Actions */}
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] leading-snug">
+            <span className={`font-bold ${isPearl ? 'text-slate-900' : 'text-white'}`}>
+              {n.title}
+            </span>
+            {n.description && (
+              <span className={`block mt-0.5 text-xs leading-relaxed line-clamp-2 ${
+                isPearl ? 'text-slate-600' : 'text-slate-300'
+              }`}>
+                {n.description}
+              </span>
+            )}
+          </div>
+
+          {/* Meta Row: Relative Time & Entity Tags */}
+          <div className="flex items-center flex-wrap gap-2 mt-1.5">
+            <span className={`text-[11px] font-bold ${
+              isPending
+                ? (isPearl ? 'text-blue-600' : 'text-blue-400')
+                : (isPearl ? 'text-slate-400' : 'text-slate-500')
+            }`}>
+              {formatRelativeTime(n)}
+            </span>
+
+            {n.targetFilter?.caseNo && (
+              <span className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md border ${
+                isPearl ? 'bg-white text-slate-700 border-slate-200' : 'bg-white/5 text-slate-300 border-white/10'
+              }`}>
+                Case #{n.targetFilter.caseNo}
+              </span>
+            )}
+            {n.targetFilter?.vehicleNo && (
+              <span className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md border ${
+                isPearl ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+              }`}>
+                {n.targetFilter.vehicleNo}
+              </span>
+            )}
+          </div>
+
+          {/* Facebook/Instagram Style Inline Action Buttons */}
+          {(isApproval && isPending) || n.targetView || n.targetFilter?.caseNo ? (
+            <div className="flex items-center flex-wrap gap-2 mt-2.5">
+              {isApproval && isPending && (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => handleQuickApprove(n, e)}
+                    style={{ backgroundColor: '#2563eb', color: '#ffffff' }}
+                    className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                  >
+                    <Check size={13} />
+                    <span>{isPaymentApproval ? 'Verify Payment' : 'Confirm / Approve'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleQuickReject(n, e)}
+                    className={`px-3.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1 transition cursor-pointer ${
+                      isPearl
+                        ? 'bg-slate-200 hover:bg-slate-300 text-slate-800'
+                        : 'bg-white/10 hover:bg-white/20 text-slate-200'
+                    }`}
+                  >
+                    <X size={13} />
+                    <span>Delete / Reject</span>
+                  </button>
+                </>
+              )}
+              {(n.targetView || n.targetFilter?.caseNo) && !(isApproval && isPending) && (
+                <button
+                  type="button"
+                  onClick={(e) => handleDirectNavigate(n, e)}
+                  className={`px-3 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer ${
+                    isPearl
+                      ? 'bg-slate-200/80 hover:bg-slate-300/80 text-slate-800'
+                      : 'bg-white/10 hover:bg-white/15 text-slate-200'
+                  }`}
+                >
+                  <span>{n.actionLabel || 'View Details'}</span>
+                  <ArrowRight size={11} />
+                </button>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Right Side Unread Dot + Hover Quick Actions */}
+        <div className="flex flex-col items-end justify-between gap-2 shrink-0 self-center">
+          {isPending ? (
+            <span
+              className="w-2.5 h-2.5 rounded-full bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.6)] shrink-0"
+              title="Unread notification"
+            />
+          ) : (
+            <span className="w-2.5 h-2.5 shrink-0" />
+          )}
+
+          <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+            {isPending && (
+              <button
+                type="button"
+                onClick={(e) => handleMarkAsRead(n, e)}
+                className={`p-1 rounded-lg transition cursor-pointer ${
+                  isPearl
+                    ? 'text-slate-400 hover:text-blue-600 hover:bg-white'
+                    : 'text-slate-400 hover:text-blue-400 hover:bg-white/10'
+                }`}
+                title="Mark as Read"
+              >
+                <Check size={14} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={(e) => handleDeleteNotification(n, e)}
+              className={`p-1 rounded-lg transition cursor-pointer ${
+                isPearl
+                  ? 'text-slate-400 hover:text-rose-600 hover:bg-white'
+                  : 'text-slate-400 hover:text-rose-400 hover:bg-white/10'
+              }`}
+              title="Remove notification"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -612,61 +852,51 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
         )}
       </button>
 
-      {/* Clean, Spacious Notification Center Dialog */}
+      {/* Facebook / Instagram Style Anchored Notification Popover Drawer */}
       {isOpen && typeof document !== 'undefined' && createPortal(
         <div 
-          className="fixed inset-0 z-[99990] flex items-center justify-center p-3 sm:p-6 bg-black/65 backdrop-blur-xs animate-fade-in"
+          className="fixed inset-0 z-[99990] flex items-start justify-end pt-14 sm:pt-16 px-2 sm:px-5 pb-4 bg-black/30 backdrop-blur-[2px] animate-fade-in"
           style={{ isolation: 'isolate' }}
           onClick={() => setIsOpen(false)}
         >
           <div 
-            className={`w-full max-w-2xl max-h-[86vh] rounded-3xl shadow-2xl border flex flex-col overflow-hidden transition-colors duration-200 ${
+            className={`w-full sm:w-[420px] md:w-[440px] max-h-[calc(100dvh-4.5rem)] rounded-3xl shadow-2xl border flex flex-col overflow-hidden transition-all duration-200 ${
               isPearl 
-                ? 'bg-white text-slate-900 border-slate-200' 
-                : 'bg-slate-900 text-slate-100 border-slate-700/80'
+                ? 'bg-white text-slate-900 border-slate-200/90 shadow-[0_20px_60px_rgba(15,23,42,0.22)]' 
+                : 'bg-[#18191A] text-slate-100 border-white/15 shadow-[0_20px_60px_rgba(0,0,0,0.75)]'
             }`}
-            style={{ isolation: 'isolate' }}
+            style={{ isolation: 'isolate', marginTop: 0, marginBottom: 'auto' }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Clean Header */}
-            <div className={`px-5 py-4 border-b flex items-center justify-between shrink-0 ${
-              isPearl ? 'border-slate-200 bg-slate-50' : 'border-slate-800 bg-slate-950'
-            }`}>
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                  isPearl 
-                    ? 'bg-amber-100 text-amber-700 border border-amber-300/60' 
-                    : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                }`}>
-                  <Bell size={20} />
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <h3 className={`text-base sm:text-lg font-bold ${isPearl ? 'text-slate-900' : 'text-white'}`}>
-                    Notifications
-                  </h3>
-                  {unreadCount > 0 && (
-                    <span 
-                      style={{ backgroundColor: '#e11d48', color: '#ffffff' }}
-                      className="text-xs font-bold px-2.5 py-0.5 rounded-full"
-                    >
-                      {unreadCount} New
-                    </span>
-                  )}
-                </div>
+            {/* Top Header (Facebook "Notifications" Header) */}
+            <div className="px-4 pt-4 pb-2.5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <h3 className={`text-xl font-extrabold tracking-tight ${isPearl ? 'text-slate-900' : 'text-white'}`}>
+                  Notifications
+                </h3>
+                {unreadCount > 0 && (
+                  <span 
+                    style={{ backgroundColor: '#e11d48', color: '#ffffff' }}
+                    className="text-[11px] font-extrabold px-2 py-0.5 rounded-full"
+                  >
+                    {unreadCount}
+                  </span>
+                )}
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
                 {unreadCount > 0 && (
                   <button
                     type="button"
                     onClick={handleMarkAllRead}
-                    className={`text-xs font-semibold px-3 py-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1.5 ${
+                    className={`text-xs font-bold px-2.5 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1 ${
                       isPearl 
-                        ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100' 
-                        : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
+                        ? 'text-blue-600 hover:bg-blue-50' 
+                        : 'text-blue-400 hover:bg-white/10'
                     }`}
+                    title="Mark all as read"
                   >
-                    <CheckCheck size={14} className="text-emerald-500" />
+                    <CheckCheck size={15} />
                     <span>Mark all read</span>
                   </button>
                 )}
@@ -674,258 +904,117 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                   <button
                     type="button"
                     onClick={handleClearAllNotifications}
-                    className={`text-xs font-semibold px-3 py-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1.5 ${
+                    className={`p-1.5 rounded-xl transition cursor-pointer ${
                       isPearl 
-                        ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100' 
-                        : 'bg-rose-500/10 border-rose-500/25 text-rose-300 hover:bg-rose-500/20'
+                        ? 'text-slate-500 hover:text-rose-600 hover:bg-rose-50' 
+                        : 'text-slate-400 hover:text-rose-400 hover:bg-white/10'
                     }`}
                     title="Clear all notifications"
                   >
-                    <Trash2 size={14} />
-                    <span>Clear all</span>
+                    <Trash2 size={16} />
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
-                  className={`p-2 rounded-xl transition cursor-pointer ${
+                  className={`p-1.5 rounded-xl transition cursor-pointer ${
                     isPearl 
-                      ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/70' 
+                      ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-100' 
                       : 'text-slate-400 hover:text-white hover:bg-white/10'
                   }`}
                   aria-label="Close"
                 >
-                  <X size={20} />
+                  <X size={18} />
                 </button>
               </div>
             </div>
 
-            {/* Simple Filter Tabs */}
-            <div className={`px-5 py-3 border-b flex items-center gap-2 shrink-0 select-none ${
-              isPearl ? 'border-slate-200 bg-white' : 'border-slate-800 bg-slate-900'
-            }`}>
+            {/* Filter Pills (Facebook Style: All | Unread | Approvals) */}
+            <div className="px-4 pb-3 flex items-center gap-2 shrink-0 select-none border-b border-slate-200/70 dark:border-white/10">
               <button
                 type="button"
                 onClick={() => setActiveFilter('ALL')}
-                className={`py-2 px-4 rounded-xl text-xs font-bold transition cursor-pointer ${
+                className={`py-1.5 px-3.5 rounded-full text-xs font-bold transition cursor-pointer ${
                   activeFilter === 'ALL'
-                    ? 'bg-amber-500 text-slate-950 shadow-xs'
-                    : (isPearl ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10')
+                    ? (isPearl ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/25 text-blue-300')
+                    : (isPearl ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-white/10 text-slate-300 hover:bg-white/15')
                 }`}
               >
-                All ({relevantNotifications.length})
+                All
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveFilter('UNREAD')}
-                className={`py-2 px-4 rounded-xl text-xs font-bold transition cursor-pointer ${
+                className={`py-1.5 px-3.5 rounded-full text-xs font-bold transition cursor-pointer ${
                   activeFilter === 'UNREAD'
-                    ? 'bg-amber-500 text-slate-950 shadow-xs'
-                    : (isPearl ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10')
+                    ? (isPearl ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/25 text-blue-300')
+                    : (isPearl ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-white/10 text-slate-300 hover:bg-white/15')
                 }`}
               >
-                Unread ({unreadCount})
+                Unread {unreadCount > 0 ? `(${unreadCount})` : ''}
               </button>
 
               {currentRole !== UserRole.CLIENT && (
                 <button
                   type="button"
                   onClick={() => setActiveFilter('APPROVALS')}
-                  className={`py-2 px-4 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  className={`py-1.5 px-3.5 rounded-full text-xs font-bold transition cursor-pointer ${
                     activeFilter === 'APPROVALS'
-                      ? 'bg-amber-500 text-slate-950 shadow-xs'
-                      : (isPearl ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10')
+                      ? (isPearl ? 'bg-blue-100 text-blue-700' : 'bg-blue-500/25 text-blue-300')
+                      : (isPearl ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-white/10 text-slate-300 hover:bg-white/15')
                   }`}
                 >
-                  Approvals ({pendingApprovalsCount})
+                  Approvals {pendingApprovalsCount > 0 ? `(${pendingApprovalsCount})` : ''}
                 </button>
               )}
             </div>
 
-            {/* Spacious, Uncluttered Notifications List */}
-            <div className={`flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 custom-scrollbar ${
-              isPearl ? 'bg-slate-50/70' : 'bg-slate-950/60'
-            }`}>
+            {/* Scrollable Feed Grouped into "New" and "Earlier" */}
+            <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1 custom-scrollbar overscroll-contain">
               {filteredNotifications.length === 0 ? (
-                <div className="py-16 flex flex-col items-center justify-center text-center px-4">
-                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border mb-3 ${
-                    isPearl ? 'bg-white border-slate-200' : 'bg-white/5 border-white/10'
+                <div className="py-14 flex flex-col items-center justify-center text-center px-6">
+                  <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-3 ${
+                    isPearl ? 'bg-slate-100 text-slate-400' : 'bg-white/5 text-slate-500'
                   }`}>
-                    <CheckCircle2 size={26} className="text-emerald-500" />
+                    <Bell size={26} />
                   </div>
                   <h4 className={`text-sm font-bold ${isPearl ? 'text-slate-800' : 'text-slate-200'}`}>
-                    No notifications
+                    You have no notifications
                   </h4>
-                  <p className={`text-xs mt-1 ${isPearl ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <p className={`text-xs mt-1 leading-relaxed ${isPearl ? 'text-slate-500' : 'text-slate-400'}`}>
                     {activeFilter === 'UNREAD' 
-                      ? 'You have no unread notifications.' 
-                      : 'Nothing to show right now.'}
+                      ? 'You are all caught up! No unread notifications.' 
+                      : 'Live updates from cases, vehicles, payments, and approvals will appear here automatically.'}
                   </p>
                 </div>
               ) : (
-                filteredNotifications.map((n, idx) => {
-                  const isPending = n.status === 'PENDING';
-                  const isPaymentApproval = 
-                    n.notificationSubType === 'PAYMENT_APPROVAL' ||
-                    n.approvalData?.actionType === 'VERIFY_PAYMENT';
-
-                  const isApproval = 
-                    isPaymentApproval ||
-                    n.notificationSubType === 'URGENT_PAYABLE_APPROVAL' ||
-                    n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
-                    n.notificationSubType === 'CASE_APPROVAL' ||
-                    n.notificationSubType === 'DELETION_APPROVAL' ||
-                    n.notificationSubType === 'CANCELLATION_APPROVAL' ||
-                    n.notificationSubType === 'EDIT_APPROVAL' ||
-                    n.approvalData?.actionType === 'APPROVE_URGENT_PAYABLE' ||
-                    n.approvalData?.actionType === 'APPROVE_NOC' ||
-                    n.approvalData?.actionType === 'APPROVE_CLIENT';
-
-                  return (
-                    <div 
-                      key={`live_notif_${n.id || idx}_${idx}`}
-                      onClick={() => handleCardClick(n)}
-                      className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-                        isPearl
-                          ? isPending
-                            ? 'bg-white border-amber-300 shadow-xs hover:border-amber-400'
-                            : 'bg-white/80 border-slate-200 hover:bg-white opacity-80'
-                          : isPending
-                            ? 'bg-slate-900 border-amber-500/35 hover:border-amber-400/60'
-                            : 'bg-slate-900/50 border-white/10 hover:bg-slate-900 opacity-75'
-                      }`}
-                    >
-                      <div className="flex items-start gap-3.5">
-                        {/* Icon */}
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border mt-0.5 ${
-                          isPearl
-                            ? 'bg-slate-50 border-slate-200'
-                            : 'bg-white/5 border-white/10'
-                        }`}>
-                          {getNotificationIcon(n)}
-                        </div>
-
-                        {/* Content */}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-center gap-2 min-w-0">
-                              {isPending && (
-                                <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
-                              )}
-                              <h4 className={`text-sm font-bold leading-snug ${
-                                isPearl ? 'text-slate-900' : 'text-white'
-                              }`}>
-                                {n.title}
-                              </h4>
-                            </div>
-
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <span className={`text-[11px] whitespace-nowrap ${
-                                isPearl ? 'text-slate-500' : 'text-slate-400'
-                              }`}>
-                                {n.timestamp || 'Recent'}
-                              </span>
-                              {isPending && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleMarkAsRead(n, e)}
-                                  className={`p-1 rounded-lg transition cursor-pointer ${
-                                    isPearl 
-                                      ? 'text-slate-400 hover:text-emerald-600 hover:bg-slate-100' 
-                                      : 'text-slate-400 hover:text-emerald-400 hover:bg-white/10'
-                                  }`}
-                                  title="Mark as Read"
-                                >
-                                  <Check size={15} />
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={(e) => handleDeleteNotification(n, e)}
-                                className={`p-1 rounded-lg transition cursor-pointer ${
-                                  isPearl 
-                                    ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50' 
-                                    : 'text-slate-400 hover:text-rose-400 hover:bg-rose-500/10'
-                                }`}
-                                title="Delete Notification"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </div>
-
-                          {n.description && (
-                            <p className={`text-xs mt-1 leading-relaxed line-clamp-2 ${
-                              isPearl ? 'text-slate-600' : 'text-slate-300'
-                            }`}>
-                              {n.description}
-                            </p>
-                          )}
-
-                          {/* Action Buttons Footer */}
-                          <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-200/60 dark:border-white/10 flex-wrap">
-                            <div className="flex items-center gap-2">
-                              {n.targetFilter?.caseNo && (
-                                <span className={`text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-lg border ${
-                                  isPearl ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-white/5 text-slate-300 border-white/10'
-                                }`}>
-                                  Case: {n.targetFilter.caseNo}
-                                </span>
-                              )}
-                              {n.targetFilter?.vehicleNo && (
-                                <span className={`text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-lg border ${
-                                  isPearl ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-amber-500/10 text-amber-300 border-amber-500/20'
-                                }`}>
-                                  Vehicle: {n.targetFilter.vehicleNo}
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-2 ml-auto">
-                              {isApproval && isPending && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => handleQuickApprove(n, e)}
-                                    style={{ backgroundColor: '#059669', color: '#ffffff' }}
-                                    className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 transition cursor-pointer"
-                                  >
-                                    <Check size={13} />
-                                    <span>{isPaymentApproval ? 'Verify' : 'Approve'}</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => handleQuickReject(n, e)}
-                                    style={{ backgroundColor: '#e11d48', color: '#ffffff' }}
-                                    className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1 transition cursor-pointer"
-                                  >
-                                    <X size={13} />
-                                    <span>Reject</span>
-                                  </button>
-                                </>
-                              )}
-                              {(n.targetView || n.targetFilter?.caseNo) && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleDirectNavigate(n, e)}
-                                  className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1 border transition cursor-pointer ${
-                                    isPearl
-                                      ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
-                                      : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/25'
-                                  }`}
-                                >
-                                  <span>{n.actionLabel || 'Open'}</span>
-                                  <ArrowRight size={12} />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+                <>
+                  {newNotifications.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="px-3 pt-2 pb-1 flex items-center justify-between">
+                        <span className={`text-sm font-extrabold ${isPearl ? 'text-slate-900' : 'text-white'}`}>
+                          New
+                        </span>
+                        <span className={`text-[11px] font-semibold ${isPearl ? 'text-blue-600' : 'text-blue-400'}`}>
+                          {newNotifications.length} unread
+                        </span>
                       </div>
+                      {newNotifications.map((n, idx) => renderNotificationRow(n, idx))}
                     </div>
-                  );
-                })
+                  )}
+
+                  {earlierNotifications.length > 0 && (
+                    <div className="space-y-1 pt-2">
+                      <div className="px-3 pt-1 pb-1 flex items-center justify-between">
+                        <span className={`text-sm font-extrabold ${isPearl ? 'text-slate-900' : 'text-white'}`}>
+                          Earlier
+                        </span>
+                      </div>
+                      {earlierNotifications.map((n, idx) => renderNotificationRow(n, idx + 1000))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

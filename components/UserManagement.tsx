@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Users, UserPlus, Briefcase, Truck, Edit, Trash2, Key, Save, X, CheckCircle, 
   AlertTriangle, Eye, FileText, CreditCard, ChevronRight, Calendar, DollarSign, 
@@ -25,13 +26,14 @@ import {
   subscribeToCases, 
   subscribeToFinances, 
   DEFAULT_DATABASE_USERS,
-  syncMonthlyStaffSalariesToPayables 
+  syncMonthlyStaffSalariesToPayables,
+  syncDestinationStaffContainerCharges
 } from '../services/dbService';
 
 import { ClientRegistrationModal } from './ClientRegistrationModal';
 import { StaffLedgerModal } from './StaffLedgerModal';
 import { ClientLedgerModal } from './ClientLedgerModal';
-import { DestinationStaffModal } from './DestinationStaffModal';
+import { DestinationStaffModal, COMMON_STATIONS } from './DestinationStaffModal';
 import { AdminRolesAndPrivilegesTable } from './AdminRolesAndPrivilegesTable';
 import { useActiveCompany } from '../services/companyService';
 
@@ -57,9 +59,14 @@ const UserManagement: React.FC = () => {
   }, [activeTab]);
 
   // Live state from Firestore subscriptions
-  const [users, setUsers] = useState<AppUser[]>(DEFAULT_DATABASE_USERS);
+  const [users, setUsers] = useState<AppUser[]>(() => {
+    const cached = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []);
+    return cached && cached.length > 0 ? cached : DEFAULT_DATABASE_USERS;
+  });
   const [clientsList, setClientsList] = useState<Client[]>([]);
-  const [destinationStaffList, setDestinationStaffList] = useState<DestinationStaff[]>([]);
+  const [destinationStaffList, setDestinationStaffList] = useState<DestinationStaff[]>(() => {
+    return safeAppStorage.getJSON<DestinationStaff[]>('dpl_destination_staff', []);
+  });
   const [staffLedgerEntries, setStaffLedgerEntries] = useState<StaffLedgerEntry[]>([]);
   const [casesList, setCasesList] = useState<Case[]>([]);
   const [financesList, setFinancesList] = useState<FinanceEntry[]>([]);
@@ -70,6 +77,9 @@ const UserManagement: React.FC = () => {
       if (data && data.length > 0) {
         setUsers(data);
         syncMonthlyStaffSalariesToPayables(data).catch(() => {});
+        if (data.some(u => Number(u.defaultPerContainerCharge) > 0)) {
+          syncDestinationStaffContainerCharges({ users: data }).catch(() => {});
+        }
       }
     });
 
@@ -133,6 +143,8 @@ const UserManagement: React.FC = () => {
     type: 'USER' | 'CLIENT' | 'DESTINATION';
     id: string | number;
     name: string;
+    docId?: string;
+    userLoginId?: string;
   } | null>(null);
 
   // Form State for Staff & Transporter/Broker
@@ -143,6 +155,8 @@ const UserManagement: React.FC = () => {
     role: '' as UserRole | '',
     roles: [] as UserRole[],
     designation: '',
+    assignedStation: '',
+    defaultPerContainerCharge: 0,
     generatedId: '',
     generatedPass: '',
     profilePicture: '',
@@ -211,7 +225,7 @@ const UserManagement: React.FC = () => {
     const generatedId = `${prefix}${nextNum.toString().padStart(4, '0')}`;
     const generatedPass = Math.random().toString(36).slice(-8).toUpperCase();
 
-    const finalRoles = defaultRolesOverride || (roleType === 'TRANSPORTER' ? [UserRole.TRANSPORTER] : [UserRole.OPERATIONS_MANAGER]);
+    const finalRoles = defaultRolesOverride || (roleType === 'TRANSPORTER' ? [UserRole.TRANSPORTER] : [UserRole.OFFICE_STAFF]);
     const finalRole = finalRoles[0];
 
     setFormData({
@@ -221,6 +235,8 @@ const UserManagement: React.FC = () => {
       role: finalRole,
       roles: finalRoles,
       designation: roleType === 'STAFF' && defaultRolesOverride?.includes(UserRole.UNLOADING_PORT_STAFF) ? 'Destination Representative' : '',
+      assignedStation: defaultRolesOverride?.includes(UserRole.UNLOADING_PORT_STAFF) ? 'Lahore Dry Port (Prem Nagar)' : '',
+      defaultPerContainerCharge: 0,
       generatedId,
       generatedPass,
       profilePicture: '',
@@ -235,8 +251,8 @@ const UserManagement: React.FC = () => {
       allowanceFuel: 5000,
       allowanceInternet: 2000,
       loansAdvances: 0,
-      allowedCompanies: [activeCompany?.id || 'docks'],
-      allCompaniesAccess: false,
+      allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage'],
+      allCompaniesAccess: true,
       isGlobalAdmin: false,
       representativeName: '',
       fleetSize: 1,
@@ -271,6 +287,8 @@ const UserManagement: React.FC = () => {
       role: user.role,
       roles: userRoles,
       designation: user.designation || '',
+      assignedStation: user.assignedStation || '',
+      defaultPerContainerCharge: Number(user.defaultPerContainerCharge) || 0,
       generatedId: user.userId || '',
       generatedPass: user.password || '',
       profilePicture: user.profilePicture || '',
@@ -329,6 +347,8 @@ const UserManagement: React.FC = () => {
         role: primaryRole as UserRole,
         roles: assignedRoles as UserRole[],
         designation: formData.designation.trim(),
+        assignedStation: formData.assignedStation || undefined,
+        defaultPerContainerCharge: Number(formData.defaultPerContainerCharge) || 0,
         status: formData.status || 'ACTIVE',
         isSuspended: formData.status === 'SUSPENDED',
         isAdmin: assignedRoles.includes(UserRole.ADMIN),
@@ -361,9 +381,13 @@ const UserManagement: React.FC = () => {
         } : {})
       } as any;
 
-      setUsers(prev => prev.map(u => String(u.id) === String(editingId) ? updatedUser : u));
+      const nextUsers = users.map(u => String(u.id) === String(editingId) ? updatedUser : u);
+      setUsers(nextUsers);
       try {
         await saveUserToFirestore(updatedUser);
+        if (Number(updatedUser.defaultPerContainerCharge) > 0) {
+          await syncDestinationStaffContainerCharges({ users: nextUsers, cases: casesList, destinationStaff: destinationStaffList });
+        }
       } catch (err) {
         console.warn("Notice: User saved locally", err);
       }
@@ -376,6 +400,8 @@ const UserManagement: React.FC = () => {
         role: primaryRole as UserRole,
         roles: assignedRoles as UserRole[],
         designation: formData.designation.trim(),
+        assignedStation: formData.assignedStation || undefined,
+        defaultPerContainerCharge: Number(formData.defaultPerContainerCharge) || 0,
         status: formData.status || 'ACTIVE',
         isSuspended: formData.status === 'SUSPENDED',
         isAdmin: assignedRoles.includes(UserRole.ADMIN),
@@ -408,9 +434,13 @@ const UserManagement: React.FC = () => {
         } : {})
       } as any;
 
-      setUsers(prev => [...prev, newUser]);
+      const nextUsers = [...users, newUser];
+      setUsers(nextUsers);
       try {
         await saveUserToFirestore(newUser);
+        if (Number(newUser.defaultPerContainerCharge) > 0) {
+          await syncDestinationStaffContainerCharges({ users: nextUsers, cases: casesList, destinationStaff: destinationStaffList });
+        }
       } catch (err) {
         console.warn("Notice: User saved locally", err);
       }
@@ -424,8 +454,16 @@ const UserManagement: React.FC = () => {
 
     try {
       if (deleteTarget.type === 'USER') {
-        setUsers(users.filter(u => String(u.id) !== String(deleteTarget.id)));
-        await deleteUserFromFirestore(deleteTarget.id);
+        setUsers(prev => prev.filter(u => {
+          if (deleteTarget.docId && (u as any)._docId) {
+            return String((u as any)._docId) !== String(deleteTarget.docId);
+          }
+          if (deleteTarget.userLoginId && u.userId) {
+            return u.userId.toLowerCase() !== deleteTarget.userLoginId.toLowerCase();
+          }
+          return String(u.id) !== String(deleteTarget.id);
+        }));
+        await deleteUserFromFirestore(deleteTarget.id, deleteTarget.docId, deleteTarget.userLoginId);
       } else if (deleteTarget.type === 'CLIENT') {
         setClientsList(prev => prev.filter(c => (c.id || c.name) !== deleteTarget.id));
         await deleteClientFromFirestore(String(deleteTarget.id));
@@ -480,7 +518,7 @@ const UserManagement: React.FC = () => {
 
   // User Scope & Authority: Check whether current logged-in session is a Group Super Admin or Company Admin
   const isCurrentUserGlobalAdmin = safeAppStorage.getItem('dpl_is_global_admin') === 'true';
-  const [showAllGroupStaff, setShowAllGroupStaff] = useState(false);
+  const [showAllGroupStaff, setShowAllGroupStaff] = useState(true);
 
   // Helper to test if a user has access / belongs to the active company
   const userBelongsToCompany = (u: AppUser, targetCompanyId: string) => {
@@ -546,9 +584,14 @@ const UserManagement: React.FC = () => {
   });
 
   const baseDestinationUsers = users.filter(u => 
+    u.role === UserRole.LOADING_PORT_STAFF ||
     u.role === UserRole.UNLOADING_PORT_STAFF || 
     u.role === UserRole.DESTINATION_PORT_STAFF ||
-    (u.roles && (u.roles.includes(UserRole.UNLOADING_PORT_STAFF) || u.roles.includes(UserRole.DESTINATION_PORT_STAFF)))
+    (u.roles && (
+      u.roles.includes(UserRole.LOADING_PORT_STAFF) ||
+      u.roles.includes(UserRole.UNLOADING_PORT_STAFF) || 
+      u.roles.includes(UserRole.DESTINATION_PORT_STAFF)
+    ))
   );
 
   const destinationUsers = (isCurrentUserGlobalAdmin && showAllGroupStaff)
@@ -572,7 +615,7 @@ const UserManagement: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6 animate-fade-in pb-12 font-sans w-full max-w-full min-w-0 overflow-x-hidden">
+    <div className="space-y-4 sm:space-y-6 animate-fade-in pb-12 font-sans w-full max-w-full min-w-0">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4">
         <div>
@@ -851,13 +894,15 @@ const UserManagement: React.FC = () => {
                     >
                       <Edit size={14} />
                     </button>
-                    <button 
-                      onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name })}
-                      className="text-gray-400 hover:text-red-400 p-2 rounded-xl bg-white/5 hover:bg-red-500/10 transition-colors"
-                      title="Delete Staff"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    {Number(user.id) !== 1 && (user.userId || '').toLowerCase() !== 'arbabkhanboby' && (
+                      <button 
+                        onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name, docId: (user as any)._docId, userLoginId: user.userId })}
+                        className="text-gray-400 hover:text-red-400 p-2 rounded-xl bg-white/5 hover:bg-red-500/10 transition-colors"
+                        title="Delete Staff"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -970,13 +1015,15 @@ const UserManagement: React.FC = () => {
                           >
                             <Edit size={15} />
                           </button>
-                          <button 
-                            onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name })}
-                            className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 transition-colors"
-                            title="Delete User"
-                          >
-                            <Trash2 size={15} />
-                          </button>
+                          {Number(user.id) !== 1 && (user.userId || '').toLowerCase() !== 'arbabkhanboby' && (
+                            <button 
+                              onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name, docId: (user as any)._docId, userLoginId: user.userId })}
+                              className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 transition-colors"
+                              title="Delete User"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1288,7 +1335,7 @@ const UserManagement: React.FC = () => {
                       <Edit size={14} />
                     </button>
                     <button 
-                      onClick={() => setDeleteTarget({ type: 'USER', id: trans.id, name: trans.name })}
+                      onClick={() => setDeleteTarget({ type: 'USER', id: trans.id, name: trans.name, docId: (trans as any)._docId, userLoginId: trans.userId })}
                       className="text-gray-400 hover:text-red-400 p-1.5 rounded-xl bg-white/5 hover:bg-red-500/10 transition-colors"
                       title="Delete Transporter / Broker"
                     >
@@ -1365,7 +1412,7 @@ const UserManagement: React.FC = () => {
                             <Edit size={15} />
                           </button>
                           <button 
-                            onClick={() => setDeleteTarget({ type: 'USER', id: trans.id, name: trans.name })}
+                            onClick={() => setDeleteTarget({ type: 'USER', id: trans.id, name: trans.name, docId: (trans as any)._docId, userLoginId: trans.userId })}
                             className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 transition-colors"
                             title="Delete Transporter / Broker"
                           >
@@ -1699,7 +1746,7 @@ const UserManagement: React.FC = () => {
                         <Edit size={13} />
                       </button>
                       <button 
-                        onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name })}
+                        onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name, docId: (user as any)._docId, userLoginId: user.userId })}
                         className="text-gray-400 hover:text-red-400 p-1.5 rounded-xl bg-white/5 hover:bg-red-500/10 transition-colors"
                         title="Delete Staff"
                       >
@@ -1801,7 +1848,7 @@ const UserManagement: React.FC = () => {
                                 <Edit size={15} />
                               </button>
                               <button 
-                                onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name })}
+                                onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name, docId: (user as any)._docId, userLoginId: user.userId })}
                                 className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 transition-colors"
                                 title="Delete Staff"
                               >
@@ -1823,9 +1870,9 @@ const UserManagement: React.FC = () => {
       {/* ========================================================================= */}
       {/* ONBOARDING ROLE SELECTOR MODAL */}
       {/* ========================================================================= */}
-      {showRoleSelectorModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-start justify-center z-50 pt-3 sm:pt-6 pb-6 px-3 sm:px-4 overflow-y-auto animate-in fade-in duration-150">
-          <div className="glass-card p-6 sm:p-8 rounded-3xl w-full max-w-xl border border-white/15 shadow-2xl space-y-5 bg-slate-900 mb-6">
+      {showRoleSelectorModal && createPortal(
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-[9999] p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="glass-card p-6 sm:p-8 rounded-3xl w-full max-w-xl border border-white/15 shadow-2xl space-y-5 bg-slate-900 my-auto">
             <div className="flex justify-between items-center border-b border-white/10 pb-3">
               <div>
                 <span className="text-[10px] font-mono uppercase tracking-widest text-brand-400 font-bold">Directory Setup</span>
@@ -1922,16 +1969,17 @@ const UserManagement: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ========================================================================= */}
       {/* STAFF & TRANSPORTER FORM MODAL */}
       {/* ========================================================================= */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-2 sm:p-4 overflow-hidden animate-in fade-in duration-150">
-          <div className="glass-card rounded-3xl w-full max-w-3xl border border-white/15 shadow-2xl max-h-[92vh] flex flex-col bg-slate-900 overflow-hidden">
-            <div className="flex justify-between items-center p-4 sm:p-5 border-b border-white/10 bg-slate-900/95 backdrop-blur-md shrink-0">
+      {showModal && createPortal(
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-[9999] p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="glass-card rounded-3xl w-full max-w-4xl border border-white/15 shadow-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[92dvh] my-auto flex flex-col bg-slate-900 overflow-hidden">
+            <div className="flex justify-between items-center p-4 sm:p-5 border-b border-white/10 bg-slate-900/95 shrink-0 sticky top-0 z-10">
               <div>
                 <span className="text-[10px] font-mono uppercase tracking-widest text-brand-400 font-bold">
                   {selectedOnboardingRole === 'TRANSPORTER' ? 'Transporter / Broker Setup' : 'Staff Employee Profile'}
@@ -1940,7 +1988,12 @@ const UserManagement: React.FC = () => {
                   {isEditing ? 'Edit Profile' : 'Register New'} {selectedOnboardingRole === 'TRANSPORTER' ? 'Transporter / Broker' : 'Office Staff'}
                 </h3>
               </div>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-white p-1.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors">
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
+                className="text-gray-300 hover:text-white p-2 rounded-xl bg-white/10 hover:bg-white/20 transition-colors cursor-pointer shrink-0"
+                title="Close"
+              >
                 <X size={18} />
               </button>
             </div>
@@ -2249,6 +2302,37 @@ const UserManagement: React.FC = () => {
                         value={formData.loansAdvances}
                         onChange={(e) => setFormData({ ...formData, loansAdvances: Number(e.target.value) || 0 })}
                         className="w-full bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-amber-400 font-mono text-xs outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Destination / Border Staff Default Per-Container Charges */}
+                  <div className="pt-2.5 mt-2 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-cyan-300 font-semibold block mb-1">
+                        By Default Per Container Charges (PKR) — Destination Staff
+                      </label>
+                      <input 
+                        type="number"
+                        placeholder="e.g. 5000 per assigned container"
+                        value={formData.defaultPerContainerCharge}
+                        onChange={(e) => setFormData({ ...formData, defaultPerContainerCharge: Number(e.target.value) || 0 })}
+                        className="w-full bg-cyan-950/30 border border-cyan-500/30 rounded-lg px-2.5 py-1.5 text-cyan-200 font-mono text-xs outline-none focus:border-cyan-400"
+                      />
+                      <span className="text-[10px] text-gray-400 block mt-0.5">
+                        Auto-posts to Destination Staff Ledger per container assigned (payable to Karachi Head Office).
+                      </span>
+                    </div>
+                    <div>
+                      <label className="text-gray-300 font-medium block mb-1">
+                        Assigned Destination Station / Dry Port
+                      </label>
+                      <input 
+                        type="text"
+                        placeholder="e.g. Torkham Border, Chaman, Sost, Lahore Dry Port"
+                        value={formData.assignedStation}
+                        onChange={(e) => setFormData({ ...formData, assignedStation: e.target.value })}
+                        className="w-full bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-white text-xs outline-none focus:border-brand-500"
                       />
                     </div>
                   </div>
@@ -2583,7 +2667,8 @@ const UserManagement: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ========================================================================= */}
@@ -2609,9 +2694,13 @@ const UserManagement: React.FC = () => {
         }}
         initialClient={clientToEdit || undefined}
         onSave={(savedClient) => {
+          const normSaved = (savedClient.name || '').trim().toUpperCase().replace(/[.,\-_/()]/g, ' ').replace(/\s+/g, ' ');
           setClientsList(prev => [
             savedClient,
-            ...prev.filter(c => (c.id || c.name) !== (savedClient.id || savedClient.name))
+            ...prev.filter(c => {
+              const normC = (c.name || '').trim().toUpperCase().replace(/[.,\-_/()]/g, ' ').replace(/\s+/g, ' ');
+              return (c.id || c.name) !== (savedClient.id || savedClient.name) && normC !== normSaved;
+            })
           ]);
           setShowClientModal(false);
           setClientToEdit(null);
@@ -2641,7 +2730,19 @@ const UserManagement: React.FC = () => {
           setDestinationStaffToEdit(null);
         }}
         staffToEdit={destinationStaffToEdit}
-        onSaved={() => {
+        onSaved={(savedStaff, savedUser) => {
+          if (savedStaff) {
+            setDestinationStaffList(prev => [
+              savedStaff,
+              ...prev.filter(d => String(d.id) !== String(savedStaff.id))
+            ]);
+          }
+          if (savedUser) {
+            setUsers(prev => [
+              ...prev.filter(u => String(u.id) !== String(savedUser.id) && (u.userId || '').toLowerCase() !== (savedUser.userId || '').toLowerCase()),
+              savedUser
+            ]);
+          }
           setShowDestinationModal(false);
           setDestinationStaffToEdit(null);
         }}
@@ -2650,9 +2751,9 @@ const UserManagement: React.FC = () => {
       {/* ========================================================================= */}
       {/* 9. DELETE CONFIRMATION MODAL */}
       {/* ========================================================================= */}
-      {deleteTarget && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-start justify-center z-60 pt-3 sm:pt-6 pb-6 px-3 sm:px-4 overflow-y-auto animate-in fade-in duration-150">
-          <div className="glass-card p-6 rounded-2xl w-full max-w-sm border border-white/10 text-center space-y-4 bg-slate-900 shadow-2xl mb-6">
+      {deleteTarget && createPortal(
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-[9999] p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          <div className="glass-card p-6 rounded-2xl w-full max-w-sm border border-white/10 text-center space-y-4 bg-slate-900 shadow-2xl my-auto">
             <div className="bg-red-500/20 w-12 h-12 rounded-full flex items-center justify-center mx-auto border border-red-500/30">
               <AlertTriangle size={24} className="text-red-500" />
             </div>
@@ -2675,7 +2776,8 @@ const UserManagement: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

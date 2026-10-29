@@ -303,7 +303,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
   };
 
   // ----------------------------------------------------
-  // 2. LOGO & BRANDING STATE (INCLUDING FAVICON SVG)
+  // 2. LOGO & BRANDING STATE (1. SPLASH/LOGIN LOGO, 2. FAVICON, 3. DOCUMENT GENERATION LOGO)
   // ----------------------------------------------------
   const [groupName, setGroupName] = useState(parentGroup.name);
   const [groupTitle, setGroupTitle] = useState(parentGroup.title);
@@ -318,15 +318,21 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
   const [groupLogoFile, setGroupLogoFile] = useState<File | null>(null);
   const [isOptimizingLogo, setIsOptimizingLogo] = useState(false);
 
-  // Favicon SVG / Icon State
+  // 2. Favicon SVG / Icon State
   const [groupFaviconPreview, setGroupFaviconPreview] = useState<string>(parentGroup.favicon || '');
   const [groupFaviconFile, setGroupFaviconFile] = useState<File | null>(null);
   const [isOptimizingFavicon, setIsOptimizingFavicon] = useState(false);
+
+  // 3. Official Document Generation / PDF Letterhead Logo State
+  const [groupDocumentLogoPreview, setGroupDocumentLogoPreview] = useState<string>(parentGroup.documentLogo || '');
+  const [groupDocumentLogoFile, setGroupDocumentLogoFile] = useState<File | null>(null);
+  const [isOptimizingDocumentLogo, setIsOptimizingDocumentLogo] = useState(false);
 
   const [brandingSaving, setBrandingSaving] = useState(false);
   const [brandingSuccess, setBrandingSuccess] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const faviconInputRef = useRef<HTMLInputElement>(null);
+  const documentLogoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setGroupName(parentGroup.name);
@@ -344,7 +350,10 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     if (!groupFaviconFile) {
       setGroupFaviconPreview(parentGroup.favicon || '');
     }
-  }, [parentGroup, groupLogoFile, groupFaviconFile]);
+    if (!groupDocumentLogoFile) {
+      setGroupDocumentLogoPreview(parentGroup.documentLogo || '');
+    }
+  }, [parentGroup, groupLogoFile, groupFaviconFile, groupDocumentLogoFile]);
 
   const handleLogoFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -399,13 +408,38 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
     }
   };
 
+  const handleDocumentLogoFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const isSupported = ['png', 'svg', 'jpg', 'jpeg', 'webp'].includes(ext || '') || file.type.startsWith('image/');
+
+    if (!isSupported) {
+      alert("Unsupported file format. Please upload a PNG, SVG, or JPG image for the Document Logo.");
+      return;
+    }
+
+    setIsOptimizingDocumentLogo(true);
+    try {
+      const optimizedDocLogo = await optimizeLogoImage(file, 600, 600);
+      setGroupDocumentLogoFile(file);
+      setGroupDocumentLogoPreview(optimizedDocLogo);
+    } catch (err) {
+      console.error("Failed to process document logo:", err);
+      alert("Could not process this document logo file. Please upload a valid SVG, PNG, or JPG.");
+    } finally {
+      setIsOptimizingDocumentLogo(false);
+    }
+  };
+
   const handleSaveBranding = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setBrandingSaving(true);
     setBrandingSuccess(false);
 
     try {
-      // 1. Update Master Conglomerate Parent Group (including Logo & Favicon SVG) in Firestore (settings/parent_group)
+      // 1. Update Master Conglomerate Parent Group (Splash/Login Logo, Favicon, and Document Generation Logo) in Firestore (settings/parent_group)
       await saveParentGroup({
         name: groupName.trim(),
         title: groupTitle.trim(),
@@ -417,7 +451,8 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
         email: groupEmail.trim(),
         web: groupWeb.trim(),
         logo: groupLogoPreview,
-        favicon: groupFaviconPreview
+        favicon: groupFaviconPreview,
+        documentLogo: groupDocumentLogoPreview
       }, currentUserName || 'System Administrator');
 
       if (groupFaviconPreview && isUploadedLogo(groupFaviconPreview)) {
@@ -426,6 +461,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
 
       setGroupLogoFile(null);
       setGroupFaviconFile(null);
+      setGroupDocumentLogoFile(null);
       setBrandingSuccess(true);
       setTimeout(() => setBrandingSuccess(false), 4000);
     } catch (err: any) {
@@ -437,7 +473,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
   };
 
   const handleResetLogo = async () => {
-    const confirmReset = window.confirm("Reset company logo, favicon, and group settings back to factory default?");
+    const confirmReset = window.confirm("Reset Splash/Login logo, Favicon, Document Generation logo, and group settings back to factory default?");
     if (!confirmReset) return;
 
     setBrandingSaving(true);
@@ -446,8 +482,10 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
       await resetBrandingToDefault();
       setGroupLogoFile(null);
       setGroupFaviconFile(null);
+      setGroupDocumentLogoFile(null);
       setGroupLogoPreview(DEFAULT_PARENT_GROUP.logo);
       setGroupFaviconPreview('');
+      setGroupDocumentLogoPreview('');
       applyDynamicFaviconToDOM(null);
       setBrandingSuccess(true);
       setTimeout(() => setBrandingSuccess(false), 3000);
@@ -951,10 +989,10 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                 <div>
                   <h3 className="text-lg font-bold text-white flex items-center gap-2">
                     <ImageIcon className="text-amber-400" size={20} />
-                    App & Group Logo & Visual Branding
+                    App & Group Logo & Visual Branding (3 Dedicated Logos)
                   </h3>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    Customize the conglomerate name, official logo image, and letterhead credentials. Automatically synchronized across cloud Firestore.
+                    Configure (1) Splash Screen & Login Screen Logo, (2) Browser Favicon Icon, and (3) Official Document Generation / PDF Letterhead Logo.
                   </p>
                 </div>
 
@@ -966,16 +1004,16 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                     className="px-3 py-1.5 rounded-xl border border-red-500/30 text-red-400 hover:bg-red-500/10 transition text-xs font-semibold flex items-center gap-1.5"
                   >
                     <RotateCcw size={13} />
-                    <span>Reset Logo</span>
+                    <span>Reset All Logos</span>
                   </button>
 
                   <button
                     type="submit"
-                    disabled={brandingSaving || isOptimizingLogo || isOptimizingFavicon}
+                    disabled={brandingSaving || isOptimizingLogo || isOptimizingFavicon || isOptimizingDocumentLogo}
                     className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 transition shadow-lg shadow-amber-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
                   >
                     {brandingSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                    <span>{brandingSaving ? 'Saving...' : 'Save & Apply Logo & Favicon'}</span>
+                    <span>{brandingSaving ? 'Saving...' : 'Save & Apply All 3 Logos'}</span>
                   </button>
                 </div>
               </div>
@@ -983,20 +1021,25 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
               {brandingSuccess && (
                 <div className="p-3.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 text-xs flex items-center gap-2 animate-fade-in">
                   <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
-                  <span>Main App Logo, Favicon SVG Icon, and Conglomerate Branding updated and applied across the system!</span>
+                  <span>Splash & Login Screen Logo, Favicon Icon, and Official Document Generation Logo updated and applied across the system!</span>
                 </div>
               )}
 
-              {/* 1. Main Company Logo Upload & Live Preview Card */}
+              {/* 1. Splash Screen & Login Screen Logo Upload & Live Preview Card */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 {/* Upload Box */}
-                <div className="md:col-span-2 p-5 rounded-2xl bg-white/5 border border-white/10 flex flex-col justify-between">
+                <div className="md:col-span-2 p-5 rounded-2xl bg-white/5 border border-amber-500/25 flex flex-col justify-between">
                   <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-amber-300 mb-2 flex items-center gap-2">
-                      <Upload size={14} /> Upload Main Company Logo
-                    </h4>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-2">
+                        <Upload size={14} /> 1. Splash Screen & Login Screen Logo
+                      </h4>
+                      <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                        Splash & Login UI
+                      </span>
+                    </div>
                     <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-                      Upload high-resolution logo (PNG, SVG, or JPG). Transparent PNG or SVG is recommended for optimal rendering across dark interfaces and printed PDF dossiers.
+                      Yeh logo <strong>Splash Screen</strong>, <strong>Login Screen</strong>, aur main app portal header par nazar aayega. Transparent PNG ya SVG file upload karein.
                     </p>
 
                     <input
@@ -1012,11 +1055,11 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                       className="border-2 border-dashed border-amber-500/40 hover:border-amber-400 rounded-2xl p-6 text-center cursor-pointer bg-black/30 hover:bg-amber-500/5 transition-all"
                     >
                       <Upload className="w-8 h-8 mx-auto text-amber-400 mb-2 animate-bounce" />
-                      <p className="text-xs font-bold text-white">Click to Select New Main Logo File</p>
+                      <p className="text-xs font-bold text-white">Click to Upload Splash Screen & Login Screen Logo</p>
                       <p className="text-xs text-gray-400 mt-1">SVG, PNG, JPG (Max 5MB)</p>
                       {isOptimizingLogo && (
                         <p className="text-xs text-amber-300 mt-2 flex items-center justify-center gap-1.5">
-                          <Loader2 size={13} className="animate-spin" /> Optimizing image for crisp HD rendering...
+                          <Loader2 size={13} className="animate-spin" /> Optimizing Splash & Login logo...
                         </p>
                       )}
                     </div>
@@ -1031,19 +1074,19 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                 </div>
 
                 {/* Live Preview Card */}
-                <div className="p-5 rounded-2xl bg-white/5 border border-white/10 flex flex-col items-center justify-center text-center">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">
-                    Active Main Logo Preview
+                <div className="p-5 rounded-2xl bg-white/5 border border-amber-500/25 flex flex-col items-center justify-center text-center">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-amber-300 mb-3">
+                    Splash & Login Logo Preview
                   </h4>
                   <div className="h-32 w-full flex items-center justify-center p-3 rounded-2xl bg-black/60 border border-white/10 mb-3 shadow-inner">
                     <img 
                       src={(groupLogoPreview && isUploadedLogo(groupLogoPreview)) ? groupLogoPreview : '/logos/mak_pearl_white_emblem.svg'} 
-                      alt="Company Logo Preview" 
+                      alt="Splash & Login Logo Preview" 
                       className="max-h-full max-w-full object-contain filter drop-shadow-[0_4px_16px_rgba(245,158,11,0.3)]"
                     />
                   </div>
                   <span className="text-xs font-mono text-gray-400">
-                    Live Main Logo Sample
+                    {(groupLogoPreview && isUploadedLogo(groupLogoPreview)) ? 'Custom Splash/Login Logo Active' : 'Default Splash/Login Logo'}
                   </span>
                 </div>
               </div>
@@ -1055,14 +1098,14 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-2">
                       <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-300 flex items-center gap-2">
-                        <Globe size={14} /> Upload Favicon Logo (SVG / Browser & App Icon)
+                        <Globe size={14} /> 2. Favicon Logo (Browser Tab & App Shortcut Icon)
                       </h4>
                       <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-                        SVG Recommended
+                        Favicon / App Icon
                       </span>
                     </div>
                     <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-                      Jo bhi SVG (ya PNG) file yahan upload ki jayegi, wahi browser tab ka official <strong>Favicon icon</strong> aur app shortcut icon ban jayega. Click <strong>Save & Apply Logo & Favicon</strong> to save permanently across all devices.
+                      Jo bhi SVG (ya PNG) file yahan upload ki jayegi, wahi browser tab ka official <strong>Favicon icon</strong> aur mobile/desktop app install shortcut icon ban jayega.
                     </p>
 
                     <input
@@ -1132,6 +1175,96 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                           setGroupFaviconFile(null);
                           setGroupFaviconPreview('');
                           applyDynamicFaviconToDOM(null);
+                        }}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 underline cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Official Document Generation Logo (PDFs, Ledgers, Invoices, Receipts & Dossiers) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {/* Document Logo Upload Box */}
+                <div className="md:col-span-2 p-5 rounded-2xl bg-white/5 border border-emerald-500/25 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-300 flex items-center gap-2">
+                        <ImageIcon size={14} /> 3. Official Document Generation Logo (PDFs, Ledgers & Invoices)
+                      </h4>
+                      <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                        Circular PDF Badge
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 mb-4 leading-relaxed">
+                      Yeh logo koi bhi <strong>Document generate karne par</strong> (Client Ledger PDF, Commercial Invoice, Payment Receipt, Case Dossier, Delivery Order, NOC) official circular letterhead emblem mein print hoga.
+                    </p>
+
+                    <input
+                      type="file"
+                      ref={documentLogoInputRef}
+                      onChange={handleDocumentLogoFileSelect}
+                      accept="image/png,image/svg+xml,image/jpeg,image/webp,.svg"
+                      className="hidden"
+                    />
+
+                    <div 
+                      onClick={() => documentLogoInputRef.current?.click()}
+                      className="border-2 border-dashed border-emerald-500/40 hover:border-emerald-400 rounded-2xl p-6 text-center cursor-pointer bg-black/30 hover:bg-emerald-500/5 transition-all"
+                    >
+                      <Upload className="w-8 h-8 mx-auto text-emerald-400 mb-2" />
+                      <p className="text-xs font-bold text-white">Click to Upload Document Generation / Letterhead Logo</p>
+                      <p className="text-xs text-gray-400 mt-1">Automatically framed in a crisp circular emblem on all PDFs</p>
+                      {isOptimizingDocumentLogo && (
+                        <p className="text-xs text-emerald-300 mt-2 flex items-center justify-center gap-1.5">
+                          <Loader2 size={13} className="animate-spin" /> Processing Document Generation Logo...
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {groupDocumentLogoFile && (
+                    <div className="mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-200 flex items-center justify-between">
+                      <span className="truncate">Selected Document Logo: {groupDocumentLogoFile.name} ({Math.round(groupDocumentLogoFile.size / 1024)} KB)</span>
+                      <span className="text-xs font-bold text-emerald-400">Ready to Save</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Live Document Circular Logo Preview Card */}
+                <div className="p-5 rounded-2xl bg-white/5 border border-emerald-500/25 flex flex-col items-center justify-center text-center">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-300 mb-3">
+                    Document Circular Logo
+                  </h4>
+                  <div className="h-32 w-full flex flex-col items-center justify-center p-3 rounded-2xl bg-black/60 border border-white/10 mb-3 shadow-inner">
+                    <div className="w-24 h-24 rounded-full bg-white border-4 border-slate-900 ring-2 ring-amber-500 flex items-center justify-center p-2.5 shadow-lg overflow-hidden">
+                      <img 
+                        src={
+                          (groupDocumentLogoPreview && isUploadedLogo(groupDocumentLogoPreview))
+                            ? groupDocumentLogoPreview
+                            : (groupLogoPreview && isUploadedLogo(groupLogoPreview))
+                              ? groupLogoPreview
+                              : '/logos/mak_group_logo.svg'
+                        } 
+                        alt="Document Circular Logo Preview" 
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-gray-400">
+                      {(groupDocumentLogoPreview && isUploadedLogo(groupDocumentLogoPreview))
+                        ? 'Custom Document Logo Active'
+                        : 'Uses Main Logo in Circle'}
+                    </span>
+                    {groupDocumentLogoPreview && isUploadedLogo(groupDocumentLogoPreview) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGroupDocumentLogoFile(null);
+                          setGroupDocumentLogoPreview('');
                         }}
                         className="text-[10px] text-rose-400 hover:text-rose-300 underline cursor-pointer"
                       >

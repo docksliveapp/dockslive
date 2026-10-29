@@ -117,6 +117,7 @@ export interface ParentGroupInfo {
   subtitle: string;
   logo: string;
   favicon?: string;
+  documentLogo?: string;
   address: string;
   phone: string;
   cell: string;
@@ -140,6 +141,24 @@ export function getCompanyLogoUrl(companyId?: CompanyId | null): string {
   return defaults[companyId] || '/logos/mak_group_logo.svg';
 }
 
+export function resolveCompanyIdFromRef(refOrName?: string | null, explicitCompanyId?: CompanyId | string | null): CompanyId {
+  if (explicitCompanyId) {
+    const low = String(explicitCompanyId).toLowerCase().trim();
+    if (low === 'docks' || low.includes('docks') || low === 'dpl') return 'docks';
+    if (low === 'truckit' || low.includes('truckit') || low === 'trk') return 'truckit';
+    if (low === 'muhib' || low.includes('muhib') || low === 'mi' || low === 'mhb') return 'muhib';
+    if (low === 'vantage' || low.includes('vantage') || low === 'vsl') return 'vantage';
+  }
+  if (refOrName) {
+    const upper = String(refOrName).toUpperCase().trim();
+    if (upper.startsWith('TRK') || upper.includes('TRUCKIT')) return 'truckit';
+    if (upper.startsWith('MI-') || upper.startsWith('MHB') || upper.includes('MUHIB')) return 'muhib';
+    if (upper.startsWith('VSL') || upper.includes('VANTAGE')) return 'vantage';
+    if (upper.startsWith('DPL') || upper.includes('DOCKS')) return 'docks';
+  }
+  return getActiveCompanyId();
+}
+
 export const DEFAULT_PARENT_GROUP: ParentGroupInfo = {
   id: 'mak',
   name: 'MAK Group of Companies',
@@ -148,6 +167,7 @@ export const DEFAULT_PARENT_GROUP: ParentGroupInfo = {
   subtitle: 'DOCKS • TRUCKIT • MUHIB • VANTAGE',
   logo: '/logos/mak_group_logo.svg',
   favicon: '/favicon.svg',
+  documentLogo: '/logos/mak_group_logo.svg',
   address: 'Office No 13 1st Floor State Life Building No 7 G-Allana Road Tower Karachi',
   phone: '+92-21-32330103, +92-21-32330104',
   cell: '+92-321-9222883, +92-321-8496006',
@@ -285,11 +305,13 @@ export function getParentGroupInfo(): ParentGroupInfo {
   const stored = safeAppStorage.getJSON<Partial<ParentGroupInfo>>(PARENT_GROUP_STORAGE_KEY, {});
   const cleanLogo = isUploadedLogo(stored.logo) ? stored.logo! : '';
   const cleanFavicon = isUploadedLogo(stored.favicon) ? stored.favicon! : '';
+  const cleanDocumentLogo = isUploadedLogo(stored.documentLogo) ? stored.documentLogo! : '';
   const result: ParentGroupInfo = {
     ...DEFAULT_PARENT_GROUP,
     ...stored,
     logo: cleanLogo,
     favicon: cleanFavicon,
+    documentLogo: cleanDocumentLogo,
     name: stored.name || DEFAULT_PARENT_GROUP.name,
     title: stored.title || DEFAULT_PARENT_GROUP.title,
     tagline: stored.tagline || DEFAULT_PARENT_GROUP.tagline,
@@ -357,7 +379,8 @@ export async function resetParentGroupInfo(): Promise<ParentGroupInfo> {
   return saveParentGroupInfo({
     ...DEFAULT_PARENT_GROUP,
     logo: '',
-    favicon: ''
+    favicon: '',
+    documentLogo: ''
   });
 }
 
@@ -375,7 +398,8 @@ export function initParentGroupFirestoreSync() {
           ...data,
           address: (data.address && !String(data.address).includes('14-B')) ? data.address : DEFAULT_PARENT_GROUP.address,
           logo: data.logo || DEFAULT_PARENT_GROUP.logo,
-          favicon: data.favicon || ''
+          favicon: data.favicon || '',
+          documentLogo: data.documentLogo || ''
         };
         broadcastParentGroupUpdate(merged);
       }

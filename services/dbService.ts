@@ -284,6 +284,50 @@ function dispatchCaseLifecycleNotifications(caseItem: Case, prevCase?: Case | nu
       }
     }
 
+    // 3b. Port of Loading Gate-Out Complete & Workflow In Transit -> Notify Finance Manager ("This case completed from your end")
+    const loadingStepDetail =
+      caseItem.workflowDetails?.['Loading Port Processing'] ||
+      caseItem.workflowDetails?.['LOADING_PORT_PROCESSING'] ||
+      (caseItem.workflowDetails as any)?.['Port Loading & Sealing'];
+    const isNowInTransitOrGatedOutFromPol =
+      !isNowCancelled &&
+      (String(caseItem.status || '').toUpperCase() === 'IN TRANSIT' ||
+        String(caseItem.status || '').toUpperCase() === 'IN_TRANSIT' ||
+        Boolean(caseItem.loadingPortGateOutTime) ||
+        Boolean(loadingStepDetail?.gateOutToggled) ||
+        Boolean(loadingStepDetail?.completed && String(caseItem.status || '').toUpperCase().includes('TRANSIT')));
+
+    if (isNowInTransitOrGatedOutFromPol) {
+      const polDoneKey = `notif_fin_pol_completed_${caseItem.caseNo || caseItem.id}`;
+      if (!safeAppStorage.getItem(polDoneKey)) {
+        safeAppStorage.setItem(polDoneKey, 'true');
+        const polName = caseItem.pol || (caseItem.extractedData as any)?.pol || 'Port of Loading (Karachi)';
+        const podName = caseItem.pod || (caseItem.extractedData as any)?.pod || 'Destination';
+        saveNotificationToFirestore({
+          id: Date.now() + Math.floor(Math.random() * 1000) + 77,
+          title: `This case completed from your end: #${caseNo}`,
+          description: `This case (#${caseNo} - ${clientName || 'Karachi Forwarder / Client'}) is completed from your end! Port of Loading (${polName}) loading & vehicle gate-out is complete and workflow is now In Transit. You can now issue the invoice to the Karachi forwarder/client and collect your payment.`,
+          details: `Case No: ${caseNo}\nClient / Karachi Forwarder: ${clientName || 'N/A'}\nPort of Loading: ${polName}\nDestination: ${podName}\nStatus: Loading Complete & Vehicle Gate-Out Confirmed (In Transit)\nFinance Action: Issue Invoice to Karachi Forwarder & Collect Payment`,
+          timestamp: nowTimeStr,
+          type: 'ACTION',
+          notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
+          status: 'PENDING',
+          actionLabel: 'Issue Invoice & Collect Payment',
+          priority: 'HIGH',
+          targetRole: 'FINANCE_MANAGER,ADMIN',
+          targetClientName: clientName || undefined,
+          category: 'FINANCE',
+          targetView: 'finance',
+          targetFilter: { caseId: caseItem.id, caseNo }
+        }).catch(() => {});
+      }
+    }
+
+    // 3c. Auto-sync Destination Staff Default Per-Container Charges to Destination Staff Ledger (Internal Company Transaction)
+    if (!isNowCancelled) {
+      syncDestinationStaffContainerCharges({ cases: [caseItem] }).catch(() => {});
+    }
+
     // 4. Company-Managed vs Client-Managed Arrangements Notification & Demand -> Client
     if (clientName) {
       const companyManagedItems: string[] = [];
@@ -847,16 +891,14 @@ export async function syncMonthlyStaffSalariesToPayables(
   const newlyCreated: FinanceEntry[] = [];
 
   for (const user of staffUsers) {
-    // Skip external client or transporter entities, admin accounts, and legacy seed test profiles
+    // Skip external client or transporter entities and admin accounts
     const nameLower = (user.name || '').toLowerCase();
-    const isLegacyPersonal = nameLower.includes('mohsin') || nameLower.includes('shahid') || nameLower.includes('danish') || nameLower.includes('tariq') || nameLower.includes('rashid') || nameLower.includes('bilal');
     if (
       user.role === UserRole.CLIENT || 
       user.role === UserRole.TRANSPORTER || 
       user.role === UserRole.ADMIN || 
       user.userId === 'admin' || 
-      nameLower.includes('administrator') ||
-      isLegacyPersonal
+      nameLower.includes('administrator')
     ) continue;
     const salary = Number(user.baseSalary || 0);
     if (salary <= 0) continue;
@@ -978,14 +1020,12 @@ export async function autoPostMonthlyRecurringAndSalaries(
   if (staffUsers && staffUsers.length > 0) {
     for (const user of staffUsers) {
       const nameLower = (user.name || '').toLowerCase();
-      const isLegacyPersonal = nameLower.includes('mohsin') || nameLower.includes('shahid') || nameLower.includes('danish') || nameLower.includes('tariq') || nameLower.includes('rashid') || nameLower.includes('bilal');
       if (
         user.role === UserRole.CLIENT || 
         user.role === UserRole.TRANSPORTER || 
         user.role === UserRole.ADMIN || 
         user.userId === 'admin' || 
-        nameLower.includes('administrator') ||
-        isLegacyPersonal
+        nameLower.includes('administrator')
       ) continue;
       const salary = Number(user.baseSalary || 0);
       if (salary <= 0) continue;
@@ -1036,6 +1076,8 @@ export async function autoPostMonthlyRecurringAndSalaries(
 }
 
 // VEHICLES
+let isSyncingMissingLocalVehicles = false;
+
 export function subscribeToVehicles(
   onData: (items: Vehicle[]) => void,
   onError?: (err: any) => void
@@ -1052,8 +1094,21 @@ export function subscribeToVehicles(
       firestoreItems.push({ ...data, id: numId } as Vehicle);
     });
 
-    // Authoritative Firestore Sync for Vehicles
     const finalVehicles = dedupeArrayById(firestoreItems);
+    if (finalVehicles.length === 0) {
+      const localCached = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+      if (localCached && localCached.length > 0) {
+        onData(localCached);
+        if (!isSyncingMissingLocalVehicles) {
+          isSyncingMissingLocalVehicles = true;
+          saveVehiclesBulkToFirestore(localCached).finally(() => {
+            isSyncingMissingLocalVehicles = false;
+          });
+        }
+        return;
+      }
+    }
+
     safeAppStorage.setJSON('dpl_live_vehicles', finalVehicles);
     backupVehiclesToIndexedDB(finalVehicles).catch(() => {});
     onData(finalVehicles);
@@ -1070,6 +1125,10 @@ export function subscribeToVehicles(
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
+      const localCached = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+      if (localCached && localCached.length > 0) {
+        onData(localCached);
+      }
       if (onError) onError(error);
     }
   );
@@ -1085,7 +1144,7 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
     const transporterTarget = (vehicle.transporterName || vehicle.brokerName || vehicle.ownerName || '').trim() || undefined;
     const nowTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // 1. Vehicle Registration Confirmed Marked -> Transporter
+    // 1. Vehicle Registration Confirmed Marked -> Transporter & Vehicle Manager
     const isConfirmed =
       vehicle.status === 'CONFIRMED' ||
       vehicle.registrationConfirmed === true ||
@@ -1096,21 +1155,20 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
 
     if (isConfirmed && (!prevVehicle || !wasConfirmed)) {
       const confKey = `notif_veh_confirmed_${vehicle.id}_${regNo}`;
-      const detId = parseNumericDocId( undefined, confKey, 10 );
       if (!safeAppStorage.getItem(confKey)) {
         safeAppStorage.setItem(confKey, 'true');
         saveNotificationToFirestore({
-          id: detId,
-          title: `Vehicle Registration Confirmed: ${regNo}`,
-          description: `Vehicle ${regNo} (${transporterTarget || 'Transporter'}) registration has been confirmed and marked active in the customs bonded fleet.`,
-          details: `Vehicle Registration No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nVehicle Type: ${vehicle.type || 'Trailer'}\nStatus: CONFIRMED\nRegistration Date: ${vehicle.registrationDate || new Date().toISOString().split('T')[0]}\nExpiry Date: ${vehicle.registrationExpiryDate || vehicle.validationExpiryDate || 'N/A'}`,
+          id: Date.now() + Math.floor(Math.random() * 1000),
+          title: `Vehicle Registered: ${regNo}`,
+          description: `Vehicle ${regNo} (${transporterTarget || 'Fleet'}) has been registered in the customs bonded fleet.`,
+          details: `Vehicle Registration No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nVehicle Type: ${vehicle.type || 'Trailer'}\nStatus: ${vehicle.status || 'AVAILABLE'}\nRegistration Date: ${vehicle.registrationDate || new Date().toISOString().split('T')[0]}\nExpiry Date: ${vehicle.registrationExpiryDate || vehicle.validationExpiryDate || 'N/A'}`,
           timestamp: nowTimeStr,
           type: 'INFO',
           notificationSubType: 'VEHICLE_REGISTERED',
           status: 'PENDING',
-          actionLabel: 'View Registered Vehicle',
-          priority: 'HIGH',
-          targetRole: 'TRANSPORTER,VEHICLE_MANAGER',
+          actionLabel: 'View Vehicle',
+          priority: 'MEDIUM',
+          targetRole: 'ADMIN,TRANSPORTER,VEHICLE_MANAGER',
           targetClientName: transporterTarget,
           category: 'TRANSPORTER',
           targetView: 'vehicles',
@@ -1119,7 +1177,7 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
       }
     }
 
-    // 2. Vehicle Cancelled Marked & NOC Generated -> Transporter
+    // 2. Vehicle Cancelled Marked & NOC Generated -> Transporter & Admin
     const isCancelled = vehicle.status === 'CANCELLED' || vehicle.cancellationApproved === true;
     const wasCancelled = prevVehicle
       ? (prevVehicle.status === 'CANCELLED' || prevVehicle.cancellationApproved === true)
@@ -1127,11 +1185,10 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
 
     if (isCancelled && !wasCancelled) {
       const cancKey = `notif_veh_cancelled_noc_${vehicle.id}_${regNo}`;
-      const detId = parseNumericDocId(undefined, cancKey, 11);
       if (!safeAppStorage.getItem(cancKey)) {
         safeAppStorage.setItem(cancKey, 'true');
         saveNotificationToFirestore({
-          id: detId,
+          id: Date.now() + Math.floor(Math.random() * 1000),
           title: `Vehicle Cancelled & NOC Generated: ${regNo}`,
           description: `Vehicle ${regNo} (${transporterTarget || 'Transporter'}) has been marked CANCELLED and its De-Registration NOC has been generated.`,
           details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nStatus: CANCELLED\nNOC Status: NOC Generated & Approved\nCancellation Date: ${vehicle.cancellationDate || new Date().toISOString().split('T')[0]}`,
@@ -1141,7 +1198,7 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
           status: 'PENDING',
           actionLabel: 'View NOC & Status',
           priority: 'HIGH',
-          targetRole: 'TRANSPORTER,VEHICLE_MANAGER',
+          targetRole: 'ADMIN,TRANSPORTER,VEHICLE_MANAGER',
           targetClientName: transporterTarget,
           category: 'TRANSPORTER',
           targetView: 'vehicles',
@@ -1150,7 +1207,7 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
       }
     }
 
-    // 3. Vehicle Renewed -> Transporter
+    // 3. Vehicle Renewed -> Transporter & Admin
     const currRenewalsCount = Array.isArray(vehicle.renewals) ? vehicle.renewals.length : 0;
     const prevRenewalsCount = prevVehicle && Array.isArray(prevVehicle.renewals) ? prevVehicle.renewals.length : 0;
     const isRenewedNow =
@@ -1161,12 +1218,11 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
     if (isRenewedNow && !isCancelled) {
       const renSig = `${currRenewalsCount}_${vehicle.lastRenewalDate || ''}_${vehicle.validationExpiryDate || vehicle.registrationExpiryDate || ''}`;
       const renKey = `notif_veh_renewed_${vehicle.id}_${renSig}`;
-      const detId = parseNumericDocId(undefined, renKey, 12);
       if (!safeAppStorage.getItem(renKey)) {
         safeAppStorage.setItem(renKey, 'true');
         const newExp = vehicle.validationExpiryDate || vehicle.registrationExpiryDate || 'Updated';
         saveNotificationToFirestore({
-          id: detId,
+          id: Date.now() + Math.floor(Math.random() * 1000),
           title: `Vehicle Renewed: ${regNo}`,
           description: `Vehicle ${regNo} (${transporterTarget || 'Transporter'}) has been renewed. New validity/expiry date: ${newExp}.`,
           details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nStatus: RENEWED\nLast Renewal Date: ${vehicle.lastRenewalDate || new Date().toISOString().split('T')[0]}\nNew Expiry Date: ${newExp}`,
@@ -1175,8 +1231,8 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
           notificationSubType: 'VEHICLE_RENEWED',
           status: 'PENDING',
           actionLabel: 'View Renewal Details',
-          priority: 'HIGH',
-          targetRole: 'TRANSPORTER,VEHICLE_MANAGER',
+          priority: 'MEDIUM',
+          targetRole: 'ADMIN,TRANSPORTER,VEHICLE_MANAGER',
           targetClientName: transporterTarget,
           category: 'TRANSPORTER',
           targetView: 'vehicles',
@@ -1185,65 +1241,7 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
       }
     }
 
-    // 4. Check Immediate Expiry / Expire Soon on Save or Update -> Admin, Vehicle Manager & Transporter
-    const expDateStr = vehicle.validationExpiryDate || vehicle.registrationExpiryDate || (vehicle as any).taxExpiryDate || (vehicle as any).fitnessExpiryDate;
-    if (expDateStr && !isCancelled) {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const todayTime = new Date(todayStr).getTime();
-      const expTime = new Date(expDateStr).getTime();
-      if (!isNaN(expTime)) {
-        const diffDays = Math.ceil((expTime - todayTime) / (24 * 60 * 60 * 1000));
-        if (diffDays <= 0) {
-          const expKey = `audit_vehicle_expired_${vehicle.id}_${expDateStr}`;
-          const detId = parseNumericDocId(undefined, expKey, 13);
-          if (!safeAppStorage.getItem(expKey)) {
-            safeAppStorage.setItem(expKey, 'true');
-            saveNotificationToFirestore({
-              id: detId,
-              title: `Vehicle Expired: ${regNo}`,
-              description: `Vehicle ${regNo} (${transporterTarget || 'Transporter'}) registration/validation expired on ${expDateStr}.`,
-              details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nExpired On: ${expDateStr}\nAction Required: Immediate renewal required.`,
-              timestamp: nowTimeStr,
-              type: 'ALERT',
-              notificationSubType: 'DOC_EXPIRY_ALERT',
-              status: 'PENDING',
-              actionLabel: 'Renew Vehicle',
-              priority: 'HIGH',
-              targetRole: 'ADMIN,VEHICLE_MANAGER,TRANSPORTER',
-              targetClientName: transporterTarget,
-              category: 'TRANSPORTER',
-              targetView: 'vehicles',
-              targetFilter: { vehicleId: vehicle.id, vehicleNo: regNo }
-            }).catch(() => {});
-          }
-        } else if (diffDays <= 10) {
-          const soonKey = `audit_vehicle_expiring_soon_${vehicle.id}_${expDateStr}`;
-          const detId = parseNumericDocId(undefined, soonKey, 14);
-          if (!safeAppStorage.getItem(soonKey)) {
-            safeAppStorage.setItem(soonKey, 'true');
-            saveNotificationToFirestore({
-              id: detId,
-              title: `Vehicle Expire Soon (${diffDays} Days): ${regNo}`,
-              description: `Vehicle ${regNo} (${transporterTarget || 'Transporter'}) will expire in ${diffDays} day(s) on ${expDateStr}.`,
-              details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nExpiry Date: ${expDateStr}\nDays Remaining: ${diffDays} days`,
-              timestamp: nowTimeStr,
-              type: 'INFO',
-              notificationSubType: 'DOC_EXPIRY_ALERT',
-              status: 'PENDING',
-              actionLabel: 'View Vehicle',
-              priority: 'MEDIUM',
-              targetRole: 'ADMIN,VEHICLE_MANAGER,TRANSPORTER',
-              targetClientName: transporterTarget,
-              category: 'TRANSPORTER',
-              targetView: 'vehicles',
-              targetFilter: { vehicleId: vehicle.id, vehicleNo: regNo }
-            }).catch(() => {});
-          }
-        }
-      }
-    }
-
-    // 5. Vehicle Location Updated by Driver (if Location Service is ON on this vehicle)
+    // 4. Vehicle Location Updated by Driver
     const isLocationServiceOn = vehicle.locationServiceEnabled !== false;
     if (
       isLocationServiceOn &&
@@ -1251,12 +1249,10 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
       prevVehicle &&
       (vehicle.onlineLocation !== prevVehicle.onlineLocation || vehicle.lastLocationUpdatedAt !== prevVehicle.lastLocationUpdatedAt)
     ) {
-      const locKey = `notif_veh_loc_${vehicle.id}`;
-      const detId = parseNumericDocId(undefined, locKey, 15);
       const drvName = vehicle.lastLocationDriverName || vehicle.driverName || 'Driver';
       saveNotificationToFirestore({
-        id: detId,
-        title: `Vehicle Location Updated by Driver: ${regNo}`,
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        title: `Vehicle Location Updated: ${regNo}`,
         description: `Driver ${drvName} updated live location for vehicle ${regNo}: ${vehicle.onlineLocation}.`,
         details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nDriver: ${drvName}\nCurrent Location: ${vehicle.onlineLocation}\nUpdated At: ${vehicle.lastLocationUpdatedAt || nowTimeStr}`,
         timestamp: nowTimeStr,
@@ -1264,8 +1260,8 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
         notificationSubType: 'VEHICLE_LOCATION_UPDATE',
         status: 'PENDING',
         actionLabel: 'View Live Location',
-        priority: 'HIGH',
-        targetRole: 'TRANSPORTER,VEHICLE_MANAGER',
+        priority: 'MEDIUM',
+        targetRole: 'ADMIN,TRANSPORTER,VEHICLE_MANAGER',
         targetClientName: transporterTarget,
         category: 'TRANSPORTER',
         targetView: 'vehicles',
@@ -1273,15 +1269,13 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
       }).catch(() => {});
     }
 
-    // 6. Vehicle Missing Alert (if Location Service is ON on this vehicle)
+    // 5. Vehicle Missing Alert
     if (isLocationServiceOn && vehicle.isMissingAlertActive && !prevVehicle?.isMissingAlertActive) {
-      const missKey = `notif_veh_missing_${vehicle.id}`;
-      const detId = parseNumericDocId(undefined, missKey, 16);
       saveNotificationToFirestore({
-        id: detId,
+        id: Date.now() + Math.floor(Math.random() * 1000),
         title: `Vehicle Missing Alert: ${regNo}`,
         description: `URGENT: Vehicle ${regNo} (Driver: ${vehicle.driverName || 'N/A'}) has Location Service ON but GPS signal is missing / vehicle unresponsive!`,
-        details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nDriver: ${vehicle.driverName || 'N/A'} (${vehicle.driverContact || 'N/A'})\nLast Known Location: ${vehicle.onlineLocation || 'Unknown'}\nAlert: Vehicle Missing / GPS Signal Lost while Location Service is ON.`,
+        details: `Vehicle No: ${regNo}\nTransporter: ${transporterTarget || 'N/A'}\nDriver: ${vehicle.driverName || 'N/A'} (${vehicle.driverContact || 'N/A'})\nLast Known Location: ${vehicle.onlineLocation || 'Unknown'}`,
         timestamp: nowTimeStr,
         type: 'ALERT',
         notificationSubType: 'VEHICLE_MISSING_ALERT',
@@ -1300,7 +1294,7 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
   }
 }
 
-export async function saveVehicleToFirestore(vehicle: Vehicle): Promise<void> {
+export async function saveVehicleToFirestore(vehicle: Vehicle, skipNotification = false): Promise<void> {
   const path = 'vehicles';
   const docId = String(vehicle.id || Date.now());
   const activeCompany = getActiveCompanyId();
@@ -1314,9 +1308,38 @@ export async function saveVehicleToFirestore(vehicle: Vehicle): Promise<void> {
       updatedAt: new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload);
-    dispatchTransporterVehicleNotifications({ ...vehicle, id: Number(docId) }, null, true);
+    if (!skipNotification) {
+      dispatchTransporterVehicleNotifications({ ...vehicle, id: Number(docId) }, null, true);
+    }
   } catch (error) {
     console.warn(`Firestore saveVehicle warning:`, error);
+  }
+}
+
+export async function saveVehiclesBulkToFirestore(vehiclesList: Vehicle[]): Promise<void> {
+  if (!vehiclesList || vehiclesList.length === 0) return;
+  const path = 'vehicles';
+  const activeCompany = getActiveCompanyId();
+  backupVehiclesToIndexedDB(vehiclesList).catch(() => {});
+  try {
+    for (let i = 0; i < vehiclesList.length; i += 400) {
+      const chunk = vehiclesList.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((v, idx) => {
+        const docId = String(v.id || (Date.now() + i + idx));
+        const payload = sanitizeForFirestore({
+          ...v,
+          companyId: (v as any).companyId || activeCompany,
+          id: Number(docId) || v.id,
+          createdBy: auth.currentUser?.uid || 'guest',
+          updatedAt: new Date().toISOString()
+        });
+        batch.set(doc(db, path, docId), payload, { merge: true });
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    console.warn('Firestore saveVehiclesBulk warning:', error);
   }
 }
 
@@ -1637,15 +1660,25 @@ export async function updateTransporterRequestInFirestore(request: TransporterRe
 }
 
 // NOTIFICATIONS
-let hasPurgedStaleNotificationsV5 = false;
 
 /**
- * Checks whether a notification is an orphaned ghost notification pointing to deleted/reset data.
+ * Checks whether a notification is invalid or an unsolicited auto-audit notification.
+ * Never deletes real user/workflow notifications just because local storage caches for other tabs haven't loaded yet.
  */
 function isOrphanedNotification(n: AppNotification): boolean {
   if (!n || !n.title) return true;
 
-  // 1. Check against last reset timestamp if present
+  // Filter out legacy unsolicited auto-audit spam notifications
+  const rawDocId = String((n as any)._docId || n.id || '');
+  if (
+    rawDocId.startsWith('audit_vehicle_expired_') ||
+    rawDocId.startsWith('audit_vehicle_expiring_soon_') ||
+    rawDocId.startsWith('audit_vehicle_idle_')
+  ) {
+    return true;
+  }
+
+  // Check against last system reset timestamp if present
   const lastResetIso = safeAppStorage.getRawItem('dpl_last_reset_timestamp');
   if (lastResetIso && (n as any).updatedAt) {
     const resetTime = new Date(lastResetIso).getTime();
@@ -1653,61 +1686,6 @@ function isOrphanedNotification(n: AppNotification): boolean {
     if (!isNaN(resetTime) && !isNaN(notifTime) && notifTime < resetTime) {
       return true;
     }
-  }
-
-  // 2. Check if notification points to a Case when Cases collection is empty or case was deleted
-  const liveCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
-  const caseNoTarget = n.targetFilter?.caseNo || n.approvalData?.caseNo;
-  const caseIdTarget = n.targetFilter?.caseId || (n.approvalData?.entityType === 'case' ? n.approvalData?.entityId : undefined);
-  if (n.category === 'CASE' || caseNoTarget || caseIdTarget || n.targetView === 'cases') {
-    if (liveCases.length === 0) return true;
-    if (caseNoTarget && !liveCases.some(c => (c.caseNo || c.caseNumber) === caseNoTarget)) return true;
-    if (caseIdTarget && !liveCases.some(c => String(c.id) === String(caseIdTarget))) return true;
-  }
-
-  // 3. Check if notification points to a Vehicle when Vehicles collection is empty or vehicle was deleted
-  const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
-  const vehNoTarget = n.targetFilter?.vehicleNo;
-  const vehIdTarget = n.targetFilter?.vehicleId || (n.approvalData?.entityType === 'vehicle' ? n.approvalData?.entityId : undefined);
-  const isVehicleNotif =
-    Boolean(vehNoTarget) ||
-    Boolean(vehIdTarget) ||
-    n.targetView === 'vehicles' ||
-    n.notificationSubType === 'VEHICLE_REGISTERED' ||
-    n.notificationSubType === 'VEHICLE_RENEWED' ||
-    n.notificationSubType === 'VEHICLE_CANCELLED_NOC' ||
-    n.notificationSubType === 'IDLE_VEHICLE_ALERT' ||
-    (n.notificationSubType === 'DOC_EXPIRY_ALERT' && n.category === 'TRANSPORTER');
-
-  if (isVehicleNotif) {
-    if (liveVehicles.length === 0) return true;
-    if (vehNoTarget && !liveVehicles.some(v => (v.registrationNumber || '').toLowerCase() === String(vehNoTarget).toLowerCase())) return true;
-    if (vehIdTarget && !liveVehicles.some(v => String(v.id) === String(vehIdTarget))) return true;
-  }
-
-  // 4. Check if notification points to Company Documents when Company Documents collection is empty
-  const liveDocs = safeAppStorage.getJSON<CompanyDocument[]>('dpl_company_documents', []);
-  if (
-    n.targetView === 'company_documents' ||
-    n.notificationSubType === 'HEARING_NOTICE_REMINDER' ||
-    (n.notificationSubType === 'DOC_EXPIRY_ALERT' && n.category !== 'TRANSPORTER')
-  ) {
-    if (liveDocs.length === 0) return true;
-  }
-
-  // 5. Check if notification points to Finance when all finance arrays are empty
-  const liveFin = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', []);
-  const liveRecv = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_receivables', []);
-  const livePay = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', []);
-  if (
-    n.category === 'FINANCE' ||
-    n.targetView === 'finance' ||
-    n.notificationSubType === 'FINANCE_RECORDED' ||
-    n.notificationSubType === 'INVOICE_CHARGE_NOTIFICATION' ||
-    n.notificationSubType === 'PAYMENT_APPROVAL' ||
-    n.approvalData?.entityType === 'finance'
-  ) {
-    if (liveFin.length === 0 && liveRecv.length === 0 && livePay.length === 0) return true;
   }
 
   return false;
@@ -1718,17 +1696,6 @@ export function subscribeToNotifications(
   onError?: (err: any) => void
 ) {
   const path = 'notifications';
-
-  // One-time cleanup of stale/pre-reset notifications so 99+ ghost notifications from prior resets are wiped immediately
-  if (!hasPurgedStaleNotificationsV5 && typeof window !== 'undefined') {
-    hasPurgedStaleNotificationsV5 = true;
-    if (safeAppStorage.getRawItem('dpl_purge_stale_notifications_v5') !== 'done') {
-      safeAppStorage.setRawItem('dpl_purge_stale_notifications_v5', 'done');
-      safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, []);
-      onData([]);
-      clearAllNotificationsInFirestore().catch(() => {});
-    }
-  }
 
   // 1. Immediately emit valid local cached notifications
   const cached = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []);
@@ -1747,8 +1714,6 @@ export function subscribeToNotifications(
   };
   if (typeof window !== 'undefined') {
     window.addEventListener('dpl_notification_updated', handleLocalUpdate);
-    window.addEventListener('dpl_cases_updated', handleLocalUpdate);
-    window.addEventListener('dpl_finance_updated', handleLocalUpdate);
   }
 
   // 3. Firestore live subscription
@@ -1770,7 +1735,7 @@ export function subscribeToNotifications(
         }
       });
 
-      // Automatically purge orphaned ghost notifications from Firestore in the background
+      // Automatically purge invalid/auto-audit spam notifications from Firestore in the background
       if (orphanRefsToDelete.length > 0) {
         (async () => {
           try {
@@ -1784,22 +1749,23 @@ export function subscribeToNotifications(
         })();
       }
 
-      // Deduplicate by both id and title+description signature so identical spam notifications never stack
+      // Deduplicate by both id and title+description+status+caseNo signature so identical notifications never stack
       const seenSig = new Set<string>();
       const uniqueItems: AppNotification[] = [];
       for (const item of dedupeArrayById(items)) {
-        const sig = `${item.title || ''}__${item.description || ''}__${item.status || ''}`;
+        const sig = `${item.title || ''}__${item.description || ''}__${item.status || ''}__${item.targetFilter?.caseNo || ''}__${item.targetFilter?.vehicleNo || ''}`;
         if (!seenSig.has(sig)) {
           seenSig.add(sig);
           uniqueItems.push(item);
         }
       }
 
-      // Sort newest first
+      // Sort newest first (by updatedAt ISO timestamp if available, otherwise numeric id)
       uniqueItems.sort((a, b) => {
-        const timeA = a.id || 0;
-        const timeB = b.id || 0;
-        return timeB - timeA;
+        const tA = (a as any).updatedAt ? new Date((a as any).updatedAt).getTime() : 0;
+        const tB = (b as any).updatedAt ? new Date((b as any).updatedAt).getTime() : 0;
+        if (tA && tB && tA !== tB) return tB - tA;
+        return (Number(b.id) || 0) - (Number(a.id) || 0);
       });
 
       safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, uniqueItems);
@@ -1815,8 +1781,6 @@ export function subscribeToNotifications(
     unsubscribeSnapshot();
     if (typeof window !== 'undefined') {
       window.removeEventListener('dpl_notification_updated', handleLocalUpdate);
-      window.removeEventListener('dpl_cases_updated', handleLocalUpdate);
-      window.removeEventListener('dpl_finance_updated', handleLocalUpdate);
     }
   };
 }
@@ -1942,9 +1906,6 @@ export async function clearAllNotificationsInFirestore(companyId?: CompanyId): P
 
 export const DEFAULT_DATABASE_USERS: AppUser[] = [
   { id: 1, userId: 'Arbabkhanboby', password: 'Behzadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
-  { id: 101, userId: 'arbab', password: 'Behzadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
-  { id: 102, userId: 'admin', password: 'Behzadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
-  { id: 103, userId: 'behzad', password: 'Behzadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
   { id: 2, userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER], designation: 'Finance Manager', contact: '0333-5554444', email: 'finance@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage'], baseSalary: 0 },
   { id: 3, userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER], designation: 'Operations Manager', contact: '0321-9876543', email: 'casemanager@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'], baseSalary: 0 },
   { id: 4, userId: 'vehiclemanager', password: 'dpl01234', name: 'Vehicles Manager', role: UserRole.VEHICLE_MANAGER, roles: [UserRole.VEHICLE_MANAGER], designation: 'Fleet & Vehicle Manager', contact: '0301-2233445', email: 'transport@docks.com', status: 'ACTIVE', isGlobalAdmin: false, allowedCompanies: ['truckit', 'docks'], baseSalary: 0 },
@@ -1970,19 +1931,36 @@ let hasSeededInitialUsers = false;
 
 /**
  * Subscribes to live Firestore users collection.
- * Automatically seeds default organization accounts if Firestore users collection is empty.
+ * Automatically seeds default organization accounts if Firestore users collection is empty,
+ * and cleans up duplicate Master Admin alias documents ('admin', 'arbab', 'behzad', '101', '102', '103').
  */
 export function subscribeToUsers(
   onData: (users: AppUser[]) => void,
   onError?: (err: any) => void
 ) {
   const path = 'users';
-  return onSnapshot(
+
+  // Immediately emit cached users if available so newly added staff appear right away
+  const initialCached = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []);
+  if (initialCached && initialCached.length > 0) {
+    onData(initialCached);
+  }
+
+  const handleLocalUsersUpdate = () => {
+    const latestLocal = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []);
+    if (latestLocal && latestLocal.length > 0) {
+      onData(latestLocal);
+    }
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('dpl_users_updated', handleLocalUsersUpdate);
+  }
+
+  const unsubSnapshot = onSnapshot(
     collection(db, path),
     async (snapshot) => {
       if (snapshot.empty && !hasSeededInitialUsers) {
         hasSeededInitialUsers = true;
-        console.log('Seeding default organizational accounts to Firestore database...');
         try {
           for (const user of DEFAULT_DATABASE_USERS) {
             const docId = String(user.id);
@@ -1994,35 +1972,36 @@ export function subscribeToUsers(
             });
             await setDoc(doc(db, path, docId), payload);
           }
-          onData(DEFAULT_DATABASE_USERS);
+          const localUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []);
+          const mergedSeed = localUsers && localUsers.length > 0 ? localUsers : DEFAULT_DATABASE_USERS;
+          safeAppStorage.setJSON('dpl_live_users', mergedSeed);
+          onData(mergedSeed);
           return;
         } catch (seedErr) {
           console.warn('Failed to seed default users:', seedErr);
         }
       }
 
-      const list: AppUser[] = [];
+      const rawList: AppUser[] = [];
+      let idx = 0;
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
+        const docIdStr = String(docSnap.id);
         const nameLower = (data.name || '').toLowerCase();
         const idLower = (data.userId || '').toLowerCase();
-        const isClientOrTransporter = data.role === UserRole.CLIENT || data.role === UserRole.TRANSPORTER || data.status === 'PENDING_APPROVAL';
-        const isLegacyPersonal = !isClientOrTransporter && !data.isGlobalAdmin && (
-          nameLower.includes('mohsin') || 
-          nameLower.includes('shahid') || 
-          nameLower.includes('danish') || 
-          nameLower.includes('tariq') ||
-          nameLower.includes('rashid') ||
-          idLower === 'mohsin' || 
-          idLower === 'shahid' || 
-          idLower === 'danish' || 
-          idLower === 'documentmanager' ||
-          idLower === 'lahore' ||
-          idLower === 'peshawar'
-        );
 
-        if (isLegacyPersonal) {
-          // Asynchronously clean up legacy document from Firestore
+        // Detect duplicate Master Admin alias docs ('admin', 'arbab', 'behzad', '101', '102', '103')
+        const isDuplicateAdminAlias =
+          docIdStr === 'admin' ||
+          docIdStr === 'arbab' ||
+          docIdStr === 'behzad' ||
+          docIdStr === '101' ||
+          docIdStr === '102' ||
+          docIdStr === '103' ||
+          (nameLower.includes('arbab khan boby') && docIdStr !== '1' && ['admin', 'arbab', 'behzad'].includes(idLower));
+
+        if (isDuplicateAdminAlias) {
+          // Asynchronously clean up duplicate admin alias document from Firestore
           deleteDoc(doc(db, path, docSnap.id)).catch(() => {});
         } else {
           const isAdminAccount = data.role === UserRole.ADMIN || idLower === 'admin' || nameLower.includes('administrator');
@@ -2030,24 +2009,69 @@ export function subscribeToUsers(
             data.baseSalary = 0;
             updateDoc(doc(db, path, docSnap.id), { baseSalary: 0 }).catch(() => {});
           }
-          list.push({
+          const uniqueNumId = parseNumericDocId(data.id, docSnap.id, idx++);
+          rawList.push({
             ...data,
             baseSalary: isAdminAccount ? 0 : data.baseSalary,
-            id: Number(docSnap.id) || Number(data.id) || Date.now()
-          } as AppUser);
+            id: uniqueNumId,
+            _docId: docSnap.id
+          } as AppUser & { _docId?: string });
         }
       });
 
-      // Sort by id
-      list.sort((a, b) => Number(a.id) - Number(b.id));
-      onData(list.length > 0 ? list : DEFAULT_DATABASE_USERS);
+      // Also merge any locally saved users from safeAppStorage ('dpl_live_users') that may not have synced to Firestore yet
+      const localStoredUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || [];
+      const deletedUserKeys = new Set<string>(safeAppStorage.getJSON<string[]>('dpl_deleted_user_keys', []) || []);
+      for (const localU of localStoredUsers) {
+        const lKey = (localU.userId || String(localU.id)).toLowerCase().trim();
+        if (deletedUserKeys.has(lKey) || deletedUserKeys.has(String(localU.id))) continue;
+        const existsInSnapshot = rawList.some(
+          r =>
+            String(r.id) === String(localU.id) ||
+            (r.userId && localU.userId && r.userId.toLowerCase().trim() === localU.userId.toLowerCase().trim())
+        );
+        if (!existsInSnapshot) {
+          rawList.push(localU);
+        }
+      }
+
+      // Deduplicate by lowercase userId (preserving newest updated record if multiple exist, without deleting newly added staff)
+      const userMap = new Map<string, AppUser>();
+      rawList.sort((a, b) => Number(a.id) - Number(b.id));
+      for (const u of rawList) {
+        const key = (u.userId || String((u as any)._docId || u.id)).toLowerCase().trim();
+        if (deletedUserKeys.has(key) || deletedUserKeys.has(String(u.id))) continue;
+        if (userMap.has(key)) {
+          const existing = userMap.get(key)!;
+          // Keep the more recently updated record (or primary admin doc '1')
+          if ((existing as any)._docId === '1') {
+            continue;
+          }
+          userMap.set(key, { ...existing, ...u });
+        } else {
+          userMap.set(key, u);
+        }
+      }
+
+      const list = Array.from(userMap.values());
+      const finalUsers = list.length > 0 ? list : DEFAULT_DATABASE_USERS;
+      safeAppStorage.setJSON('dpl_live_users', finalUsers);
+      onData(finalUsers);
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
       if (onError) onError(error);
-      onData(DEFAULT_DATABASE_USERS);
+      const fallbackLocal = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []);
+      onData(fallbackLocal && fallbackLocal.length > 0 ? fallbackLocal : DEFAULT_DATABASE_USERS);
     }
   );
+
+  return () => {
+    unsubSnapshot();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('dpl_users_updated', handleLocalUsersUpdate);
+    }
+  };
 }
 
 /**
@@ -2130,12 +2154,15 @@ export async function authenticateDatabaseUser(
       };
 
       saveActiveDbUserSession(adminMasterUser);
-      // Fire-and-forget sync to Firestore so login is never blocked or hanged
+      // Persist ONLY the single canonical Master Admin document ('1') and clean up any legacy duplicate alias docs
       Promise.allSettled([
         setDoc(doc(db, 'users', '1'), sanitizeForFirestore(adminMasterUser), { merge: true }),
-        setDoc(doc(db, 'users', 'admin'), sanitizeForFirestore({ ...adminMasterUser, id: 'admin', userId: 'admin' }), { merge: true }),
-        setDoc(doc(db, 'users', 'arbab'), sanitizeForFirestore({ ...adminMasterUser, id: 'arbab', userId: 'arbab' }), { merge: true }),
-        setDoc(doc(db, 'users', 'behzad'), sanitizeForFirestore({ ...adminMasterUser, id: 'behzad', userId: 'behzad' }), { merge: true })
+        deleteDoc(doc(db, 'users', 'admin')),
+        deleteDoc(doc(db, 'users', 'arbab')),
+        deleteDoc(doc(db, 'users', 'behzad')),
+        deleteDoc(doc(db, 'users', '101')),
+        deleteDoc(doc(db, 'users', '102')),
+        deleteDoc(doc(db, 'users', '103'))
       ]).catch(() => {});
 
       return adminMasterUser;
@@ -2166,7 +2193,7 @@ export async function authenticateDatabaseUser(
           (cleanId.length >= 3 && uNameLower.includes(cleanId));
 
         if (matchUserId || matchEmail || matchName) {
-          matchedUser = { ...u, id: Number(docSnap.id) || Number(u.id) || (docSnap.id as any) };
+          matchedUser = { ...u, id: parseNumericDocId(u.id, docSnap.id, 0), _docId: docSnap.id } as any;
         }
       });
     } catch (dbErr: any) {
@@ -2442,8 +2469,9 @@ export async function authenticateDatabaseUser(
           { merge: true }
         );
       } else {
+        const targetDocId = String((matchedUser as any)._docId || updatedUser.id);
         await setDoc(
-          doc(db, 'users', String(updatedUser.id)),
+          doc(db, 'users', targetDocId),
           sanitizeForFirestore(updatedUser),
           { merge: true }
         );
@@ -2499,23 +2527,98 @@ export async function syncFirebaseUserToDatabase(
 
 export async function saveUserToFirestore(user: AppUser): Promise<void> {
   const path = 'users';
-  const docId = String(user.id || Date.now());
+  const rawDocId = (user as any)._docId;
+  const docId = String(rawDocId || user.id || Date.now());
+  const numericId = Number(user.id) || parseNumericDocId(user.id, docId, 0);
+  const payload = sanitizeForFirestore({
+    ...user,
+    id: numericId,
+    updatedAt: new Date().toISOString()
+  });
+  delete (payload as any)._docId;
+
+  // Immediately persist in local safeAppStorage ('dpl_live_users') so UI lists update instantaneously and never lose new staff
   try {
-    const payload = sanitizeForFirestore({
-      ...user,
-      id: Number(docId),
-      updatedAt: new Date().toISOString()
-    });
+    const deletedKeys = (safeAppStorage.getJSON<string[]>('dpl_deleted_user_keys', []) || []).filter(
+      k => k !== String(numericId) && k !== (user.userId || '').toLowerCase().trim()
+    );
+    safeAppStorage.setJSON('dpl_deleted_user_keys', deletedKeys);
+
+    const existingUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', DEFAULT_DATABASE_USERS) || [];
+    const userKey = (user.userId || String(numericId)).toLowerCase().trim();
+    const filtered = existingUsers.filter(
+      u =>
+        String(u.id) !== String(numericId) &&
+        String((u as any)._docId || '') !== docId &&
+        (u.userId || '').toLowerCase().trim() !== userKey
+    );
+    const updatedList = [...filtered, { ...(payload as AppUser), _docId: docId } as AppUser];
+    safeAppStorage.setJSON('dpl_live_users', updatedList);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dpl_users_updated', { detail: payload }));
+    }
+  } catch (_) {}
+
+  try {
     await setDoc(doc(db, path, docId), payload, { merge: true });
   } catch (error) {
     console.warn(`Firestore saveUser warning:`, error);
   }
 }
 
-export async function deleteUserFromFirestore(userId: number | string): Promise<void> {
+export async function deleteUserFromFirestore(
+  userId: number | string,
+  rawDocId?: string,
+  userLoginId?: string
+): Promise<void> {
   const path = 'users';
+  // Immediately remove from local safeAppStorage ('dpl_live_users')
   try {
-    await deleteDoc(doc(db, path, String(userId)));
+    const deletedKeys = new Set<string>(safeAppStorage.getJSON<string[]>('dpl_deleted_user_keys', []) || []);
+    deletedKeys.add(String(userId));
+    if (rawDocId) deletedKeys.add(String(rawDocId));
+    if (userLoginId) deletedKeys.add(String(userLoginId).toLowerCase().trim());
+    safeAppStorage.setJSON('dpl_deleted_user_keys', Array.from(deletedKeys));
+
+    const existingUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || [];
+    const remaining = existingUsers.filter(u => {
+      if (String(u.id) === String(userId)) return false;
+      if (rawDocId && String((u as any)._docId || '') === String(rawDocId)) return false;
+      if (userLoginId && u.userId && u.userId.toLowerCase().trim() === userLoginId.toLowerCase().trim()) return false;
+      return true;
+    });
+    safeAppStorage.setJSON('dpl_live_users', remaining);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dpl_users_updated'));
+    }
+  } catch (_) {}
+
+  try {
+    await deleteDoc(doc(db, path, String(userId))).catch(() => {});
+    if (rawDocId && String(rawDocId) !== String(userId)) {
+      await deleteDoc(doc(db, path, String(rawDocId))).catch(() => {});
+    }
+    if (userLoginId) {
+      await deleteDoc(doc(db, path, String(userLoginId))).catch(() => {});
+    }
+    // Also remove any document in 'users' whose internal id or userId matches
+    const snap = await getDocs(collection(db, path));
+    const docsToRemove: any[] = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      const matchById = String(data.id) === String(userId) || String(d.id) === String(userId);
+      const matchByRawDoc = rawDocId && String(d.id) === String(rawDocId);
+      const matchByLoginId =
+        userLoginId &&
+        data.userId &&
+        String(data.userId).toLowerCase().trim() === String(userLoginId).toLowerCase().trim();
+      if (matchById || matchByRawDoc || matchByLoginId) {
+        docsToRemove.push(d.ref);
+      }
+    });
+    for (const ref of docsToRemove) {
+      await deleteDoc(ref).catch(() => {});
+    }
   } catch (error) {
     console.warn(`Firestore deleteUser warning:`, error);
   }
@@ -2541,6 +2644,63 @@ export async function getUserProfile(userId: string): Promise<AppUser | null> {
 // CLIENTS
 export const DEFAULT_CLIENTS: string[] = [];
 
+function normalizeClientKey(name?: string): string {
+  return (name || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[.,\-_/()]/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function mergeClientRecords(primary: Client, secondary: Client): Client {
+  const pickStr = (a?: string, b?: string) => (a && a.trim() ? a : b && b.trim() ? b : '');
+  const pickCharges = (a?: any[], b?: any[]) => (Array.isArray(a) && a.length > 0 ? a : Array.isArray(b) && b.length > 0 ? b : []);
+  const pickObj = (a?: Record<string, any>, b?: Record<string, any>) =>
+    a && Object.keys(a).length > 0 ? a : b && Object.keys(b).length > 0 ? b : {};
+
+  return {
+    ...secondary,
+    ...primary,
+    id: primary.id || secondary.id,
+    name: pickStr(primary.name, secondary.name),
+    ownerName: pickStr(primary.ownerName, secondary.ownerName),
+    contact: pickStr(primary.contact, secondary.contact),
+    officeAddress: pickStr(primary.officeAddress, secondary.officeAddress),
+    mobileNumber: pickStr(primary.mobileNumber, secondary.mobileNumber),
+    whatsappNumber: pickStr(primary.whatsappNumber, secondary.whatsappNumber),
+    email: pickStr(primary.email, secondary.email),
+    cnic: pickStr(primary.cnic, secondary.cnic),
+    ntn: pickStr(primary.ntn, secondary.ntn),
+    strn: pickStr(primary.strn, secondary.strn),
+    businessCardUrl: pickStr(primary.businessCardUrl, secondary.businessCardUrl),
+    contractLetterUrl: pickStr(primary.contractLetterUrl, secondary.contractLetterUrl),
+    nicDocUrl: pickStr(primary.nicDocUrl, secondary.nicDocUrl),
+    cnicFrontUrl: pickStr((primary as any).cnicFrontUrl, (secondary as any).cnicFrontUrl),
+    cnicBackUrl: pickStr((primary as any).cnicBackUrl, (secondary as any).cnicBackUrl),
+    ntnDocUrl: pickStr((primary as any).ntnDocUrl, (secondary as any).ntnDocUrl),
+    defaultCaseCategory: pickStr(primary.defaultCaseCategory, secondary.defaultCaseCategory) || 'Bonded Carrier',
+    defaultServiceArrangements: pickObj(primary.defaultServiceArrangements, secondary.defaultServiceArrangements),
+    defaultCharges: pickCharges(primary.defaultCharges, secondary.defaultCharges),
+    openingBalance: Number(primary.openingBalance) || Number(secondary.openingBalance) || 0,
+    userId: pickStr(primary.userId, secondary.userId),
+    password: pickStr(primary.password, secondary.password),
+    loginEnabled: Boolean(primary.loginEnabled || secondary.loginEnabled)
+  };
+}
+
+function scoreClientCompleteness(c: Partial<Client>): number {
+  let score = 0;
+  if (c.ownerName?.trim()) score += 2;
+  if (c.officeAddress?.trim()) score += 3;
+  if (c.mobileNumber?.trim() || c.contact?.trim()) score += 2;
+  if (c.ntn?.trim()) score += 2;
+  if (c.email?.trim()) score += 1;
+  if (c.userId?.trim()) score += 2;
+  if (Array.isArray(c.defaultCharges) && c.defaultCharges.length > 0) score += 2;
+  if (c.businessCardUrl || c.contractLetterUrl || c.nicDocUrl || (c as any).ntnDocUrl) score += 2;
+  return score;
+}
+
 export function subscribeToClients(
   onData: (clients: Client[]) => void,
   onError?: (err: any) => void
@@ -2551,11 +2711,13 @@ export function subscribeToClients(
   const emit = () => {
     const active = getActiveCompanyId();
     const localDocsMap = safeAppStorage.getJSON<Record<string, Partial<Client>>>('dpl_persistent_client_docs', {}) || {};
-    const list: Client[] = [];
+    const dedupedByName = new Map<string, Client>();
+    const duplicateIdsToDelete: string[] = [];
+
     cachedDocs.forEach((docData) => {
       if (matchesActiveCompany(docData.companyId, active)) {
         const localBackup = localDocsMap[String(docData.id)] || {};
-        list.push({
+        const hydrated: Client = {
           ...docData,
           businessCardUrl: docData.businessCardUrl || localBackup.businessCardUrl || '',
           contractLetterUrl: docData.contractLetterUrl || localBackup.contractLetterUrl || '',
@@ -2563,9 +2725,35 @@ export function subscribeToClients(
           cnicFrontUrl: docData.cnicFrontUrl || localBackup.cnicFrontUrl || docData.nicDocUrl || localBackup.nicDocUrl || '',
           cnicBackUrl: docData.cnicBackUrl || localBackup.cnicBackUrl || '',
           ntnDocUrl: docData.ntnDocUrl || (localBackup as any).ntnDocUrl || ''
-        } as Client);
+        } as Client;
+
+        const normKey = normalizeClientKey(hydrated.name) || String(hydrated.id);
+        if (!dedupedByName.has(normKey)) {
+          dedupedByName.set(normKey, hydrated);
+        } else {
+          const existing = dedupedByName.get(normKey)!;
+          const existingScore = scoreClientCompleteness(existing);
+          const incomingScore = scoreClientCompleteness(hydrated);
+          const primary = incomingScore >= existingScore ? hydrated : existing;
+          const secondary = incomingScore >= existingScore ? existing : hydrated;
+          const merged = mergeClientRecords(primary, secondary);
+          dedupedByName.set(normKey, merged);
+          if (secondary.id && String(secondary.id) !== String(primary.id)) {
+            duplicateIdsToDelete.push(String(secondary.id));
+          }
+        }
       }
     });
+
+    // Clean up redundant duplicate client docs in background and persist merged fields to primary doc
+    if (duplicateIdsToDelete.length > 0) {
+      duplicateIdsToDelete.forEach((dupId) => {
+        deleteDoc(doc(db, path, dupId)).catch(() => {});
+      });
+    }
+
+    const list = Array.from(dedupedByName.values());
+    safeAppStorage.setJSON('dpl_cached_clients', list);
     onData(list);
   };
 
@@ -2597,7 +2785,24 @@ export function subscribeToClients(
 export async function deleteClientFromFirestore(clientId: string): Promise<void> {
   const path = 'clients';
   try {
-    await deleteDoc(doc(db, path, clientId));
+    const cached = safeAppStorage.getJSON<Client[]>('dpl_cached_clients', []) || [];
+    const targetClient = cached.find(c => String(c.id) === String(clientId) || c.name === clientId);
+    const targetNorm = targetClient ? normalizeClientKey(targetClient.name) : '';
+
+    await deleteDoc(doc(db, path, clientId)).catch(() => {});
+
+    // Also delete any duplicate Firestore client doc with the same normalized name so deleting a client removes all duplicates
+    if (targetNorm) {
+      const snap = await getDocs(collection(db, path));
+      const removePromises: Promise<any>[] = [];
+      snap.forEach((d) => {
+        const data = d.data();
+        if (normalizeClientKey(data.name) === targetNorm) {
+          removePromises.push(deleteDoc(d.ref).catch(() => {}));
+        }
+      });
+      await Promise.all(removePromises);
+    }
   } catch (error) {
     console.warn(`Firestore deleteClient warning:`, error);
   }
@@ -2605,59 +2810,77 @@ export async function deleteClientFromFirestore(clientId: string): Promise<void>
 
 export async function saveClientToFirestore(client: Partial<Client>): Promise<string> {
   const path = 'clients';
-  const docId = client.id || `client_${Date.now()}`;
   const activeCompany = getActiveCompanyId();
+  const targetCompany = (client as any).companyId || activeCompany;
+  const normTargetName = normalizeClientKey(client.name);
+
+  // Check if a client with the same normalized name already exists in local cache or Firestore to prevent duplicates
+  let existingMatch: Partial<Client> | undefined;
+  try {
+    const cachedClients = safeAppStorage.getJSON<Client[]>('dpl_cached_clients', []) || [];
+    if (normTargetName) {
+      existingMatch = cachedClients.find(
+        c => normalizeClientKey(c.name) === normTargetName && matchesActiveCompany((c as any).companyId, targetCompany)
+      );
+    }
+  } catch (_) {}
+
+  const docId = client.id || existingMatch?.id || `client_${Date.now()}`;
+  const mergedInput: Partial<Client> = existingMatch
+    ? mergeClientRecords(client as Client, existingMatch as Client)
+    : client;
+
   try {
     // Preserve large base64 documents in localStorage backup before sanitizeForFirestore strips >150KB strings
     try {
       const localDocsMap = safeAppStorage.getJSON<Record<string, any>>('dpl_persistent_client_docs', {}) || {};
       localDocsMap[String(docId)] = {
         ...(localDocsMap[String(docId)] || {}),
-        businessCardUrl: client.businessCardUrl || localDocsMap[String(docId)]?.businessCardUrl || '',
-        contractLetterUrl: client.contractLetterUrl || localDocsMap[String(docId)]?.contractLetterUrl || '',
-        nicDocUrl: client.nicDocUrl || (client as any).cnicFrontUrl || localDocsMap[String(docId)]?.nicDocUrl || '',
-        cnicFrontUrl: (client as any).cnicFrontUrl || client.nicDocUrl || localDocsMap[String(docId)]?.cnicFrontUrl || '',
-        cnicBackUrl: (client as any).cnicBackUrl || localDocsMap[String(docId)]?.cnicBackUrl || '',
-        ntnDocUrl: (client as any).ntnDocUrl || localDocsMap[String(docId)]?.ntnDocUrl || ''
+        businessCardUrl: mergedInput.businessCardUrl || localDocsMap[String(docId)]?.businessCardUrl || '',
+        contractLetterUrl: mergedInput.contractLetterUrl || localDocsMap[String(docId)]?.contractLetterUrl || '',
+        nicDocUrl: mergedInput.nicDocUrl || (mergedInput as any).cnicFrontUrl || localDocsMap[String(docId)]?.nicDocUrl || '',
+        cnicFrontUrl: (mergedInput as any).cnicFrontUrl || mergedInput.nicDocUrl || localDocsMap[String(docId)]?.cnicFrontUrl || '',
+        cnicBackUrl: (mergedInput as any).cnicBackUrl || localDocsMap[String(docId)]?.cnicBackUrl || '',
+        ntnDocUrl: (mergedInput as any).ntnDocUrl || localDocsMap[String(docId)]?.ntnDocUrl || ''
       };
       safeAppStorage.setJSON('dpl_persistent_client_docs', localDocsMap);
     } catch (_) {}
 
     const payload = sanitizeForFirestore({
-      ...client,
-      companyId: (client as any).companyId || activeCompany,
+      ...mergedInput,
+      companyId: targetCompany,
       id: docId,
-      name: client.name?.trim() || 'New Client',
-      ownerName: client.ownerName || '',
-      contact: client.contact || '',
-      officeAddress: client.officeAddress || '',
-      mobileNumber: client.mobileNumber || '',
-      whatsappNumber: client.whatsappNumber || '',
-      email: client.email || '',
-      cnic: client.cnic || '',
-      ntn: client.ntn || '',
-      strn: client.strn || '',
-      businessCardUrl: client.businessCardUrl || '',
-      businessCardName: (client as any).businessCardName || '',
-      contractLetterUrl: client.contractLetterUrl || '',
-      contractLetterName: (client as any).contractLetterName || '',
-      nicDocUrl: client.nicDocUrl || (client as any).cnicFrontUrl || '',
-      nicDocName: (client as any).nicDocName || '',
-      cnicFrontUrl: (client as any).cnicFrontUrl || client.nicDocUrl || '',
-      cnicFrontName: (client as any).cnicFrontName || '',
-      cnicBackUrl: (client as any).cnicBackUrl || '',
-      cnicBackName: (client as any).cnicBackName || '',
-      ntnDocUrl: (client as any).ntnDocUrl || '',
-      ntnDocName: (client as any).ntnDocName || '',
-      defaultCaseCategory: client.defaultCaseCategory || 'Bonded Carrier',
-      defaultServiceArrangements: client.defaultServiceArrangements || {},
-      defaultCharges: client.defaultCharges || [],
-      openingBalance: client.openingBalance || 0,
-      userId: client.userId || '',
-      password: client.password || '',
-      loginEnabled: client.loginEnabled ?? false,
-      status: (client as any).status || 'ACTIVE',
-      createdAt: client.createdAt || new Date().toISOString()
+      name: mergedInput.name?.trim() || 'New Client',
+      ownerName: mergedInput.ownerName || '',
+      contact: mergedInput.contact || '',
+      officeAddress: mergedInput.officeAddress || '',
+      mobileNumber: mergedInput.mobileNumber || '',
+      whatsappNumber: mergedInput.whatsappNumber || '',
+      email: mergedInput.email || '',
+      cnic: mergedInput.cnic || '',
+      ntn: mergedInput.ntn || '',
+      strn: mergedInput.strn || '',
+      businessCardUrl: mergedInput.businessCardUrl || '',
+      businessCardName: (mergedInput as any).businessCardName || '',
+      contractLetterUrl: mergedInput.contractLetterUrl || '',
+      contractLetterName: (mergedInput as any).contractLetterName || '',
+      nicDocUrl: mergedInput.nicDocUrl || (mergedInput as any).cnicFrontUrl || '',
+      nicDocName: (mergedInput as any).nicDocName || '',
+      cnicFrontUrl: (mergedInput as any).cnicFrontUrl || mergedInput.nicDocUrl || '',
+      cnicFrontName: (mergedInput as any).cnicFrontName || '',
+      cnicBackUrl: (mergedInput as any).cnicBackUrl || '',
+      cnicBackName: (mergedInput as any).cnicBackName || '',
+      ntnDocUrl: (mergedInput as any).ntnDocUrl || '',
+      ntnDocName: (mergedInput as any).ntnDocName || '',
+      defaultCaseCategory: mergedInput.defaultCaseCategory || 'Bonded Carrier',
+      defaultServiceArrangements: mergedInput.defaultServiceArrangements || {},
+      defaultCharges: mergedInput.defaultCharges || [],
+      openingBalance: mergedInput.openingBalance || 0,
+      userId: mergedInput.userId || '',
+      password: mergedInput.password || '',
+      loginEnabled: mergedInput.loginEnabled ?? false,
+      status: (mergedInput as any).status || 'ACTIVE',
+      createdAt: mergedInput.createdAt || new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload, { merge: true });
     return docId;
@@ -2709,7 +2932,11 @@ export function subscribeToDestinationStaff(
       snapshot.forEach((docSnap) => {
         list.push({ ...docSnap.data(), id: docSnap.id } as DestinationStaff);
       });
+      safeAppStorage.setJSON('dpl_destination_staff', list);
       onData(list);
+      if (list.some(s => Number(s.defaultPerContainerCharge) > 0)) {
+        syncDestinationStaffContainerCharges({ destinationStaff: list }).catch(() => {});
+      }
     },
     (error) => {
       console.warn(`Firestore subscription notice on ${path}:`, error);
@@ -2723,20 +2950,41 @@ export async function saveDestinationStaffToFirestore(staff: Partial<Destination
   const docId = staff.id || `dst_${Date.now()}`;
   try {
     const payload = sanitizeForFirestore({
+      ...staff,
       id: docId,
       name: staff.name?.trim() || 'Staff Representative',
       station: staff.station || 'Karachi Port',
       role: staff.role || 'Station Supervisor',
-      contact: staff.contact || '',
+      roles: staff.roles || [],
+      userId: staff.userId || '',
+      password: staff.password || '',
+      loginEnabled: staff.loginEnabled ?? true,
+      contact: staff.contact || staff.phone || '',
+      phone: staff.phone || staff.contact || '',
+      secondaryPhone: staff.secondaryPhone || '',
       cnic: staff.cnic || '',
       address: staff.address || '',
-      commissionOrSalary: staff.commissionOrSalary || 0,
+      commissionOrSalary: Number(staff.commissionOrSalary || staff.baseRate) || 0,
+      baseRate: Number(staff.baseRate || staff.commissionOrSalary) || 0,
+      defaultPerContainerCharge: Number(staff.defaultPerContainerCharge) || 0,
       paymentType: staff.paymentType || 'Monthly Salary',
-      status: staff.status || 'Active',
+      status: staff.status || 'ACTIVE',
       notes: staff.notes || '',
+      updatedAt: new Date().toISOString(),
       createdAt: staff.createdAt || new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload, { merge: true });
+
+    const currentList = safeAppStorage.getJSON<DestinationStaff[]>('dpl_destination_staff', []);
+    const mergedList = [
+      payload as DestinationStaff,
+      ...currentList.filter(s => s.id !== docId)
+    ];
+    safeAppStorage.setJSON('dpl_destination_staff', mergedList);
+
+    if (Number(staff.defaultPerContainerCharge) > 0) {
+      syncDestinationStaffContainerCharges({ destinationStaff: mergedList }).catch(() => {});
+    }
     return docId;
   } catch (error) {
     console.warn(`Firestore saveDestinationStaff warning:`, error);
@@ -2753,7 +3001,7 @@ export async function deleteDestinationStaffFromFirestore(staffId: string): Prom
   }
 }
 
-// STAFF DUAL LEDGERS (Salary & Daily Routine / Petty Cash)
+// STAFF DUAL LEDGERS (Salary, Daily Routine & Destination Per-Container Remittance Ledger)
 export function subscribeToStaffLedgers(
   onData: (entries: StaffLedgerEntry[]) => void,
   onError?: (err: any) => void
@@ -2766,6 +3014,7 @@ export function subscribeToStaffLedgers(
       snapshot.forEach((docSnap) => {
         list.push({ ...docSnap.data(), id: docSnap.id } as StaffLedgerEntry);
       });
+      safeAppStorage.setJSON('dpl_staff_ledgers', list);
       onData(list);
     },
     (error) => {
@@ -2790,6 +3039,10 @@ export async function saveStaffLedgerEntryToFirestore(entry: Partial<StaffLedger
       debit: Number(entry.debit) || 0,
       credit: Number(entry.credit) || 0,
       balance: Number(entry.balance) || 0,
+      caseNo: entry.caseNo || undefined,
+      containerCount: entry.containerCount || undefined,
+      perContainerRate: entry.perContainerRate || undefined,
+      isInternalCompanyTransaction: entry.isInternalCompanyTransaction ?? undefined,
       receiptUrl: entry.receiptUrl || '',
       notes: entry.notes || '',
       settled: entry.settled ?? false
@@ -2799,6 +3052,195 @@ export async function saveStaffLedgerEntryToFirestore(entry: Partial<StaffLedger
   } catch (error) {
     console.warn(`Firestore saveStaffLedger warning:`, error);
     return docId;
+  }
+}
+
+/**
+ * Automatically calculates and posts Destination Staff Default Per-Container Charges
+ * (`containerCount * defaultPerContainerCharge`) into the Destination Staff's Ledger
+ * (`staff_ledgers` and `staff_private_ledgers`) as an Internal Company Transaction
+ * (Charges received at Destination that the Destination Staff must remit to Karachi Head Office).
+ */
+export async function syncDestinationStaffContainerCharges(options?: {
+  cases?: Case[];
+  destinationStaff?: DestinationStaff[];
+  users?: AppUser[];
+}): Promise<void> {
+  try {
+    const allCases: Case[] =
+      options?.cases && options.cases.length > 0
+        ? options.cases
+        : safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
+    if (!allCases || allCases.length === 0) return;
+
+    const destStaffList: DestinationStaff[] =
+      options?.destinationStaff ||
+      safeAppStorage.getJSON<DestinationStaff[]>('dpl_destination_staff', []);
+
+    let usersList: AppUser[] = options?.users || [];
+    if (usersList.length === 0) {
+      try {
+        const uSnap = await getDocs(collection(db, 'users'));
+        uSnap.forEach(d => usersList.push({ ...(d.data() as AppUser), id: Number(d.data().id || d.id) || 0 }));
+      } catch (_) {}
+    }
+
+    // Build unified list of destination staff profiles who have a defaultPerContainerCharge > 0
+    interface ActiveDestRateProfile {
+      staffId: string;
+      userId: string;
+      name: string;
+      station: string;
+      rate: number;
+    }
+
+    const profilesMap = new Map<string, ActiveDestRateProfile>();
+
+    destStaffList.forEach(ds => {
+      const rate = Number(ds.defaultPerContainerCharge) || 0;
+      if (rate > 0 && ds.status !== 'INACTIVE' && ds.status !== 'Inactive') {
+        const key = (ds.userId || ds.name || ds.id).toLowerCase().trim();
+        profilesMap.set(key, {
+          staffId: String(ds.userId || ds.id),
+          userId: String(ds.userId || ds.id),
+          name: ds.name,
+          station: ds.station || '',
+          rate
+        });
+      }
+    });
+
+    usersList.forEach(u => {
+      const rate = Number(u.defaultPerContainerCharge) || 0;
+      const roles = u.roles && u.roles.length > 0 ? u.roles : [u.role];
+      const isDestRole =
+        roles.includes(UserRole.UNLOADING_PORT_STAFF) ||
+        roles.includes(UserRole.DESTINATION_PORT_STAFF) ||
+        rate > 0;
+      if (isDestRole && rate > 0 && u.status !== 'SUSPENDED' && u.status !== 'INACTIVE') {
+        const key = (u.userId || u.name || String(u.id)).toLowerCase().trim();
+        const existing = profilesMap.get(key);
+        profilesMap.set(key, {
+          staffId: String(u.id || u.userId),
+          userId: String(u.userId || u.id),
+          name: u.name,
+          station: u.assignedStation || existing?.station || u.designation || '',
+          rate
+        });
+      }
+    });
+
+    const profiles = Array.from(profilesMap.values());
+    if (profiles.length === 0) return;
+
+    const existingLedgers = safeAppStorage.getJSON<StaffLedgerEntry[]>('dpl_staff_ledgers', []);
+    const existingLedgerMap = new Map<string, StaffLedgerEntry>();
+    existingLedgers.forEach(e => {
+      if (e.id) existingLedgerMap.set(e.id, e);
+    });
+
+    for (const c of allCases) {
+      if (!c || String(c.status || '').toUpperCase() === 'CANCELLED') continue;
+      const caseNo = c.caseNo || c.caseNumber || c.id;
+      if (!caseNo) continue;
+
+      const podRaw = (c.pod || (c.extractedData as any)?.pod || (c.extractedData as any)?.placeOfDelivery || '').toLowerCase();
+      const destStep =
+        c.workflowDetails?.['Destination Port Arrival'] ||
+        c.workflowDetails?.['DESTINATION_PORT_ARRIVAL'] ||
+        ({} as any);
+      const explicitStaffId = String(destStep.staffUserId || (c as any).assignedDestinationStaffId || '').toLowerCase().trim();
+      const explicitOfficer = String(destStep.officer || (c as any).assignedDestinationStaffName || '').toLowerCase().trim();
+
+      for (const prof of profiles) {
+        const profUserLower = prof.userId.toLowerCase().trim();
+        const profIdLower = prof.staffId.toLowerCase().trim();
+        const profNameLower = prof.name.toLowerCase().trim();
+        const stationTokens = prof.station
+          .toLowerCase()
+          .replace(/[()/-]/g, ' ')
+          .split(/\s+/)
+          .filter(tok => tok.length >= 4 && !['port', 'terminal', 'border', 'station', 'office', 'point', 'agent', 'staff'].includes(tok));
+
+        const matchesExplicitStaff =
+          (explicitStaffId && (explicitStaffId === profUserLower || explicitStaffId === profIdLower)) ||
+          (explicitOfficer && (explicitOfficer === profNameLower || explicitOfficer === profUserLower));
+
+        const matchesStation =
+          stationTokens.length > 0 && podRaw.length > 0 && stationTokens.some(tok => podRaw.includes(tok));
+
+        // If only 1 destination staff profile has a default per-container rate configured and no station mismatch, or if matched by station / explicit assignment
+        const isSingleConfiguredDestStaff = profiles.length === 1 && (!stationTokens.length || !podRaw || matchesStation);
+
+        if (!matchesExplicitStaff && !matchesStation && !isSingleConfiguredDestStaff) {
+          continue;
+        }
+
+        const containerList = Array.isArray(c.containers) && c.containers.length > 0 ? c.containers : [];
+        const containerCount = Math.max(1, containerList.length);
+        const totalCharge = containerCount * prof.rate;
+        const containerNums =
+          containerList.map(cn => cn.number).filter(Boolean).join(', ') ||
+          c.containerNumber ||
+          (c.extractedData as any)?.containerNo ||
+          'Assigned Container(s)';
+
+        const safeCaseKey = String(caseNo).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const safeStaffKey = String(prof.userId || prof.staffId).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const ledgerDocId = `dest_cntr_${safeStaffKey}_${safeCaseKey}`;
+
+        const prevEntry = existingLedgerMap.get(ledgerDocId);
+        // Only write if not yet created or if containerCount / rate changed
+        if (prevEntry && Number(prevEntry.debit) === totalCharge && Number(prevEntry.containerCount) === containerCount) {
+          continue;
+        }
+
+        const dateStr = (c.createdAt || new Date().toISOString()).split('T')[0];
+        const description = `Internal Company Transaction: ${containerCount} Container(s) [${containerNums}] × PKR ${prof.rate.toLocaleString()}/cntr — Case #${caseNo} (${c.pod || 'Destination'}) — Received by Destination Staff, Payable to Karachi Head Office`;
+
+        // 1. Save to Staff Ledger (`staff_ledgers`) for User Management -> Staff Ledger Modal
+        await saveStaffLedgerEntryToFirestore({
+          id: ledgerDocId,
+          staffId: prof.staffId,
+          staffName: prof.name,
+          type: 'CONTAINER_CHARGES',
+          date: dateStr,
+          description,
+          category: 'Internal Company Transaction (Karachi Head Office Remittance)',
+          debit: totalCharge,
+          credit: prevEntry?.credit || 0,
+          balance: totalCharge - (prevEntry?.credit || 0),
+          caseNo: String(caseNo),
+          containerCount,
+          perContainerRate: prof.rate,
+          isInternalCompanyTransaction: true,
+          notes: `Auto-posted from Default Per-Container Charge (PKR ${prof.rate.toLocaleString()} × ${containerCount} container(s)) for Case #${caseNo}. Remittance due to Karachi Head Office.`,
+          settled: prevEntry?.settled ?? false
+        });
+
+        // 2. Also save to Staff Private Ledger (`staff_private_ledgers`) so Destination Staff sees it in their own portal
+        const privDocId = `priv_cntr_${safeStaffKey}_${safeCaseKey}`;
+        await saveStaffPrivateLedgerEntryToFirestore({
+          id: privDocId,
+          staffUserId: prof.userId.toLowerCase().trim(),
+          staffName: prof.name,
+          clientName: 'Karachi Head Office (Internal Company Remittance)',
+          caseNo: String(caseNo),
+          containerNo: containerNums,
+          date: dateStr,
+          description: `Internal Company Remittance Due to Karachi Head Office: ${containerCount} Container(s) × PKR ${prof.rate.toLocaleString()} (Case #${caseNo})`,
+          reference: `HO-CNTR-${caseNo}`,
+          debit: totalCharge,
+          credit: 0,
+          balance: totalCharge,
+          type: 'DEBIT',
+          paymentMode: 'CASH',
+          createdAt: new Date().toISOString()
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('syncDestinationStaffContainerCharges notice:', err);
   }
 }
 

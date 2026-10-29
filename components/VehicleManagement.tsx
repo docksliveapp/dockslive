@@ -10,6 +10,7 @@ import { UniversalDocumentPreviewModal, DataMappingCheckItem } from './Universal
 import { 
   subscribeToVehicles, 
   saveVehicleToFirestore, 
+  saveVehiclesBulkToFirestore,
   updateVehicleInFirestore, 
   deleteVehicleFromFirestore 
 } from '../services/dbService';
@@ -959,8 +960,8 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       return vehicleRecord;
     });
 
-    setVehicles(prev => [...prev, ...newVehicles]);
-    newVehicles.forEach(nv => saveVehicleToFirestore(nv));
+    setVehicles(prev => dedupeArrayById([...prev, ...newVehicles]));
+    saveVehiclesBulkToFirestore(newVehicles);
     setShowBulkUploadModal(false);
   };
 

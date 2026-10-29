@@ -1,20 +1,16 @@
-# Build stage
-FROM node:20-alpine AS build
+# Build and runtime stage for Cloud Run / Firebase App Hosting
+FROM node:24-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY package*.json .npmrc* ./
 RUN npm install --legacy-peer-deps
 
 COPY . .
 RUN npm run build
 
-# Production serve stage using lightweight Nginx
-FROM nginx:alpine
-
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
+ENV NODE_ENV=production
+ENV PORT=8080
 EXPOSE 8080
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "server.cjs"]

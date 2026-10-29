@@ -19,6 +19,7 @@ import {
   StationAnalyticsSummary 
 } from '../services/stationAnalytics';
 import { exportTableToExcel } from '../services/excelExportService';
+import { getCategoryArrangements, getArrangementCharges } from '../services/categoryTariffService';
 
 // Data Generator based on real cases per date
 const generateGraphData = (startStr: string, endStr: string, casesList: Case[] = []) => {
@@ -282,13 +283,111 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
   }).length;
   const docPendingRenewal = companyDocs.filter(d => d.pendingRenewal).length;
 
-  const cashInHand = liveFinances
-    .filter(f => f.paymentMethod === 'CASH')
+  // Strictly verified cashbook transactions (INCOME & EXPENSE)
+  const cashbookEntries = liveFinances.filter(
+    f => (f.type === 'INCOME' || f.type === 'EXPENSE') && f.status !== 'PENDING' && (f.status as any) !== 'REJECTED'
+  );
+
+  const officeCash = cashbookEntries
+    .filter(f => f.paymentMethod !== 'BANK')
     .reduce((sum, f) => sum + (f.type === 'INCOME' ? Number(f.amount) || 0 : -(Number(f.amount) || 0)), 0);
 
-  const totalReceivables = liveFinances
-    .filter(f => f.type === 'RECEIVABLE' && f.status !== 'PAID')
-    .reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
+  const isHblBankEntry = (f: FinanceEntry) =>
+    f.paymentMethod === 'BANK' &&
+    (f.bankId === '1' ||
+      (f.bankId && String(f.bankId).toLowerCase().includes('hbl')) ||
+      (f.bankName && f.bankName.toLowerCase().includes('hbl')));
+
+  const hblCorporate = cashbookEntries
+    .filter(isHblBankEntry)
+    .reduce((sum, f) => sum + (f.type === 'INCOME' ? Number(f.amount) || 0 : -(Number(f.amount) || 0)), 0);
+
+  const meezanActive = cashbookEntries
+    .filter(f => f.paymentMethod === 'BANK' && !isHblBankEntry(f))
+    .reduce((sum, f) => sum + (f.type === 'INCOME' ? Number(f.amount) || 0 : -(Number(f.amount) || 0)), 0);
+
+  // Total Balance = Cash in Hand (Office Cash) + All Bank Balances (HBL + Meezan/Other Banks)
+  const cashInHand = officeCash + hblCorporate + meezanActive;
+
+  // Unified Total Receivables calculation matching Finance.tsx (Cases + Receivables minus Income per Client)
+  const totalReceivables = useMemo(() => {
+    const getCaseInvoicedAmount = (c: Case): number => {
+      if (c.status === 'CANCELLED') return 0;
+      if (c.charges && c.charges.length > 0) {
+        const valid = c.charges.filter(ch => ch.arrangedBy !== 'Client' && (Number(ch.amount) || 0) > 0);
+        if (valid.length > 0) {
+          return valid.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+        }
+      }
+      if (c.serviceArrangements && typeof c.serviceArrangements === 'object') {
+        const arrSum = Object.values(c.serviceArrangements)
+          .filter((item: any) => item && item.arrangedBy !== 'Client' && (Number(item.amount) || 0) > 0)
+          .reduce((acc: number, item: any) => acc + (Number(item.amount) || 0), 0);
+        if (arrSum > 0) return arrSum;
+      }
+      const fallbackAmount =
+        Number(c.totalAmount) ||
+        Number((c.extractedData as any)?.totalAmount) ||
+        Number((c.extractedData as any)?.invoiceAmount) ||
+        0;
+      if (fallbackAmount > 0) return fallbackAmount;
+      try {
+        const catArr = getCategoryArrangements(c.category || 'Bonded Carrier');
+        if (catArr) {
+          const dCharges = getArrangementCharges(catArr);
+          if (dCharges.length > 0) {
+            return dCharges.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+          }
+        }
+      } catch {}
+      return 0;
+    };
+
+    const clientTotals = new Map<string, { invoiced: number; paid: number }>();
+    const normalizeParty = (p?: string) => (p || 'General Client').trim().toLowerCase().replace(/\s+/g, ' ');
+    const caseRefs = new Set<string>();
+
+    liveCases.forEach(c => {
+      if (c.status === 'CANCELLED') return;
+      const amt = getCaseInvoicedAmount(c);
+      if (amt > 0) {
+        const ref = (c.caseNo || c.caseNumber || c.invoiceNo || `CASE-${c.id}`).trim().toLowerCase();
+        caseRefs.add(ref);
+        const key = normalizeParty(
+          c.clientName || c.client || c.importer || (c.extractedData as any)?.cargoOwner || (c.extractedData as any)?.importerName
+        );
+        const cur = clientTotals.get(key) || { invoiced: 0, paid: 0 };
+        cur.invoiced += amt;
+        clientTotals.set(key, cur);
+      }
+    });
+
+    liveFinances
+      .filter(f => f.type === 'RECEIVABLE')
+      .forEach(r => {
+        const ref = (r.reference || '').trim().toLowerCase();
+        if (ref && caseRefs.has(ref)) return;
+        const key = normalizeParty(r.party);
+        const cur = clientTotals.get(key) || { invoiced: 0, paid: 0 };
+        cur.invoiced += Number(r.amount) || 0;
+        clientTotals.set(key, cur);
+      });
+
+    liveFinances
+      .filter(f => f.type === 'INCOME' && f.status !== 'PENDING' && (f.status as any) !== 'REJECTED')
+      .forEach(f => {
+        const key = normalizeParty(f.party);
+        const cur = clientTotals.get(key) || { invoiced: 0, paid: 0 };
+        cur.paid += Number(f.amount) || 0;
+        clientTotals.set(key, cur);
+      });
+
+    let totalOutstanding = 0;
+    clientTotals.forEach(val => {
+      totalOutstanding += Math.max(0, val.invoiced - val.paid);
+    });
+    return totalOutstanding;
+  }, [liveCases, liveFinances]);
 
   const todayStr = new Date().toISOString().split('T')[0];
   const expensesToday = liveFinances
@@ -298,14 +397,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
   const totalPayables = liveFinances
     .filter(f => f.type === 'PAYABLE' && f.status !== 'PAID')
     .reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
-
-  const officeCash = Math.max(0, cashInHand);
-  const hblCorporate = liveFinances
-    .filter(f => (f.bankId === '1' || f.bankId === 'HBL Corporate') && f.paymentMethod === 'BANK')
-    .reduce((sum, f) => sum + (f.type === 'INCOME' ? Number(f.amount) || 0 : -(Number(f.amount) || 0)), 0);
-  const meezanActive = liveFinances
-    .filter(f => (f.bankId === '2' || f.bankId === 'Meezan Active') && f.paymentMethod === 'BANK')
-    .reduce((sum, f) => sum + (f.type === 'INCOME' ? Number(f.amount) || 0 : -(Number(f.amount) || 0)), 0);
 
   // Drag to Scroll State for Graph (used in modal)
   const [isDragging, setIsDragging] = useState(false);
@@ -495,7 +586,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
                 onClick={() => onNavigate('finance', { tab: 'cashbook' })}
                 className="glass-panel p-4 rounded-xl border-none bg-gradient-to-br from-white/5 to-white/0 hover:bg-white/10 transition-colors cursor-pointer group"
             >
-              <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold group-hover:text-gray-200">Cash in Hand</p>
+              <p className="text-xs text-gray-400 uppercase tracking-wider font-semibold group-hover:text-gray-200">Cash in Hand (Cash + Bank)</p>
               <h4 className="text-2xl font-bold text-green-400 mt-2 font-mono drop-shadow">PKR {cashInHand.toLocaleString()}</h4>
             </div>
             <div 

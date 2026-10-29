@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   X, DollarSign, Calendar, Plus, Printer, CheckCircle, Clock, 
   ArrowUpRight, ArrowDownLeft, Receipt, Trash2, Filter, AlertCircle, 
@@ -21,7 +22,9 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
   staffUser,
   ledgerEntries
 }) => {
-  const [ledgerType, setLedgerType] = useState<'SALARY' | 'DAILY'>('SALARY');
+  const [ledgerType, setLedgerType] = useState<'SALARY' | 'DAILY' | 'CONTAINER_CHARGES'>(
+    Number(staffUser.defaultPerContainerCharge) > 0 ? 'CONTAINER_CHARGES' : 'SALARY'
+  );
 
   // Date range filter
   const todayStr = new Date().toISOString().split('T')[0];
@@ -109,6 +112,11 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
       setEntryCategory('Salary Disbursement');
       setEntryDescription(`Monthly Salary payment - ${new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}`);
       setEntryAmount(staffUser.baseSalary || 50000);
+    } else if (ledgerType === 'CONTAINER_CHARGES') {
+      setEntryDirection('CREDIT');
+      setEntryCategory('Head Office Remittance');
+      setEntryDescription('Per-container charges remitted to Karachi Head Office');
+      setEntryAmount(staffUser.defaultPerContainerCharge || 5000);
     } else {
       setEntryDirection('DEBIT');
       setEntryCategory('Petty Cash Advance');
@@ -175,9 +183,9 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
     window.print();
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-start justify-center pt-3 sm:pt-6 pb-6 px-2 sm:px-4 overflow-y-auto animate-in fade-in duration-150">
-      <div className="glass-card rounded-2xl w-full max-w-5xl border border-white/15 shadow-2xl bg-slate-900/98 mb-6 max-h-[94vh] flex flex-col">
+  return createPortal(
+    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+      <div className="glass-card rounded-2xl w-full max-w-5xl border border-white/15 shadow-2xl bg-slate-900/98 my-auto max-h-[calc(100dvh-1rem)] sm:max-h-[92dvh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="p-4 sm:p-5 border-b border-white/10 flex justify-between items-center bg-slate-950/80 rounded-t-2xl shrink-0">
           <div className="flex items-center gap-3">
@@ -237,10 +245,10 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
         {/* Dual Ledger Mode Switcher Tabs */}
         <div className="p-3 sm:p-4 bg-black/40 border-b border-white/10 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0">
           {/* Tabs */}
-          <div className="flex items-center gap-2 bg-slate-950/80 p-1 rounded-xl border border-white/10 self-start">
+          <div className="flex flex-wrap items-center gap-2 bg-slate-950/80 p-1 rounded-xl border border-white/10 self-start">
             <button
               onClick={() => setLedgerType('SALARY')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
                 ledgerType === 'SALARY'
                   ? 'bg-brand-600 text-white shadow-md'
                   : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -251,14 +259,27 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
             </button>
             <button
               onClick={() => setLedgerType('DAILY')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
                 ledgerType === 'DAILY'
                   ? 'bg-amber-600 text-white shadow-md'
                   : 'text-gray-400 hover:text-white hover:bg-white/5'
               }`}
             >
               <Coffee size={14} />
-              <span>2. Daily Routine & Petty Cash Ledger</span>
+              <span>2. Daily Routine & Petty Cash</span>
+            </button>
+            <button
+              onClick={() => setLedgerType('CONTAINER_CHARGES')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all ${
+                ledgerType === 'CONTAINER_CHARGES'
+                  ? 'bg-cyan-600 text-white shadow-md'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <ShieldCheck size={14} />
+              <span>
+                3. Per-Container Charges (HO){Number(staffUser.defaultPerContainerCharge) > 0 ? ` • PKR ${Number(staffUser.defaultPerContainerCharge).toLocaleString()}/Cntr` : ''}
+              </span>
             </button>
           </div>
 
@@ -285,10 +306,19 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
             <button
               onClick={handleOpenAdd}
               className={`text-white text-xs font-semibold px-3.5 py-2 rounded-xl shadow-md transition flex items-center gap-1.5 ${
-                ledgerType === 'SALARY' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-amber-600 hover:bg-amber-500'
+                ledgerType === 'SALARY'
+                  ? 'bg-emerald-600 hover:bg-emerald-500'
+                  : ledgerType === 'CONTAINER_CHARGES'
+                  ? 'bg-cyan-600 hover:bg-cyan-500'
+                  : 'bg-amber-600 hover:bg-amber-500'
               }`}
             >
-              <Plus size={14} /> {ledgerType === 'SALARY' ? 'Record Salary / Loan' : 'Record Daily Cash / Expense'}
+              <Plus size={14} />{' '}
+              {ledgerType === 'SALARY'
+                ? 'Record Salary / Loan'
+                : ledgerType === 'CONTAINER_CHARGES'
+                ? 'Record HO Remittance / Charge'
+                : 'Record Daily Cash / Expense'}
             </button>
           </div>
         </div>
@@ -297,7 +327,11 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-slate-950/40 border-b border-white/10 shrink-0">
           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
             <span className="text-[11px] text-gray-400 block mb-1">
-              {ledgerType === 'SALARY' ? 'Total Salary / Advances Paid (Debit)' : 'Total Cash Given to Staff (Debit)'}
+              {ledgerType === 'SALARY'
+                ? 'Total Salary / Advances Paid (Debit)'
+                : ledgerType === 'CONTAINER_CHARGES'
+                ? 'Total Assigned Container Charges (Receivable by HO)'
+                : 'Total Cash Given to Staff (Debit)'}
             </span>
             <span className="text-base font-bold font-mono text-emerald-400">
               PKR {totalDebit.toLocaleString()}
@@ -306,7 +340,11 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
 
           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
             <span className="text-[11px] text-gray-400 block mb-1">
-              {ledgerType === 'SALARY' ? 'Total Deductions / Loans Repaid (Credit)' : 'Total Bills Submitted / Returned (Credit)'}
+              {ledgerType === 'SALARY'
+                ? 'Total Deductions / Loans Repaid (Credit)'
+                : ledgerType === 'CONTAINER_CHARGES'
+                ? 'Total Remitted to Karachi Head Office (Credit)'
+                : 'Total Bills Submitted / Returned (Credit)'}
             </span>
             <span className="text-base font-bold font-mono text-blue-400">
               PKR {totalCredit.toLocaleString()}
@@ -315,7 +353,11 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
 
           <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
             <span className="text-[11px] text-gray-400 block mb-1">
-              {ledgerType === 'SALARY' ? 'Net Outstanding / Advance Balance' : 'Net Cash Currently in Staff Hand'}
+              {ledgerType === 'SALARY'
+                ? 'Net Outstanding / Advance Balance'
+                : ledgerType === 'CONTAINER_CHARGES'
+                ? 'Net Payable to Karachi Head Office'
+                : 'Net Cash Currently in Staff Hand'}
             </span>
             <span className={`text-base font-bold font-mono ${netBalance === 0 ? 'text-emerald-400' : netBalance > 0 ? 'text-amber-400' : 'text-blue-400'}`}>
               {netBalance === 0 
@@ -594,8 +636,8 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
 
       {/* Quick Receipt Viewer */}
       {previewReceiptUrl && (
-        <div className="fixed inset-0 bg-black/95 z-70 flex items-start justify-center pt-3 sm:pt-6 pb-6 px-3 sm:px-4 overflow-y-auto">
-          <div className="glass-card rounded-2xl w-full max-w-xl border border-white/20 p-4 space-y-3 bg-slate-900 flex flex-col max-h-[90vh] mb-6">
+        <div className="fixed inset-0 bg-black/95 z-[10010] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="glass-card rounded-2xl w-full max-w-xl border border-white/20 p-4 space-y-3 bg-slate-900 flex flex-col max-h-[90vh] my-auto">
             <div className="flex justify-between items-center border-b border-white/10 pb-2">
               <h4 className="text-sm font-bold text-white">Attached Bill / Receipt</h4>
               <button onClick={() => setPreviewReceiptUrl(null)} className="text-gray-400 hover:text-white">
@@ -608,6 +650,7 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };

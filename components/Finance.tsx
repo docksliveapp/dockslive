@@ -752,6 +752,27 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     return { total: 0, breakdown: 'No charges added' };
   };
 
+  // Helper to format Container Number, Container Size, and Container Quantity for Case Ledger Narration
+  const formatCaseContainerNarration = (c: Case): string => {
+    const cntrs = Array.isArray(c.containers) && c.containers.length > 0 ? c.containers : [];
+    const cntrQty = cntrs.length || 1;
+    const rawNos = cntrs.map(cn => (cn.number || '').trim()).filter(Boolean);
+    const fallbackNo =
+      c.containerNumber ||
+      c.extractedData?.containerNo ||
+      (c.invoiceNo && c.invoiceNo !== c.caseNo ? c.invoiceNo : '') ||
+      'N/A';
+    const cntrNoText = rawNos.length > 0 ? rawNos.join(', ') : fallbackNo;
+
+    const rawSizes = cntrs.map(cn => (cn.size || '').trim()).filter(Boolean);
+    const cntrSizeText =
+      rawSizes.length > 0
+        ? Array.from(new Set(rawSizes)).join('/')
+        : ((c as any).containerSize || c.extractedData?.containerSize || '40ft');
+
+    return `Cntr No: ${cntrNoText} | Size: ${cntrSizeText} | Qty: ${cntrQty}`;
+  };
+
   // Build real-time dynamic Client Ledger for selected client
   const clientLedgerEntries = useMemo(() => {
     if (!selectedLedgerClient) return [];
@@ -785,20 +806,19 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         if (c.status === 'CANCELLED') return;
 
         const charges = getCaseChargesList(c);
-        // Rule: Case number is identical to invoice number
-        const invNo = c.invoiceNo || c.caseNo || (c.extractedData && c.extractedData.blNumber ? `INV-${c.extractedData.blNumber}` : `INV-${c.id}`);
-        const cntrNumbers = (c.containers || []).map(cntr => cntr.number).filter(Boolean).join(', ');
-        const cntrInfo = cntrNumbers ? `[${(c.containers || []).length} Cntr: ${cntrNumbers}]` : '';
+        // Rule: Case Number IS the Invoice Number and Voucher Number (no separate invoice reference)
+        const caseRefNo = c.caseNo || c.caseNumber || c.invoiceNo || `CASE-${c.id}`;
+        const cntrNarration = formatCaseContainerNarration(c);
 
         if (charges.length > 1) {
-          // Add each itemized charge line as its own debit entry so payments against specific charges (e.g. AGAINST TP CHARGES) reconcile cleanly
           charges.forEach((ch, idx) => {
-            const chargeDate = (ch as any).date || c.createdAt || c.registrationDate || new Date().toISOString().split('T')[0];
+            const rawDate = (ch as any).date || c.createdAt || c.registrationDate || new Date().toISOString().split('T')[0];
+            const chargeDate = String(rawDate).split('T')[0];
             entries.push({
               id: `case_${c.id}_ch_${idx}_${ch.id || idx}`,
               date: chargeDate,
-              reference: invNo,
-              description: `Invoice: ${ch.description} - Case ${c.caseNo}${cntrInfo ? ' ' + cntrInfo : ''}`,
+              reference: caseRefNo,
+              description: `${ch.description} | ${cntrNarration}`,
               debit: Number(ch.amount) || 0,
               credit: 0,
               balance: 0,
@@ -809,12 +829,13 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
           });
         } else if (charges.length === 1) {
           const ch = charges[0];
-          const chargeDate = (ch as any).date || c.createdAt || c.registrationDate || new Date().toISOString().split('T')[0];
+          const rawDate = (ch as any).date || c.createdAt || c.registrationDate || new Date().toISOString().split('T')[0];
+          const chargeDate = String(rawDate).split('T')[0];
           entries.push({
             id: `case_${c.id}`,
             date: chargeDate,
-            reference: invNo,
-            description: `Invoice: ${ch.description} - Case ${c.caseNo}${cntrInfo ? ' ' + cntrInfo : ''}`,
+            reference: caseRefNo,
+            description: `${ch.description} | ${cntrNarration}`,
             debit: Number(ch.amount) || 0,
             credit: 0,
             balance: 0,
@@ -829,19 +850,29 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     // 3. Add Receivables billed directly (if not from cases)
     receivables.forEach((r) => {
       if (matchClient(r.party)) {
+        const descCaseMatch = (r.description || '').match(/\b((?:DPL|TRK|MI|MHB|VSL)-[A-Z0-9-]+-\d+)\b/i);
+        const linkedCase = cases.find(c =>
+          (r.relatedCaseId && String(c.id) === String(r.relatedCaseId)) ||
+          (r.caseNo && c.caseNo === r.caseNo) ||
+          (descCaseMatch && c.caseNo?.toUpperCase() === descCaseMatch[1].toUpperCase())
+        );
+        const resolvedCaseNo = linkedCase?.caseNo || r.caseNo || (descCaseMatch ? descCaseMatch[1] : '') || r.reference || `CASE-${r.id}`;
+
         // Prevent duplicate if this receivable is already linked to a case that was added above
         const isAlreadyAdded = entries.some(e => 
           (r.relatedCaseId && (e as any).relatedCaseId === r.relatedCaseId) ||
+          (resolvedCaseNo && e.reference && e.reference.toUpperCase() === resolvedCaseNo.toUpperCase()) ||
           (r.caseNo && e.reference && e.reference.includes(r.caseNo)) ||
           (r.reference && e.reference && e.reference.includes(r.reference))
         );
         if (isAlreadyAdded) return;
 
+        const cntrDetails = linkedCase ? ` | ${formatCaseContainerNarration(linkedCase)}` : '';
         entries.push({
           id: `recv_${r.id}`,
-          date: r.date,
-          reference: r.reference || r.caseNo || `INV-${r.id}`,
-          description: `Invoice: ${r.description}${r.caseNo ? ` - Case ${r.caseNo}` : ''} (${r.category})`,
+          date: String(r.date || '').split('T')[0],
+          reference: resolvedCaseNo,
+          description: `${r.description}${cntrDetails}`,
           debit: Number(r.amount) || 0,
           credit: 0,
           balance: 0,
@@ -858,10 +889,18 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
           ? `Bank Transfer (${f.bankName || 'HBL'} Trx #${f.transactionId || 'Direct'})` 
           : 'Cash Receipt';
 
+        const descCaseMatch = (f.description || '').match(/\b((?:DPL|TRK|MI|MHB|VSL)-[A-Z0-9-]+-\d+)\b/i);
+        const linkedCase = cases.find(c =>
+          (f.caseNo && c.caseNo === f.caseNo) ||
+          (f.relatedCaseId && String(c.id) === String(f.relatedCaseId)) ||
+          (descCaseMatch && c.caseNo?.toUpperCase() === descCaseMatch[1].toUpperCase())
+        );
+        const resolvedRef = linkedCase?.caseNo || f.caseNo || (descCaseMatch ? descCaseMatch[1] : '') || f.reference || (f.transactionId ? `#${f.transactionId}` : `REC-${f.id}`);
+
         entries.push({
           id: `pay_${f.id}`,
-          date: f.date,
-          reference: f.reference || (f.transactionId ? `#${f.transactionId}` : `REC-${f.id}`),
+          date: String(f.date || '').split('T')[0],
+          reference: resolvedRef,
           description: `Payment Received: ${f.description} [${methodInfo}]`,
           debit: 0,
           credit: Number(f.amount) || 0,
@@ -999,26 +1038,27 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     // 1. Collect all invoice / billing items
     const allInvoices: (FinanceEntry & { isCaseInvoice?: boolean })[] = [];
 
-    // A. Case Invoices
+    // A. Case Invoices (Case Number IS the Invoice Number & Voucher Number)
     cases.forEach((c) => {
       if (c.status === 'CANCELLED') return;
 
       const { total, breakdown } = getCaseTotalCharges(c);
       if (total > 0) {
         const cntrNumbers = (c.containers || []).map(cntr => cntr.number).filter(Boolean).join(', ');
-        const invNo = c.invoiceNo || c.caseNo || (c.extractedData && c.extractedData.blNumber ? `INV-${c.extractedData.blNumber}` : `INV-${c.id}`);
+        const caseRefNo = c.caseNo || c.caseNumber || c.invoiceNo || `CASE-${c.id}`;
+        const cntrNarration = formatCaseContainerNarration(c);
         allInvoices.push({
           id: typeof c.id === 'number' ? c.id : Number(String(c.id).replace(/\D/g, '').slice(0, 9)) || 1000 + Math.floor(Math.random() * 8000),
-          date: c.createdAt || c.registrationDate || new Date().toISOString().split('T')[0],
+          date: String(c.createdAt || c.registrationDate || new Date().toISOString()).split('T')[0],
           party: (c.clientName || c.client || c.importer || (c.extractedData as any)?.cargoOwner || (c.extractedData as any)?.importerName || 'General Client').trim(),
-          description: `Case ${c.caseNo}: ${c.category} [${(c.containers || []).length || 1} Cntr: ${cntrNumbers || 'N/A'}] - ${c.pol || 'POL'} to ${c.pod || 'POD'} (${breakdown})`,
+          description: `${breakdown} | ${cntrNarration}`,
           amount: total,
           type: 'RECEIVABLE',
           status: 'PENDING',
           category: 'Freight & Clearance',
-          reference: invNo,
+          reference: caseRefNo,
           caseNo: c.caseNo,
-          containerNumber: cntrNumbers || 'N/A',
+          containerNumber: cntrNumbers || c.containerNumber || 'N/A',
           relatedCaseId: String(c.id),
           isCaseInvoice: true
         });
@@ -1039,9 +1079,10 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     });
 
     // 2. FIFO Payment allocation per client
+    const normalizeClientParty = (p?: string) => (p || 'General Client').trim().toLowerCase().replace(/\s+/g, ' ');
     const clientGroups: Record<string, typeof allInvoices> = {};
     allInvoices.forEach(inv => {
-      const key = (inv.party || 'General Client').trim().toLowerCase();
+      const key = normalizeClientParty(inv.party);
       if (!clientGroups[key]) clientGroups[key] = [];
       clientGroups[key].push(inv);
     });
@@ -1052,9 +1093,9 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       // Sort oldest first for FIFO payment matching
       invList.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-      // Sum all payments received from this client
+      // Sum all verified payments received from this client
       const totalPaid = financeData
-        .filter(f => f.party?.trim().toLowerCase() === clientKey && f.type === 'INCOME')
+        .filter(f => normalizeClientParty(f.party) === clientKey && f.type === 'INCOME' && f.status !== 'PENDING' && (f.status as any) !== 'REJECTED')
         .reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
 
       let availablePayment = totalPaid;
@@ -1097,10 +1138,12 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       lastDate: string;
     }>();
 
+    const normalizeClientParty = (p?: string) => (p || 'General Client').trim().toLowerCase().replace(/\s+/g, ' ');
+
     // 1. Accumulate all invoices/charges for each client
     calculatedReceivables.forEach((inv) => {
       const partyName = inv.party?.trim() || 'General Client';
-      const key = partyName.toLowerCase();
+      const key = normalizeClientParty(partyName);
       if (!clientMap.has(key)) {
         clientMap.set(key, {
           party: partyName,
@@ -1122,11 +1165,11 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       }
     });
 
-    // 2. Accumulate all income payments received from this client
+    // 2. Accumulate all verified income payments received from this client
     financeData.forEach((f) => {
-      if (f.type === 'INCOME' && f.party) {
+      if (f.type === 'INCOME' && f.status !== 'PENDING' && (f.status as any) !== 'REJECTED' && f.party) {
         const partyName = f.party.trim();
-        const key = partyName.toLowerCase();
+        const key = normalizeClientParty(partyName);
         if (!clientMap.has(key)) {
           clientMap.set(key, {
             party: partyName,
@@ -1148,8 +1191,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     });
 
     const results = Array.from(clientMap.values()).map((client) => {
-      const key = client.party.toLowerCase();
-      const clientCases = cases.filter(c => c.clientName?.trim().toLowerCase() === key);
+      const key = normalizeClientParty(client.party);
+      const clientCases = cases.filter(c => normalizeClientParty(c.clientName || c.client) === key);
       const totalContainers = clientCases.reduce((sum, c) => sum + (c.containers?.length || 1), 0);
       const currentBalance = client.totalInvoiced - client.totalPaid;
 
@@ -1389,120 +1432,172 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     };
   }, [financeData, calculatedReceivables]);
 
-  // Master General Ledger Entries (Strictly Client Generated Invoices, Case Billables & Client Payments)
+  // Master General Ledger Entries: Consolidated Single Entry per Client / Line showing Total Invoiced, Total Paid, and Total Balance
   const generalLedgerEntries = useMemo(() => {
-    const glEntries: (LedgerEntry & { party: string; category: string })[] = [];
+    const normalizePartyKey = (p?: string) =>
+      (p || 'General Client')
+        .trim()
+        .toUpperCase()
+        .replace(/[.,\-_/()]/g, ' ')
+        .replace(/\s+/g, ' ');
+
+    const isSalaryOrInternal = (party?: string, desc?: string, cat?: string, ref?: string) => {
+      const partyLower = (party || '').toLowerCase();
+      const descLower = (desc || '').toLowerCase();
+      const catLower = (cat || '').toLowerCase();
+      return (
+        catLower.includes('salary') ||
+        catLower.includes('payroll') ||
+        catLower.includes('internal transfer') ||
+        partyLower.includes('system administrator') ||
+        partyLower.includes('cash in drawer') ||
+        descLower.includes('salary') ||
+        (ref || '').startsWith('SAL-')
+      );
+    };
+
+    interface ConsolidatedClientGL {
+      key: string;
+      party: string;
+      lastDate: string;
+      totalDebit: number;
+      totalCredit: number;
+      invoicesCount: number;
+      paymentsCount: number;
+      caseRefs: Set<string>;
+      containerRefs: Set<string>;
+    }
+
+    const clientMap = new Map<string, ConsolidatedClientGL>();
+    const trackedCaseRefs = new Set<string>();
+
+    const getOrCreateClient = (rawParty?: string, dateStr?: string): ConsolidatedClientGL => {
+      const displayParty = (rawParty || 'General Client').trim().toUpperCase();
+      const key = normalizePartyKey(displayParty);
+      if (!clientMap.has(key)) {
+        clientMap.set(key, {
+          key,
+          party: displayParty,
+          lastDate: dateStr || new Date().toISOString().split('T')[0],
+          totalDebit: 0,
+          totalCredit: 0,
+          invoicesCount: 0,
+          paymentsCount: 0,
+          caseRefs: new Set<string>(),
+          containerRefs: new Set<string>()
+        });
+      }
+      const item = clientMap.get(key)!;
+      if (dateStr && (!item.lastDate || dateStr > item.lastDate)) {
+        item.lastDate = dateStr;
+      }
+      return item;
+    };
 
     // 1. All Client Case charges / Generated Invoices (Debits)
     cases.forEach((c) => {
       if (c.status === 'CANCELLED') return;
-
-      const { total, breakdown } = getCaseTotalCharges(c);
+      const { total } = getCaseTotalCharges(c);
       if (total > 0) {
-        const cntrNumbers = (c.containers || []).map(cntr => cntr.number).filter(Boolean).join(', ');
-        const invNo = c.invoiceNo || c.caseNo || (c.extractedData && c.extractedData.blNumber ? `INV-${c.extractedData.blNumber}` : `INV-${c.id}`);
-        const refParts = [invNo, `Case: ${c.caseNo}`, cntrNumbers ? `Cntr: ${cntrNumbers}` : ''].filter(Boolean);
+        const partyName = c.clientName || c.client || c.importer || (c.extractedData as any)?.cargoOwner || (c.extractedData as any)?.importerName || 'General Client';
+        const caseRefNo = (c.caseNo || c.caseNumber || c.invoiceNo || `CASE-${c.id}`).trim();
+        trackedCaseRefs.add(caseRefNo.toLowerCase());
+        const dateStr = String(c.createdAt || c.registrationDate || new Date().toISOString()).split('T')[0];
 
-        glEntries.push({
-          id: `gl_case_${c.id}`,
-          date: c.createdAt || c.registrationDate || new Date().toISOString().split('T')[0],
-          reference: refParts.join(' | '),
-          description: `Case Billing: ${c.category} [${(c.containers || []).length || 1} Cntr] - ${breakdown}`,
-          debit: total,
-          credit: 0,
-          balance: 0,
-          type: 'DEBIT',
-          party: c.clientName || c.client || 'General Client',
-          category: 'Freight & Clearance'
-        });
+        const rec = getOrCreateClient(partyName, dateStr);
+        rec.totalDebit += total;
+        rec.invoicesCount += 1;
+        if (caseRefNo) rec.caseRefs.add(caseRefNo);
+        const cntrs = (c.containers || []).map(cn => cn.number).filter(Boolean);
+        cntrs.forEach(cn => rec.containerRefs.add(cn));
+        if (cntrs.length === 0 && c.containerNumber) rec.containerRefs.add(c.containerNumber);
       }
     });
 
-    // 2. All Client Receivables Invoiced (Debits)
+    // 2. All Client Receivables Invoiced (Debits, avoiding duplicates with cases)
     receivables.forEach((r) => {
-      if (r.category === 'Staff Payroll & Salaries' || r.reference?.startsWith('SAL-') || r.reference?.startsWith('REC-')) return;
-      const refParts = [
-        r.reference || `INV-${r.id}`,
-        r.caseNo ? `Case: ${r.caseNo}` : '',
-        r.containerNumber ? `Cntr: ${r.containerNumber}` : ''
-      ].filter(Boolean);
+      if (isSalaryOrInternal(r.party, r.description, r.category, r.reference)) return;
+      if (r.reference?.startsWith('REC-')) return;
+      const refClean = (r.reference || '').trim().toLowerCase();
+      if (refClean && trackedCaseRefs.has(refClean)) return;
 
-      glEntries.push({
-        id: `gl_recv_${r.id}`,
-        date: r.date,
-        reference: refParts.join(' | '),
-        description: `Receivable Invoiced: ${r.description}`,
-        debit: r.amount,
-        credit: 0,
-        balance: 0,
-        type: 'DEBIT',
-        party: r.party,
-        category: r.category
+      const rec = getOrCreateClient(r.party, r.date);
+      rec.totalDebit += Number(r.amount) || 0;
+      rec.invoicesCount += 1;
+      if (r.caseNo) rec.caseRefs.add(r.caseNo);
+      else if (r.reference) rec.caseRefs.add(r.reference);
+      if (r.containerNumber) rec.containerRefs.add(r.containerNumber);
+    });
+
+    // 3. All Verified Client Payments Received (Credits)
+    financeData.forEach((f) => {
+      if (f.type === 'INCOME' && f.status !== 'PENDING' && (f.status as any) !== 'REJECTED') {
+        if (isSalaryOrInternal(f.party, f.description, f.category, f.reference)) return;
+        const rec = getOrCreateClient(f.party, f.date);
+        rec.totalCredit += Number(f.amount) || 0;
+        rec.paymentsCount += 1;
+        if (f.caseNo) rec.caseRefs.add(f.caseNo);
+      }
+    });
+
+    // Build consolidated single-row-per-client ledger entries
+    let consolidatedList: (LedgerEntry & { party: string; category: string; invoicesCount?: number; paymentsCount?: number })[] = [];
+
+    Array.from(clientMap.values()).forEach((client) => {
+      if (client.totalDebit === 0 && client.totalCredit === 0) return;
+
+      const netClientBalance = client.totalDebit - client.totalCredit;
+      const casesArr = Array.from(client.caseRefs);
+      const cntrsArr = Array.from(client.containerRefs);
+
+      const refBadge =
+        client.invoicesCount > 0
+          ? `${client.invoicesCount} Invoice${client.invoicesCount > 1 ? 's' : ''}`
+          : `${client.paymentsCount} Receipt${client.paymentsCount > 1 ? 's' : ''}`;
+
+      const caseSummaryText =
+        casesArr.length > 0
+          ? `Cases: ${casesArr.slice(0, 4).join(', ')}${casesArr.length > 4 ? ` (+${casesArr.length - 4} more)` : ''}`
+          : 'Consolidated Account';
+
+      const cntrSummaryText =
+        cntrsArr.length > 0
+          ? ` | Cntrs: ${cntrsArr.slice(0, 3).join(', ')}${cntrsArr.length > 3 ? ` (+${cntrsArr.length - 3})` : ''}`
+          : '';
+
+      consolidatedList.push({
+        id: `gl_client_${client.key}`,
+        date: client.lastDate,
+        reference: refBadge,
+        description: `Total ${client.invoicesCount} Invoice(s) Billed & ${client.paymentsCount} Payment(s) Received | ${caseSummaryText}${cntrSummaryText}`,
+        debit: client.totalDebit,
+        credit: client.totalCredit,
+        balance: netClientBalance,
+        type: netClientBalance >= 0 ? 'DEBIT' : 'CREDIT',
+        party: client.party,
+        category: `${client.invoicesCount} Invoices • ${client.paymentsCount} Payments`,
+        invoicesCount: client.invoicesCount,
+        paymentsCount: client.paymentsCount
       });
     });
 
-    // 3. All Client Payments Received (Credits)
-    financeData.forEach((f) => {
-      if (f.type === 'INCOME') {
-        const refParts = [
-          f.reference || `REC-${f.id}`,
-          f.caseNo ? `Case: ${f.caseNo}` : '',
-          f.containerNumber ? `Cntr: ${f.containerNumber}` : ''
-        ].filter(Boolean);
-
-        glEntries.push({
-          id: `gl_inc_${f.id}`,
-          date: f.date,
-          reference: refParts.join(' | '),
-          description: `Client Payment Received: ${f.description}`,
-          debit: 0,
-          credit: f.amount,
-          balance: 0,
-          type: 'CREDIT',
-          party: f.party,
-          category: f.category
-        });
-      }
-    });
-
-    // Strictly ensure no staff salaries, payroll, or administrative payables appear in General Ledger
-    const clientOnlyGlEntries = glEntries.filter(e => {
-      const partyLower = (e.party || '').toLowerCase();
-      const descLower = (e.description || '').toLowerCase();
-      const catLower = (e.category || '').toLowerCase();
-      const isSalaryOrStaff = 
-        catLower.includes('salary') || 
-        catLower.includes('payroll') || 
-        partyLower.includes('system administrator') || 
-        descLower.includes('salary') ||
-        (e.reference || '').startsWith('SAL-');
-      return !isSalaryOrStaff;
-    });
-
     // Filter by Account if selected
-    let filtered = clientOnlyGlEntries;
     if (glAccountFilter !== 'ALL') {
-      filtered = filtered.filter(e => e.party?.trim().toLowerCase() === glAccountFilter.trim().toLowerCase());
+      const targetNorm = normalizePartyKey(glAccountFilter);
+      consolidatedList = consolidatedList.filter(e => normalizePartyKey(e.party) === targetNorm);
     }
 
-    // Sort chronologically
-    filtered.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    // Sort: clients with highest positive balance due first, then by party name
+    consolidatedList.sort((a, b) => b.balance - a.balance || a.party.localeCompare(b.party));
 
-    // Calculate running balance
-    let currentGlBalance = 0;
-    filtered.forEach((entry) => {
-      currentGlBalance = currentGlBalance + entry.debit - entry.credit;
-      entry.balance = currentGlBalance;
-    });
-
-    return filtered;
+    return consolidatedList;
   }, [cases, financeData, receivables, glAccountFilter]);
 
   // Master GL Summary
   const glSummary = useMemo(() => {
     const totalDebits = generalLedgerEntries.reduce((sum, e) => sum + e.debit, 0);
     const totalCredits = generalLedgerEntries.reduce((sum, e) => sum + e.credit, 0);
-    const netBalance = totalDebits - totalCredits;
+    const netBalance = generalLedgerEntries.reduce((sum, e) => sum + Math.max(0, e.balance), 0);
     return {
       totalDebits,
       totalCredits,
@@ -1735,19 +1830,20 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     const paidDate = new Date().toISOString().split('T')[0];
     const isSummary = Boolean(invoiceForReceive.isClientSummary);
     const seqRef = generateFinanceReference();
+    const unifiedCaseOrVoucherRef = invoiceForReceive.caseNo || invoiceForReceive.reference || seqRef;
     const incomeEntry: FinanceEntry = {
       id: Date.now(),
       date: paidDate,
       description: isSummary
         ? `Ledger Settlement Received from ${invoiceForReceive.party}`
-        : `Payment Received against ${invoiceForReceive.reference || 'Invoice'} (${invoiceForReceive.party})`,
+        : `Payment Received against Case ${unifiedCaseOrVoucherRef} (${invoiceForReceive.party})`,
       party: invoiceForReceive.party,
       amount: amt,
       type: 'INCOME',
       status: 'PAID',
       category: 'Client Payment',
-      reference: seqRef,
-      caseNo: invoiceForReceive.caseNo,
+      reference: unifiedCaseOrVoucherRef,
+      caseNo: invoiceForReceive.caseNo || invoiceForReceive.reference,
       containerNumber: invoiceForReceive.containerNumber,
       paymentMethod: receivePaymentMethod,
       bankName: receivePaymentMethod === 'BANK' ? receivePaymentBank : undefined,
@@ -2021,10 +2117,13 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     setPdfErrorMessage(null);
     setDirectDownloadUrl(null);
 
+    const foundClientForInv = registeredClients.find(
+      c => (c.name || '').trim().toLowerCase() === (entry.party || '').trim().toLowerCase()
+    );
     const invoice: ReceivableInvoiceData = {
       invoiceNo: entry.reference || `INV-2026-${entry.id}`,
-      date: entry.date,
-      dueDate: entry.date,
+      date: String(entry.date || '').split('T')[0],
+      dueDate: String(entry.date || '').split('T')[0],
       clientName: entry.party,
       description: entry.description,
       amount: entry.amount,
@@ -2032,6 +2131,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       category: entry.category,
       status: entry.status,
       companyName,
+      companyId: (foundClientForInv as any)?.companyId || activeCompany?.id,
       customLogo: activeLogo,
       branding
     };
@@ -2044,10 +2144,13 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     setPdfSuccessMessage(null);
     setPdfErrorMessage(null);
     try {
+      const foundClientForInv = registeredClients.find(
+        c => (c.name || '').trim().toLowerCase() === (entry.party || '').trim().toLowerCase()
+      );
       const invoice: ReceivableInvoiceData = {
         invoiceNo: entry.reference || `INV-2026-${entry.id}`,
-        date: entry.date,
-        dueDate: entry.date,
+        date: String(entry.date || '').split('T')[0],
+        dueDate: String(entry.date || '').split('T')[0],
         clientName: entry.party,
         description: entry.description,
         amount: entry.amount,
@@ -2055,6 +2158,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         category: entry.category,
         status: entry.status,
         companyName,
+        companyId: (foundClientForInv as any)?.companyId || activeCompany?.id,
         customLogo: activeLogo,
         branding
       };
@@ -2118,14 +2222,16 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       const clientCandidate = c.clientName || c.client || c.importer || (c.extractedData as any)?.cargoOwner || (c.extractedData as any)?.importerName;
       if (matchClient(clientCandidate) && c.status !== 'CANCELLED') {
         const charges = getCaseChargesList(c);
-        const invNo = c.invoiceNo || c.caseNo || `INV-${c.id}`;
+        const caseRefNo = c.caseNo || c.caseNumber || c.invoiceNo || `CASE-${c.id}`;
+        const cntrNarration = formatCaseContainerNarration(c);
         charges.forEach((ch, idx) => {
-          const chargeDate = (ch as any).date || c.createdAt || c.registrationDate || new Date().toISOString().split('T')[0];
+          const rawDate = (ch as any).date || c.createdAt || c.registrationDate || new Date().toISOString().split('T')[0];
+          const chargeDate = String(rawDate).split('T')[0];
           entries.push({
             id: `case_${c.id}_ch_${idx}`,
             date: chargeDate,
-            reference: invNo,
-            description: `Invoice: ${ch.description} - Case ${c.caseNo}`,
+            reference: caseRefNo,
+            description: `${ch.description} | ${cntrNarration}`,
             debit: Number(ch.amount) || 0,
             credit: 0,
             balance: 0,
@@ -2138,16 +2244,19 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
     receivables.forEach((r) => {
       if (matchClient(r.party)) {
+        const descCaseMatch = (r.description || '').match(/\b((?:DPL|TRK|MI|MHB|VSL)-[A-Z0-9-]+-\d+)\b/i);
+        const resolvedRef = r.caseNo || (descCaseMatch ? descCaseMatch[1] : '') || r.reference || `CASE-${r.id}`;
         const isAlreadyAdded = entries.some(e =>
+          (resolvedRef && e.reference && e.reference.toUpperCase() === resolvedRef.toUpperCase()) ||
           (r.caseNo && e.reference && e.reference.includes(r.caseNo)) ||
           (r.reference && e.reference && e.reference.includes(r.reference))
         );
         if (!isAlreadyAdded) {
           entries.push({
             id: `recv_${r.id}`,
-            date: r.date,
-            reference: r.reference || r.caseNo || `INV-${r.id}`,
-            description: `Invoice: ${r.description}`,
+            date: String(r.date || '').split('T')[0],
+            reference: resolvedRef,
+            description: `${r.description}`,
             debit: Number(r.amount) || 0,
             credit: 0,
             balance: 0,
@@ -2160,10 +2269,12 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
     financeData.forEach((f) => {
       if (matchClient(f.party) && f.type === 'INCOME') {
+        const descCaseMatch = (f.description || '').match(/\b((?:DPL|TRK|MI|MHB|VSL)-[A-Z0-9-]+-\d+)\b/i);
+        const resolvedRef = f.caseNo || (descCaseMatch ? descCaseMatch[1] : '') || f.reference || `REC-${f.id}`;
         entries.push({
           id: `pay_${f.id}`,
-          date: f.date,
-          reference: f.reference || `REC-${f.id}`,
+          date: String(f.date || '').split('T')[0],
+          reference: resolvedRef,
           description: `Payment Received: ${f.description}`,
           debit: 0,
           credit: Number(f.amount) || 0,
@@ -2364,12 +2475,16 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       const dateRangeStr = (ledgerStartDate || ledgerEndDate)
         ? `${ledgerStartDate || 'Start'} to ${ledgerEndDate || 'Today'}`
         : 'Full History to Date';
+      const foundClientObj = registeredClients.find(
+        c => (c.name || '').trim().toLowerCase() === selectedLedgerClient.trim().toLowerCase()
+      );
       const res = await downloadClientLedgerPdf({
         clientName: selectedLedgerClient,
-        statementDate: `${new Date().toLocaleDateString()} (Period: ${dateRangeStr})`,
+        statementDate: `${new Date().toISOString().split('T')[0]}`,
+        dateRange: dateRangeStr,
         summary: clientSummary,
         entries: entriesToExport.map(e => ({
-          date: e.date,
+          date: String(e.date || '').split('T')[0],
           reference: e.reference || '',
           description: e.description,
           debit: e.debit,
@@ -2377,6 +2492,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
           balance: e.balance
         })),
         companyName,
+        companyId: (foundClientObj as any)?.companyId || activeCompany?.id,
         customLogo: activeLogo,
         branding
       });
@@ -4787,8 +4903,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/5 print:text-black print:border-black">
                   <tr>
                     <th className="p-4 w-28">Date</th>
-                    <th className="p-4 w-36">Voucher / Ref</th>
-                    <th className="p-4">Particulars & Description</th>
+                    <th className="p-4 w-36">Case No</th>
+                    <th className="p-4">Description / Narration</th>
                     <th className="p-4 text-right w-36">Debit (Charges)</th>
                     <th className="p-4 text-right w-36">Credit (Paid)</th>
                     <th className="p-4 text-right w-40">Running Balance</th>
@@ -4940,47 +5056,54 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             {/* General Ledger Stats Highlights */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 no-print">
               <div className="glass-panel p-3.5 rounded-xl border border-white/10">
-                <p className="text-[11px] text-gray-400 uppercase font-semibold">Total Debits</p>
+                <p className="text-[11px] text-gray-400 uppercase font-semibold">Total Invoiced (Debits)</p>
                 <p className="text-lg font-bold text-red-400 font-mono mt-1">
                   PKR {glSummary.totalDebits.toLocaleString()}
                 </p>
-                <p className="text-[10px] text-gray-500">Billings, charges & payables</p>
+                <p className="text-[10px] text-gray-500">All client invoices combined</p>
               </div>
               <div className="glass-panel p-3.5 rounded-xl border border-white/10">
-                <p className="text-[11px] text-gray-400 uppercase font-semibold">Total Credits</p>
+                <p className="text-[11px] text-gray-400 uppercase font-semibold">Total Received (Credits)</p>
                 <p className="text-lg font-bold text-green-400 font-mono mt-1">
                   PKR {glSummary.totalCredits.toLocaleString()}
                 </p>
-                <p className="text-[10px] text-gray-500">Payments & inflows received</p>
+                <p className="text-[10px] text-gray-500">All client payments received</p>
               </div>
               <div className="glass-panel p-3.5 rounded-xl border border-white/10 bg-brand-500/5">
-                <p className="text-[11px] text-brand-300 uppercase font-bold">General Net Position</p>
-                <p className="text-xl font-bold font-mono mt-1 text-white">
+                <p className="text-[11px] text-brand-300 uppercase font-bold">Total Outstanding Dues</p>
+                <p className="text-xl font-bold font-mono mt-1 text-amber-300">
                   PKR {glSummary.netBalance.toLocaleString()}
                 </p>
-                <p className="text-[10px] text-gray-400">Total net book balance</p>
+                <p className="text-[10px] text-gray-400">Consolidated client receivables</p>
               </div>
               <div className="glass-panel p-3.5 rounded-xl border border-white/10">
-                <p className="text-[11px] text-gray-400 uppercase font-semibold">Total Vouchers</p>
+                <p className="text-[11px] text-gray-400 uppercase font-semibold">Total Client Accounts</p>
                 <p className="text-lg font-bold text-blue-400 font-mono mt-1">
                   {glSummary.totalEntries}
                 </p>
-                <p className="text-[10px] text-gray-500">General ledger postings</p>
+                <p className="text-[10px] text-gray-500">1 consolidated row per client</p>
               </div>
             </div>
 
-            {/* Master General Ledger Table */}
+            {/* Master General Ledger Table (1 Single Consolidated Row Per Client) */}
             {/* Mobile View: Compact, Zero-Horizontal Scroll */}
             <div className="block sm:hidden divide-y divide-white/10 border-t border-white/10">
               {generalLedgerEntries.length === 0 ? (
                 <div className="p-8 text-center text-gray-500 text-xs">
-                  No general ledger entries recorded.
+                  No general ledger client accounts recorded.
                 </div>
               ) : (
                 generalLedgerEntries
                   .filter(entry => !searchTerm || entry.party.toLowerCase().includes(searchTerm.toLowerCase()) || entry.description.toLowerCase().includes(searchTerm.toLowerCase()) || (entry.reference || '').toLowerCase().includes(searchTerm.toLowerCase()))
                   .map((entry, idx) => (
-                    <div key={`gl_mob_${entry.id || idx}_${idx}`} className="p-3 hover:bg-white/5 transition-colors space-y-1.5">
+                    <div
+                      key={`gl_mob_${entry.id || idx}_${idx}`}
+                      onClick={() => {
+                        setSelectedLedgerClient(entry.party);
+                        setActiveTab('client_ledger');
+                      }}
+                      className="p-3 hover:bg-white/5 transition-colors space-y-1.5 cursor-pointer"
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-[11px] font-mono text-gray-400 shrink-0">{entry.date}</span>
@@ -4997,15 +5120,11 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
                       <div className="flex items-center justify-between pt-1 border-t border-white/5 text-xs font-mono">
                         <div className="flex items-center gap-2">
-                          {entry.debit > 0 && (
-                            <span className="text-red-400 font-medium">Dr: PKR {entry.debit.toLocaleString()}</span>
-                          )}
-                          {entry.credit > 0 && (
-                            <span className="text-green-400 font-medium">Cr: PKR {entry.credit.toLocaleString()}</span>
-                          )}
+                          <span className="text-red-400 font-medium">Billed: PKR {entry.debit.toLocaleString()}</span>
+                          <span className="text-green-400 font-medium">Paid: PKR {entry.credit.toLocaleString()}</span>
                         </div>
-                        <div className="font-bold text-white">
-                          PKR {entry.balance.toLocaleString()}
+                        <div className={`font-bold ${entry.balance > 0 ? 'text-amber-300' : entry.balance === 0 ? 'text-emerald-400' : 'text-blue-300'}`}>
+                          Bal: PKR {Math.abs(entry.balance).toLocaleString()} {entry.balance < 0 ? '(Adv)' : ''}
                         </div>
                       </div>
                     </div>
@@ -5013,34 +5132,42 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               )}
             </div>
 
-            {/* Desktop Table: Full View */}
+            {/* Desktop Table: Consolidated Single Row Per Client */}
             <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left text-sm text-gray-300 border-t border-white/10 print:table print:text-black print:border-black">
                 <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/5 print:text-black print:border-black">
                   <tr>
-                    <th className="p-4 w-28">Date</th>
-                    <th className="p-4 w-44">Account / Entity</th>
-                    <th className="p-4 w-32">Ref / Voucher</th>
-                    <th className="p-4">Description</th>
-                    <th className="p-4 text-right w-36">Debit (PKR)</th>
-                    <th className="p-4 text-right w-36">Credit (PKR)</th>
-                    <th className="p-4 text-right w-40">GL Balance</th>
+                    <th className="p-4 w-28">Last Date</th>
+                    <th className="p-4 w-56">Client / Account Name</th>
+                    <th className="p-4 w-36">Total Invoices</th>
+                    <th className="p-4">Consolidated Account Summary</th>
+                    <th className="p-4 text-right w-40">Total Invoiced (PKR)</th>
+                    <th className="p-4 text-right w-40">Total Paid (PKR)</th>
+                    <th className="p-4 text-right w-44">Total Balance</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5 print:divide-gray-300">
                   {generalLedgerEntries
                     .filter(entry => !searchTerm || entry.party.toLowerCase().includes(searchTerm.toLowerCase()) || entry.description.toLowerCase().includes(searchTerm.toLowerCase()) || (entry.reference || '').toLowerCase().includes(searchTerm.toLowerCase()))
                     .map((entry, idx) => (
-                    <tr key={`gl_row_${entry.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
-                      <td className="p-4 whitespace-nowrap text-xs text-gray-400 print:text-black">{entry.date}</td>
+                    <tr
+                      key={`gl_row_${entry.id || idx}_${idx}`}
+                      onClick={() => {
+                        setSelectedLedgerClient(entry.party);
+                        setActiveTab('client_ledger');
+                      }}
+                      className="hover:bg-white/5 transition-colors cursor-pointer"
+                      title="Click to view detailed invoice-by-invoice ledger for this client"
+                    >
+                      <td className="p-4 whitespace-nowrap text-xs text-gray-400 font-mono print:text-black">{entry.date}</td>
                       <td className="p-4 whitespace-nowrap">
-                        <span className="font-semibold text-white text-xs print:text-black">
+                        <span className="font-bold text-white text-xs sm:text-sm print:text-black block">
                           {entry.party}
                         </span>
-                        <p className="text-[10px] text-gray-500 print:hidden">{entry.category}</p>
+                        <p className="text-[10px] text-gray-400 print:hidden">{entry.category}</p>
                       </td>
                       <td className="p-4 whitespace-nowrap">
-                        <span className="font-mono text-xs text-brand-300 bg-brand-500/10 px-2 py-0.5 rounded border border-brand-500/20 print:border-none print:text-black print:bg-transparent">
+                        <span className="font-mono text-xs text-brand-300 bg-brand-500/10 px-2.5 py-1 rounded border border-brand-500/20 print:border-none print:text-black print:bg-transparent">
                           {entry.reference || '-'}
                         </span>
                       </td>
@@ -5049,21 +5176,23 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                           {entry.description}
                         </p>
                       </td>
-                      <td className="p-4 text-right text-red-400 font-mono text-xs sm:text-sm print:text-black">
-                        {entry.debit > 0 ? `PKR ${entry.debit.toLocaleString()}` : '-'}
+                      <td className="p-4 text-right text-red-400 font-mono font-semibold text-xs sm:text-sm print:text-black">
+                        PKR {entry.debit.toLocaleString()}
                       </td>
-                      <td className="p-4 text-right text-green-400 font-mono text-xs sm:text-sm print:text-black">
-                        {entry.credit > 0 ? `PKR ${entry.credit.toLocaleString()}` : '-'}
+                      <td className="p-4 text-right text-green-400 font-mono font-semibold text-xs sm:text-sm print:text-black">
+                        PKR {entry.credit.toLocaleString()}
                       </td>
-                      <td className="p-4 text-right font-bold text-white font-mono text-xs sm:text-sm print:text-black">
-                        PKR {entry.balance.toLocaleString()}
+                      <td className="p-4 text-right font-bold font-mono text-xs sm:text-sm print:text-black">
+                        <span className={entry.balance > 0 ? 'text-amber-300' : entry.balance === 0 ? 'text-emerald-400' : 'text-blue-300'}>
+                          PKR {Math.abs(entry.balance).toLocaleString()} {entry.balance < 0 ? '(Advance)' : entry.balance > 0 ? '(Due)' : '(Settled)'}
+                        </span>
                       </td>
                     </tr>
                   ))}
                   {generalLedgerEntries.length === 0 && (
                     <tr>
                       <td colSpan={7} className="text-center p-8 text-gray-500">
-                        No general ledger entries recorded.
+                        No general ledger client accounts recorded.
                       </td>
                     </tr>
                   )}

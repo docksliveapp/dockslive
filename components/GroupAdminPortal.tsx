@@ -67,6 +67,7 @@ import { exportTableToExcel } from '../services/excelExportService';
 import GroupAdminManagementModal, { AdminSettingsTab } from './GroupAdminManagementModal';
 import Dashboard from './Dashboard';
 import { ThemeToggleSwitch } from './ThemeToggleSwitch';
+import { LiveNotificationCenter } from './LiveNotificationCenter';
 import PublicContainerTrackingPortal from './PublicContainerTrackingPortal';
 import PublicVehicleTrackingPortal from './PublicVehicleTrackingPortal';
 
@@ -803,6 +804,12 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 <span className="hidden md:inline">Open Workspace</span>
               </button>
             )}
+
+            <LiveNotificationCenter
+              currentRole={UserRole.ADMIN}
+              currentRoles={[UserRole.ADMIN]}
+              userIdentifier={currentUserName || 'Arbabkhanboby'}
+            />
 
             <ThemeToggleSwitch compact />
 
