@@ -3774,121 +3774,143 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           </div>
         )}
 
-       {/* Case List - Touch-Optimized Virtualized List for High Performance & Smooth Scrolling */}
-       <div className="glass-card rounded-2xl overflow-hidden">
-         {/* Mobile View: High Density, Compact Typography, Zero Horizontal Scroll */}
-         <div className="block sm:hidden touch-pan-y">
+       {/* Case List - Full-Height Open Layout for Mobile & Desktop */}
+       <div className="glass-card rounded-2xl overflow-hidden min-h-[calc(100dvh-220px)] flex flex-col">
+         {/* Mobile View: Full-Screen Open List, Clean Date & Full Case No Visibility */}
+         <div className="block sm:hidden flex-1">
            <VirtualizedList
              items={filteredCases}
-             itemHeight={98}
-             maxHeight={650}
+             itemHeight={106}
+             minHeight={420}
              getItemKey={(c, idx) => `case_mob_${c.id || idx}_${idx}`}
              emptyPlaceholder={
-               <div className="p-8 text-center text-gray-400 text-xs">
+               <div className="p-10 text-center text-gray-400 text-xs">
                  No cases found matching the criteria.
                </div>
              }
-             renderItem={(c) => (
-               <div 
-                 className="p-3 hover:bg-white/5 active:bg-white/10 transition-colors cursor-pointer space-y-1.5 border-b border-white/5"
-                 onClick={() => { setSelectedCase(c); setView('details'); }}
-               >
-                 {/* Top Row: Case No, Status & Date */}
-                 <div className="flex items-center justify-between gap-2">
-                   <div className="flex items-center gap-2 min-w-0">
-                     <span className="font-mono font-bold text-xs text-brand-400 truncate">{c.caseNo}</span>
-                     <span className="text-[10px] text-gray-400 shrink-0">{c.createdAt}</span>
-                   </div>
-                   <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border border-white/10 shrink-0 ${
-                     c.status === CaseStatus.COMPLETED ? 'bg-green-500/20 text-green-400' : 
-                     c.status === CaseStatus.IN_TRANSIT ? 'bg-blue-500/20 text-blue-400' : 'bg-yellow-500/20 text-yellow-400'
-                   }`}>
-                     {c.status}
-                   </span>
-                 </div>
-
-                 {/* Middle Row: Client & Category */}
-                 <div className="flex items-center justify-between gap-2">
-                   <p className="font-semibold text-white text-xs truncate">{c.clientName}</p>
-                   <span className="text-[10px] text-brand-300 bg-brand-500/10 px-1.5 py-0.5 rounded border border-brand-500/20 shrink-0">
-                     {c.category}
-                   </span>
-                 </div>
-
-                 {/* Bottom Row: Route (POL -> POD) & View Button */}
-                 <div className="flex items-center justify-between pt-1 border-t border-white/5 text-[11px]">
-                   <span className="font-mono text-gray-300 truncate">
-                     {c.pol && c.pod ? `${c.pol} → ${c.pod}` : 'Customs Clearance'}
-                   </span>
-                   <span className="text-brand-400 flex items-center gap-1 font-medium text-[11px] shrink-0">
-                     <Eye size={12} />
-                     <span>Details</span>
-                   </span>
-                 </div>
-               </div>
-             )}
-           />
-         </div>
-
-         {/* Desktop View: Virtualized Table for Instant 60fps Scrolling */}
-         <div className="hidden sm:block">
-           <VirtualizedTable<Case>
-             items={filteredCases}
-             rowHeight={64}
-             maxHeight={650}
-             minTableWidth={1000}
-             getItemKey={(c, idx) => `case_row_${c.id || idx}_${idx}`}
-             onRowClick={(c) => { setSelectedCase(c); setView('details'); }}
-             columns={[
-               { header: 'Case No', width: '16%' },
-               { header: 'Client', width: '22%' },
-               { header: 'Category', width: '18%' },
-               { header: 'Route', width: '16%' },
-               { header: 'Date', width: '12%' },
-               { header: 'Status', width: '10%' },
-               { header: 'Action', width: '6%', className: 'text-center' }
-             ]}
-             renderRow={(c) => (
-               <>
-                 <div className="p-4 font-mono font-bold text-white group-hover:text-brand-400 transition-colors truncate" style={{ width: '16%', flexShrink: 0 }}>
-                   {c.caseNo}
-                 </div>
-                 <div className="p-4 font-medium text-white truncate" style={{ width: '22%', flexShrink: 0 }}>
-                   {c.clientName}
-                 </div>
-                 <div className="p-4 text-gray-200 truncate" style={{ width: '18%', flexShrink: 0 }}>
-                   {c.category}
-                 </div>
-                 <div className="p-4 text-xs font-mono text-gray-300 truncate" style={{ width: '16%', flexShrink: 0 }}>
-                   {c.pol && c.pod ? `${c.pol} → ${c.pod}` : '-'}
-                 </div>
-                 <div className="p-4 text-gray-300 text-xs truncate" style={{ width: '12%', flexShrink: 0 }}>
-                   {c.createdAt}
-                 </div>
-                 <div className="p-4" style={{ width: '10%', flexShrink: 0 }}>
-                   <div className="flex flex-col gap-1 items-start">
-                     <span className={`px-2 py-0.5 rounded text-xs font-medium border border-white/10 ${
+             renderItem={(c) => {
+               const formattedDate = c.createdAt
+                 ? (() => {
+                     const d = new Date(c.createdAt);
+                     return !isNaN(d.getTime())
+                       ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                       : String(c.createdAt).split('T')[0];
+                   })()
+                 : '';
+               return (
+                 <div 
+                   className="p-3.5 hover:bg-white/5 active:bg-white/10 transition-colors cursor-pointer space-y-2 border-b border-white/5"
+                   onClick={() => { setSelectedCase(c); setView('details'); }}
+                 >
+                   {/* Top Row: Case No, Clean Date & Status */}
+                   <div className="flex items-center justify-between gap-2">
+                     <div className="flex items-center gap-2 min-w-0 flex-1">
+                       <span className="font-mono font-bold text-xs text-brand-400 truncate">{c.caseNo}</span>
+                       {formattedDate && (
+                         <span className="text-[10px] text-gray-400 shrink-0">{formattedDate}</span>
+                       )}
+                     </div>
+                     <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border border-white/10 shrink-0 ${
                        c.status === CaseStatus.COMPLETED ? 'bg-green-500/20 text-green-400' : 
                        c.status === CaseStatus.IN_TRANSIT ? 'bg-blue-500/20 text-blue-400' : 'bg-yellow-500/20 text-yellow-400'
                      }`}>
                        {c.status}
                      </span>
-                     {c.approvalStatus === 'PENDING' && (
-                       <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/25 text-amber-300 border border-amber-500/40 animate-pulse">
-                         Pending Approval
-                       </span>
-                     )}
+                   </div>
+
+                   {/* Middle Row: Client & Category */}
+                   <div className="flex items-center justify-between gap-2">
+                     <p className="font-semibold text-white text-xs truncate">{c.clientName}</p>
+                     <span className="text-[10px] text-brand-300 bg-brand-500/10 px-1.5 py-0.5 rounded border border-brand-500/20 shrink-0">
+                       {c.category}
+                     </span>
+                   </div>
+
+                   {/* Bottom Row: Route (POL -> POD) & View Button */}
+                   <div className="flex items-center justify-between pt-1.5 border-t border-white/5 text-[11px] gap-2">
+                     <span className="font-mono text-gray-300 truncate">
+                       {c.pol && c.pod ? `${c.pol} → ${c.pod}` : 'Customs Clearance'}
+                     </span>
+                     <span className="text-brand-400 flex items-center gap-1 font-medium text-[11px] shrink-0">
+                       <Eye size={12} />
+                       <span>Details</span>
+                     </span>
                    </div>
                  </div>
-                 <div className="p-4 text-center" style={{ width: '6%', flexShrink: 0 }}>
-                   <button className="p-2 hover:bg-white/10 rounded-full text-brand-400 transition-colors">
-                     <Eye size={18} />
-                   </button>
-                 </div>
-               </>
-             )}
+               );
+             }}
+           />
+         </div>
+
+         {/* Desktop View: Open Full-Height Table */}
+         <div className="hidden sm:block flex-1">
+           <VirtualizedTable<Case>
+             items={filteredCases}
+             rowHeight={64}
+             minHeight={520}
+             minTableWidth={1000}
+             getItemKey={(c, idx) => `case_row_${c.id || idx}_${idx}`}
+             onRowClick={(c) => { setSelectedCase(c); setView('details'); }}
+             columns={[
+               { header: 'Case No', width: '18%' },
+               { header: 'Client', width: '22%' },
+               { header: 'Category', width: '16%' },
+               { header: 'Route', width: '18%' },
+               { header: 'Date', width: '10%' },
+               { header: 'Status', width: '10%' },
+               { header: 'Action', width: '6%', className: 'text-center' }
+             ]}
+             renderRow={(c) => {
+               const formattedDate = c.createdAt
+                 ? (() => {
+                     const d = new Date(c.createdAt);
+                     return !isNaN(d.getTime())
+                       ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                       : String(c.createdAt).split('T')[0];
+                   })()
+                 : '-';
+               return (
+                 <>
+                   <div className="p-4 font-mono font-bold text-white group-hover:text-brand-400 transition-colors truncate" style={{ width: '18%', flexShrink: 0 }}>
+                     {c.caseNo}
+                   </div>
+                   <div className="p-4 font-medium text-white truncate" style={{ width: '22%', flexShrink: 0 }}>
+                     {c.clientName}
+                   </div>
+                   <div className="p-4 text-gray-200 truncate" style={{ width: '16%', flexShrink: 0 }}>
+                     {c.category}
+                   </div>
+                   <div className="p-4 text-xs font-mono text-gray-300 truncate" style={{ width: '18%', flexShrink: 0 }}>
+                     {c.pol && c.pod ? `${c.pol} → ${c.pod}` : '-'}
+                   </div>
+                   <div className="p-4 text-gray-300 text-xs truncate" style={{ width: '10%', flexShrink: 0 }}>
+                     {formattedDate}
+                   </div>
+                   <div className="p-4" style={{ width: '10%', flexShrink: 0 }}>
+                     <div className="flex flex-col gap-1 items-start">
+                       <span className={`px-2 py-0.5 rounded text-xs font-medium border border-white/10 ${
+                         c.status === CaseStatus.COMPLETED ? 'bg-green-500/20 text-green-400' : 
+                         c.status === CaseStatus.IN_TRANSIT ? 'bg-blue-500/20 text-blue-400' : 'bg-yellow-500/20 text-yellow-400'
+                       }`}>
+                         {c.status}
+                       </span>
+                       {c.approvalStatus === 'PENDING' && (
+                         <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/25 text-amber-300 border border-amber-500/40 animate-pulse">
+                           Pending Approval
+                         </span>
+                       )}
+                     </div>
+                   </div>
+                   <div className="p-4 text-center" style={{ width: '6%', flexShrink: 0 }}>
+                     <button className="p-2 hover:bg-white/10 rounded-full text-brand-400 transition-colors">
+                       <Eye size={18} />
+                     </button>
+                   </div>
+                 </>
+               );
+             }}
              emptyPlaceholder={
-               <div className="p-8 text-center text-gray-400 text-sm">
+               <div className="p-12 text-center text-gray-400 text-sm">
                  No cases found matching the criteria.
                </div>
              }

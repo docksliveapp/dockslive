@@ -42,46 +42,33 @@ export function VirtualizedList<T>({
   const [scrollTop, setScrollTop] = useState(0);
   const [measuredHeight, setMeasuredHeight] = useState<number>(() => {
     if (height && height > 0) return height;
-    return typeof window !== 'undefined' ? Math.min(window.innerHeight * 0.65, maxHeight) : 400;
+    return typeof window !== 'undefined' ? Math.max(window.innerHeight - 200, 600) : 700;
   });
 
   const lastScrollTop = useRef(0);
 
-  // Measure container height dynamically
+  // Measure available viewport height dynamically without locking to empty placeholder height
   useLayoutEffect(() => {
     if (height && height > 0) {
       setMeasuredHeight(height);
       return;
     }
-    const container = containerRef.current;
-    if (!container) return;
 
     const updateHeight = () => {
-      const rect = container.getBoundingClientRect();
-      const available = rect.height > 0 ? rect.height : (container.parentElement?.clientHeight || 450);
-      const calculated = Math.min(Math.max(available, minHeight), maxHeight);
+      const container = containerRef.current;
+      const topOffset = container ? Math.max(0, container.getBoundingClientRect().top) : 180;
+      const viewportAvailable =
+        typeof window !== 'undefined' ? Math.max(window.innerHeight - topOffset - 24, 520) : 650;
+      const calculated = Math.min(Math.max(viewportAvailable, minHeight), Math.max(maxHeight, 750));
       setMeasuredHeight(calculated);
     };
 
     updateHeight();
-
-    let resizeObserver: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      resizeObserver = new ResizeObserver(() => {
-        updateHeight();
-      });
-      resizeObserver.observe(container);
-      if (container.parentElement) {
-        resizeObserver.observe(container.parentElement);
-      }
-    }
-
     window.addEventListener('resize', updateHeight);
     return () => {
       window.removeEventListener('resize', updateHeight);
-      if (resizeObserver) resizeObserver.disconnect();
     };
-  }, [height, maxHeight, minHeight]);
+  }, [height, maxHeight, minHeight, items.length]);
 
   const totalCount = items.length;
   const totalContentHeight = totalCount * itemHeight;
@@ -109,19 +96,22 @@ export function VirtualizedList<T>({
     if (totalCount === 0) {
       return { startIndex: 0, endIndex: 0, offsetY: 0 };
     }
+    if (!height && totalCount <= 250) {
+      return { startIndex: 0, endIndex: totalCount - 1, offsetY: 0 };
+    }
     const start = Math.max(0, Math.floor(scrollTop / itemHeight) - overscanCount);
     const visibleCount = Math.ceil(measuredHeight / itemHeight);
     const end = Math.min(totalCount - 1, start + visibleCount + overscanCount * 2);
     const offset = start * itemHeight;
     return { startIndex: start, endIndex: end, offsetY: offset };
-  }, [scrollTop, itemHeight, measuredHeight, overscanCount, totalCount]);
+  }, [scrollTop, itemHeight, measuredHeight, overscanCount, totalCount, height]);
 
   if (totalCount === 0) {
     return (
       <div 
         ref={containerRef}
         className={`w-full overflow-hidden flex flex-col justify-center items-center ${className}`}
-        style={{ minHeight, maxHeight, width }}
+        style={{ minHeight, width }}
       >
         {emptyPlaceholder || (
           <div className="p-8 text-center text-gray-400 font-medium text-sm">
@@ -132,13 +122,38 @@ export function VirtualizedList<T>({
     );
   }
 
-  // Slice visible items
+  // For standard-sized lists without an explicit fixed height, render open full-height flow
+  // so mobile and desktop users scroll naturally with the page without a tiny inner scroll box
+  if (!height && totalCount <= 250) {
+    return (
+      <div
+        ref={containerRef}
+        className={`w-full relative ${className}`}
+        style={{ width }}
+      >
+        {header && <div className="sticky top-0 z-20 shrink-0">{header}</div>}
+        <div className="w-full divide-y divide-white/5">
+          {items.map((item, index) => {
+            const key = getItemKey ? getItemKey(item, index) : `virt_item_${index}`;
+            return (
+              <React.Fragment key={key}>
+                {renderItem(item, index, undefined)}
+              </React.Fragment>
+            );
+          })}
+        </div>
+        {footer && <div className="shrink-0">{footer}</div>}
+      </div>
+    );
+  }
+
+  // Slice visible items for large virtualized datasets
   const visibleItems = items.slice(startIndex, endIndex + 1);
 
   // Determine container style
   const containerStyle: CSSProperties = {
     height: height ? height : Math.min(measuredHeight, Math.max(totalContentHeight, minHeight)),
-    maxHeight,
+    maxHeight: Math.max(maxHeight, 750),
     minHeight: Math.min(minHeight, totalContentHeight),
     width,
     overflowY: 'auto',
