@@ -6,12 +6,13 @@ runConfig:
   memoryMiB: 512
 
 env:
-  - variable: NPM_CONFIG_PRODUCTION
-    value: "false"
+  - variable: NPM_CONFIG_LEGACY_PEER_DEPS
+    value: "true"
     availability:
       - BUILD
   - variable: NODE_ENV
     value: production
     availability:
       - RUNTIME
+
 
