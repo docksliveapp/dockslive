@@ -20,6 +20,8 @@ import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
 import { useActiveCompany } from '../services/companyService';
 import { ThemeToggleSwitch } from './ThemeToggleSwitch';
+import LiveNotificationCenter from './LiveNotificationCenter';
+import { UserRole } from '../types';
 
 interface VendorPortalProps {
   onSignOut: () => void;
@@ -166,6 +168,11 @@ export const VendorPortal: React.FC<VendorPortalProps> = ({
             <div className="text-[10px] text-amber-400 font-mono">ID: {vendorId}</div>
           </div>
           <ThemeToggleSwitch compact />
+          <LiveNotificationCenter
+            currentRole={UserRole.VENDOR}
+            userIdentifier={vendorName}
+            clientName={vendorName}
+          />
           <button
             type="button"
             onClick={onSignOut}

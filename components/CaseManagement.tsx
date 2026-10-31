@@ -6370,7 +6370,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         <div className="rounded-2xl border border-white/15 bg-slate-900/90 p-5 space-y-3.5 shadow-md">
           <div className="flex items-center justify-between">
             <h4 className="text-amber-400 text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-2">
-              <UploadCloud size={16} /> Attached Cargo Documents (Builty, Weight Slip, Challan)
+              <UploadCloud size={16} /> Attached Cargo Documents (Consignment Waybill, Weighbridge Slip, Delivery Note)
             </h4>
             <span className="text-xs text-slate-400 font-mono">
               {uploadedDocs.length} {uploadedDocs.length === 1 ? 'file' : 'files'}

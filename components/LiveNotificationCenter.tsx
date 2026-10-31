@@ -222,7 +222,7 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
 
       // =======================================================================
       // 2. STRICT CLIENT FILTER:
-      //    - Only notifications explicitly addressed to THIS Client (jis per paisey charge horahey hain / jis client ka case hai)
+      //    - Only notifications explicitly addressed to THIS Client account
       //    - Hide internal approval requests (MANAGER_REVIEW / ADMIN_FINAL)
       // =======================================================================
       if (isClient && !isOperationsManager && !isFinanceManager && !isVehicleManager && !isCaseManager) {
@@ -276,9 +276,24 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       }
 
       const matchesDirectRole = declaredTargetRoles.some(tr => 
-        tr === currentNorm || userRolesNorm.includes(tr)
+        tr === currentNorm || userRolesNorm.includes(tr) || tr === 'ALL'
       );
       if (matchesDirectRole) return true;
+
+      // Port Staff (Loading / Destination / Unloading) matching
+      const isPortStaff =
+        currentNorm.includes('PORT') ||
+        currentNorm.includes('LOADING') ||
+        currentNorm.includes('DESTINATION') ||
+        userRolesNorm.some(r => r.includes('PORT') || r.includes('LOADING') || r.includes('DESTINATION'));
+      if (isPortStaff) {
+        if (
+          declaredTargetRoles.some(tr => tr.includes('PORT') || tr.includes('LOADING') || tr.includes('DESTINATION')) ||
+          subType === 'WORKFLOW_TASK'
+        ) {
+          return true;
+        }
+      }
 
       if (isVehicleManager) {
         if (approvalStage === 'ADMIN_FINAL' && !declaredTargetRoles.some(tr => tr.includes('VEHICLE'))) {
@@ -369,7 +384,9 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
           n.approvalData?.actionType === 'VERIFY_PAYMENT' ||
           n.approvalData?.actionType === 'APPROVE_URGENT_PAYABLE' ||
           n.approvalData?.actionType === 'APPROVE_NOC' ||
-          n.approvalData?.actionType === 'APPROVE_CLIENT'
+          n.approvalData?.actionType === 'APPROVE_CLIENT' ||
+          n.approvalData?.actionType === 'APPROVE_TRANSPORTER' ||
+          n.approvalData?.actionType === 'CONFIRM_TRANSPORTER_PAYMENT'
         );
       });
     }
@@ -413,10 +430,12 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
 
   const handleClearAllNotifications = async () => {
     try {
-      await clearAllNotificationsInFirestore();
-      setNotifications([]);
+      const itemsToDelete = [...relevantNotifications];
+      await Promise.all(
+        itemsToDelete.map((item) => deleteNotificationFromFirestore(item.id, (item as any)._docId))
+      );
     } catch (err) {
-      console.warn("Could not clear all notifications:", err);
+      console.warn("Could not clear role notifications:", err);
     }
   };
 
@@ -659,7 +678,9 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       n.notificationSubType === 'EDIT_APPROVAL' ||
       n.approvalData?.actionType === 'APPROVE_URGENT_PAYABLE' ||
       n.approvalData?.actionType === 'APPROVE_NOC' ||
-      n.approvalData?.actionType === 'APPROVE_CLIENT';
+      n.approvalData?.actionType === 'APPROVE_CLIENT' ||
+      n.approvalData?.actionType === 'APPROVE_TRANSPORTER' ||
+      n.approvalData?.actionType === 'CONFIRM_TRANSPORTER_PAYMENT';
 
     return (
       <div

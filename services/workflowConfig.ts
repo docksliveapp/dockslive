@@ -340,9 +340,9 @@ export const CATEGORY_WORKFLOW_MAP: Record<string, CategoryWorkflowConfig> = {
       {
         stepIndex: 2,
         id: 'Loading & Bilty Generation',
-        title: 'Loading & Bilty Generation',
-        shortTitle: 'Loading & Bilty',
-        description: 'Cargo loading photos, cargo condition audit, and auto-generated commercial bilty / consignment note.',
+        title: 'Loading & Consignment Waybill Generation',
+        shortTitle: 'Loading & Waybill',
+        description: 'Cargo loading verification photos, cargo condition audit, and auto-generated commercial consignment waybill (C/N).',
         categoryName: 'Transportation of Private Cargo'
       },
       {

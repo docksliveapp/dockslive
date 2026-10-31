@@ -38,8 +38,14 @@ function handleExtractDocuments(req, res) {
   }
 
   const chunks = [];
+  let totalBytes = 0;
+  const MAX_PAYLOAD_BYTES = 35 * 1024 * 1024; // 35MB max request guard
   req.on('data', (chunk) => {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+    totalBytes += buf.length;
+    if (totalBytes <= MAX_PAYLOAD_BYTES) {
+      chunks.push(buf);
+    }
   });
 
   req.on('end', async () => {
@@ -85,7 +91,7 @@ Carefully read EVERY page of the attached document(s) — including multi-page P
       parts.push({ text: extractionInstruction });
 
       let apiResponse = null;
-      const models = ['gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
+      const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
       for (const m of models) {
         try {
           apiResponse = await ai.models.generateContent({
@@ -159,6 +165,10 @@ function sendFile(res, filePath, urlPath) {
     res.writeHead(200, {
       'Content-Type': contentType,
       'Cache-Control': cacheControl,
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
+      'X-XSS-Protection': '1; mode=block',
+      'Permissions-Policy': 'camera=(self), microphone=(self), geolocation=(self)',
     });
     res.end(content);
   });

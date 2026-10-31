@@ -169,23 +169,59 @@ export const safeAppStorage = {
     } catch (_) {}
   },
   wipeAppOperationalData: (preserveAuth: boolean = true): void => {
-    const authUser = preserveAuth ? safeAppStorage.getItem('dpl_auth_user') : null;
-    const userRole = preserveAuth ? safeAppStorage.getItem('dpl_user_role') : null;
+    const isProtectedKey = (k: string): boolean => {
+      if (
+        k === 'mak_parent_group_branding' ||
+        k === 'dpl_company_branding_v1' ||
+        k.startsWith('dpl_company_branding_v1_') ||
+        k === 'dpl_active_company_id' ||
+        k === 'dpl_app_theme' ||
+        k === 'dpl_custom_banks' ||
+        k.startsWith('dpl_custom_banks_') ||
+        k === 'dpl_admin_userid' ||
+        k === 'dpl_admin_email' ||
+        k === 'dpl_admin_phone' ||
+        k === 'dpl_admin_pin' ||
+        k === 'dpl_admin_password'
+      ) {
+        return true;
+      }
+      if (
+        preserveAuth &&
+        (k === 'dpl_auth_user' ||
+          k === 'dpl_user_role' ||
+          k === 'dpl_user_roles' ||
+          k === 'dpl_user_designation' ||
+          k === 'dpl_current_user_id' ||
+          k === 'dpl_current_user_name' ||
+          k === 'dpl_allowed_companies' ||
+          k === 'dpl_is_global_admin' ||
+          k === 'dpl_session_active')
+      ) {
+        return true;
+      }
+      return false;
+    };
 
-    // 1. Clear memory cache for all operational, notification, and audit keys
+    // 1. Clear memory cache for operational, notification, and audit keys (preserving branding/logos/company info)
     Object.keys(memoryCache).forEach((k) => {
+      if (isProtectedKey(k)) return;
       if (k.startsWith('dpl_') || k.startsWith('dpl-') || k.startsWith('notif_') || k.startsWith('audit_')) {
         delete memoryCache[k];
       }
     });
 
-    // 2. Clear localStorage keys
+    // 2. Clear localStorage operational keys (preserving branding/logos/company info)
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         const keysToRemove: string[] = [];
         for (let i = 0; i < window.localStorage.length; i++) {
           const key = window.localStorage.key(i);
-          if (key && (key.startsWith('dpl_') || key.startsWith('dpl-') || key.startsWith('notif_') || key.startsWith('audit_'))) {
+          if (
+            key &&
+            !isProtectedKey(key) &&
+            (key.startsWith('dpl_') || key.startsWith('dpl-') || key.startsWith('notif_') || key.startsWith('audit_'))
+          ) {
             keysToRemove.push(key);
           }
         }
@@ -193,25 +229,23 @@ export const safeAppStorage = {
       }
     } catch (_) {}
 
-    // 3. Clear sessionStorage keys
+    // 3. Clear sessionStorage operational keys (preserving branding/logos/company info)
     try {
       if (typeof window !== 'undefined' && window.sessionStorage) {
         const keysToRemove: string[] = [];
         for (let i = 0; i < window.sessionStorage.length; i++) {
           const key = window.sessionStorage.key(i);
-          if (key && (key.startsWith('dpl_') || key.startsWith('dpl-') || key.startsWith('notif_') || key.startsWith('audit_'))) {
+          if (
+            key &&
+            !isProtectedKey(key) &&
+            (key.startsWith('dpl_') || key.startsWith('dpl-') || key.startsWith('notif_') || key.startsWith('audit_'))
+          ) {
             keysToRemove.push(key);
           }
         }
         keysToRemove.forEach((k) => window.sessionStorage.removeItem(k));
       }
     } catch (_) {}
-
-    // 4. Restore auth session if requested
-    if (preserveAuth) {
-      if (authUser) safeAppStorage.setItem('dpl_auth_user', authUser);
-      if (userRole) safeAppStorage.setItem('dpl_user_role', userRole);
-    }
   },
   getJSON: <T>(key: string, fallback: T): T => {
     try {

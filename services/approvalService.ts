@@ -834,6 +834,34 @@ export async function approveActionRequest(notification: AppNotification): Promi
     } catch (err) {
       console.warn("Could not execute NOC approval:", err);
     }
+  } else if (actionType === 'CONFIRM_TRANSPORTER_PAYMENT') {
+    const numId = Number(entityId);
+    const amount = Number(notification.approvalData.amount || 0);
+    const transporterName = notification.targetClientName || notification.approvalData.requestedBy || 'Transporter';
+    try {
+      await updateFinanceInFirestore({
+        id: numId,
+        status: 'PAID',
+        remarks: `Transporter "${transporterName}" confirmed receipt of PKR ${amount.toLocaleString()} on ${new Date().toLocaleDateString()}`
+      } as any);
+      logActivity(
+        `Transporter Payment Confirmed: PKR ${amount.toLocaleString()}`,
+        `Transporter "${transporterName}" confirmed receipt of freight payment PKR ${amount.toLocaleString()}.`,
+        'TRANSPORTER',
+        transporterName,
+        { entityId: numId, amount }
+      );
+    } catch (err) {
+      console.warn("Could not confirm transporter payment:", err);
+    }
+  } else if (actionType === 'APPROVE_TRANSPORTER') {
+    const transporterName = notification.approvalData.entityName || String(entityId);
+    logActivity(
+      `Transporter Registration Approved: ${transporterName}`,
+      `Transporter account "${transporterName}" approved by Administrator.`,
+      'ADMIN',
+      'System Admin'
+    );
   }
 
   await updateNotificationInFirestore({ ...notification, status: 'RESOLVED' });

@@ -439,13 +439,12 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
         completed = true;
         clearTimeout(failsafeTimer);
 
-        // Reset local settings state
+        // Reset local operational documents state (preserve company logos, details, and banks)
         setCompanyDocuments([]);
-        setBanks([{ id: 1, name: 'HBL Corporate', acct: '0011-2233-4455', iban: 'PK36HABB001122334455', branch: 'Clifton' }]);
 
         setShowResetWarningModal(false);
         setResetSuccessMessage(
-          `Reset for ${activeCompany?.name || 'Company'} Successful: Wiped ${wipeResult.deletedCounts.cases} cases and ${wipeResult.deletedCounts.finances} finance entries for ${activeCompany?.name || 'this company'}. Shared Fleet Vehicles and all other 3 subsidiaries remain 100% intact.`
+          `Reset for ${activeCompany?.name || 'Company'} Successful: Wiped ${wipeResult.deletedCounts.cases} cases and ${wipeResult.deletedCounts.finances} finance entries for ${activeCompany?.name || 'this company'}. Uploaded Logos, Company Details, Shared Fleet Vehicles, and all other 3 subsidiaries remain 100% intact.`
         );
       }
 
@@ -956,6 +955,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
                                 <li>All Cases, B/Ls, and Containers across Docks, Muhib, Vantage, and TruckIt</li>
                                 <li>All Finance records, Cashbooks, Payables, Receivables, and Ledgers across all 4 companies</li>
                                 <li>All Shared Fleet Vehicles, Drivers, Clients, and Vendors</li>
+                                 <li className="text-emerald-300 font-semibold list-none pt-1">✓ Preserved: Uploaded Logos, Company Names & Corporate Details remain 100% intact.</li>
                              </ul>
                           </>
                        ) : (
@@ -964,7 +964,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
                              <ul className="list-disc pl-5 space-y-1">
                                 <li>All registered Cases, B/Ls, and Containers for {activeCompany?.name || 'this company'}</li>
                                 <li>All Finance records, Payables, Receivables, and Ledgers for {activeCompany?.name || 'this company'}</li>
-                                <li>Custom branding and document settings for {activeCompany?.name || 'this company'}</li>
+                                <li className="text-emerald-300 font-semibold list-none pt-1">✓ Preserved: Uploaded Logos, Company Name & Corporate Details remain 100% intact.</li>
                                 <li className="text-emerald-300 font-semibold list-none pt-1">✓ Important: Shared Vehicle Management Database and all other 3 corporate subsidiaries remain 100% intact.</li>
                              </ul>
                           </>

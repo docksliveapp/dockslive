@@ -531,12 +531,14 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 
       {/* 2. CENTER CONGLOMERATE HEADER */}
       <div className="text-center mb-4 sm:mb-6 shrink-0 px-2">
-        <div className="inline-flex items-center justify-center mb-2 transform hover:scale-105 transition-transform duration-300">
-          <img 
-            src={parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? parentGroup.logo : (isPearl ? "/logos/mak_pearl_white_emblem.svg" : (parentGroup.logo || "/logos/mak_group_logo.svg"))} 
-            alt={parentGroup.name} 
-            className="h-20 sm:h-28 w-auto max-w-[240px] sm:max-w-[400px] object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.22)]" 
-          />
+        <div className="inline-flex items-center justify-center min-h-[2rem] mb-2 transform hover:scale-105 transition-transform duration-300">
+          {parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? (
+            <img 
+              src={parentGroup.logo} 
+              alt={parentGroup.name} 
+              className="h-20 sm:h-28 w-auto max-w-[240px] sm:max-w-[400px] object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.22)]" 
+            />
+          ) : null}
         </div>
 
         <h1 className={`text-lg sm:text-2xl font-bold tracking-wide font-sans mb-1 break-words ${
@@ -613,13 +615,15 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
                 </div>
               )}
 
-              {/* Company Logo Display */}
+              {/* Company Logo Display (Uploaded Logo Only; empty space if none uploaded) */}
               <div className="h-24 sm:h-36 w-full flex items-center justify-center p-2 mb-2 sm:mb-3 transform group-hover:scale-105 transition-transform duration-300">
-                <img 
-                  src={getCompanyLogoUrl(comp.id)} 
-                  alt={comp.name} 
-                  className="max-h-full w-auto max-w-[200px] sm:max-w-[300px] object-contain filter drop-shadow-[0_6px_16px_rgba(0,0,0,0.25)]" 
-                />
+                {getCompanyLogoUrl(comp.id) ? (
+                  <img 
+                    src={getCompanyLogoUrl(comp.id)} 
+                    alt={comp.name} 
+                    className="max-h-full w-auto max-w-[200px] sm:max-w-[300px] object-contain filter drop-shadow-[0_6px_16px_rgba(0,0,0,0.25)]" 
+                  />
+                ) : null}
               </div>
 
               {/* Only Company Name (Clean & Prominent) */}

@@ -1198,7 +1198,7 @@ Return ONLY valid JSON.`;
     }
 
     let response: any = null;
-    const modelsToTry = ['gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
+    const modelsToTry = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
 
     for (const model of modelsToTry) {
       try {
@@ -1265,7 +1265,7 @@ export const autoFillVehicleData = async (file: File) => {
     ];
 
     const apiCall = ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-flash-latest',
       contents: { parts },
       config: {
         responseMimeType: "application/json",
@@ -1518,7 +1518,7 @@ Return JSON with these exact properties:
     ];
 
     const apiCall = ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-flash-latest',
       contents: parts,
       config: {
         responseMimeType: "application/json"
@@ -1578,7 +1578,7 @@ export const createChatSession = () => {
   const ai = getAIClient();
   if (!ai) return null;
   return ai.chats.create({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-flash-latest',
     config: {
       systemInstruction: "You are Docks AI, the elite logistics assistant for Docks (Pvt.) Ltd. You specialize in Pakistani logistics (KICT, SAPT, PQA, Custom Clearance, GD, TP Filing). Assist with email drafting, explaining procedures, and answering shipping queries.",
     }
@@ -1699,7 +1699,7 @@ Extract these exact properties:
       });
 
       const apiCall = ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-flash-latest',
         contents: parts,
         config: {
           responseMimeType: "application/json"

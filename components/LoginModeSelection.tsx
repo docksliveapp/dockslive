@@ -217,22 +217,16 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
       />
 
       <div className="min-h-full w-full max-w-[430px] mx-auto flex flex-col justify-center items-center py-4 sm:py-8 relative z-10">
-        {/* Prominent MAK Corporate Logo placed closely above Sign In Card */}
+        {/* Prominent Corporate Logo Area placed closely above Sign In Card (Uploaded Logo Only; empty if none uploaded) */}
         <div className="w-full flex flex-col items-center text-center mb-4 sm:mb-5 animate-fade-in">
-          <div className="inline-flex items-center justify-center transform hover:scale-[1.03] transition-transform duration-300">
+          <div className="inline-flex items-center justify-center min-h-[3.5rem] transform hover:scale-[1.03] transition-transform duration-300">
             {parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? (
               <img 
                 src={parentGroup.logo} 
                 alt={parentGroup.name || "MAK Group of Companies"} 
                 className="w-40 sm:w-48 md:w-52 h-40 sm:h-48 md:h-52 max-h-40 sm:max-h-48 md:max-h-52 object-contain drop-shadow-[0_12px_32px_rgba(15,23,42,0.16)] select-none" 
               />
-            ) : (
-              <img 
-                src={isPearl ? "/logos/mak_pearl_white_emblem.svg" : "/logos/mak_group_logo.svg"} 
-                alt={parentGroup.name || "MAK Group of Companies"} 
-                className="w-40 sm:w-48 md:w-52 h-40 sm:h-48 md:h-52 max-h-40 sm:max-h-48 md:max-h-52 object-contain drop-shadow-[0_12px_32px_rgba(15,23,42,0.14)] select-none" 
-              />
-            )}
+            ) : null}
           </div>
         </div>
 

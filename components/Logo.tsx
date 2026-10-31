@@ -13,9 +13,11 @@ const Logo: React.FC<LogoProps> = ({ className = "h-14 sm:h-16 w-auto", variant 
   const { activeCompany } = useActiveCompany();
   const [imgError, setImgError] = useState(false);
 
-  const candidateLogo = customSrc !== undefined 
+  const rawCandidate = customSrc !== undefined 
     ? customSrc 
-    : (globalLogo || activeCompany?.logo || '/logos/mak_group_logo.svg');
+    : (globalLogo || activeCompany?.logo || '');
+
+  const candidateLogo = isUploadedLogo(rawCandidate) ? rawCandidate : null;
 
   if (candidateLogo && !imgError) {
     return (
@@ -28,15 +30,8 @@ const Logo: React.FC<LogoProps> = ({ className = "h-14 sm:h-16 w-auto", variant 
     );
   }
 
-  // Official MAK Group Corporate Medallion Logo
-  return (
-    <img 
-      src="/logos/mak_group_logo.svg" 
-      alt="MAK Group of Companies" 
-      className={`${className} object-contain select-none transition-all duration-300 drop-shadow-sm`}
-      onError={() => setImgError(true)}
-    />
-  );
+  // Strictly empty when no uploaded logo exists
+  return null;
 };
 
 export default Logo;

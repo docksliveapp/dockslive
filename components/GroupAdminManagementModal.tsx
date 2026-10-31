@@ -705,11 +705,13 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
         <div className="flex items-center justify-between px-5 sm:px-7 py-4 border-b border-white/10 bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-950">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-full flex items-center justify-center shrink-0 bg-transparent">
-              <img 
-                src={(parentGroup?.logo && isUploadedLogo(parentGroup.logo)) ? parentGroup.logo : '/logos/mak_pearl_white_emblem.svg'} 
-                alt={parentGroup?.name || 'MAK Group of Companies'} 
-                className="w-full h-full object-contain drop-shadow" 
-              />
+              {(parentGroup?.logo && isUploadedLogo(parentGroup.logo)) ? (
+                <img 
+                  src={parentGroup.logo} 
+                  alt={parentGroup?.name || 'MAK Group of Companies'} 
+                  className="w-full h-full object-contain drop-shadow" 
+                />
+              ) : null}
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -1079,14 +1081,18 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                     Splash & Login Logo Preview
                   </h4>
                   <div className="h-32 w-full flex items-center justify-center p-3 rounded-2xl bg-black/60 border border-white/10 mb-3 shadow-inner">
-                    <img 
-                      src={(groupLogoPreview && isUploadedLogo(groupLogoPreview)) ? groupLogoPreview : '/logos/mak_pearl_white_emblem.svg'} 
-                      alt="Splash & Login Logo Preview" 
-                      className="max-h-full max-w-full object-contain filter drop-shadow-[0_4px_16px_rgba(245,158,11,0.3)]"
-                    />
+                    {(groupLogoPreview && isUploadedLogo(groupLogoPreview)) ? (
+                      <img 
+                        src={groupLogoPreview} 
+                        alt="Splash & Login Logo Preview" 
+                        className="max-h-full max-w-full object-contain filter drop-shadow-[0_4px_16px_rgba(245,158,11,0.3)]"
+                      />
+                    ) : (
+                      <span className="text-[11px] font-mono text-gray-500">No Logo Uploaded (Empty Space)</span>
+                    )}
                   </div>
                   <span className="text-xs font-mono text-gray-400">
-                    {(groupLogoPreview && isUploadedLogo(groupLogoPreview)) ? 'Custom Splash/Login Logo Active' : 'Default Splash/Login Logo'}
+                    {(groupLogoPreview && isUploadedLogo(groupLogoPreview)) ? 'Custom Splash/Login Logo Active' : 'No Logo Uploaded'}
                   </span>
                 </div>
               </div>
@@ -1240,24 +1246,28 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                   </h4>
                   <div className="h-32 w-full flex flex-col items-center justify-center p-3 rounded-2xl bg-black/60 border border-white/10 mb-3 shadow-inner">
                     <div className="w-24 h-24 rounded-full bg-white border-4 border-slate-900 ring-2 ring-amber-500 flex items-center justify-center p-2.5 shadow-lg overflow-hidden">
-                      <img 
-                        src={
-                          (groupDocumentLogoPreview && isUploadedLogo(groupDocumentLogoPreview))
-                            ? groupDocumentLogoPreview
-                            : (groupLogoPreview && isUploadedLogo(groupLogoPreview))
-                              ? groupLogoPreview
-                              : '/logos/mak_group_logo.svg'
-                        } 
-                        alt="Document Circular Logo Preview" 
-                        className="w-full h-full object-contain"
-                      />
+                      {((groupDocumentLogoPreview && isUploadedLogo(groupDocumentLogoPreview)) || (groupLogoPreview && isUploadedLogo(groupLogoPreview))) ? (
+                        <img 
+                          src={
+                            (groupDocumentLogoPreview && isUploadedLogo(groupDocumentLogoPreview))
+                              ? groupDocumentLogoPreview
+                              : groupLogoPreview
+                          } 
+                          alt="Document Circular Logo Preview" 
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <span className="text-[9px] font-mono text-slate-400 text-center leading-tight">Empty</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-mono text-gray-400">
                       {(groupDocumentLogoPreview && isUploadedLogo(groupDocumentLogoPreview))
                         ? 'Custom Document Logo Active'
-                        : 'Uses Main Logo in Circle'}
+                        : (groupLogoPreview && isUploadedLogo(groupLogoPreview))
+                          ? 'Uses Uploaded Main Logo'
+                          : 'No Document Logo Uploaded'}
                     </span>
                     {groupDocumentLogoPreview && isUploadedLogo(groupDocumentLogoPreview) && (
                       <button
@@ -1441,7 +1451,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                     <ShieldAlert size={16} /> Danger Zone: Master Conglomerate Factory Reset
                   </h4>
                   <p className="text-xs text-rose-200/80 mt-1 max-w-xl">
-                    Wipes all transactional cases, finances, payables, receivables, and branding across ALL 4 subsidiaries simultaneously. Protected by master administrator confirmation.
+                    Wipes all transactional cases, finances, payables, receivables, and vehicles across ALL 4 subsidiaries simultaneously. All uploaded logos, company names, and corporate details remain 100% preserved.
                   </p>
                 </div>
 

@@ -272,24 +272,24 @@ export const PAKISTAN_CUSTOMS_COMPLIANCE: Record<string, CategoryComplianceDetai
     legalAct: "Carriage by Road Act & Sales Tax on Services Acts",
     customsRulesRef: "National Commercial Freight Rules & Goods Transport Alliance Regulations",
     mandatoryDocuments: [
-      "Commercial Goods Bilty / Consignment Note (C/N)",
-      "Commercial Tax Invoice & Delivery Challan",
-      "Driver License & CNIC Copy",
-      "En-route Toll & Fuel Expense Slip"
+      "Commercial Consignment Waybill / Consignment Note (C/N)",
+      "Commercial Tax Invoice & Delivery Note",
+      "Driver License & National ID (CNIC) Copy",
+      "En-route Highway Toll & Fuel Expense Voucher"
     ],
     mandatoryFields: [
-      "Bilty / Consignment Note Number",
+      "Consignment Waybill / Note Number",
       "Pickup Origin & Destination Delivery Warehouse",
       "Vehicle Registration Number & Driver Mobile Contact",
-      "Cargo Commodity, Weight (Tons) & Package Count",
-      "Payment Terms: Paid / To-Pay / Advance"
+      "Cargo Commodity, Gross Weight (MT) & Package Count",
+      "Payment Terms: Prepaid / To-Pay / Advance"
     ],
-    procedureSummary: "Point-to-point commercial road haulage for cleared or domestic factory cargo throughout Pakistan. Features instant digital bilty generation, real-time dispatch updates, and comprehensive freight challan billing.",
+    procedureSummary: "Point-to-point commercial road haulage for cleared or domestic factory cargo throughout Pakistan. Features instant digital consignment waybill generation, real-time dispatch updates, and comprehensive freight billing.",
     standardTariff: [
       { id: 'pc_1', category: 'Transportation of Private Cargo', description: 'Commercial Inland Haulage / Freight (Origin to Destination)', amount: 75000, taxable: false },
       { id: 'pc_2', category: 'Transportation of Private Cargo', description: 'Loading, Unloading & Labour Stevedoring Surcharge', amount: 12500, taxable: true },
-      { id: 'pc_3', category: 'Transportation of Private Cargo', description: 'Transit Toll Taxes, Motorway Weigh Station & Fuel Surcharge', amount: 9500, taxable: false },
-      { id: 'pc_4', category: 'Transportation of Private Cargo', description: 'Consignment Note (Bilty) Documentation & Electronic POD Processing', amount: 4500, taxable: true }
+      { id: 'pc_3', category: 'Transportation of Private Cargo', description: 'Transit Toll Taxes, Motorway Weighbridge & Fuel Surcharge', amount: 9500, taxable: false },
+      { id: 'pc_4', category: 'Transportation of Private Cargo', description: 'Consignment Waybill (C/N) Documentation & Electronic POD Processing', amount: 4500, taxable: true }
     ]
   },
 

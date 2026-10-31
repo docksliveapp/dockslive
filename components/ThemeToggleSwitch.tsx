@@ -50,15 +50,21 @@ export function applyAppThemeToDOM(rawTheme: AppThemeMode) {
     html.classList.add('theme-pearl', 'light');
     body.classList.remove('theme-charcoal', 'dark');
     body.classList.add('theme-pearl', 'light');
+    html.style.backgroundColor = '#F8FAFC';
     body.style.backgroundColor = '#F8FAFC';
     body.style.color = '#0F172A';
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme) metaTheme.setAttribute('content', '#F8FAFC');
   } else {
     html.classList.remove('theme-pearl', 'light');
     html.classList.add('theme-charcoal', 'dark');
     body.classList.remove('theme-pearl', 'light');
     body.classList.add('theme-charcoal', 'dark');
+    html.style.backgroundColor = '#0B0F17';
     body.style.backgroundColor = '#0B0F17';
     body.style.color = '#F8FAFC';
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme) metaTheme.setAttribute('content', '#0B0F17');
   }
 }
 

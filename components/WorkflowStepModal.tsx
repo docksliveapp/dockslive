@@ -113,15 +113,23 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       (normCategory === 'Bonded Carrier' && (stepIndex === 6 || stepIndex === 7)) ||
       stepStr.includes('destination port');
 
-    // STRICT ROLE MANDATE:
-    // Loading workflow and Loading bill can ONLY be updated/created by Loading Port Staff
+    // Loading workflow and Loading bill can be updated by Loading Port Staff, Admin, or Operations Manager
     if (isLoadingWorkflowStep) {
-      return rolesList.includes(UserRole.LOADING_PORT_STAFF);
+      return (
+        rolesList.includes(UserRole.LOADING_PORT_STAFF) ||
+        rolesList.includes(UserRole.ADMIN) ||
+        rolesList.includes(UserRole.OPERATIONS_MANAGER)
+      );
     }
 
-    // Destination unloading workflow and Destination bill can ONLY be updated/created by Destination Port Staff
+    // Destination unloading workflow and Destination bill can be updated by Destination Port Staff, Admin, or Operations Manager
     if (isDestinationWorkflowStep) {
-      return rolesList.includes(UserRole.DESTINATION_PORT_STAFF) || rolesList.includes(UserRole.UNLOADING_PORT_STAFF);
+      return (
+        rolesList.includes(UserRole.DESTINATION_PORT_STAFF) ||
+        rolesList.includes(UserRole.UNLOADING_PORT_STAFF) ||
+        rolesList.includes(UserRole.ADMIN) ||
+        rolesList.includes(UserRole.OPERATIONS_MANAGER)
+      );
     }
 
     // In Transit can be updated by Destination Port Staff (to receive vehicle & complete transit), Transporter, Vehicle Manager, Operations Manager, or Admin
@@ -404,7 +412,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
   const handleValidateVehicle = (vehNoToCheck?: string) => {
     const rawNo = (vehNoToCheck || formData.assignedVehicleNo || '').trim();
     if (!rawNo) {
-      alert('Please enter a vehicle registration number to validate');
+      setValidationError('Please enter a vehicle registration number to validate.');
       return;
     }
 
@@ -482,7 +490,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
   const handleSelectVehicleFromList = (veh: Vehicle) => {
     const stat = (veh.status || 'Active').toLowerCase();
     if (stat === 'expired' || stat === 'cancelled' || stat === 'suspended' || stat === 'inactive') {
-      alert(`Cannot assign vehicle ${veh.registrationNumber}: status is ${veh.status.toUpperCase()}. Only active/valid vehicles are allowed.`);
+      setValidationError(`Cannot assign vehicle ${veh.registrationNumber}: status is ${veh.status.toUpperCase()}. Only active and valid vehicles are permitted.`);
       return;
     }
     setFormData(prev => ({

@@ -1392,14 +1392,16 @@ const App: React.FC = () => {
               type="button"
               id="header-center-company-logo-btn"
               onClick={() => setIsCompanyModalOpen(true)}
-              className="flex items-center justify-center px-1.5 py-1 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 border border-transparent transition-all duration-200 cursor-pointer group shrink-0 max-w-full"
+              className="flex items-center justify-center px-1.5 py-1 min-h-[2.25rem] min-w-[3rem] rounded-xl hover:bg-black/5 dark:hover:bg-white/5 border border-transparent transition-all duration-200 cursor-pointer group shrink-0 max-w-full"
               title={`${activeCompany.name} (Click to switch company)`}
             >
-              <img 
-                src={getCompanyLogoUrl(activeCompany.id)} 
-                alt={activeCompany.name} 
-                className="h-8 sm:h-11 md:h-14 w-auto max-w-[120px] xs:max-w-[150px] sm:max-w-[220px] md:max-w-[320px] object-contain drop-shadow group-hover:scale-105 transition-transform duration-200" 
-              />
+              {getCompanyLogoUrl(activeCompany.id) ? (
+                <img 
+                  src={getCompanyLogoUrl(activeCompany.id)} 
+                  alt={activeCompany.name} 
+                  className="h-8 sm:h-11 md:h-14 w-auto max-w-[120px] xs:max-w-[150px] sm:max-w-[220px] md:max-w-[320px] object-contain drop-shadow group-hover:scale-105 transition-transform duration-200" 
+                />
+              ) : null}
             </button>
           </div>
 
@@ -1473,7 +1475,9 @@ const App: React.FC = () => {
               onNavigateToTab={(tabName) => {
                 if (tabName === 'finance') setActiveView('finance');
                 else if (tabName === 'cases') setActiveView('cases');
-                else if (tabName === 'transporter') setActiveView('vehicles');
+                else if (tabName === 'transporter' || tabName === 'vehicles') setActiveView('vehicles');
+                else if (tabName === 'available_vehicles') setActiveView('available_vehicles');
+                else if (tabName === 'company_documents') setActiveView('company_documents');
                 else if (tabName === 'users') setActiveView('users');
               }}
             />

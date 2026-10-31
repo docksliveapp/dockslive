@@ -36,10 +36,17 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  height: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
   width: 100%;
   max-width: 100% !important;
-  overflow-x: hidden !important;
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+  overscroll-behavior-y: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  -webkit-touch-callout: none !important;
+  user-select: none;
+  -webkit-user-select: none;
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
   margin: 0;
@@ -49,11 +56,56 @@ body {
 }
 
 #root {
-  min-height: 100%;
-  min-height: 100dvh;
+  height: 100dvh;
+  max-height: 100dvh;
   width: 100%;
   max-width: 100% !important;
   overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior-y: none !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Native Mobile APK Rule: Disable text selection on all UI elements, buttons, headers, and navigation bars; allow ONLY inside input/textarea fields */
+*,
+*::before,
+*::after {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body,
+header,
+nav,
+aside,
+footer,
+button,
+[role="button"],
+a,
+label,
+th,
+.glass-panel,
+.glass-card {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+.selectable-text {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  -webkit-touch-callout: default !important;
+}
+
+/* Disable long-press context menus and drag ghosts on images and UI icons */
+img,
+svg,
+[role="img"] {
+  -webkit-touch-callout: none !important;
+  -webkit-user-drag: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -822,7 +874,46 @@ button,
 }
 
 /* ==========================================================================
-   7. PRINT & A4 LEGAL REPORT HELPERS
+   7. CROSS-PLATFORM PWA / ANDROID APK / iOS SAFE-AREA & STANDALONE SUPPORT
+   ========================================================================== */
+@supports (padding: max(0px)) {
+  body {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #main-scroll-container {
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: max(3.5rem, calc(env(safe-area-inset-bottom, 0px) + 2.5rem));
+  }
+  @media (display-mode: standalone) {
+    header.sticky {
+      padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+    }
+  }
+}
+
+/* Instant Native Skeleton Shimmer Loader */
+@keyframes nativeSkeletonShimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.native-skeleton {
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.12) 25%, rgba(148, 163, 184, 0.24) 50%, rgba(148, 163, 184, 0.12) 75%);
+  background-size: 200% 100%;
+  animation: nativeSkeletonShimmer 1.5s infinite linear;
+  border-radius: 0.75rem;
+}
+
+/* ==========================================================================
+   8. PRINT & A4 LEGAL REPORT HELPERS
    ========================================================================== */
 @media print {
   @page {

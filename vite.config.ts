@@ -155,7 +155,7 @@ Carefully read EVERY page of the attached document(s) — including multi-page P
                   parts.push({ text: extractionInstruction });
 
                   let apiResponse: any = null;
-                  const models = ['gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-2.5-flash'];
+                  const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
                   for (const m of models) {
                     try {
                       apiResponse = await ai.models.generateContent({

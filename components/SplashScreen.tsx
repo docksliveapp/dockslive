@@ -136,7 +136,7 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
         />
 
         <div
-          className={`relative p-6 sm:p-8 rounded-[2.25rem] bg-white/75 backdrop-blur-2xl border border-white/90 shadow-[0_24px_60px_-15px_rgba(15,23,42,0.08),inset_0_1px_0_0_rgba(255,255,255,0.95)] transition-all duration-700 ease-out transform ${
+          className={`relative p-6 sm:p-8 rounded-[2.25rem] bg-white/75 backdrop-blur-2xl border border-white/90 shadow-[0_24px_60px_-15px_rgba(15,23,42,0.08),inset_0_1px_0_0_rgba(255,255,255,0.95)] transition-all duration-700 ease-out transform min-w-[220px] min-h-[140px] flex flex-col items-center justify-center ${
             mounted
               ? 'opacity-100 scale-100 translate-y-0'
               : 'opacity-0 scale-95 translate-y-3'
@@ -145,11 +145,15 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             animation: mounted ? 'dplFloat 4s ease-in-out infinite' : undefined
           }}
         >
-          <img
-            src={adminUploadedLogo || '/logos/mak_pearl_white_emblem.svg'}
-            alt={parentGroup?.name || 'MAK Group of Companies'}
-            className="w-44 sm:w-56 md:w-64 lg:w-72 max-h-48 sm:max-h-56 lg:max-h-64 object-contain drop-shadow-[0_12px_28px_rgba(15,23,42,0.10)] select-none mx-auto"
-          />
+          {adminUploadedLogo ? (
+            <img
+              src={adminUploadedLogo}
+              alt={parentGroup?.name || 'MAK Group of Companies'}
+              className="w-44 sm:w-56 md:w-64 lg:w-72 max-h-48 sm:max-h-56 lg:max-h-64 object-contain drop-shadow-[0_12px_28px_rgba(15,23,42,0.10)] select-none mx-auto"
+            />
+          ) : (
+            <div className="w-44 sm:w-56 h-24 sm:h-32 flex items-center justify-center mx-auto" />
+          )}
 
           {/* Subtle Smooth Loading Progress Bar */}
           <div className="mt-5 w-36 sm:w-44 mx-auto h-1 rounded-full bg-slate-200/80 overflow-hidden">

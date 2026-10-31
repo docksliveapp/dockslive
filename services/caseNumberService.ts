@@ -186,7 +186,7 @@ export function generateStandardBillNumber(
 
   const now = new Date();
   const yy = String(now.getFullYear()).slice(-2);
-  const mmm = MONTH_CODES[now.getMonth()];
+  const mmm = MONTH_NAMES[now.getMonth()];
   const serial = String(existingBillsCount + 1).padStart(3, '0');
   return `${prefix}-${billType}-${yy}-${mmm}-${serial}`;
 }

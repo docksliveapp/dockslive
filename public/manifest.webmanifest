@@ -6,14 +6,18 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#F8FAFC",
   "theme_color": "#F8FAFC",
-  "categories": ["business", "logistics", "productivity"],
+  "categories": ["business", "logistics", "productivity", "finance"],
   "lang": "en",
   "dir": "ltr",
   "prefer_related_applications": false,
+  "launch_handler": {
+    "client_mode": ["navigate-existing", "auto"]
+  },
+  "handle_links": "preferred",
   "icons": [
     {
       "src": "/pwa-192x192-v3.png",
@@ -100,7 +104,7 @@
       "sizes": "512x512",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "MAK Group Mobile Client Portal"
+      "label": "MAK Group Mobile Native App"
     }
   ]
 }

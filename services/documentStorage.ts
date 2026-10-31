@@ -209,3 +209,57 @@ export async function restoreVehiclesFromIndexedDB(): Promise<any[]> {
     return [];
   }
 }
+
+export async function clearOperationalIndexedDBCache(options?: {
+  clearVehicles?: boolean;
+  companyId?: string;
+}): Promise<void> {
+  try {
+    const db = await getIDB();
+    const clearVehicles = options?.clearVehicles ?? true;
+    const companyId = options?.companyId;
+
+    if (!companyId) {
+      // Full operational wipe (Main App Factory Reset)
+      await new Promise<void>((resolve) => {
+        try {
+          const tx = db.transaction(['case_backups', 'vehicle_backups', 'documents'], 'readwrite');
+          tx.objectStore('case_backups').clear();
+          if (clearVehicles) {
+            tx.objectStore('vehicle_backups').clear();
+          }
+          tx.objectStore('documents').clear();
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+        } catch (_) {
+          resolve();
+        }
+      });
+    } else {
+      // Single-company operational wipe: only remove cases matching companyId
+      await new Promise<void>((resolve) => {
+        try {
+          const tx = db.transaction('case_backups', 'readwrite');
+          const store = tx.objectStore('case_backups');
+          const req = store.getAll();
+          req.onsuccess = () => {
+            const records = req.result || [];
+            for (const rec of records) {
+              const recComp = rec?.data?.companyId || 'docks';
+              if (recComp === companyId && rec.key) {
+                store.delete(rec.key);
+              }
+            }
+            resolve();
+          };
+          req.onerror = () => resolve();
+        } catch (_) {
+          resolve();
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('IndexedDB operational cache clear notice:', err);
+  }
+}
+

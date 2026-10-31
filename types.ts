@@ -278,6 +278,14 @@ export interface StaffLoadingBill {
     receiptUrl?: string;
     receiptName?: string;
   }>;
+  items?: Array<{
+    id?: string;
+    head: string;
+    amount: number;
+    description?: string;
+    receiptUrl?: string;
+    receiptName?: string;
+  }>;
   totalAmount: number;
   grandTotal?: number;
   paidAmount: number;
@@ -402,6 +410,7 @@ export interface CompanyDocument {
   notes?: string;
   unlimitedValidity?: boolean;
   hasExpiry?: boolean;
+  issueDate?: string;
   expiryDate?: string;
   isExpired?: boolean;
 }
@@ -1255,7 +1264,11 @@ export interface Vehicle {
   companyName?: string; // Display name of operating entity (e.g. Docks (Pvt.) Ltd., Truckit, Muhib, Vantage)
   
   // Status & Validation
-  status: 'AVAILABLE' | 'ON_TRIP' | 'MAINTENANCE' | 'IN_LINE' | 'EXPIRED' | 'EXPIRE_SOON' | 'CANCELLED' | 'TRANSFERRED' | 'INACTIVE';
+  status: 'AVAILABLE' | 'ON_TRIP' | 'MAINTENANCE' | 'IN_LINE' | 'EXPIRED' | 'EXPIRE_SOON' | 'CANCELLED' | 'TRANSFERRED' | 'INACTIVE' | 'CONFIRMED' | 'RENEWED';
+  registrationConfirmed?: boolean;
+  registrationExpiryDate?: string;
+  lastRenewalDate?: string;
+  renewals?: any[];
   validationStartDate?: string; // Only for Bonded/Afghan
   validationExpiryDate?: string; // Auto-calculated (6 months)
   
@@ -1399,7 +1412,7 @@ export interface AppNotification {
   description: string;
   details?: string; // Full details for the pop-up
   timestamp: string;
-  type: 'ACTION' | 'INFO' | 'ALERT';
+  type: 'ACTION' | 'INFO' | 'ALERT' | 'APPROVAL' | 'SUCCESS';
   notificationSubType?: 
     | 'CASE_APPROVAL' 
     | 'BUYING' 
@@ -1410,6 +1423,10 @@ export interface AppNotification {
     | 'PAYMENT_APPROVAL'
     | 'CLIENT_REGISTRATION_APPROVAL'
     | 'WORKFLOW_TASK'
+    | 'WORKFLOW_UPDATE'
+    | 'CASE_CANCELLED_ALERT'
+    | 'COMPANY_MANAGED_UPDATE'
+    | 'CLIENT_MANAGED_DEMAND'
     | 'FINANCE_RECORDED'
     | 'INVOICE_CHARGE_NOTIFICATION'
     | 'URGENT_PAYABLE_APPROVAL'
@@ -1428,15 +1445,16 @@ export interface AppNotification {
     | 'VEHICLE_RENEWED'
     | 'VEHICLE_LOCATION_UPDATE'
     | 'VEHICLE_MISSING_ALERT'
-    | 'TRANSPORTER_PAYMENT_CONFIRMATION';
+    | 'TRANSPORTER_PAYMENT_CONFIRMATION'
+    | string;
   status: 'PENDING' | 'RESOLVED' | 'REJECTED';
   actionLabel?: string;
   priority?: 'HIGH' | 'MEDIUM' | 'LOW';
   targetView?: string;
   targetFilter?: any;
-  targetRole?: UserRole | string;
+  targetRole?: UserRole | string | (UserRole | string)[];
   targetClientName?: string;
-  category?: 'CASE' | 'FINANCE' | 'APPROVAL' | 'TRANSPORTER' | 'GENERAL';
+  category?: 'CASE' | 'FINANCE' | 'APPROVAL' | 'TRANSPORTER' | 'GENERAL' | 'CLIENT_REG' | 'SYSTEM' | string;
   read?: boolean;
   approvalData?: {
     entityType: 'case' | 'vehicle' | 'finance' | 'client' | 'transporter' | 'document' | 'staff';

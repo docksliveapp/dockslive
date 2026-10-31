@@ -29,7 +29,8 @@ import {
   backupCasesToIndexedDB, 
   backupVehiclesToIndexedDB, 
   restoreCasesFromIndexedDB, 
-  restoreVehiclesFromIndexedDB 
+  restoreVehiclesFromIndexedDB,
+  clearOperationalIndexedDBCache
 } from './documentStorage';
 
 /**
@@ -581,16 +582,35 @@ export function subscribeToFinances(
 ) {
   const path = 'finances';
   let cachedDocs: any[] = [];
+  let hasReceivedSnapshot = false;
+
+  // Stale-While-Revalidate: Immediately emit locally cached finance entries before network responds
+  try {
+    const localFinances = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', []);
+    if (localFinances && localFinances.length > 0) {
+      const active = getActiveCompanyId();
+      const filtered = options?.allCompanies
+        ? localFinances
+        : localFinances.filter((f) => matchesActiveCompany(f.companyId, active));
+      onData(dedupeArrayById(filtered));
+    }
+  } catch (_) {}
 
   const emit = () => {
     const active = getActiveCompanyId();
+    const allItems: FinanceEntry[] = [];
     const items: FinanceEntry[] = [];
     let idx = 0;
     cachedDocs.forEach((data) => {
-      if (!options?.allCompanies && !matchesActiveCompany(data.companyId, active)) return;
       const numId = parseNumericDocId(data.id, data._docId || String(idx), idx++);
-      items.push({ ...data, id: numId } as FinanceEntry);
+      const entry = { ...data, id: numId } as FinanceEntry;
+      allItems.push(entry);
+      if (!options?.allCompanies && !matchesActiveCompany(data.companyId, active)) return;
+      items.push(entry);
     });
+    if (hasReceivedSnapshot) {
+      safeAppStorage.setJSON('dpl_live_finance', dedupeArrayById(allItems));
+    }
     onData(dedupeArrayById(items));
   };
 
@@ -601,6 +621,7 @@ export function subscribeToFinances(
   const unsubFirestore = onSnapshot(
     collection(db, path),
     (snapshot) => {
+      hasReceivedSnapshot = true;
       cachedDocs = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -1084,6 +1105,15 @@ export function subscribeToVehicles(
 ) {
   const path = 'vehicles';
   let cachedDocs: any[] = [];
+  let hasReceivedSnapshot = false;
+
+  // Stale-While-Revalidate: Immediately emit locally cached vehicles before Firestore responds
+  try {
+    const localCached = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+    if (localCached && localCached.length > 0) {
+      onData(dedupeArrayById(localCached));
+    }
+  } catch (_) {}
 
   const emit = () => {
     const firestoreItems: Vehicle[] = [];
@@ -1095,28 +1125,17 @@ export function subscribeToVehicles(
     });
 
     const finalVehicles = dedupeArrayById(firestoreItems);
-    if (finalVehicles.length === 0) {
-      const localCached = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
-      if (localCached && localCached.length > 0) {
-        onData(localCached);
-        if (!isSyncingMissingLocalVehicles) {
-          isSyncingMissingLocalVehicles = true;
-          saveVehiclesBulkToFirestore(localCached).finally(() => {
-            isSyncingMissingLocalVehicles = false;
-          });
-        }
-        return;
-      }
+    if (hasReceivedSnapshot) {
+      safeAppStorage.setJSON('dpl_live_vehicles', finalVehicles);
+      backupVehiclesToIndexedDB(finalVehicles).catch(() => {});
     }
-
-    safeAppStorage.setJSON('dpl_live_vehicles', finalVehicles);
-    backupVehiclesToIndexedDB(finalVehicles).catch(() => {});
     onData(finalVehicles);
   };
 
   const unsubFirestore = onSnapshot(
     collection(db, path),
     (snapshot) => {
+      hasReceivedSnapshot = true;
       cachedDocs = [];
       snapshot.forEach((docSnap) => {
         cachedDocs.push({ ...docSnap.data(), _docId: docSnap.id });
@@ -1792,11 +1811,20 @@ export async function saveNotificationToFirestore(notif: AppNotification): Promi
   const numId = notif.id || parseNumericDocId(undefined, deterministicKey, 0);
   const docId = String(numId);
   const activeCompany = getActiveCompanyId();
+  const nowIso = new Date().toISOString();
+  const normalizedTargetRoles = Array.isArray((notif as any).targetRoles)
+    ? (notif as any).targetRoles
+    : notif.targetRole
+      ? [notif.targetRole]
+      : ['All'];
   const payload = sanitizeForFirestore({
     ...notif,
     companyId: (notif as any).companyId || activeCompany,
     id: numId,
-    updatedAt: new Date().toISOString()
+    read: Boolean(notif.read),
+    targetRoles: normalizedTargetRoles,
+    createdAt: (notif as any).createdAt || nowIso,
+    updatedAt: nowIso
   });
 
   // Save to local storage cache immediately so UI reacts instantly
@@ -1824,7 +1852,17 @@ export async function updateNotificationInFirestore(notif: AppNotification): Pro
   const path = 'notifications';
   const numId = Number(notif.id);
   const docId = String((notif as any)._docId || numId);
-  const payload = sanitizeForFirestore({ ...notif, updatedAt: new Date().toISOString() });
+  const nowIso = new Date().toISOString();
+  const isResolved =
+    notif.approvalData?.status === 'APPROVED' ||
+    notif.approvalData?.status === 'REJECTED' ||
+    notif.actionStatus === 'COMPLETED';
+  const payload = sanitizeForFirestore({
+    ...notif,
+    read: isResolved ? true : Boolean(notif.read),
+    updatedAt: nowIso,
+    ...(isResolved ? { resolvedAt: (notif as any).resolvedAt || nowIso } : {})
+  });
 
   // Update local storage cache immediately
   try {
@@ -3614,13 +3652,15 @@ export async function wipeCompleteDatabase(): Promise<{
     console.warn('Error resetting users collection in wipeCompleteDatabase:', err);
   }
 
-  // 3. Reset in-memory logos
-  PARENT_GROUP.logo = '';
-  Object.keys(GROUP_COMPANIES).forEach((k) => {
-    GROUP_COMPANIES[k as CompanyId].logo = '';
-  });
+  // 3. Preserve uploaded logos, company names, and corporate branding (NEVER wipe logos or company details on Factory Reset)
+  try {
+    await clearOperationalIndexedDBCache({ clearVehicles: true });
+  } catch (idbErr) {
+    console.warn('IndexedDB operational cache clear notice:', idbErr);
+  }
 
   // 4. Wipe universal unified storage (all operational dpl_, notif_, audit_ keys in memory, localStorage, and sessionStorage)
+  // Note: safeAppStorage.wipeAppOperationalData(true) strictly preserves mak_parent_group_branding, dpl_company_branding_v1*, dpl_custom_banks*, and admin profile keys
   try {
     safeAppStorage.wipeAppOperationalData(true);
     safeAppStorage.setItem('dpl_cleanup_phantom_v3', 'done');
@@ -3630,7 +3670,7 @@ export async function wipeCompleteDatabase(): Promise<{
     console.warn('Storage wipe notice:', e);
   }
 
-  // 5. Explicitly purge all known keys to ensure complete wipe
+  // 5. Explicitly purge all known operational keys to ensure complete wipe (excluding branding, logos, and banks)
   const explicitKeys = [
     'dpl_live_finance', 'dpl_live_receivables', 'dpl_live_payables', 'dpl_live_cases',
     'dpl_live_notifications', 'dpl_live_transporter_requests', 'dpl_live_drivers',
@@ -3641,8 +3681,7 @@ export async function wipeCompleteDatabase(): Promise<{
     'dpl_reg_draft_active', 'dpl_reg_step', 'dpl_reg_caseno', 'dpl_reg_formdata', 
     'dpl_reg_docs', 'dpl_reg_updated_at', 'dpl_reg_view', 'dpl_vehicles_data', 'dpl_registered_clients',
     'dpl_selected_case', 'dpl_selected_case_id', 'dpl_finance_active_tab', 'dpl_dashboard_timeframe',
-    'dpl_ports', 'dpl_company_docs', 'dpl_company_documents', 'dpl_custom_banks', 'dpl_last_cloud_backup_time',
-    'dpl_last_location_view', 'dpl_last_location_role', 'dpl_session_active'
+    'dpl_ports', 'dpl_company_docs', 'dpl_company_documents', 'dpl_last_cloud_backup_time'
   ];
 
   explicitKeys.forEach((k) => {
@@ -3651,38 +3690,28 @@ export async function wipeCompleteDatabase(): Promise<{
     try { sessionStorage.removeItem(k); } catch (_) {}
   });
 
-  // 6. Ensure all payables, finances, cases, notifications, and activity logs in memory and storage are strictly empty
+  // 6. Ensure all payables, finances, cases, vehicles, notifications, and activity logs in memory and storage are strictly empty
   safeAppStorage.setJSON('dpl_live_finance', []);
   safeAppStorage.setJSON('dpl_live_payables', []);
   safeAppStorage.setJSON('dpl_live_receivables', []);
   safeAppStorage.setJSON('dpl_live_cases', []);
+  safeAppStorage.setJSON('dpl_live_vehicles', []);
   safeAppStorage.setJSON('dpl_live_notifications', []);
   safeAppStorage.setJSON('dpl_system_activity_logs', []);
 
-  // 7. Remove custom branding for all companies and parent group
+  // 7. Clear per-company operational notification keys ONLY (NEVER remove dpl_company_branding_v1_* or mak_parent_group_branding)
   ['docks', 'muhib', 'vantage', 'truckit'].forEach(cId => {
-    safeAppStorage.removeItem(`dpl_company_branding_v1_${cId}`);
     safeAppStorage.removeItem(`dpl_live_notifications_${cId}`);
-    try { localStorage.removeItem(`dpl_company_branding_v1_${cId}`); } catch (_) {}
     try { localStorage.removeItem(`dpl_live_notifications_${cId}`); } catch (_) {}
   });
-  safeAppStorage.removeItem('mak_parent_group_branding');
-  try { localStorage.removeItem('mak_parent_group_branding'); } catch (_) {}
 
-  // 8. Reset Firestore settings docs
+  // 8. Record system reset timestamp in Firestore settings (preserving branding and parent_group docs)
   try {
     await executeWithTimeout((async () => {
-      const batch = writeBatch(db);
-      batch.set(doc(db, 'settings', 'branding'), { customLogo: null, updatedAt: resetNowIso }, { merge: true });
-      batch.set(doc(db, 'settings', 'parent_group'), { logo: '', updatedAt: resetNowIso }, { merge: true });
-      batch.set(doc(db, 'settings', 'system_reset'), { lastResetAt: resetNowIso }, { merge: true });
-      for (const cId of ['muhib', 'vantage', 'truckit']) {
-        batch.set(doc(db, 'settings', `branding_${cId}`), { customLogo: null, updatedAt: resetNowIso }, { merge: true });
-      }
-      await batch.commit();
+      await setDoc(doc(db, 'settings', 'system_reset'), { lastResetAt: resetNowIso }, { merge: true });
     })(), 3500, null);
   } catch (err) {
-    console.warn('Error resetting Firestore settings docs:', err);
+    console.warn('Error updating Firestore system_reset doc:', err);
   }
 
   // 9. Thoroughly clear browser cookies & cache storage
@@ -3778,12 +3807,14 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
 
   await Promise.all(wipePromises);
 
-  // Reset this company's logo in memory
-  if (GROUP_COMPANIES[companyId]) {
-    GROUP_COMPANIES[companyId].logo = '';
+  // 2. Clear IndexedDB operational records for this company while strictly preserving company logo, details, and banks
+  try {
+    await clearOperationalIndexedDBCache({ clearVehicles: false, companyId });
+  } catch (idbErr) {
+    console.warn('IndexedDB company cache clear notice:', idbErr);
   }
 
-  // 2. Filter local storage cached arrays to remove only this company's items (preserving shared vehicles)
+  // 3. Filter local storage cached arrays to remove only this company's operational items (preserving shared vehicles, company logo, branding, and banks)
   try {
     safeAppStorage.setRawItem('dpl_last_reset_timestamp', new Date().toISOString());
 
@@ -3805,20 +3836,6 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
 
     const liveActivityLogs = safeAppStorage.getJSON<any[]>('dpl_system_activity_logs', []);
     safeAppStorage.setJSON('dpl_system_activity_logs', liveActivityLogs.filter(l => !matchesActiveCompany(l?.companyId, companyId)));
-
-    // Reset this specific company's branding
-    safeAppStorage.removeItem(`dpl_company_branding_v1_${companyId}`);
-    try { localStorage.removeItem(`dpl_company_branding_v1_${companyId}`); } catch (_) {}
-    safeAppStorage.removeItem(`dpl_custom_banks_${companyId}`);
-    try { localStorage.removeItem(`dpl_custom_banks_${companyId}`); } catch (_) {}
-
-    // Reset Firestore branding doc for this company
-    try {
-      const docId = companyId === 'docks' ? 'branding' : `branding_${companyId}`;
-      await setDoc(doc(db, 'settings', docId), { customLogo: null, updatedAt: new Date().toISOString() }, { merge: true });
-    } catch (err) {
-      console.warn('Error resetting Firestore branding doc for company:', err);
-    }
   } catch (e) {
     console.warn('Company storage cleanup notice:', e);
   }

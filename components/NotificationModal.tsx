@@ -46,12 +46,20 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
     notification.notificationSubType === 'URGENT_PAYABLE_APPROVAL' ||
     notification.approvalData?.actionType === 'APPROVE_URGENT_PAYABLE';
 
+  const isTransporterPaymentConfirm =
+    notification.approvalData?.actionType === 'CONFIRM_TRANSPORTER_PAYMENT';
+
+  const isTransporterApproval =
+    notification.approvalData?.actionType === 'APPROVE_TRANSPORTER';
+
   const isApprovalAction = 
     !isMonthlyExpense && (
       isPaymentApproval ||
       isSalaryCollection ||
       isNocApproval ||
       isUrgentPayableApproval ||
+      isTransporterPaymentConfirm ||
+      isTransporterApproval ||
       notification.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
       notification.notificationSubType === 'CASE_APPROVAL' ||
       notification.notificationSubType === 'DELETION_APPROVAL' ||
@@ -455,6 +463,10 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
                 <span>
                   {isPaymentApproval 
                     ? 'Confirm Receipt & Credit Ledger' 
+                    : isTransporterPaymentConfirm
+                    ? 'Confirm Payment Received'
+                    : isTransporterApproval
+                    ? 'Approve Transporter Registration'
                     : isSalaryCollection
                     ? 'Confirm Collection & Update Ledger'
                     : isNocApproval

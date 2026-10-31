@@ -9,7 +9,17 @@ export function isUploadedLogo(url?: string | null): boolean {
   if (!url || typeof url !== 'string') return false;
   const s = url.trim();
   if (!s || s.length < 5) return false;
-  if (s.startsWith('/logos/') || s.includes('docks_logo') || s.includes('mak_group_logo') || s.includes('muhib_logo') || s.includes('vantage_logo') || s.includes('truckit_logo')) {
+  if (
+    s.startsWith('/logos/') ||
+    s === '/favicon.svg' ||
+    s.includes('/favicon.svg') ||
+    s.includes('docks_logo') ||
+    s.includes('mak_group_logo') ||
+    s.includes('mak_pearl_white_emblem') ||
+    s.includes('muhib_logo') ||
+    s.includes('vantage_logo') ||
+    s.includes('truckit_logo')
+  ) {
     return false;
   }
   return true;
@@ -128,17 +138,13 @@ export interface ParentGroupInfo {
 }
 
 export function getCompanyLogoUrl(companyId?: CompanyId | null): string {
-  if (!companyId) return '/logos/mak_group_logo.svg';
+  if (!companyId) {
+    const pGroup = getParentGroupInfo();
+    return (pGroup?.logo && isUploadedLogo(pGroup.logo)) ? pGroup.logo : '';
+  }
   const custom = getCompanyUploadedLogo(companyId);
-  if (custom) return custom;
-  
-  const defaults: Record<CompanyId, string> = {
-    docks: '/logos/docks_logo.svg',
-    muhib: '/logos/muhib_logo.svg',
-    vantage: '/logos/vantage_logo.svg',
-    truckit: '/logos/truckit_logo.svg'
-  };
-  return defaults[companyId] || '/logos/mak_group_logo.svg';
+  if (custom && isUploadedLogo(custom)) return custom;
+  return '';
 }
 
 export function resolveCompanyIdFromRef(refOrName?: string | null, explicitCompanyId?: CompanyId | string | null): CompanyId {
@@ -165,9 +171,9 @@ export const DEFAULT_PARENT_GROUP: ParentGroupInfo = {
   title: 'MAK GROUP OF COMPANIES',
   tagline: 'Premier Multi-Entity Logistics, Customs & International Trade Conglomerate',
   subtitle: 'DOCKS • TRUCKIT • MUHIB • VANTAGE',
-  logo: '/logos/mak_group_logo.svg',
-  favicon: '/favicon.svg',
-  documentLogo: '/logos/mak_group_logo.svg',
+  logo: '',
+  favicon: '',
+  documentLogo: '',
   address: 'Office No 13 1st Floor State Life Building No 7 G-Allana Road Tower Karachi',
   phone: '+92-21-32330103, +92-21-32330104',
   cell: '+92-321-9222883, +92-321-8496006',
@@ -393,13 +399,28 @@ export function initParentGroupFirestoreSync() {
     onSnapshot(parentRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data();
+        const currentStored = getParentGroupInfo();
+        const resolvedLogo = isUploadedLogo(data.logo)
+          ? data.logo
+          : (isUploadedLogo(currentStored.logo) && data.logo === undefined ? currentStored.logo : '');
+        const resolvedFavicon = isUploadedLogo(data.favicon)
+          ? data.favicon
+          : (isUploadedLogo(currentStored.favicon) && data.favicon === undefined ? currentStored.favicon : '');
+        const resolvedDocLogo = isUploadedLogo(data.documentLogo)
+          ? data.documentLogo
+          : (isUploadedLogo(currentStored.documentLogo) && data.documentLogo === undefined ? currentStored.documentLogo : '');
         const merged: ParentGroupInfo = {
           ...DEFAULT_PARENT_GROUP,
+          ...currentStored,
           ...data,
-          address: (data.address && !String(data.address).includes('14-B')) ? data.address : DEFAULT_PARENT_GROUP.address,
-          logo: data.logo || DEFAULT_PARENT_GROUP.logo,
-          favicon: data.favicon || '',
-          documentLogo: data.documentLogo || ''
+          name: data.name || currentStored.name || DEFAULT_PARENT_GROUP.name,
+          title: data.title || currentStored.title || DEFAULT_PARENT_GROUP.title,
+          tagline: data.tagline || currentStored.tagline || DEFAULT_PARENT_GROUP.tagline,
+          subtitle: data.subtitle || currentStored.subtitle || DEFAULT_PARENT_GROUP.subtitle,
+          address: (data.address && !String(data.address).includes('14-B')) ? data.address : (currentStored.address || DEFAULT_PARENT_GROUP.address),
+          logo: resolvedLogo,
+          favicon: resolvedFavicon,
+          documentLogo: resolvedDocLogo
         };
         broadcastParentGroupUpdate(merged);
       }
@@ -433,7 +454,13 @@ export function initAllCompaniesFirestoreSync() {
           const data = snap.data();
           const key = `dpl_company_branding_v1_${cId}`;
           const currentStored = safeAppStorage.getRawJSON<any>(key, {});
-          const cleanCustomLogo = data.customLogo || data.logo || currentStored.customLogo || null;
+          const rawCandidate = data.customLogo !== undefined ? (data.customLogo || data.logo) : currentStored.customLogo;
+          const cleanCustomLogo = isUploadedLogo(rawCandidate)
+            ? rawCandidate
+            : (isUploadedLogo(currentStored.customLogo) && data.customLogo === undefined ? currentStored.customLogo : null);
+          if (GROUP_COMPANIES[cId]) {
+            GROUP_COMPANIES[cId].logo = cleanCustomLogo || '';
+          }
           const updated = {
             ...currentStored,
             ...data,
@@ -441,8 +468,8 @@ export function initAllCompaniesFirestoreSync() {
             useMainLogoAsOfficial: typeof data.useMainLogoAsOfficial === 'boolean' 
               ? data.useMainLogoAsOfficial 
               : currentStored.useMainLogoAsOfficial,
-            companyName: data.companyName || currentStored.companyName,
-            subtitle: data.subtitle || currentStored.subtitle,
+            companyName: data.companyName || currentStored.companyName || GROUP_COMPANIES[cId]?.legalTitle || GROUP_COMPANIES[cId]?.name,
+            subtitle: data.subtitle || currentStored.subtitle || GROUP_COMPANIES[cId]?.tagline,
           };
           safeAppStorage.setRawJSON(key, updated);
           if (cId === 'docks') {
@@ -494,7 +521,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Docks (Pvt.) Ltd.',
     category: 'Customs Bonded Carrier & Port Logistics',
     tagline: 'Nationwide Bonded Carrier & Afghan Transit Logistics Specialist',
-    logo: '/logos/docks_logo.svg',
+    logo: '',
     accentColor: '#F59E0B', // Amber / Gold
     borderColor: 'border-amber-500/40',
     badgeBg: 'bg-amber-500/20',
@@ -524,7 +551,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Muhib International (SMC-Pvt.) Ltd.',
     category: 'International Freight Forwarding & Trade Logistics',
     tagline: 'Global Import, Export & Customs Clearance Facilitation',
-    logo: '/logos/muhib_logo.svg',
+    logo: '',
     accentColor: '#2563EB', // Royal Blue & Crimson
     borderColor: 'border-blue-500/40',
     badgeBg: 'bg-blue-500/20',
@@ -554,7 +581,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Vantage Shipping Line (Pvt.) Ltd.',
     category: 'Ocean Freight & Maritime Container Vessel Logistics',
     tagline: 'Worldwide Ocean Freight, Shipping Agency & Container Management',
-    logo: '/logos/vantage_logo.svg',
+    logo: '',
     accentColor: '#0EA5E9', // Sky / Cyan
     borderColor: 'border-cyan-500/40',
     badgeBg: 'bg-cyan-500/20',
@@ -584,7 +611,7 @@ export const GROUP_COMPANIES: Record<CompanyId, CompanyInfo> = {
     legalTitle: 'Truckit (Pvt.) Ltd.',
     category: 'Nationwide Fleet Haulage & Fast Cargo Trucking',
     tagline: 'High-Speed Cargo Haulage, Heavy Transport & Inter-City Fleet',
-    logo: '/logos/truckit_logo.svg',
+    logo: '',
     accentColor: '#EF4444', // Red
     borderColor: 'border-red-500/40',
     badgeBg: 'bg-red-500/20',

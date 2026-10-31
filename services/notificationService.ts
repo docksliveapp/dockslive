@@ -1,82 +1,100 @@
 import { AppNotification, UserRole } from '../types';
 import { saveNotificationToFirestore } from './dbService';
-import { logActivity } from './activityLogService';
+import { getActiveCompanyId } from './companyService';
 
-export interface SendNotificationOptions {
+export interface CreateNotificationPayload {
   title: string;
   description: string;
-  details?: string;
-  targetRole?: UserRole | string; // 'ALL' or specific role enum/string
-  targetClientName?: string; // If targeting a specific transporter or client
-  targetView?: 'cases' | 'finance' | 'vehicles' | 'users' | 'dashboard' | string;
-  targetFilter?: any;
-  type?: 'ACTION' | 'INFO' | 'ALERT';
+  details: string;
+  type?: 'ALERT' | 'APPROVAL' | 'INFO' | 'ACTION' | 'SUCCESS';
   notificationSubType?: AppNotification['notificationSubType'];
-  status?: 'PENDING' | 'RESOLVED' | 'REJECTED';
-  approvalData?: AppNotification['approvalData'];
-  actionLabel?: string;
   priority?: 'HIGH' | 'MEDIUM' | 'LOW';
+  actionLabel?: string;
+  targetRole: UserRole | string | (UserRole | string)[];
+  targetClientName?: string;
+  category?: 'CASE' | 'FINANCE' | 'TRANSPORTER' | 'CLIENT_REG' | 'SYSTEM' | 'APPROVAL' | 'GENERAL' | string;
+  targetView?: 'cases' | 'finance' | 'transporter' | 'users' | 'vehicles' | string;
+  targetFilter?: {
+    caseId?: number | string;
+    caseNo?: string;
+    invoiceNo?: string;
+    vehicleId?: string | number;
+    vehicleNo?: string;
+    tab?: string;
+    stepId?: string;
+    [key: string]: any;
+  };
   performedBy?: string;
-  performedByRole?: string;
-  category?: 'CASE' | 'FINANCE' | 'APPROVAL' | 'TRANSPORTER' | 'GENERAL';
+  approvalData?: AppNotification['approvalData'];
 }
 
 /**
- * Sends a real-time notification to the targeted role (and automatically to Admin/Super Admin),
- * and simultaneously records an audit record in the system activity log.
+ * Triggers a native system / browser notification on Desktop (Windows/macOS) or Mobile APK/PWA
+ * when Notification permission is granted.
  */
-export async function sendAppNotification(opts: SendNotificationOptions): Promise<AppNotification> {
-  const numericId = Date.now() + Math.floor(Math.random() * 10000);
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+export async function triggerNativeBrowserNotification(title: string, body: string, url: string = '/'): Promise<void> {
+  if (typeof window === 'undefined' || !('Notification' in window)) return;
+  try {
+    if (Notification.permission !== 'granted') return;
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg && typeof reg.showNotification === 'function') {
+        await reg.showNotification(title, {
+          body,
+          icon: '/pwa-192x192-v3.png',
+          badge: '/pwa-192x192-v3.png',
+          data: { url },
+        });
+        return;
+      }
+    }
+    new Notification(title, {
+      body,
+      icon: '/pwa-192x192-v3.png',
+    });
+  } catch (_) {}
+}
 
-  const notif: AppNotification = {
-    id: numericId,
-    title: opts.title,
-    description: opts.description,
-    details: opts.details || opts.description,
-    timestamp: timeStr,
-    type: opts.type || 'INFO',
-    notificationSubType: opts.notificationSubType || 'GENERAL',
-    status: opts.status || 'PENDING',
-    approvalData: opts.approvalData,
-    actionLabel: opts.actionLabel,
-    priority: opts.priority || 'MEDIUM',
-    targetRole: opts.targetRole || 'ALL',
-    targetClientName: opts.targetClientName,
-    targetView: opts.targetView,
-    targetFilter: opts.targetFilter,
-    category: opts.category || 'GENERAL',
-    read: false
+/**
+ * Sends a real-time notification to Firestore so the target role/user
+ * receives it immediately in their Live Notification Center.
+ */
+export async function sendAppNotification(payload: CreateNotificationPayload): Promise<AppNotification> {
+  const rolesArray = Array.isArray(payload.targetRole) 
+    ? payload.targetRole.map(r => String(r)) 
+    : [String(payload.targetRole)];
+  
+  const primaryTargetRole = rolesArray.join(',');
+
+  // Automatically tag with active company unless it's a shared fleet/transporter notification
+  const isSharedFleet = payload.category === 'TRANSPORTER' || payload.targetView === 'transporter';
+
+  const newNotif: AppNotification & { targetRoles?: string[]; companyId?: string } = {
+    id: Date.now() + Math.floor(Math.random() * 1000),
+    title: payload.title,
+    description: payload.description,
+    details: payload.details,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    type: payload.type || 'INFO',
+    notificationSubType: payload.notificationSubType || 'GENERAL',
+    status: 'PENDING',
+    actionLabel: payload.actionLabel || 'Open & Take Action',
+    priority: payload.priority || 'HIGH',
+    targetRole: primaryTargetRole,
+    targetRoles: rolesArray,
+    targetClientName: payload.targetClientName,
+    category: payload.category || 'CASE',
+    targetView: payload.targetView || 'cases',
+    targetFilter: payload.targetFilter,
+    approvalData: payload.approvalData,
+    companyId: isSharedFleet ? undefined : getActiveCompanyId(),
   };
 
-  // 1. Save to Firestore notifications collection for real-time Live Notification Center
   try {
-    await saveNotificationToFirestore(notif);
+    await saveNotificationToFirestore(newNotif);
   } catch (err) {
-    console.warn('Could not save notification to Firestore:', err);
+    console.warn("Could not save notification to Firestore, stored locally:", err);
   }
 
-  // 2. Also log to central Activity Logs for the Admin Dashboard & Audit Trail
-  try {
-    const roleForLog = opts.performedByRole || (opts.targetRole ? String(opts.targetRole) : 'SYSTEM');
-    const userForLog = opts.performedBy || 'System';
-    await logActivity(
-      opts.title,
-      opts.description,
-      roleForLog,
-      userForLog,
-      {
-        targetRole: opts.targetRole,
-        targetClientName: opts.targetClientName,
-        targetView: opts.targetView,
-        targetFilter: opts.targetFilter,
-        category: opts.category
-      }
-    );
-  } catch (err) {
-    console.warn('Could not log activity:', err);
-  }
-
-  return notif;
+  return newNotif;
 }
