@@ -46,37 +46,15 @@ export async function notifyLiveFinanceTransaction(params: {
 }
 
 export async function runMonthlySalaryRolloverCheck(): Promise<void> {
-  try {
-    const now = new Date();
-    const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const lastProcessedMonth = safeAppStorage.getItem(LAST_SALARY_ROLLOVER_KEY);
-
-    if (lastProcessedMonth !== currentMonthKey) {
-      await autoPostMonthlyRecurringAndSalaries();
-      safeAppStorage.setItem(LAST_SALARY_ROLLOVER_KEY, currentMonthKey);
-    }
-  } catch (err) {
-    console.warn('Monthly salary rollover check notice:', err);
-  }
+  // Disabled automatic background generation so payables never increment without explicit user entry
 }
 
 export async function runDailyAutomatedAudit(force = false): Promise<void> {
   if (force) {
-    await runMonthlySalaryRolloverCheck();
+    await autoPostMonthlyRecurringAndSalaries();
   }
 }
 
-let schedulerInterval: any = null;
-
 export function initAuditSchedulerService(): void {
-  if (schedulerInterval) return;
-
-  // Run monthly rollover check after a brief delay
-  setTimeout(() => {
-    runMonthlySalaryRolloverCheck().catch(() => {});
-  }, 4000);
-
-  schedulerInterval = setInterval(() => {
-    runMonthlySalaryRolloverCheck().catch(() => {});
-  }, 15 * 60 * 1000);
+  // Background auto-posting disabled to prevent unsolicited payable generation
 }

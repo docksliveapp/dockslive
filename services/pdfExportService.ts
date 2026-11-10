@@ -1829,9 +1829,17 @@ export async function downloadClientLedgerPdf(data: ClientLedgerExportData): Pro
       const entry = data.entries[idx];
       const cleanDateStr = formatPdfDate(entry.date);
 
-      // Cleanly wrap Case No and Description / Narration (with Container No, Size & Qty) without truncation
+      // Format Case No and Description / Narration (strictly Container No & Vehicle No for case billings)
+      let rawDesc = cleanPdfText(entry.description || '-');
+      if (entry.debit > 0 && entry.reference !== 'OPN-BAL' && rawDesc.includes('Cntr No:')) {
+        const cntrMatch = rawDesc.match(/Cntr No:\s*([^|]+)/i);
+        const vehMatch = rawDesc.match(/Veh No:\s*([^|]+)/i);
+        const extractedCntr = cntrMatch ? cntrMatch[1].trim() : 'N/A';
+        const extractedVeh = vehMatch ? vehMatch[1].trim() : 'N/A';
+        rawDesc = `Cntr No: ${extractedCntr} | Veh No: ${extractedVeh}`;
+      }
       const refLines = doc.splitTextToSize(cleanPdfText(entry.reference || '-'), 34);
-      const descLines = doc.splitTextToSize(cleanPdfText(entry.description || '-'), 58);
+      const descLines = doc.splitTextToSize(rawDesc, 58);
       const lineCount = Math.min(3, Math.max(refLines.length, descLines.length));
       const rowHeight = lineCount === 1 ? 6.8 : lineCount === 2 ? 10.0 : 13.2;
 
@@ -2252,7 +2260,8 @@ export async function downloadGeneralLedgerPdf(data: GeneralLedgerExportData): P
       doc.text(partyStr, margin + 23, currentY + 4.4);
       doc.text(cleanPdfText(entry.reference || '-').substring(0, 10), margin + 56, currentY + 4.4);
 
-      const desc = cleanPdfText(entry.description || '-').length > 28 ? cleanPdfText(entry.description || '-').substring(0, 26) + '..' : cleanPdfText(entry.description || '-');
+      const rawGlDesc = cleanPdfText(entry.description || '-');
+      const desc = rawGlDesc.length > 36 ? rawGlDesc.substring(0, 34) + '..' : rawGlDesc;
       doc.setTextColor(15, 23, 42);
       doc.text(desc, margin + 75, currentY + 4.4);
 

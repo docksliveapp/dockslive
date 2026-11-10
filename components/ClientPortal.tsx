@@ -898,11 +898,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     clientCases.forEach(c => {
       const rate = getRouteRate(c.pol, c.pod);
       (c.containers || [{ number: 'MSKU-DEFAULT' } as any]).forEach((cntr, idx) => {
+        const cntrNoStr = cntr.number || c.containerNumber || c.extractedData?.containerNo || 'N/A';
+        const vehNoStr = cntr.vehicleNo || c.extractedData?.vehicleNumber || (c as any).vehicleNo || 'N/A';
         list.push({
           id: `inv_${c.id}_${idx}`,
           date: c.createdAt || new Date().toISOString().split('T')[0],
           type: 'INVOICE',
-          typeName: 'Freight Commercial Invoice',
+          typeName: `Cntr No: ${cntrNoStr} | Veh No: ${vehNoStr}`,
           recipient: 'DPL Company Billing',
           caseNo: c.caseNo,
           containerNo: cntr.number,

@@ -4,7 +4,7 @@ import {
   CheckCircle2, Plus, LogOut, MapPin, Truck, AlertTriangle, 
   User, CreditCard, ChevronRight, RefreshCw, Filter, Layers, 
   ShieldCheck, ArrowUpRight, ArrowDownLeft, FileCheck, Receipt, Eye,
-  Calendar, Box, DollarSign, X, Menu, ChevronDown, Check, Anchor
+  Calendar, Box, DollarSign, X, Menu, ChevronDown, Check, Anchor, BookOpen
 } from 'lucide-react';
 import { Case, CaseStatus, UserRole, StaffLoadingBill, StaffPrivateLedgerEntry, Container } from '../types';
 import { subscribeToCases, subscribeToStaffBills, subscribeToStaffPrivateLedger, saveCaseToFirestore } from '../services/dbService';

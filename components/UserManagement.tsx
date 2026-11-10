@@ -76,7 +76,6 @@ const UserManagement: React.FC = () => {
     const unsubUsers = subscribeToUsers((data) => {
       if (data && data.length > 0) {
         setUsers(data);
-        syncMonthlyStaffSalariesToPayables(data).catch(() => {});
         if (data.some(u => Number(u.defaultPerContainerCharge) > 0)) {
           syncDestinationStaffContainerCharges({ users: data }).catch(() => {});
         }

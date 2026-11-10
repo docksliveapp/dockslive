@@ -75,23 +75,46 @@ export const ClientLedgerModal: React.FC<ClientLedgerModalProps> = ({
 
     const ref = c.caseNo || c.caseNumber || c.invoiceNo || `CASE-${c.id}`;
     const cntrs = Array.isArray(c.containers) && c.containers.length > 0 ? c.containers : [];
-    const cntrQty = cntrs.length || 1;
     const rawNos = cntrs.map(cn => (cn.number || '').trim()).filter(Boolean);
-    const cntrNoText = rawNos.length > 0 ? rawNos.join(', ') : (c.containerNumber || c.extractedData?.containerNo || 'N/A');
-    const rawSizes = cntrs.map(cn => (cn.size || '').trim()).filter(Boolean);
-    const cntrSizeText = rawSizes.length > 0 ? Array.from(new Set(rawSizes)).join('/') : ((c as any).containerSize || c.extractedData?.containerSize || '40ft');
-    const cntrNarration = `Cntr No: ${cntrNoText} | Size: ${cntrSizeText} | Qty: ${cntrQty}`;
+    const cntrNoText = rawNos.length > 0 ? Array.from(new Set(rawNos)).join(', ') : (c.containerNumber || c.extractedData?.containerNo || 'N/A');
+    const rawVehs = cntrs.map(cn => (cn.vehicleNo || '').trim()).filter(Boolean);
+    const wfVehs = Object.values(c.workflowDetails || {})
+      .map((step: any) =>
+        step?.assignedVehicleNo ||
+        step?.vehicleNo ||
+        step?.assignedTruckNo ||
+        step?.attVehicleNo ||
+        step?.cargoTruckNo ||
+        step?.carCarrierTrailerNo ||
+        step?.isoHazmatVehicleNo ||
+        step?.isoVehicleRegNo ||
+        step?.assignedTrailerNo ||
+        ''
+      )
+      .map((v: string) => String(v || '').trim())
+      .filter(Boolean);
+    const billVehs = [...(c.loadingBills || []), ...(c.destinationBills || [])]
+      .map((b: any) => String(b?.vehicleNo || '').trim())
+      .filter(Boolean);
+    const fallbackVeh =
+      c.extractedData?.vehicleNumber ||
+      (c.extractedData as any)?.vehicleNo ||
+      (c as any).vehicleNo ||
+      (c as any).vehicleNumber ||
+      (c as any).assignedVehicleNo ||
+      wfVehs[0] ||
+      billVehs[0] ||
+      'N/A';
+    const vehNoText = rawVehs.length > 0 ? Array.from(new Set(rawVehs)).join(', ') : fallbackVeh;
+    const cntrNarration = `Cntr No: ${cntrNoText} | Veh No: ${vehNoText}`;
 
     if (totalBilled > 0) {
-      const chargeLabel = Array.isArray(c.charges) && c.charges.length > 0
-        ? c.charges.map(ch => ch.description).filter(Boolean).join(', ')
-        : (c.category || 'Logistics Charges');
       rawRows.push({
         id: `case_${c.id}`,
         date: caseDate,
         type: 'INVOICE',
         refNumber: ref,
-        description: `${chargeLabel} | ${cntrNarration}`,
+        description: cntrNarration,
         debit: totalBilled,
         credit: 0
       });
