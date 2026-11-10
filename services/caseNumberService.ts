@@ -60,23 +60,40 @@ export function getDestinationCode(destination?: string): string {
 
   const upper = destination.toUpperCase().trim();
 
-  // 1. Direct or partial city match
+  // 1. Prioritize explicit dry port & border station names first (before checking Karachi/KHI so "Karachi to Peshawar" or "Azakhel" always resolves to destination)
+  if (upper.includes('PESHAWAR') || upper.includes('AZAKHEL') || upper.includes('JAMRUD') || upper.includes('AMAN GARH') || upper.includes('AMANGARH')) return 'PEW';
+  if (upper.includes('TORKHAM') || upper.includes('TOR KHAM')) return 'TKM';
+  if (upper.includes('CHAMAN')) return 'CHM';
+  if (upper.includes('SPIN BOLDAK')) return 'SPB';
+  if (upper.includes('KABUL')) return 'KBL';
+  if (upper.includes('KANDAHAR')) return 'KDH';
+  if (upper.includes('JALALABAD')) return 'JAL';
+  if (upper.includes('LAHORE') || upper.includes('PREM') || upper.includes('MUGHALPURA') || upper.includes('KOT LAKHPAT') || upper.includes('LRDP')) return 'LHR';
+  if (upper.includes('FAISALABAD') || upper.includes('GATTI') || upper.includes('CHAK JHUMRA')) return 'FSD';
+  if (upper.includes('ISLAMABAD') || upper.includes('CHAKLALA') || upper.includes('MARGALLA')) return 'ISB';
+  if (upper.includes('RAWALPINDI')) return 'RWP';
+  if (upper.includes('MULTAN') || upper.includes('SHERSHAH')) return 'MUX';
+  if (upper.includes('SIALKOT') || upper.includes('SAMBRIAL')) return 'SKT';
+  if (upper.includes('QUETTA')) return 'QTA';
+  if (upper.includes('GUJRANWALA')) return 'GUJ';
+  if (upper.includes('GWADAR')) return 'GWD';
+  if (upper.includes('HYDERABAD')) return 'HDD';
+  if (upper.includes('SUKKUR')) return 'SKR';
+  if (upper.includes('SAHIWAL')) return 'SWL';
+  if (upper.includes('KASUR')) return 'KSR';
+  if (upper.includes('SHEIKHUPURA')) return 'SKP';
+  if (upper.includes('GUJRAT')) return 'GJT';
+  if (upper.includes('PORT QASIM') || upper.includes('QICT')) return 'PQA';
+  if (upper.includes('KARACHI') || upper.includes('KICT') || upper.includes('PICTC') || upper.includes('SAPT') || upper.includes('KPT')) return 'KHI';
+
+  // 2. Standalone 3-letter destination code match (word-boundary only, never inside another word)
   for (const [city, code] of Object.entries(DESTINATION_CODES)) {
-    if (upper.includes(city) || upper.includes(code)) {
+    if (upper.includes(city) || new RegExp(`\\b${code}\\b`).test(upper)) {
       return code;
     }
   }
 
-  // Common dry port aliases
-  if (upper.includes('PREM') || upper.includes('MUGHALPURA') || upper.includes('KOT LAKHPAT')) return 'LHR';
-  if (upper.includes('GATTI') || upper.includes('CHAK JHUMRA')) return 'FSD';
-  if (upper.includes('CHAKLALA') || upper.includes('MARGALLA')) return 'ISB';
-  if (upper.includes('SHERSHAH')) return 'MUX';
-  if (upper.includes('SAMBRIAL')) return 'SKT';
-  if (upper.includes('SPIN BOLDAK')) return 'SPB';
-  if (upper.includes('TOR KHAM')) return 'TKM';
-
-  // 2. Extract first 3 clean letters if alphanumeric
+  // 3. Extract first 3 clean letters if alphanumeric
   const clean = upper.replace(/[^A-Z]/g, '');
   if (clean.length >= 3) {
     return clean.slice(0, 3);

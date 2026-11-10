@@ -48,7 +48,15 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
     ? globalLogo
     : '/logos/mak_pearl_white_emblem.svg';
 
-  const [activeSearch, setActiveSearch] = useState<string>('');
+  const [activeSearch, setActiveSearch] = useState<string>(() => {
+    if (initialQuery && initialQuery.trim().length >= 4) return initialQuery.trim();
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlQ = (params.get('q') || params.get('container') || params.get('container1') || params.get('bl') || params.get('truck') || params.get('caseno') || params.get('case') || '').trim();
+      if (urlQ.length >= 4) return urlQ;
+    }
+    return '';
+  });
   const [selectedContainerId, setSelectedContainerId] = useState<string | null>(null);
   const [cases, setCases] = useState<Case[]>([]);
   const [isLoadingCases, setIsLoadingCases] = useState<boolean>(true);
@@ -103,21 +111,23 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
     };
   }, []);
 
-  // Trigger search on mount if initial query exists
+  // Trigger search only when initialQuery prop is explicitly updated from parent
   useEffect(() => {
-    if (initialQuery && initialQuery.trim()) {
+    if (initialQuery && initialQuery.trim().length >= 4) {
       setSearchQuery(initialQuery.trim());
       setActiveSearch(initialQuery.trim());
       setSelectedContainerId(null);
-    } else if (searchQuery.trim() && !activeSearch) {
-      setActiveSearch(searchQuery.trim());
     }
-  }, [initialQuery, searchQuery]);
+  }, [initialQuery]);
 
   const handleSearchSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const clean = searchQuery.trim();
-    if (!clean) return;
+    if (!clean) {
+      setActiveSearch('');
+      setSelectedContainerId(null);
+      return;
+    }
     setActiveSearch(clean);
     setSelectedContainerId(null);
 
@@ -151,14 +161,11 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
     return extractMatchingContainers(activeSearch, matchingCases, getCategoryWorkflow, getWorkflowStepIndex);
   }, [activeSearch, matchingCases]);
 
-  // Determine active displayed container if drilling into details
+  // Determine active displayed container (strictly single exact match only)
   const activeContainerItem = useMemo(() => {
-    if (matchingContainers.length === 1) return matchingContainers[0];
-    if (selectedContainerId) {
-      return matchingContainers.find(c => String(c.id) === String(selectedContainerId)) || null;
-    }
+    if (matchingContainers.length > 0) return matchingContainers[0];
     return null;
-  }, [matchingContainers, selectedContainerId]);
+  }, [matchingContainers]);
 
   // Helper to format operating company badge
   const getOperatingCompany = (cid?: string) => {
@@ -396,14 +403,33 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
                 <input
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Enter Container No, Truck No, B/L No, or Case Ref..."
-                  className="w-full bg-transparent pl-11 pr-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none font-mono tracking-wide font-bold"
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    if (activeSearch) {
+                      setActiveSearch('');
+                      setSelectedContainerId(null);
+                    }
+                  }}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  placeholder="Enter complete Container No and press Enter..."
+                  className="w-full bg-transparent pl-11 pr-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none font-mono tracking-wide font-bold uppercase"
                 />
                 {searchQuery && (
                   <button
                     type="button"
-                    onClick={() => { setSearchQuery(''); setActiveSearch(''); setSelectedContainerId(null); }}
+                    onClick={() => {
+                      setSearchQuery('');
+                      setActiveSearch('');
+                      setSelectedContainerId(null);
+                      if (typeof window !== 'undefined') {
+                        const url = new URL(window.location.href);
+                        url.searchParams.delete('q');
+                        window.history.replaceState({}, '', url.toString());
+                      }
+                    }}
                     className="pr-3 text-slate-400 hover:text-slate-800 text-sm cursor-pointer font-bold"
                   >
                     ×
@@ -480,163 +506,14 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
               </div>
             )}
 
-            {/* B. If EXACTLY 1 Container (or user drilled into 1 container from the list): "uska status samne a jaega" */}
+            {/* B. Single Container Detailed Dossier Card: "vahi container ka status aana chahie Kisi aur container ka show Nahin hona chahie" */}
             {activeContainerItem && (
               <div className="space-y-4">
-                {/* Back to multiple containers list if user clicked from list */}
-                {matchingContainers.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedContainerId(null)}
-                    className="text-xs text-slate-700 hover:text-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 flex items-center gap-2 transition-colors cursor-pointer w-fit shadow-xs font-semibold"
-                  >
-                    <ArrowLeft size={14} />
-                    <span>Back to Containers List ({matchingContainers.length} Containers)</span>
-                  </button>
-                )}
-
-                {/* Single Container Detailed Dossier Card */}
                 <SingleContainerDossierCard
                   item={activeContainerItem}
                   onDownloadPdf={() => handleDownloadTrackingSlip(activeContainerItem)}
                   isGeneratingPdf={isGeneratingPdf}
                 />
-              </div>
-            )}
-
-            {/* C. If MORE THAN 1 Container Entry across companies or current/past history: Show list and open detail page on click */}
-            {!activeContainerItem && matchingContainers.length > 1 && (
-              <div className="space-y-4">
-                {/* Header Summary Banner */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-300 text-amber-700 flex items-center justify-center shrink-0">
-                      <Package size={20} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
-                        Centralized Multi-Company Container Records ({matchingContainers.length} Entries Found)
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        Showing all current and past entries across Docks, Muhib, Vantage &amp; Truckit. Click any entry below to open its full detail &amp; workflow status page.
-                      </p>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-slate-100 text-slate-800 border border-slate-300 shrink-0 font-mono">
-                    Total: {matchingContainers.length} Entries
-                  </span>
-                </div>
-
-                {/* Responsive Containers List with Prominent Company & Workflow Status Field */}
-                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-                  <div className="divide-y divide-slate-100">
-                    {matchingContainers.map((cItem, idx) => {
-                      const opBadge = getOperatingCompany(cItem.companyId);
-                      const compLogo = getCompanyLogoUrl((cItem.companyId || 'docks') as CompanyId);
-
-                      return (
-                        <div 
-                          key={cItem.id || idx}
-                          onClick={() => setSelectedContainerId(String(cItem.id))}
-                          className="p-4 sm:p-5 hover:bg-amber-50/40 transition-colors cursor-pointer group flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-                        >
-                          {/* Container Specs, Company & Identifiers */}
-                          <div className="space-y-2.5 min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="w-6 h-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-mono font-bold shrink-0">
-                                {idx + 1}
-                              </span>
-                              <span className="font-mono text-lg sm:text-xl font-black text-slate-900 tracking-wider group-hover:text-amber-800 transition-colors">
-                                {cItem.containerNumber}
-                              </span>
-                              <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 shrink-0">
-                                {cItem.size || '40ft'}
-                              </span>
-                              {cItem.sealNo && (
-                                <span className="text-xs font-mono text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 shrink-0">
-                                  Seal: {cItem.sealNo}
-                                </span>
-                              )}
-                              {/* Company Badge with Logo */}
-                              <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-0.5 rounded-md border ${opBadge.color} shrink-0`}>
-                                <img src={compLogo} alt={opBadge.name} className="w-4 h-4 object-contain shrink-0" />
-                                <span>{opBadge.name}</span>
-                              </span>
-                              {/* Current vs Past Record Badge */}
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
-                                cItem.isCompleted
-                                  ? 'bg-slate-100 text-slate-700 border-slate-300'
-                                  : 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                              }`}>
-                                {cItem.isCompleted ? 'Past / Completed Record' : 'Current / Active Record'}
-                              </span>
-                            </div>
-
-                            {/* Truck & Consignment Metadata */}
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
-                              <div>
-                                <span>Company: <strong className="text-slate-900">{opBadge.name}</strong></span>
-                              </div>
-                              <div>
-                                <span>Case: <strong className="text-slate-900 font-mono">{cItem.caseNo}</strong></span>
-                              </div>
-                              <div>
-                                <span>B/L: <strong className="text-slate-900 font-mono">{cItem.blNumber || 'N/A'}</strong></span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <Truck size={13} className="text-emerald-700" />
-                                <span>Truck: <strong className="text-slate-900 font-mono">{cItem.vehicleNo || 'Awaiting Haulage'}</strong></span>
-                                {cItem.driverName && <span className="text-slate-500 font-normal">({cItem.driverName})</span>}
-                              </div>
-                              <div>
-                                <span>Date: <strong className="text-slate-800 font-mono">{cItem.registrationDate}</strong></span>
-                              </div>
-                              <div>
-                                <span>Category: <strong className="text-amber-800">{cItem.category}</strong></span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* DEDICATED STATUS FIELD (Showing current active workflow) */}
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-3 shrink-0 lg:max-w-md">
-                            <div className={`p-3 rounded-xl border-2 flex-1 min-w-[260px] ${
-                              cItem.isCompleted
-                                ? 'bg-emerald-50 border-emerald-400 text-emerald-950 shadow-xs'
-                                : 'bg-amber-50 border-amber-400 text-amber-950 shadow-xs'
-                            }`}>
-                              <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider mb-1">
-                                <span className="font-mono text-slate-600">CURRENT WORKFLOW STATUS</span>
-                                <span className={`flex items-center gap-1 font-bold ${cItem.isCompleted ? 'text-emerald-700' : 'text-amber-700'}`}>
-                                  <span className={`w-2 h-2 rounded-full ${cItem.isCompleted ? 'bg-emerald-600' : 'bg-amber-600 animate-ping'}`} />
-                                  {cItem.isCompleted ? 'Completed' : 'In Progress'}
-                                </span>
-                              </div>
-                              <p className="text-xs sm:text-sm font-black text-slate-900 line-clamp-1">
-                                {cItem.currentWorkflowStep}
-                              </p>
-                              <p className="text-[11px] text-slate-600 line-clamp-1 mt-0.5">
-                                {cItem.currentWorkflowDescription}
-                              </p>
-                            </div>
-
-                            {/* View Full Status Button */}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedContainerId(String(cItem.id));
-                              }}
-                              className="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-amber-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs shrink-0 cursor-pointer"
-                            >
-                              <span>View Status</span>
-                              <ChevronRight size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
             )}
 

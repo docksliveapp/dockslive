@@ -1919,8 +1919,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
           const matchPortName = (rawPort?: string): string => {
             if (!rawPort) return '';
-            const rawLower = rawPort.toLowerCase();
-            const rawUpper = rawPort.toUpperCase();
+            const rawLower = rawPort.toLowerCase().trim();
+            const rawUpper = rawPort.toUpperCase().trim();
+            if (rawUpper.includes('PESHAWAR') || rawUpper.includes('AZAKHEL') || rawUpper.includes('JAMRUD')) {
+              const pdp = ports.find(p => p.name.toLowerCase().includes('peshawar'));
+              return pdp ? pdp.name : 'Peshawar Dry Port';
+            }
             if (rawUpper.includes('LRDP') || (rawUpper.includes('LAHORE') && rawUpper.includes('RAILWAY'))) {
               const ldp = ports.find(p => p.name.toLowerCase().includes('lahore dry port'));
               return ldp ? ldp.name : 'Lahore Dry Port';
@@ -1929,17 +1933,19 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               const lnlc = ports.find(p => p.name.toLowerCase().includes('lahore nlc'));
               return lnlc ? lnlc.name : 'Lahore NLC Dry Port';
             }
+            const exactPort = ports.find(p => p.name.toLowerCase() === rawLower || (p.code && p.code.toLowerCase() === rawLower));
+            if (exactPort) return exactPort.name;
             const matchedPort = ports.find(p => 
               p.name.toLowerCase().includes(rawLower) || 
-              rawLower.includes(p.name.toLowerCase()) || 
-              (p.code && p.code.length >= 3 && rawUpper.includes(p.code.toUpperCase()))
+              rawLower.includes(p.name.toLowerCase())
             );
             return matchedPort ? matchedPort.name : rawPort;
           };
 
-          // For Bonded Carrier / TP cases, the domestic transit route is from Pakistan Entry Sea Port (pod/pickupDestination) to Exit Dry Port (placeOfDelivery/dropoffDestination)
+          // CRITICAL: If user already selected Port of Loading (prev.pol) or Port of Destination (prev.pod) in Step 1,
+          // NEVER overwrite or replace their chosen ports during document scanning or when moving to Step 2!
           const isBondedOrTp = candidateCategory === 'Bonded Carrier' || Boolean(data.tpNumber || (data.gdNo && /TP/i.test(data.gdNo)));
-          let candidatePol = forceOverwrite ? '' : (prev.pol || '');
+          let candidatePol = (prev.pol && prev.pol.trim()) ? prev.pol.trim() : '';
           if (!candidatePol) {
             if (isBondedOrTp && (data.pickupDestination || (data.pod && /SAPT|KICT|QICT|KPT|KARACHI|GWADAR|PICT/i.test(data.pod)))) {
               candidatePol = matchPortName(data.pickupDestination || data.pod);
@@ -1948,13 +1954,28 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             }
           }
 
-          let candidatePod = forceOverwrite ? '' : (prev.pod || '');
+          let candidatePod = (prev.pod && prev.pod.trim()) ? prev.pod.trim() : '';
           if (!candidatePod) {
-            if (isBondedOrTp && (data.dropoffDestination || data.placeOfDelivery)) {
-              candidatePod = matchPortName(data.dropoffDestination || data.placeOfDelivery);
+            const rawDestCandidate = isBondedOrTp
+              ? (data.dropoffDestination || data.placeOfDelivery || '')
+              : (data.dropoffDestination || data.placeOfDelivery || data.pod || '');
+            // For Bonded Carrier, never set Destination Dry Port (POD) to a Karachi sea port!
+            if (isBondedOrTp && /SAPT|KICT|QICT|KPT|KARACHI|PICT/i.test(rawDestCandidate) && !/PESHAWAR|LAHORE|FAISALABAD|ISLAMABAD|MULTAN|SIALKOT|QUETTA|TORKHAM|CHAMAN/i.test(rawDestCandidate)) {
+              candidatePod = '';
             } else {
-              candidatePod = matchPortName(data.dropoffDestination || data.placeOfDelivery || data.pod);
+              candidatePod = matchPortName(rawDestCandidate);
             }
+          }
+
+          // Keep extractedData route fields strictly synchronized with user's locked POL & POD
+          if (candidatePol) {
+            merged.pol = candidatePol;
+            merged.pickupDestination = candidatePol;
+          }
+          if (candidatePod) {
+            merged.pod = candidatePod;
+            merged.dropoffDestination = candidatePod;
+            merged.placeOfDelivery = candidatePod;
           }
 
           const foundClient = clientsData.find(c => c.name?.toLowerCase() === candidateClient.toLowerCase());
@@ -1989,7 +2010,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       setIsReadingDocuments(false);
       let activeNo = generatedCaseNo;
       if (!activeNo) {
-        activeNo = generateCaseNumber();
+        activeNo = generateCaseNumber(undefined, formData.pod);
         setGeneratedCaseNo(activeNo);
         safeAppStorage.setItem('dpl_reg_caseno', activeNo);
       }
@@ -2240,13 +2261,24 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         ? formData.charges
         : [];
 
-      // Final sequential verification: ensure case number is strictly unique & sequential
+      // Final sequential verification: ensure case number is strictly unique, sequential, and matches selected POD destination code
+      const chosenDest = formData.pod || formData.extractedData?.dropoffDestination || formData.extractedData?.placeOfDelivery;
+      const expectedDestCode = getDestinationCode(chosenDest);
+      const currentPrefix = activeCompany?.prefix || getActiveCompanyPrefix();
       let finalCaseNo = generatedCaseNo;
       const isTaken = !finalCaseNo || cases.some(c => c.caseNo === finalCaseNo);
       if (isTaken) {
-        finalCaseNo = generateCaseNumber();
-        setGeneratedCaseNo(finalCaseNo);
+        finalCaseNo = generateCaseNumber(cases, chosenDest);
+      } else if (chosenDest) {
+        const parts = finalCaseNo.split('-');
+        if (parts.length === 5 && (parts[1] !== expectedDestCode || parts[0] !== currentPrefix)) {
+          const candidateUpdated = `${currentPrefix}-${expectedDestCode}-${parts[2]}-${parts[3]}-${parts[4]}`;
+          finalCaseNo = cases.some(c => c.caseNo === candidateUpdated)
+            ? generateCaseNumber(cases, chosenDest)
+            : candidateUpdated;
+        }
       }
+      setGeneratedCaseNo(finalCaseNo);
 
       const initialWorkflow = getCategoryWorkflow(formData.category);
       const initialStepStatus = initialWorkflow.steps[0]?.id || CaseStatus.SHIPPING_LINE_DO;
@@ -6802,28 +6834,42 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               </div>
             </div>
 
-            {/* POL & POD */}
+            {/* POL & POD (Strictly synced with Step 1 selection) */}
             <div className="grid grid-cols-2 gap-2.5">
               <div>
                 <label className="text-xs text-slate-300 font-semibold block mb-1">Port of Loading (POL)</label>
                 <input 
                   className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
-                    extracted.pol ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                    (formData.pol || extracted.pol) ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`} 
-                  value={extracted.pol || ''} 
-                  onChange={(e) => updateExtractedData('pol', e.target.value)} 
+                  value={formData.pol || extracted.pol || ''} 
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormData(prev => ({
+                      ...prev,
+                      pol: val,
+                      extractedData: { ...prev.extractedData, pol: val, pickupDestination: val }
+                    }));
+                  }} 
                   placeholder="Port of Loading"
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-300 font-semibold block mb-1">Port of Discharge (POD)</label>
+                <label className="text-xs text-slate-300 font-semibold block mb-1">Port of Destination (POD)</label>
                 <input 
                   className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
-                    extracted.pod ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                    (formData.pod || extracted.pod) ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                   }`} 
-                  value={extracted.pod || ''} 
-                  onChange={(e) => updateExtractedData('pod', e.target.value)} 
-                  placeholder="Port of Discharge"
+                  value={formData.pod || extracted.pod || ''} 
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormData(prev => ({
+                      ...prev,
+                      pod: val,
+                      extractedData: { ...prev.extractedData, pod: val, dropoffDestination: val, placeOfDelivery: val }
+                    }));
+                  }} 
+                  placeholder="Port of Destination"
                 />
               </div>
             </div>
@@ -6833,11 +6879,18 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               <label className="text-xs text-slate-300 font-semibold block mb-1">Place of Delivery / Destination Dry Port</label>
               <input 
                 className={`w-full h-10 rounded-xl px-3 text-sm text-white outline-none border ${
-                  extracted.placeOfDelivery ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
+                  (formData.pod || extracted.placeOfDelivery) ? 'border-emerald-500/40 bg-emerald-950/15' : 'border-white/15 bg-slate-950 focus:border-amber-400'
                 }`} 
-                value={extracted.placeOfDelivery || ''} 
-                onChange={(e) => updateExtractedData('placeOfDelivery', e.target.value)} 
-                placeholder="e.g. LAHORE DRY PORT / MUGHALPURA"
+                value={formData.pod || extracted.placeOfDelivery || ''} 
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData(prev => ({
+                    ...prev,
+                    pod: val,
+                    extractedData: { ...prev.extractedData, placeOfDelivery: val, dropoffDestination: val, pod: val }
+                  }));
+                }} 
+                placeholder="e.g. PESHAWAR DRY PORT / LAHORE DRY PORT"
               />
             </div>
 

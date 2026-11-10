@@ -615,23 +615,17 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         if (!formData.portGatePassUrl) {
           return { valid: false, error: 'Port Gate Pass upload is required before completing loading step.' };
         }
-        if (!formData.vehiclePhotoUrl) {
-          return { valid: false, error: 'Vehicle Photo at Port is required before completing loading step.' };
-        }
-        if (!formData.customsSealPhotoUrl || !formData.customsSealNumber?.trim()) {
-          return { valid: false, error: 'Customs Seal Verification Required: Both Customs Seal Photo and Customs Seal Number are mandatory.' };
+        if (!formData.customsSealNumber?.trim()) {
+          return { valid: false, error: 'Customs Seal Verification Required: Customs Seal Number is mandatory.' };
         }
         if (!formData.gateOutToggled) {
           return { valid: false, error: 'Completion Criteria: Step requires Port Gate Out status to be confirmed.' };
         }
-        if (!formData.driverGateOutPhotoUrl) {
-          return { valid: false, error: 'Completion Criteria: Driver Live Picture at Gate Out is compulsory.' };
-        }
       }
 
       if (stepIndex === 6) { // Step 7: Destination Port Arrival
-        if (!formData.secondaryCustomsSealPhotoUrl || !formData.secondaryCustomsSealNumber?.trim()) {
-          return { valid: false, error: 'Customs Seal Verification Required: Both Secondary Customs Seal Photo and Customs Seal Number are mandatory.' };
+        if (!formData.secondaryCustomsSealNumber?.trim()) {
+          return { valid: false, error: 'Customs Seal Verification Required: Secondary Customs Seal Number is mandatory.' };
         }
         if (!formData.vehicleGateOutToggled) {
           return { valid: false, error: 'Destination Completion: Please confirm vehicle gate out & offloading.' };
@@ -824,10 +818,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 4)) &&
       (formData.gateOutToggled || forceGateOutComplete) &&
       formData.portGatePassUrl &&
-      formData.vehiclePhotoUrl &&
-      formData.customsSealPhotoUrl &&
-      formData.customsSealNumber?.trim() &&
-      formData.driverGateOutPhotoUrl
+      formData.customsSealNumber?.trim()
     ) {
       isCompleted = true;
       finalStatus = CaseStatus.IN_TRANSIT;
@@ -836,7 +827,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     // Final step completion trigger (Destination Port Arrival -> Case Finish)
     if (
       (stepIndex === categoryWorkflow.totalSteps - 1 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL || (normCategory === 'Bonded Carrier' && (stepIndex === 6 || stepIndex === 7))) &&
-      (effectiveCompleting || ((formData.vehicleGateOutToggled || formData.outOfChargeCleared) && formData.secondaryCustomsSealPhotoUrl && formData.secondaryCustomsSealNumber?.trim()))
+      (effectiveCompleting || ((formData.vehicleGateOutToggled || formData.outOfChargeCleared) && formData.secondaryCustomsSealNumber?.trim()))
     ) {
       finalStatus = CaseStatus.COMPLETED;
       isCompleted = true;
@@ -1028,16 +1019,14 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     onClose();
   };
 
-  // Destination Staff Vehicle Reception & Photo Trigger:
-  // "Destination staff Jaise hi Kisi bhi vehicle receive karenge aur uski picture lenge vahi transit complete ho jaega aur destination unloading workflow start ho jaega"
-  const handleDestinationArrivalPhotoUploaded = (photoUrl: string) => {
+  // Destination Staff Vehicle Reception Trigger (Completes Transit & Starts Destination Unloading without requiring truck photo)
+  const handleDestinationArrivalPhotoUploaded = (photoUrl?: string) => {
     const nowDate = new Date().toISOString().split('T')[0];
     const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     setFormData(prev => ({
       ...prev,
-      portGateArrivalPhotoUrl: photoUrl,
-      portGateArrivalPhotoName: 'Destination Vehicle Reception & Gate Arrival Photo',
+      ...(photoUrl ? { portGateArrivalPhotoUrl: photoUrl, portGateArrivalPhotoName: 'Destination Vehicle Reception' } : {}),
       destinationGateInToggled: true
     }));
 
@@ -1050,7 +1039,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       inTransitActive: false,
       date: nowDate,
       updatedAt: nowTime,
-      remarks: (sTransit.remarks || '') + ' (Vehicle Received & Arrival Photo Captured by Destination Staff — Transit Completed)'
+      remarks: (sTransit.remarks || '') + ' (Vehicle Received by Destination Staff — Transit Completed)'
     };
 
     const sDest = targetCase.workflowDetails?.[CaseStatus.DESTINATION_PORT_ARRIVAL] || ({} as CaseStepDetail);
@@ -1058,8 +1047,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       ...sDest,
       ...(stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL ? formData : {}),
       status: CaseStatus.DESTINATION_PORT_ARRIVAL,
-      portGateArrivalPhotoUrl: photoUrl,
-      portGateArrivalPhotoName: 'Destination Vehicle Reception & Gate Arrival Photo',
+      ...(photoUrl ? { portGateArrivalPhotoUrl: photoUrl, portGateArrivalPhotoName: 'Destination Vehicle Reception' } : {}),
       destinationGateInToggled: true,
       date: sDest.date || nowDate,
       updatedAt: nowTime
@@ -1071,7 +1059,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         id: `doc_dest_arrival_${Date.now()}`,
         name: `Destination_Vehicle_Reception_${targetCase.caseNo}.pdf`,
         url: photoUrl,
-        type: 'Destination Vehicle Reception Photo',
+        type: 'Destination Vehicle Reception',
         uploadedAt: new Date().toISOString()
       });
     }
@@ -1097,12 +1085,12 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
     sendAppNotification({
       title: `Vehicle Received at Destination (Transit Completed): #${targetCase.caseNo}`,
-      description: `Destination Staff received vehicle ${targetCase.containers?.[0]?.vehicleNo || ''} and captured arrival photo for Case #${targetCase.caseNo}. Transit is now COMPLETED and Destination Unloading workflow has started.`,
+      description: `Destination Staff received vehicle ${targetCase.containers?.[0]?.vehicleNo || ''} for Case #${targetCase.caseNo}. Transit is now COMPLETED and Destination Unloading workflow has started.`,
       details: `Case No: ${targetCase.caseNo}\nClient: ${targetCase.clientName || 'N/A'}\nVehicle: ${targetCase.containers?.[0]?.vehicleNo || 'N/A'}\nTransit Status: COMPLETED\nActive Stage: Destination Port Unloading Workflow`,
       targetRole: 'OPERATIONS_MANAGER,CASE_MANAGER,CLIENT,DESTINATION_PORT_STAFF',
       targetClientName: targetCase.clientName,
       targetView: 'cases',
-      targetFilter: { caseNo: targetCase.caseNo, stepId: CaseStatus.DESTINATION_PORT_ARRIVAL },
+      targetFilter: { caseNo: updatedCase.caseNo, stepId: CaseStatus.DESTINATION_PORT_ARRIVAL },
       type: 'INFO',
       notificationSubType: 'WORKFLOW_TASK',
       actionLabel: 'Open Destination Workflow',
@@ -2158,13 +2146,13 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   {[
                     {
                       stage: 'Stage 1',
-                      title: 'Gate-In & Reception',
-                      done: Boolean(formData.vehiclePhotoUrl && formData.portGatePassUrl)
+                      title: 'Gate-In & Gate Pass',
+                      done: Boolean(formData.portGatePassUrl)
                     },
                     {
                       stage: 'Stage 2',
                       title: 'Weight & Customs Seal',
-                      done: Boolean(formData.customsSealPhotoUrl && formData.customsSealNumber?.trim())
+                      done: Boolean(formData.customsSealNumber?.trim())
                     },
                     {
                       stage: 'Stage 3',
@@ -2174,7 +2162,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                     {
                       stage: 'Stage 4',
                       title: 'Gate-Out ➔ Transit',
-                      done: Boolean(formData.gateOutToggled && formData.driverGateOutPhotoUrl)
+                      done: Boolean(formData.gateOutToggled)
                     }
                   ].map((item, idx) => (
                     <div
@@ -2203,7 +2191,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                 </div>
               </div>
 
-              {/* STAGE 1: PORT GATE-IN, DO VERIFICATION & VEHICLE RECEPTION */}
+              {/* STAGE 1: PORT GATE-IN, DO VERIFICATION & PORT GATE PASS */}
               <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/60 border border-white/10 space-y-4">
                 <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
                   <div className="flex items-center gap-2.5">
@@ -2211,11 +2199,11 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                       1
                     </span>
                     <div>
-                      <h5 className="font-bold text-white text-sm">Stage 1: Port Gate-In & Vehicle Reception</h5>
-                      <p className="text-[11px] text-gray-400">Verify vehicle arrival at loading port and upload Port Gate Pass & Vehicle Photo</p>
+                      <h5 className="font-bold text-white text-sm">Stage 1: Port Gate-In & Gate Pass Verification</h5>
+                      <p className="text-[11px] text-gray-400">Verify vehicle arrival at loading port and upload or scan Port Gate Pass document</p>
                     </div>
                   </div>
-                  {formData.vehiclePhotoUrl && formData.portGatePassUrl && (
+                  {formData.portGatePassUrl && (
                     <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                       ✓ Stage 1 Ready
                     </span>
@@ -2236,7 +2224,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
                     <WorkflowMultiUploader
                       label="Delivery Order (DO) Document / Photo"
-                      sublabel="Upload or take photo of physical Delivery Order issued by shipping line"
+                      sublabel="Upload or take photo of physical Delivery Order document issued by shipping line"
                       urlField="doReceiptUrl"
                       nameField="doReceiptName"
                       allowCamera={true}
@@ -2280,32 +2268,17 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <WorkflowMultiUploader
-                    label="Vehicle Photo at Loading Port *"
-                    sublabel="Upload or take photo of container loaded on trailer (Image / Picture Format)"
-                    urlField="vehiclePhotoUrl"
-                    nameField="vehiclePhotoName"
-                    isPhotoOnly={true}
-                    accept="image/*"
-                    allowCamera={true}
-                    compact={true}
-                    formData={formData}
-                    setFormData={setFormData}
-                    onPreview={setActivePdfPreview}
-                  />
-
-                  <WorkflowMultiUploader
-                    label="Port Gate Pass *"
-                    sublabel="Upload or scan official loading port gate pass slip"
-                    urlField="portGatePassUrl"
-                    nameField="portGatePassName"
-                    compact={true}
-                    formData={formData}
-                    setFormData={setFormData}
-                    onPreview={setActivePdfPreview}
-                  />
-                </div>
+                <WorkflowMultiUploader
+                  label="Port Gate Pass *"
+                  sublabel="Upload or take photo of official loading port gate pass slip"
+                  urlField="portGatePassUrl"
+                  nameField="portGatePassName"
+                  allowCamera={true}
+                  compact={true}
+                  formData={formData}
+                  setFormData={setFormData}
+                  onPreview={setActivePdfPreview}
+                />
               </div>
 
               {/* STAGE 2: CONTAINER LOADING, TRACKER & CUSTOMS SEAL VERIFICATION */}
@@ -2317,53 +2290,36 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                     </span>
                     <div>
                       <h5 className="font-bold text-white text-sm">Stage 2: Container Loading, Weight & Customs Seal</h5>
-                      <p className="text-[11px] text-gray-400">Record weight/seal slips, GPS tracker status, and mandatory Customs Bullet Seal</p>
+                      <p className="text-[11px] text-gray-400">Record weight/seal slips, GPS tracker status, and mandatory Customs Bullet Seal Number</p>
                     </div>
                   </div>
-                  {formData.customsSealPhotoUrl && formData.customsSealNumber?.trim() && (
+                  {formData.customsSealNumber?.trim() && (
                     <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                       ✓ Seal Verified
                     </span>
                   )}
                 </div>
 
-                {/* Customs Seal Photo & Mandatory Customs Seal Number */}
+                {/* Mandatory Customs Seal Number */}
                 <div className="p-4 rounded-2xl border border-amber-500/30 bg-slate-900/90 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
                       <span className="text-white font-bold text-xs block">Customs Container Seal Verification (Mandatory)</span>
-                      <span className="text-[11px] text-amber-400 font-medium">Both High-Res Seal Photo & Customs Seal Number are compulsory</span>
+                      <span className="text-[11px] text-amber-400 font-medium">Enter Customs Bullet Seal Number</span>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <WorkflowMultiUploader
-                      label="Customs Seal Photo *"
-                      sublabel="Capture or upload high-res photo of container seal"
-                      urlField="customsSealPhotoUrl"
-                      nameField="customsSealPhotoName"
-                      required={true}
-                      isPhotoOnly={true}
-                      accept="image/*"
-                      allowCamera={true}
-                      compact={true}
-                      formData={formData}
-                      setFormData={setFormData}
-                      onPreview={setActivePdfPreview}
+                  <div>
+                    <label className="text-gray-300 text-xs font-semibold block mb-1">
+                      Customs Seal Number *
+                    </label>
+                    <input 
+                      type="text"
+                      value={formData.customsSealNumber || ''}
+                      onChange={(e) => setFormData({ ...formData, customsSealNumber: e.target.value })}
+                      placeholder="e.g. PK-KPT-89421"
+                      className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2.5 text-white font-mono font-bold uppercase text-xs focus:border-brand-400 focus:outline-none"
                     />
-
-                    <div>
-                      <label className="text-gray-300 text-xs font-semibold block mb-1">
-                        Customs Seal Number *
-                      </label>
-                      <input 
-                        type="text"
-                        value={formData.customsSealNumber || ''}
-                        onChange={(e) => setFormData({ ...formData, customsSealNumber: e.target.value })}
-                        placeholder="e.g. PK-KPT-89421"
-                        className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2.5 text-white font-mono font-bold uppercase text-xs focus:border-brand-400 focus:outline-none"
-                      />
-                    </div>
                   </div>
                 </div>
 
@@ -2561,20 +2517,6 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   </button>
                 </div>
 
-                <WorkflowMultiUploader
-                  label="Driver Live Picture at Gate Out *"
-                  sublabel="Capture or upload live verification photo of driver & vehicle passing port gate-out"
-                  urlField="driverGateOutPhotoUrl"
-                  nameField="driverGateOutPhotoName"
-                  required={true}
-                  isPhotoOnly={true}
-                  accept="image/*"
-                  allowCamera={true}
-                  formData={formData}
-                  setFormData={setFormData}
-                  onPreview={setActivePdfPreview}
-                />
-
                 {!isReadOnly && (
                   <div className="pt-2 flex justify-end">
                     <button
@@ -2624,44 +2566,36 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                 </div>
               </div>
 
-              {/* Destination Staff Vehicle Reception Card: Receiving Vehicle & Taking Picture Completes Transit & Starts Unloading */}
+              {/* Destination Staff Vehicle Reception Card: Receiving Vehicle Completes Transit & Starts Unloading */}
               <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-950/50 via-slate-900 to-teal-950/40 border border-emerald-500/30 space-y-3.5 shadow-lg">
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shrink-0">
-                      <Camera size={20} />
+                      <Truck size={20} />
                     </div>
                     <div>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                         Destination Staff Action
                       </span>
                       <h4 className="font-bold text-white text-sm mt-1">
-                        Receive Vehicle at Destination & Capture Arrival Picture
+                        Receive Vehicle at Destination Dry Port
                       </h4>
                       <p className="text-gray-300 text-[11px]">
-                        As soon as Destination Staff receives the vehicle and uploads/takes its arrival picture, Transit is automatically completed and Destination Unloading workflow starts immediately.
+                        Confirming vehicle reception at destination immediately completes Transit and starts the Destination Unloading workflow.
                       </p>
                     </div>
                   </div>
-                </div>
 
-                <WorkflowMultiUploader
-                  label="Destination Vehicle Reception / Arrival Picture *"
-                  sublabel="Take or upload vehicle arrival photo to immediately complete Transit & start Destination Unloading"
-                  urlField="portGateArrivalPhotoUrl"
-                  nameField="portGateArrivalPhotoName"
-                  isPhotoOnly={true}
-                  accept="image/*"
-                  allowCamera={true}
-                  formData={formData}
-                  setFormData={setFormData}
-                  onPreview={setActivePdfPreview}
-                  onChange={(url) => {
-                    if (url) {
-                      handleDestinationArrivalPhotoUploaded(url);
-                    }
-                  }}
-                />
+                  <button
+                    type="button"
+                    disabled={isReadOnly}
+                    onClick={() => handleDestinationArrivalPhotoUploaded()}
+                    className="px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-all active:scale-95 shrink-0 cursor-pointer"
+                  >
+                    <CheckCircle2 size={16} />
+                    <span>Confirm Vehicle Received at Destination</span>
+                  </button>
+                </div>
               </div>
 
               {/* Emergency Exception Red Button */}
@@ -2726,13 +2660,13 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   {[
                     {
                       stage: 'Stage 1',
-                      title: 'Vehicle Received & Photo',
-                      done: Boolean(formData.portGateArrivalPhotoUrl || formData.destinationGateInToggled)
+                      title: 'Vehicle Received (Gate-In)',
+                      done: Boolean(formData.destinationGateInToggled || formData.portGateArrivalPhotoUrl)
                     },
                     {
                       stage: 'Stage 2',
                       title: 'Seal & Unloading Slips',
-                      done: Boolean(formData.secondaryCustomsSealPhotoUrl && formData.secondaryCustomsSealNumber?.trim())
+                      done: Boolean(formData.secondaryCustomsSealNumber?.trim())
                     },
                     {
                       stage: 'Stage 3',
@@ -2771,49 +2705,39 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                 </div>
               </div>
 
-              {/* STAGE 1: VEHICLE RECEPTION & ARRIVAL PICTURE (COMPLETES TRANSIT & STARTS UNLOADING) */}
+              {/* STAGE 1: VEHICLE RECEPTION (COMPLETES TRANSIT & STARTS UNLOADING) */}
               <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/60 border border-white/10 space-y-4">
-                <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5">
                     <span className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono font-black text-xs flex items-center justify-center">
                       1
                     </span>
                     <div>
-                      <h5 className="font-bold text-white text-sm">Stage 1: Receive Vehicle & Capture Arrival Picture</h5>
+                      <h5 className="font-bold text-white text-sm">Stage 1: Receive Vehicle at Destination Dry Port</h5>
                       <p className="text-[11px] text-gray-400">
-                        Uploading the vehicle arrival picture automatically completes Transit and activates Destination Unloading
+                        Confirming vehicle reception automatically completes Transit and activates Destination Unloading
                       </p>
                     </div>
                   </div>
                   <button
                     type="button"
                     disabled={isReadOnly}
-                    onClick={() => setFormData({ ...formData, destinationGateInToggled: !formData.destinationGateInToggled })}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                    onClick={() => {
+                      const nextState = !formData.destinationGateInToggled;
+                      setFormData({ ...formData, destinationGateInToggled: nextState });
+                      if (nextState) {
+                        handleDestinationArrivalPhotoUploaded();
+                      }
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
                       formData.destinationGateInToggled
                         ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                        : 'bg-white/5 border-white/10 text-gray-400'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 shadow-md'
                     }`}
                   >
                     {formData.destinationGateInToggled ? '✓ Vehicle Received (Gate-In)' : 'Mark Vehicle Received'}
                   </button>
                 </div>
-
-                <WorkflowMultiUploader
-                  label="Destination Port Vehicle Arrival Picture *"
-                  sublabel="Capture or upload arrival photo of vehicle at destination dry port (Automatically marks Transit Completed)"
-                  urlField="portGateArrivalPhotoUrl"
-                  nameField="portGateArrivalPhotoName"
-                  isPhotoOnly={true}
-                  accept="image/*"
-                  allowCamera={true}
-                  formData={formData}
-                  setFormData={setFormData}
-                  onPreview={setActivePdfPreview}
-                  onChange={(url) => {
-                    if (url) handleDestinationArrivalPhotoUploaded(url);
-                  }}
-                />
               </div>
 
               {/* STAGE 2: DESTINATION CUSTOMS SEAL VERIFICATION & OFFLOADING DOCUMENTS */}
@@ -2825,10 +2749,10 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                     </span>
                     <div>
                       <h5 className="font-bold text-white text-sm">Stage 2: Destination Customs Seal & Unloading Documents</h5>
-                      <p className="text-[11px] text-gray-400">Verify intact seal before breaking and upload weighbridge, transport note & gate pass</p>
+                      <p className="text-[11px] text-gray-400">Verify intact seal number before breaking and upload weighbridge, transport note & gate pass documents</p>
                     </div>
                   </div>
-                  {formData.secondaryCustomsSealPhotoUrl && formData.secondaryCustomsSealNumber?.trim() && (
+                  {formData.secondaryCustomsSealNumber?.trim() && (
                     <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                       ✓ Seal Verified
                     </span>
@@ -2838,37 +2762,20 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                 <div className="p-4 rounded-xl border border-amber-500/30 bg-slate-900/80 space-y-3">
                   <div>
                     <span className="text-white font-bold text-xs block">Destination Customs Seal Verification (Mandatory)</span>
-                    <span className="text-[11px] text-amber-400 font-medium">Both Intact Seal Photo & Customs Seal Number are mandatory</span>
+                    <span className="text-[11px] text-amber-400 font-medium">Enter Customs Seal Number verified at destination</span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <WorkflowMultiUploader
-                      label="Secondary Customs Seal Photo *"
-                      sublabel="Capture or upload intact seal photo at destination"
-                      urlField="secondaryCustomsSealPhotoUrl"
-                      nameField="secondaryCustomsSealPhotoName"
-                      required={true}
-                      isPhotoOnly={true}
-                      accept="image/*"
-                      allowCamera={true}
-                      compact={true}
-                      formData={formData}
-                      setFormData={setFormData}
-                      onPreview={setActivePdfPreview}
+                  <div>
+                    <label className="text-gray-300 text-xs font-semibold block mb-1">
+                      Customs Seal Number (Mandatory) *
+                    </label>
+                    <input 
+                      type="text"
+                      value={formData.secondaryCustomsSealNumber || ''}
+                      onChange={(e) => setFormData({ ...formData, secondaryCustomsSealNumber: e.target.value })}
+                      placeholder="e.g. PK-DEST-89421"
+                      className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2.5 text-white font-mono font-bold uppercase text-xs focus:border-brand-400 focus:outline-none"
                     />
-
-                    <div>
-                      <label className="text-gray-300 text-xs font-semibold block mb-1">
-                        Customs Seal Number (Mandatory) *
-                      </label>
-                      <input 
-                        type="text"
-                        value={formData.secondaryCustomsSealNumber || ''}
-                        onChange={(e) => setFormData({ ...formData, secondaryCustomsSealNumber: e.target.value })}
-                        placeholder="e.g. PK-DEST-89421"
-                        className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2.5 text-white font-mono font-bold uppercase text-xs focus:border-brand-400 focus:outline-none"
-                      />
-                    </div>
                   </div>
                 </div>
 

@@ -106,10 +106,8 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
       setSearchQuery(initialQuery.trim());
       setActiveSearch(initialQuery.trim());
       setSelectedVehicle(null);
-    } else if (searchQuery.trim() && !activeSearch) {
-      setActiveSearch(searchQuery.trim());
     }
-  }, [initialQuery, searchQuery]);
+  }, [initialQuery]);
 
   const handleSearchSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();

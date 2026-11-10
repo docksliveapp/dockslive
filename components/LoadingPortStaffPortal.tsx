@@ -973,7 +973,7 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                   <span>Pending Container Shipments ({currentFilteredCases.length})</span>
                   <span>
                     {isDestinationStaff
-                      ? 'Click case to receive vehicle with photo, open unloading workflow, create bill & download DO'
+                      ? 'Click case to receive vehicle, open unloading workflow, create bill & download DO'
                       : 'Click case to open loading workflow & bill'}
                   </span>
                 </div>
@@ -1004,7 +1004,7 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
                             </span>
                             {isDestinationStaff && c.status === CaseStatus.IN_TRANSIT && (
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
-                                In Transit • Ready for Reception Photo
+                                In Transit • Ready for Vehicle Reception
                               </span>
                             )}
                           </div>

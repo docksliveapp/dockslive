@@ -341,62 +341,17 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
                 </select>
               </div>
 
-              {/* Customs Bullet Seal & Camera Capture */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-gray-300 block mb-1 font-medium text-[11px]">Customs Bullet Seal Number *</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. SL-984021"
-                    value={sealNo}
-                    onChange={e => setSealNo(e.target.value)}
-                    className="w-full bg-black/50 border border-white/15 rounded-xl px-3 py-2 text-white font-mono font-bold uppercase tracking-wider text-xs outline-none focus:border-brand-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-gray-300 block mb-1 font-medium text-[11px]">
-                    {isDestinationStaff ? 'Vehicle Reception / Seal Photo Scan' : 'Customs Seal Photo Scan'}
-                  </label>
-                  <label className="flex items-center justify-center gap-2 p-2.5 border border-dashed border-white/20 hover:border-brand-500 rounded-xl cursor-pointer bg-black/40 hover:bg-black/60 transition text-center text-xs">
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      capture="environment"
-                      className="hidden" 
-                      onChange={handleSealPhotoCapture} 
-                    />
-                    <Camera size={14} className="text-brand-400" />
-                    <span>{sealPhoto ? 'Change Photo Scan' : isDestinationStaff ? 'Capture Vehicle Arrival / Seal Photo' : 'Capture Seal Photo'}</span>
-                  </label>
-                </div>
+              {/* Customs Bullet Seal Number */}
+              <div>
+                <label className="text-gray-300 block mb-1 font-medium text-[11px]">Customs Bullet Seal Number *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. SL-984021"
+                  value={sealNo}
+                  onChange={e => setSealNo(e.target.value)}
+                  className="w-full bg-black/50 border border-white/15 rounded-xl px-3 py-2 text-white font-mono font-bold uppercase tracking-wider text-xs outline-none focus:border-brand-500"
+                />
               </div>
-
-              {/* Seal photo feedback preview */}
-              {sealPhoto && (
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between text-xs text-emerald-300">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck size={16} className="text-emerald-400" />
-                    <span className="font-semibold">
-                      {isDestinationStaff ? 'Vehicle Reception & Seal Photo Attached (Transit Completed) ✅' : 'Customs Seal Photo Scan Attached ✅'}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const a = document.createElement('a');
-                      a.href = sealPhoto;
-                      a.download = `Seal_Photo_${targetCase.caseNo}.pdf`;
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                    }}
-                    className="text-emerald-400 hover:text-white flex items-center gap-1 font-bold hover:underline"
-                  >
-                    <Download size={11} /> Download PDF Scan
-                  </button>
-                </div>
-              )}
 
               {/* Destination Offloading Checkpoints */}
               {isDestinationStaff && (

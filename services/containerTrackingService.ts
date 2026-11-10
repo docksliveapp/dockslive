@@ -124,19 +124,16 @@ export function parseTrackingTokens(query: string): string[] {
 }
 
 /**
- * Searches cases by Container Number(s), B/L Number, or Case Reference across all 4 companies (current & past).
- * Returns sorted list with most recent consignment first.
+ * Searches cases by exact Container Number, B/L Number, Vehicle Number, or Case Reference across all 4 companies.
+ * Requires full exact token match (no partial prefix/substring suggestions).
+ * Returns sorted list with active and most recent consignment first.
  */
 export function searchTrackingCases(query: string, allCases: Case[]): Case[] {
   if (!query) return [];
-  const tokens = parseTrackingTokens(query);
-  if (tokens.length === 0) return [];
-
-  const cleanTokens = tokens.map(t => t.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim()).filter(Boolean);
-  if (cleanTokens.length === 0) return [];
+  const cleanSearch = query.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  if (cleanSearch.length < 5) return [];
 
   const matched = allCases.filter((c) => {
-    // Collect all searchable terms on this case
     const terms: string[] = [];
 
     // 1. Containers (from c.containers, c.extractedData.containers, c.containerNumber, c.containerNo)
@@ -172,23 +169,23 @@ export function searchTrackingCases(query: string, allCases: Case[]): Case[] {
     const gd = (c.gdNumber || c.extractedData?.gdNo || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     if (gd) terms.push(gd);
 
-    // 5. Seal numbers & Vehicle numbers
+    // 5. Vehicle numbers
     (c.containers || []).forEach(cont => {
-      if (cont.sealNo) terms.push(cont.sealNo.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
       if (cont.vehicleNo) terms.push(cont.vehicleNo.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
     });
     if ((c as any).vehicleNo) terms.push(String((c as any).vehicleNo).replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
     if ((c as any).truckNumber) terms.push(String((c as any).truckNumber).replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
     if ((c as any).assignedVehiclePlate) terms.push(String((c as any).assignedVehiclePlate).replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
 
-    // Check if ANY searched token matches any of the case's terms
-    return cleanTokens.some(tok => {
-      return terms.some(term => term.includes(tok) || tok.includes(term));
-    });
+    // Strict exact match only — no partial substring suggestions
+    return terms.some(term => term === cleanSearch);
   });
 
-  // Sort descending by registration / creation date (newest first)
+  // Sort active cases first, then descending by registration / creation date (newest first)
   return matched.sort((a, b) => {
+    const aDone = a.status === CaseStatus.COMPLETED || String(a.status).toLowerCase().includes('completed');
+    const bDone = b.status === CaseStatus.COMPLETED || String(b.status).toLowerCase().includes('completed');
+    if (aDone !== bDone) return aDone ? 1 : -1;
     const timeA = new Date(a.createdAt || a.registrationDate || a.date || 0).getTime();
     const timeB = new Date(b.createdAt || b.registrationDate || b.date || 0).getTime();
     return timeB - timeA;
@@ -226,7 +223,8 @@ export interface MatchedContainerItem {
 }
 
 /**
- * Extracts individual matching container items across all matching cases (across all companies, current and past).
+ * Extracts ONLY the single exact matching container item for the searched query.
+ * Never returns a list of other containers.
  */
 export function extractMatchingContainers(
   query: string,
@@ -234,9 +232,12 @@ export function extractMatchingContainers(
   getWorkflowFn?: (category?: string) => any,
   getStepIndexFn?: (category?: string, status?: any) => number
 ): MatchedContainerItem[] {
-  if (!matchedCases || matchedCases.length === 0) return [];
-  const cleanQ = (query || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
-  const items: MatchedContainerItem[] = [];
+  if (!matchedCases || matchedCases.length === 0 || !query) return [];
+  const cleanSearch = query.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  if (cleanSearch.length < 5) return [];
+
+  const exactContainerMatches: MatchedContainerItem[] = [];
+  const fallbackReferenceMatches: MatchedContainerItem[] = [];
 
   matchedCases.forEach((c, caseIdx) => {
     const cid = (c.companyId || 'docks').toLowerCase();
@@ -285,51 +286,73 @@ export function extractMatchingContainers(
       containersList = [{ id: 1, number: c.containerNumber || (c as any).containerNo, size: '40ft', status: c.status }];
     }
 
+    const blClean = String(c.blNumber || c.extractedData?.blNumber || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const caseNoClean = String(effectiveCaseNo).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const gdClean = String(c.gdNumber || c.extractedData?.gdNo || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
     containersList.forEach((cont: any, idx: number) => {
       const cNum = cont.number || cont.containerNo || `CONT-${idx + 1}`;
       const cNumClean = String(cNum).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const vehClean = String(cont.vehicleNo || (c as any).vehicleNo || (c as any).truckNumber || (c as any).assignedVehiclePlate || '')
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .toLowerCase();
 
-      const matchesDirectly = !cleanQ ||
-        cNumClean.includes(cleanQ) ||
-        cleanQ.includes(cNumClean) ||
-        String(c.blNumber || c.extractedData?.blNumber || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().includes(cleanQ) ||
-        String(effectiveCaseNo).replace(/[^a-zA-Z0-9]/g, '').toLowerCase().includes(cleanQ) ||
-        String(cont.vehicleNo || (c as any).vehicleNo || (c as any).truckNumber || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().includes(cleanQ);
+      const itemObj: MatchedContainerItem = {
+        id: `${cid}_${c.id || effectiveCaseNo}_${caseIdx}_cont_${cont.id || idx}`,
+        containerNumber: cNum,
+        size: cont.size || '40ft',
+        sealNo: cont.sealNo || '',
+        weight: cont.weight || c.extractedData?.grossWeight,
+        vehicleNo: cont.vehicleNo || (c as any).vehicleNo || (c as any).truckNumber || (c as any).assignedVehiclePlate,
+        driverName: cont.driverName || (c as any).driverName,
+        driverContact: cont.driverContact || (c as any).driverContact,
+        driverCnic: cont.driverCnic || (c as any).driverCnic,
+        transporterName: cont.transporterName || (c as any).transporterName,
+        caseNo: effectiveCaseNo,
+        caseId: c.id,
+        blNumber: c.blNumber || c.extractedData?.blNumber || 'N/A',
+        companyId: cid,
+        companyName: compName,
+        category: c.category || 'Bonded Carrier',
+        pol: c.pol || c.extractedData?.pol || 'Port of Loading',
+        pod: c.pod || c.extractedData?.pod || 'Port of Discharge',
+        status: String(c.status || 'Active'),
+        currentWorkflowStep: workflowTitle,
+        currentWorkflowDescription: workflowDesc,
+        currentWorkflowStepIndex: activeStepIdx,
+        totalWorkflowSteps: totalSteps,
+        progressPercent,
+        isCompleted,
+        registrationDate: c.registrationDate || c.date || c.createdAt?.slice(0, 10) || 'N/A',
+        caseItem: c
+      };
 
-      if (matchesDirectly) {
-        items.push({
-          id: `${cid}_${c.id || effectiveCaseNo}_${caseIdx}_cont_${cont.id || idx}`,
-          containerNumber: cNum,
-          size: cont.size || '40ft',
-          sealNo: cont.sealNo || '',
-          weight: cont.weight || c.extractedData?.grossWeight,
-          vehicleNo: cont.vehicleNo || (c as any).vehicleNo || (c as any).truckNumber || (c as any).assignedVehiclePlate,
-          driverName: cont.driverName || (c as any).driverName,
-          driverContact: cont.driverContact || (c as any).driverContact,
-          driverCnic: cont.driverCnic || (c as any).driverCnic,
-          transporterName: cont.transporterName || (c as any).transporterName,
-          caseNo: effectiveCaseNo,
-          caseId: c.id,
-          blNumber: c.blNumber || c.extractedData?.blNumber || 'N/A',
-          companyId: cid,
-          companyName: compName,
-          category: c.category || 'Bonded Carrier',
-          pol: c.pol || c.extractedData?.pol || 'Port of Loading',
-          pod: c.pod || c.extractedData?.pod || 'Port of Discharge',
-          status: String(c.status || 'Active'),
-          currentWorkflowStep: workflowTitle,
-          currentWorkflowDescription: workflowDesc,
-          currentWorkflowStepIndex: activeStepIdx,
-          totalWorkflowSteps: totalSteps,
-          progressPercent,
-          isCompleted,
-          registrationDate: c.registrationDate || c.date || c.createdAt?.slice(0, 10) || 'N/A',
-          caseItem: c
-        });
+      // Priority 1: Exact Container Number match
+      if (cNumClean && cNumClean === cleanSearch) {
+        exactContainerMatches.push(itemObj);
+        return;
+      }
+
+      // Priority 2: Exact Vehicle / B/L / Case / GD match
+      if (
+        (vehClean && vehClean === cleanSearch) ||
+        (blClean && blClean === cleanSearch) ||
+        (caseNoClean && caseNoClean === cleanSearch) ||
+        (gdClean && gdClean === cleanSearch)
+      ) {
+        fallbackReferenceMatches.push(itemObj);
       }
     });
   });
 
-  return items;
+  if (exactContainerMatches.length > 0) {
+    return [exactContainerMatches[0]];
+  }
+
+  if (fallbackReferenceMatches.length > 0) {
+    return [fallbackReferenceMatches[0]];
+  }
+
+  return [];
 }
 
