@@ -506,7 +506,7 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
               </div>
             )}
 
-            {/* B. Single Container Detailed Dossier Card: "vahi container ka status aana chahie Kisi aur container ka show Nahin hona chahie" */}
+            {/* B. Single Container Detailed Dossier Card (Displays only the queried container's status) */}
             {activeContainerItem && (
               <div className="space-y-4">
                 <SingleContainerDossierCard

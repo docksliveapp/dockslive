@@ -25,7 +25,15 @@ import { subscribeToTransporterRequests, updateTransporterRequestInFirestore, de
 import { TransporterRequest } from '../types';
 import { sendAppNotification } from '../services/notificationService';
 import { exportVehiclesToExcel, exportVehicleTripsToExcel, generateVehiclesExcelBuffer } from '../services/excelExportService';
-import { parseVehicleFile, isCorruptedVehicleRecord } from '../services/documentParserService';
+import { 
+  parseVehicleFile, 
+  isCorruptedVehicleRecord, 
+  evaluateVehicleRegistrationValidity, 
+  dedupeAndMergeVehicles, 
+  resolveVehicleCompany, 
+  getDeterministicVehicleId, 
+  normalizeVehiclePlate 
+} from '../services/documentParserService';
 import { OfficialDocumentsModal, DocumentType } from './OfficialDocumentsModal';
 import { 
   generateLeaseTerminationAgreementDocx, 
@@ -191,7 +199,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   }, [propUserRoles, effectiveRole]);
 
   const hasAdminRole = effectiveRoles.includes(UserRole.ADMIN);
-  const hasVehicleMgrRole = hasAdminRole || effectiveRoles.includes(UserRole.VEHICLE_MANAGER);
+  const hasVehicleMgrRole = hasAdminRole || effectiveRoles.includes(UserRole.VEHICLE_MANAGER) || effectiveRoles.includes(UserRole.LOADING_PORT_STAFF);
 
   // Approval request state for vehicle actions (delete, cancel, edit)
   const [showVehicleApprovalModal, setShowVehicleApprovalModal] = useState(false);
@@ -209,6 +217,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
   const [renewalModalVehicle, setRenewalModalVehicle] = useState<Vehicle | null>(null);
   const [onlineModalVehicle, setOnlineModalVehicle] = useState<Vehicle | null>(null);
+  const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
 
   const getVehicleValidity = (v: Vehicle): { text: 'Valid' | 'Expired' | 'Expiry Soon'; badgeClass: string } => {
     if (v.status === 'EXPIRED') {
@@ -217,8 +226,15 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     if (v.status === 'EXPIRE_SOON') {
       return { text: 'Expiry Soon', badgeClass: 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' };
     }
-    if (v.validationExpiryDate) {
-      const expDate = new Date(v.validationExpiryDate).getTime();
+    const evalResult = evaluateVehicleRegistrationValidity(
+      v.lastRenewalDate || v.registrationDate,
+      v.validationExpiryDate || v.registrationExpiryDate
+    );
+    if (evalResult.isExpired) {
+      return { text: 'Expired', badgeClass: 'bg-red-500/20 text-red-400 border border-red-500/30' };
+    }
+    if (evalResult.expiryDate) {
+      const expDate = new Date(evalResult.expiryDate).getTime();
       const now = Date.now();
       const diffDays = Math.ceil((expDate - now) / (1000 * 60 * 60 * 24));
       if (diffDays < 0) {
@@ -651,10 +667,12 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     return date.toISOString().split('T')[0];
   };
 
-  const checkExpiryStatus = (expiryDate?: string) => {
-    if (!expiryDate) return 'Valid';
+  const checkExpiryStatus = (expiryDate?: string, registrationDate?: string) => {
+    const evalRes = evaluateVehicleRegistrationValidity(registrationDate, expiryDate);
+    if (evalRes.isExpired) return 'Expired';
+    if (!evalRes.expiryDate) return 'Expired';
     const today = new Date();
-    const expiry = new Date(expiryDate);
+    const expiry = new Date(evalRes.expiryDate);
     const monthsDiff = (expiry.getTime() - today.getTime()) / (1000 * 3600 * 24 * 30);
     
     if (monthsDiff < 0) return 'Expired';
@@ -669,8 +687,8 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   }, [transporters]);
 
   const vehiclesOnWay = vehicles.filter(v => v.status === 'ON_TRIP');
-  const vehiclesExpired = vehicles.filter(v => v.status === 'EXPIRED' || checkExpiryStatus(v.validationExpiryDate) === 'Expired');
-  const vehiclesExpiringSoon = vehicles.filter(v => v.status === 'EXPIRE_SOON' || checkExpiryStatus(v.validationExpiryDate) === 'Expiring Soon');
+  const vehiclesExpired = vehicles.filter(v => v.status === 'EXPIRED' || getVehicleValidity(v).text === 'Expired');
+  const vehiclesExpiringSoon = vehicles.filter(v => v.status === 'EXPIRE_SOON' || getVehicleValidity(v).text === 'Expiry Soon');
   
   const statusCounts = useMemo(() => {
     return {
@@ -681,7 +699,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       TIR: vehicles.filter(v => (v.category as string)?.toUpperCase() === 'TIR' || (v.type as string)?.toUpperCase().includes('TIR')).length,
       AFGHAN_TRANSIT: vehicles.filter(v => (v.category as string)?.toLowerCase().includes('afghan') || (v.type as string)?.toLowerCase().includes('afghan')).length,
       BLACKLIST: vehicles.filter(v => Boolean(v.isBlacklisted || v.status === 'CANCELLED' || v.status === 'INACTIVE')).length,
-      UPDATE_PENDING: vehicles.filter(v => Boolean(v.isUpdatePending || !v.chassisNo || !v.engineNo || !v.validationExpiryDate)).length,
+      UPDATE_PENDING: vehicles.filter(v => Boolean(v.isUpdatePending || !v.chassisNo || !v.engineNo || !v.registrationBook || !v.ownerIdCardUrl)).length,
     };
   }, [vehicles]);
 
@@ -830,26 +848,48 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   };
 
   const handleAddVehicle = (data: any) => {
-    const opCompany = data.operatingCompany || activeCompany.id || 'docks';
-    const compName = data.companyName || (
-      opCompany === 'truckit' ? 'Truckit (Pvt.) Ltd.' :
-      opCompany === 'muhib' ? 'Muhib International' :
-      opCompany === 'vantage' ? 'Vantage Shipping Line' :
-      'Docks (Pvt.) Ltd.'
-    );
+    const resolvedComp = resolveVehicleCompany(data.companyName || data.operatingCompany || activeCompany.id || 'truckit');
+    const syncedTransporter = (data.transporterName || data.brokerName || 'Direct Transporter').trim();
+    const validity = evaluateVehicleRegistrationValidity(data.registrationDate || data.validationStartDate, data.validationExpiryDate);
+    const cleanReg = (data.registrationNumber || '').trim().toUpperCase();
+    const normPlate = normalizeVehiclePlate(cleanReg);
+    const existingMatch = vehicles.find(v => normalizeVehiclePlate(v.registrationNumber) === normPlate);
 
-    const newVehicle: Vehicle = {
-      id: Date.now(),
-      dplSerial: generateDPLSerial(),
-      createdAt: new Date().toISOString().split('T')[0],
-      history: [],
+    const newOrUpdatedVehicle: Vehicle = {
+      ...(existingMatch || {}),
+      id: existingMatch?.id || data.id || getDeterministicVehicleId(cleanReg),
+      dplSerial: existingMatch?.dplSerial || data.dplSerial || generateDPLSerial(),
+      createdAt: existingMatch?.createdAt || new Date().toISOString().split('T')[0],
+      history: existingMatch?.history || [],
+      tripsHistory: existingMatch?.tripsHistory || [],
       ...data,
-      operatingCompany: opCompany,
-      companyName: compName
+      registrationNumber: cleanReg,
+      transporterName: syncedTransporter,
+      brokerName: syncedTransporter,
+      make: data.make || existingMatch?.make || '',
+      model: data.model || existingMatch?.model || '',
+      makeModel: [data.make || existingMatch?.make || '', data.model || existingMatch?.model || ''].filter(Boolean).join(' ') || data.makeModel || existingMatch?.makeModel || '',
+      registrationDate: validity.registrationDate || data.registrationDate || '',
+      validationExpiryDate: validity.expiryDate || data.validationExpiryDate || '',
+      status: data.status === 'CANCELLED' ? 'CANCELLED' : validity.status,
+      operatingCompany: resolvedComp.operatingCompany,
+      companyName: resolvedComp.companyName,
     };
-    setVehicles([...vehicles, newVehicle]);
-    saveVehicleToFirestore(newVehicle);
+
+    const { merged, removedIds } = dedupeAndMergeVehicles([...vehicles, newOrUpdatedVehicle]);
+    setVehicles(merged);
+    const finalSaved = merged.find(v => normalizeVehiclePlate(v.registrationNumber) === normPlate) || newOrUpdatedVehicle;
+    saveVehicleToFirestore(finalSaved);
+    removedIds.forEach(dupId => {
+      if (Number(dupId) !== Number(finalSaved.id)) {
+        deleteVehicleFromFirestore(dupId);
+      }
+    });
+    if (selectedVehicle && normalizeVehiclePlate(selectedVehicle.registrationNumber) === normPlate) {
+      setSelectedVehicle(finalSaved);
+    }
     setShowAddVehicle(false);
+    setEditingVehicle(null);
   };
 
   const handleDeleteVehicle = (id: number) => {
@@ -922,45 +962,58 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     const cleanList = parsedList.filter(item => !isCorruptedVehicleRecord(item));
     const tempVehiclesList = [...vehicles];
     const newVehicles: Vehicle[] = cleanList.map((item, idx) => {
-      const serial = generateDPLSerial(tempVehiclesList);
-      const transporter = item.transporterName || 'Direct Broker';
-      const broker = item.brokerName || item.transporterName || 'Direct Broker';
+      const cleanReg = (item.registrationNumber || `REG-${Date.now() + idx}`).trim().toUpperCase();
+      const serial = item.dplSerial || generateDPLSerial(tempVehiclesList);
+      const syncedTransporter = (item.transporterName || item.brokerName || 'Direct Transporter').trim();
       const rawDriver = (item.driverName || '').trim();
       const isVendorDriver = !rawDriver || 
-        rawDriver.toLowerCase() === broker.toLowerCase() || 
-        rawDriver.toLowerCase() === transporter.toLowerCase() || 
+        rawDriver.toLowerCase() === syncedTransporter.toLowerCase() || 
         rawDriver.toLowerCase() === 'n/a' ||
         rawDriver.toLowerCase() === 'none';
       const cleanDriver = isVendorDriver ? '' : rawDriver;
 
+      const resolvedComp = resolveVehicleCompany(item.companyName || item.operatingCompany);
+      const validity = evaluateVehicleRegistrationValidity(item.registrationDate, item.validationExpiryDate);
+
       const vehicleRecord: Vehicle = {
-        id: Date.now() + idx,
-        registrationNumber: item.registrationNumber || `REG-${Date.now() + idx}`,
+        id: item.id || getDeterministicVehicleId(cleanReg),
+        registrationNumber: cleanReg,
         category: (item.category as VehicleCategory) || VehicleCategory.BONDED_CARRIER,
         type: (item.type as VehicleType) || VehicleType.FLATBED,
         size: (item.size as '20ft' | '40ft' | '45ft' | 'Loose') || '40ft',
         weightCapacity: item.weightCapacity || '',
         engineNo: item.engineNo || 'N/A',
         chassisNo: item.chassisNo || 'N/A',
+        make: item.make || '',
+        model: item.model || '',
+        makeModel: item.makeModel || [item.make, item.model].filter(Boolean).join(' '),
         transporterId: 0,
-        transporterName: transporter,
-        brokerName: broker,
+        transporterName: syncedTransporter,
+        brokerName: syncedTransporter,
         driverName: cleanDriver,
         driverCnic: cleanDriver ? (item.driverCnic || '') : '',
         driverContact: cleanDriver ? (item.driverContact || '') : '',
-        validationExpiryDate: item.validationExpiryDate || new Date(Date.now() + 180 * 24 * 3600 * 1000).toISOString().slice(0, 10),
-        registrationDate: item.registrationDate,
+        registrationDate: validity.registrationDate,
+        validationExpiryDate: validity.expiryDate,
+        operatingCompany: resolvedComp.operatingCompany,
+        companyName: resolvedComp.companyName,
         dplSerial: serial,
         createdAt: new Date().toISOString().split('T')[0],
         history: [],
-        status: 'AVAILABLE' as const,
+        tripsHistory: item.tripsHistory || [],
+        status: validity.status,
         isOnline: false
       };
       tempVehiclesList.push(vehicleRecord);
       return vehicleRecord;
     });
 
-    setVehicles(prev => dedupeArrayById([...prev, ...newVehicles]));
+    // Deduplicate & merge with existing global vehicles (moving Docks duplicates to Truckit)
+    const { merged, removedIds } = dedupeAndMergeVehicles([...vehicles, ...newVehicles]);
+    setVehicles(merged);
+    removedIds.forEach(dupId => {
+      deleteVehicleFromFirestore(dupId);
+    });
     saveVehiclesBulkToFirestore(newVehicles);
     setShowBulkUploadModal(false);
   };
@@ -1000,10 +1053,13 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   };
 
   const handleConfirmRenewal = (vehicleId: number, newExpiryDate: string, docUrl?: string) => {
+    const todayIso = new Date().toISOString().split('T')[0];
     setVehicles(prev => prev.map(v => {
       if (v.id === vehicleId) {
         const updated: Vehicle = {
           ...v,
+          registrationDate: todayIso,
+          lastRenewalDate: todayIso,
           validationExpiryDate: newExpiryDate,
           status: 'AVAILABLE',
           isUpdatePending: false,
@@ -1011,8 +1067,8 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
             ...(v.history || []),
             {
               id: Date.now(),
-              date: new Date().toISOString().split('T')[0],
-              description: `6-Month Validity Renewed until ${newExpiryDate}`,
+              date: todayIso,
+              description: `6-Month Customs Validity Renewed until ${newExpiryDate}`,
               type: 'STATUS_CHANGE' as const
             }
           ]
@@ -1710,20 +1766,39 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                   <div className="p-3.5 font-mono font-bold text-white text-base truncate" style={{ width: '22%', flexShrink: 0 }}>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span>{v.registrationNumber}</span>
-                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
-                        {v.companyName || (v.operatingCompany === 'truckit' ? 'Truckit' : v.operatingCompany === 'muhib' ? 'Muhib' : v.operatingCompany === 'vantage' ? 'Vantage' : 'Docks')}
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border ${
+                        v.operatingCompany === 'truckit' || (v.companyName || '').toUpperCase().includes('TRUCKIT')
+                          ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+                          : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                      }`}>
+                        {v.companyName || (v.operatingCompany === 'truckit' ? 'TRUCKIT PVT LTD' : v.operatingCompany === 'muhib' ? 'MUHIB INT' : v.operatingCompany === 'vantage' ? 'VANTAGE' : 'DOCKS PVT LTD')}
                       </span>
                     </div>
-                    {v.dplSerial && (
-                      <span className="block text-[11px] font-mono text-gray-400 font-normal">{v.dplSerial}</span>
-                    )}
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap font-sans font-normal">
+                      <span className={`text-[9px] px-1.5 py-0.2 rounded font-semibold ${v.registrationBook ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'}`}>
+                        {v.registrationBook ? '✓ Reg Book' : '✗ Reg Book'}
+                      </span>
+                      <span className={`text-[9px] px-1.5 py-0.2 rounded font-semibold ${v.ownerIdCardUrl ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'}`}>
+                        {v.ownerIdCardUrl ? '✓ Owner ID' : '✗ Owner ID'}
+                      </span>
+                      {(v.tripsHistory?.length || 0) > 0 && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded font-semibold bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                          {v.tripsHistory!.length} Trip{v.tripsHistory!.length > 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="p-3.5 truncate" style={{ width: '16%', flexShrink: 0 }}>
-                    <span className="text-xs text-gray-200 font-medium">{v.category || 'Bonded Carrier'}</span>
-                    <span className="block text-[11px] text-gray-400">{v.type || 'Flatbed'} • {v.size || '40ft'}</span>
+                    <span className="text-xs text-white font-semibold block truncate">
+                      {[v.make, v.model].filter(Boolean).join(' ') || v.makeModel || v.category || 'Bonded Carrier'}
+                    </span>
+                    <span className="block text-[10px] font-mono text-gray-400 truncate" title={`Chassis: ${v.chassisNo || 'N/A'} | Engine: ${v.engineNo || 'N/A'}`}>
+                      CH: {v.chassisNo || 'N/A'} • ENG: {v.engineNo || 'N/A'}
+                    </span>
                   </div>
                   <div className="p-3.5 font-medium text-gray-200 truncate" style={{ width: '16%', flexShrink: 0 }}>
-                    {v.brokerName || v.transporterName || 'Direct Broker'}
+                    <span className="block truncate text-xs text-white">{v.transporterName || v.brokerName || 'Direct Transporter'}</span>
+                    <span className="block truncate text-[10px] text-gray-400">Broker: {v.brokerName || v.transporterName || 'Same'}</span>
                   </div>
                   <div className="p-3.5 text-xs truncate" style={{ width: '14%', flexShrink: 0 }}>
                     {hasAssignedDriver ? (
@@ -1743,8 +1818,13 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                     <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold inline-block ${validity.badgeClass}`}>
                       {validity.text}
                     </span>
+                    {v.registrationDate ? (
+                      <span className="block text-[10px] text-gray-300 font-mono mt-0.5">Reg: {v.registrationDate}</span>
+                    ) : (
+                      <span className="block text-[10px] text-rose-400 font-semibold mt-0.5">No Reg Date (Expired)</span>
+                    )}
                     {v.validationExpiryDate && (
-                      <span className="block text-[10px] text-gray-400 mt-0.5">Exp: {v.validationExpiryDate}</span>
+                      <span className="block text-[10px] text-gray-400 font-mono">Exp: {v.validationExpiryDate}</span>
                     )}
                   </div>
                   <div className="p-3.5 text-right flex justify-end items-center gap-1.5 flex-wrap" style={{ width: '18%', flexShrink: 0 }}>
@@ -1827,6 +1907,18 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                       </>
                     )}
 
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingVehicle(v);
+                        setShowAddVehicle(true);
+                      }}
+                      className="bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/30 text-cyan-300 hover:text-white transition-colors px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1"
+                      title="Update Vehicle Specs, Upload Reg Book / Owner ID Card, or Renew 6-Month Validity"
+                    >
+                      <Settings size={12} />
+                      <span className="text-[11px]">Edit / Docs</span>
+                    </button>
                     <button 
                       onClick={() => handlePreviewVehicleDetailsPdf(v)} 
                       className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 hover:text-white transition-colors p-1.5 rounded-lg text-xs flex items-center gap-1" 
@@ -1835,7 +1927,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                       <Eye size={13} className="text-emerald-300"/>
                       <span className="text-[10px] hidden xl:inline">PDF</span>
                     </button>
-                    <button onClick={() => setSelectedVehicle(v)} className="text-brand-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5" title="View Profile">
+                    <button onClick={() => setSelectedVehicle(v)} className="text-brand-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5" title="View Profile & Trips History">
                       <Eye size={14}/>
                     </button>
                     {v.pendingApproval ? (
@@ -1962,12 +2054,16 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
         <AddTransporterModal onClose={() => setShowAddTransporter(false)} onSave={handleAddTransporter} />
       )}
 
-      {/* Add Vehicle Modal */}
+      {/* Add / Edit Vehicle Modal */}
       {showAddVehicle && (
         <AddVehicleModal 
           transporters={transporters} 
           preSelectedTransporterId={preSelectedTransporterId}
-          onClose={() => setShowAddVehicle(false)} 
+          initialVehicle={editingVehicle}
+          onClose={() => {
+            setShowAddVehicle(false);
+            setEditingVehicle(null);
+          }} 
           onSave={handleAddVehicle} 
         />
       )}
@@ -1977,6 +2073,13 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
         <VehicleProfileModal 
           vehicle={selectedVehicle} 
           onClose={() => setSelectedVehicle(null)} 
+          onEditVehicle={(v) => {
+            setEditingVehicle(v);
+            setShowAddVehicle(true);
+          }}
+          onRenewVehicle={(v) => {
+            setRenewalModalVehicle(v);
+          }}
           onCancelVehicle={(v) => {
             setSelectedVehicle(null);
             setVehicleToCancel(v);
@@ -2474,23 +2577,71 @@ const AddTransporterModal = ({ onClose, onSave }: any) => {
   );
 };
 
-const AddVehicleModal = ({ transporters, preSelectedTransporterId, onClose, onSave }: any) => {
+const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicle, onClose, onSave }: any) => {
   const [showDocScanner, setShowDocScanner] = useState(false);
-  const [formData, setFormData] = useState<any>({
-    transporterId: preSelectedTransporterId || '',
-    operatingCompany: 'docks',
-    category: VehicleCategory.DOMESTIC,
-    type: VehicleType.FLATBED,
-    size: '40ft',
-    registrationNumber: '', engineNo: '', chassisNo: '',
-    brokerName: '',
-    ownerName: '',
-    ownerCnic: '',
-    ownerIdCardUrl: '',
-    ownerIdCardName: '',
-    driverName: '', driverCnic: '', driverContact: '',
-    validationStartDate: '',
-    weightCapacity: ''
+  const [scannerTarget, setScannerTarget] = useState<'SPEC' | 'REG_BOOK' | 'OWNER_ID'>('SPEC');
+  const todayIso = new Date().toISOString().split('T')[0];
+
+  const [formData, setFormData] = useState<any>(() => {
+    if (initialVehicle) {
+      const syncedTrans = initialVehicle.transporterName || initialVehicle.brokerName || '';
+      return {
+        ...initialVehicle,
+        transporterId: initialVehicle.transporterId || preSelectedTransporterId || '',
+        operatingCompany: initialVehicle.operatingCompany || 'truckit',
+        companyName: initialVehicle.companyName || (initialVehicle.operatingCompany === 'docks' ? 'DOCKS PVT LTD' : 'TRUCKIT PVT LTD'),
+        category: initialVehicle.category || VehicleCategory.BONDED_CARRIER,
+        type: initialVehicle.type || VehicleType.FLATBED,
+        size: initialVehicle.size || '40ft',
+        registrationNumber: initialVehicle.registrationNumber || '',
+        engineNo: initialVehicle.engineNo || '',
+        chassisNo: initialVehicle.chassisNo || '',
+        make: initialVehicle.make || '',
+        model: initialVehicle.model || '',
+        transporterName: syncedTrans,
+        brokerName: syncedTrans,
+        ownerName: initialVehicle.ownerName || '',
+        ownerCnic: initialVehicle.ownerCnic || '',
+        ownerIdCardUrl: initialVehicle.ownerIdCardUrl || '',
+        ownerIdCardName: initialVehicle.ownerIdCardName || '',
+        registrationBook: initialVehicle.registrationBook || '',
+        registrationBookName: initialVehicle.registrationBookName || '',
+        registrationDate: initialVehicle.registrationDate || '',
+        validationExpiryDate: initialVehicle.validationExpiryDate || '',
+        driverName: initialVehicle.driverName || '',
+        driverCnic: initialVehicle.driverCnic || '',
+        driverContact: initialVehicle.driverContact || '',
+        weightCapacity: initialVehicle.weightCapacity || ''
+      };
+    }
+    return {
+      transporterId: preSelectedTransporterId || '',
+      operatingCompany: 'truckit',
+      companyName: 'TRUCKIT PVT LTD',
+      category: VehicleCategory.BONDED_CARRIER,
+      type: VehicleType.FLATBED,
+      size: '40ft',
+      registrationNumber: '',
+      engineNo: '',
+      chassisNo: '',
+      make: '',
+      model: '',
+      transporterName: '',
+      brokerName: '',
+      ownerName: '',
+      ownerCnic: '',
+      ownerIdCardUrl: '',
+      ownerIdCardName: '',
+      registrationBook: '',
+      registrationBookName: '',
+      registrationDate: todayIso,
+      validationExpiryDate: evaluateVehicleRegistrationValidity(todayIso).expiryDate,
+      driverName: '',
+      driverCnic: '',
+      driverContact: '',
+      validationStartDate: todayIso,
+      weightCapacity: ''
+    };
   });
 
   const [isExtracting, setIsExtracting] = useState(false);
@@ -2510,6 +2661,21 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, onClose, onSa
     }
   };
 
+  const handleRegBookUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData((prev: any) => ({
+          ...prev,
+          registrationBook: reader.result as string,
+          registrationBookName: file.name
+        }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -2517,29 +2683,31 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, onClose, onSa
       try {
         const ext = file.name.toLowerCase().split('.').pop() || '';
         if (['xlsx', 'xls', 'docx', 'csv', 'txt'].includes(ext)) {
-          // Parse structured Office document or spreadsheet
           const result = await parseVehicleFile(file);
           if (result.rows.length > 0) {
             const first = result.rows[0];
+            const syncedTrans = first.transporterName || first.brokerName || '';
             setFormData((prev: any) => ({
               ...prev,
               registrationNumber: first.registrationNumber || prev.registrationNumber,
               category: first.category || prev.category,
               type: first.type || prev.type,
               size: first.size || prev.size,
+              make: first.make || prev.make,
+              model: first.model || prev.model,
               engineNo: first.engineNo !== 'N/A' ? (first.engineNo || prev.engineNo) : prev.engineNo,
               chassisNo: first.chassisNo !== 'N/A' ? (first.chassisNo || prev.chassisNo) : prev.chassisNo,
-              driverName: first.driverName !== 'N/A' ? (first.driverName || prev.driverName) : prev.driverName,
-              driverCnic: first.driverCnic !== 'N/A' ? (first.driverCnic || prev.driverCnic) : prev.driverCnic,
-              driverContact: first.driverContact !== 'N/A' ? (first.driverContact || prev.driverContact) : prev.driverContact,
+              registrationDate: first.registrationDate || prev.registrationDate,
               validationExpiryDate: first.validationExpiryDate || prev.validationExpiryDate,
-              brokerName: first.brokerName || first.transporterName || prev.brokerName
+              transporterName: syncedTrans || prev.transporterName,
+              brokerName: syncedTrans || prev.brokerName,
+              operatingCompany: first.operatingCompany || prev.operatingCompany,
+              companyName: first.companyName || prev.companyName
             }));
             return;
           }
         }
 
-        // For image / scan / PDF documents, use OCR / AI extraction
         const extracted = await autoFillVehicleData(file);
         if (extracted && Object.keys(extracted).length > 0) {
           setFormData((prev: any) => ({
@@ -2552,13 +2720,6 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, onClose, onSa
             weightCapacity: extracted.weightCapacity || prev.weightCapacity,
             category: extracted.category || prev.category
           }));
-        } else {
-          setFormData((prev: any) => ({
-            ...prev,
-            registrationNumber: prev.registrationNumber || 'TLP-8822',
-            engineNo: prev.engineNo || 'ENG-SCAN-123',
-            chassisNo: prev.chassisNo || 'CH-SCAN-456'
-          }));
         }
       } catch (err) {
         console.warn("Vehicle document OCR notice:", err);
@@ -2569,58 +2730,56 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, onClose, onSa
     }
   };
 
-  const showValidationDate = formData.category === VehicleCategory.BONDED_CARRIER || formData.category === VehicleCategory.AFGHAN_TRANSIT;
+  const validityPreview = evaluateVehicleRegistrationValidity(formData.registrationDate, formData.validationExpiryDate);
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-start justify-center pt-8 sm:pt-14 p-4 overflow-y-auto z-50">
-      <div className="glass-card p-6 rounded-2xl w-full max-w-2xl border border-white/10 max-h-[90vh] overflow-y-auto custom-scrollbar">
-        <h3 className="text-xl font-bold text-white mb-4 sticky top-0 bg-slate-900/95 pb-4 border-b border-white/10 z-10 backdrop-blur-md">Add New Vehicle</h3>
-        
-        <div className="flex flex-col gap-4 mb-4 mt-2">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Transporter Company (Optional)</label>
-              <select 
-                className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900"
-                value={formData.transporterId}
-                onChange={e => setFormData({...formData, transporterId: Number(e.target.value)})}
-                disabled={!!preSelectedTransporterId}
-              >
-                <option value="">-- Direct / Market Vehicle --</option>
-                {transporters.map((t: Transporter, tIdx: number) => <option key={`opt_trans_${t.id || tIdx}_${tIdx}`} value={t.id}>{t.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Broker / Fleet Vendor (Optional)</label>
-              <input 
-                type="text" 
-                placeholder="e.g. Haji Aslam Broker" 
-                className="w-full glass-input rounded p-2 text-white text-sm" 
-                value={formData.brokerName || ''} 
-                onChange={e => setFormData({...formData, brokerName: e.target.value})} 
-              />
-            </div>
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-start justify-center pt-6 sm:pt-10 p-4 overflow-y-auto z-50">
+      <div className="glass-card p-6 rounded-2xl w-full max-w-3xl border border-white/10 max-h-[92vh] overflow-y-auto custom-scrollbar">
+        <div className="flex items-center justify-between sticky top-0 bg-slate-900/95 pb-4 border-b border-white/10 z-10 backdrop-blur-md">
+          <div>
+            <h3 className="text-xl font-bold text-white">
+              {initialVehicle ? `Update Vehicle & Documents: ${initialVehicle.registrationNumber}` : 'Register New Fleet Vehicle'}
+            </h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Shared Vehicle Database across all companies • Transporter & Broker automatically synced • 6-Month Customs Validity
+            </p>
           </div>
-
+          <button onClick={onClose} className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/5">
+            <X size={20} />
+          </button>
+        </div>
+        
+        <div className="flex flex-col gap-4 mb-4 mt-4">
+          {/* Row 1: Registered Company & Vehicle Registration Number */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-amber-300 block mb-1 font-bold">Registered Company / Entity *</label>
+              <label className="text-xs text-cyan-300 block mb-1 font-bold">Registered Company (COMPANY) *</label>
               <select 
-                className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 border border-amber-500/40 text-sm font-semibold"
-                value={formData.operatingCompany || 'docks'}
-                onChange={e => setFormData({...formData, operatingCompany: e.target.value})}
+                className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 border border-cyan-500/40 text-sm font-semibold"
+                value={formData.operatingCompany || 'truckit'}
+                onChange={e => {
+                  const resolved = resolveVehicleCompany(e.target.value);
+                  setFormData({
+                    ...formData,
+                    operatingCompany: resolved.operatingCompany,
+                    companyName: resolved.companyName
+                  });
+                }}
               >
-                <option value="docks">Docks (Pvt.) Ltd. (DPL)</option>
-                <option value="truckit">Truckit (Pvt.) Ltd. (TRUCKIT)</option>
-                <option value="muhib">Muhib International (MI)</option>
-                <option value="vantage">Vantage Shipping Line (VLS)</option>
+                <option value="truckit">TRUCKIT PVT LTD (Primary Active Fleet)</option>
+                <option value="docks">DOCKS PVT LTD</option>
+                <option value="muhib">MUHIB INTERNATIONAL</option>
+                <option value="vantage">VANTAGE SHIPPING LINE</option>
               </select>
+              <span className="text-[10px] text-gray-400 mt-0.5 block">
+                Moving a Docks vehicle to Truckit updates the existing record (no duplicate).
+              </span>
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Vehicle Registration No *</label>
+              <label className="text-xs text-gray-300 block mb-1 font-bold">VEHICLE NO. (Registration Plate) *</label>
               <input 
                 type="text" 
-                placeholder="e.g. KLA-992" 
+                placeholder="e.g. TMA-133 or JU-1929" 
                 className="w-full glass-input rounded p-2 text-white font-mono font-bold uppercase tracking-wider" 
                 value={formData.registrationNumber} 
                 onChange={e => setFormData({...formData, registrationNumber: e.target.value.toUpperCase()})} 
@@ -2629,202 +2788,362 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, onClose, onSa
             </div>
           </div>
 
+          {/* Row 2: Transporter Name & Broker Name (Automatically Identical) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-white/5 p-3 rounded-xl border border-white/10">
             <div>
-              <label className="text-xs text-brand-300 block mb-1 font-medium">Vehicle Owner Name</label>
+              <label className="text-xs text-emerald-300 block mb-1 font-bold">TRANSPORTER NAME *</label>
+              <input 
+                type="text" 
+                list="fleet-transporters-list"
+                placeholder="e.g. TRUCKIT CARGO / AL-MADINA TRANSPORT" 
+                className="w-full glass-input rounded p-2 text-white text-sm font-semibold" 
+                value={formData.transporterName || formData.brokerName || ''} 
+                onChange={e => {
+                  const val = e.target.value;
+                  setFormData({
+                    ...formData,
+                    transporterName: val,
+                    brokerName: val
+                  });
+                }} 
+              />
+              <datalist id="fleet-transporters-list">
+                {transporters.map((t: Transporter, tIdx: number) => (
+                  <option key={`dl_trans_${t.id || tIdx}`} value={t.name} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1 font-semibold">BROKER NAME (Auto-Synced with Transporter)</label>
+              <input 
+                type="text" 
+                readOnly
+                placeholder="Auto-filled from Transporter Name" 
+                className="w-full glass-input rounded p-2 text-emerald-300 text-sm bg-black/40 cursor-not-allowed font-semibold" 
+                value={formData.transporterName || formData.brokerName || ''} 
+              />
+              <span className="text-[10px] text-gray-400 mt-0.5 block">Transporter aur Broker hamesha same rehte hain.</span>
+            </div>
+          </div>
+
+          {/* Row 3: Chassis No, Engine No, Maker, Model */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1 font-semibold">CHASSIS NO. *</label>
+              <input 
+                type="text" 
+                placeholder="e.g. CV450BN-50039" 
+                className="w-full glass-input rounded p-2 text-white font-mono text-xs uppercase" 
+                value={formData.chassisNo} 
+                onChange={e => setFormData({...formData, chassisNo: e.target.value.toUpperCase()})} 
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1 font-semibold">ENGINE NO. *</label>
+              <input 
+                type="text" 
+                placeholder="e.g. PE6-070941" 
+                className="w-full glass-input rounded p-2 text-white font-mono text-xs uppercase" 
+                value={formData.engineNo} 
+                onChange={e => setFormData({...formData, engineNo: e.target.value.toUpperCase()})} 
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1 font-semibold">MAKER (Make)</label>
+              <input 
+                type="text" 
+                placeholder="e.g. NISSAN / HINO" 
+                className="w-full glass-input rounded p-2 text-white text-xs uppercase font-semibold" 
+                value={formData.make || ''} 
+                onChange={e => setFormData({...formData, make: e.target.value.toUpperCase()})} 
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1 font-semibold">MODEL (Year)</label>
+              <input 
+                type="text" 
+                placeholder="e.g. 1995 / 2018" 
+                className="w-full glass-input rounded p-2 text-white font-mono text-xs" 
+                value={formData.model || ''} 
+                onChange={e => setFormData({...formData, model: e.target.value})} 
+              />
+            </div>
+          </div>
+
+          {/* Row 4: Customs 6-Month Registration Date & Auto Expiry */}
+          <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                <Calendar size={14} /> REGISTRATION DATE & CUSTOMS 6-MONTH VALIDITY RULE
+              </span>
+              <div className="flex items-center gap-2">
+                <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold uppercase ${
+                  validityPreview.isExpired
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                }`}>
+                  {validityPreview.isExpired ? 'EXPIRED (>6 Months or Blank)' : `ACTIVE (Valid until ${validityPreview.expiryDate})`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const evalNow = evaluateVehicleRegistrationValidity(todayIso);
+                    setFormData({
+                      ...formData,
+                      registrationDate: todayIso,
+                      lastRenewalDate: todayIso,
+                      validationExpiryDate: evalNow.expiryDate
+                    });
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow"
+                >
+                  Renew / Set Today (+6 Months)
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-gray-300 block mb-1">Registration / Last Renewal Date (Blank = Expired)</label>
+                <input
+                  type="date"
+                  className="w-full glass-input rounded p-2 text-white text-xs font-mono"
+                  value={formData.registrationDate || ''}
+                  onChange={e => {
+                    const regDate = e.target.value;
+                    const evalRes = evaluateVehicleRegistrationValidity(regDate);
+                    setFormData({
+                      ...formData,
+                      registrationDate: regDate,
+                      validationExpiryDate: evalRes.expiryDate
+                    });
+                  }}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-gray-300 block mb-1">6-Month Customs Expiry Date (Auto-Calculated)</label>
+                <input
+                  type="date"
+                  className="w-full glass-input rounded p-2 text-gray-300 text-xs font-mono bg-black/30"
+                  value={validityPreview.expiryDate || formData.validationExpiryDate || ''}
+                  onChange={e => setFormData({...formData, validationExpiryDate: e.target.value})}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Row 5: Mandatory Pre-Uploaded Vehicle Documents (Vehicle Registration Book & Owner ID Card) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-900/90 p-4 rounded-xl border border-brand-500/30">
+            <div className="sm:col-span-2 flex items-center justify-between border-b border-white/10 pb-2">
+              <div>
+                <h4 className="text-xs font-bold text-brand-300 uppercase tracking-wider">
+                  Mandatory Vehicle Compliance Documents (Pre-Requisite for Workflow Assignment)
+                </h4>
+                <p className="text-[11px] text-gray-400">
+                  Vehicle Registration Book and Vehicle Owner ID Card (uploaded by Vehicle Manager) are mandatory before a case workflow can be completed.
+                </p>
+              </div>
+            </div>
+
+            {/* 1. Vehicle Registration Book Upload */}
+            <div className="space-y-2 bg-white/5 p-3 rounded-xl border border-white/10">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white">1. Vehicle Registration Book *</span>
+                {formData.registrationBook ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                    ✓ Uploaded
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold">
+                    Missing
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <label htmlFor="veh-reg-book-upload" className="flex-1 cursor-pointer border border-dashed border-brand-500/40 hover:border-brand-400 bg-brand-500/5 hover:bg-brand-500/10 rounded-xl p-2.5 text-center transition-all">
+                  <input
+                    type="file"
+                    id="veh-reg-book-upload"
+                    className="hidden"
+                    accept="image/*,application/pdf"
+                    onChange={handleRegBookUpload}
+                  />
+                  <div className="flex items-center justify-center gap-1.5 text-brand-300 text-xs font-semibold">
+                    <UploadCloud size={15} />
+                    <span>{formData.registrationBook ? 'Replace Reg Book' : 'Upload Reg Book'}</span>
+                  </div>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScannerTarget('REG_BOOK');
+                    setShowDocScanner(true);
+                  }}
+                  className="px-3 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold flex items-center gap-1"
+                  title="Scan Registration Book Document"
+                >
+                  <Camera size={14} /> Scan Doc
+                </button>
+              </div>
+              {formData.registrationBook && (
+                <div className="flex items-center justify-between text-[11px] bg-black/40 p-2 rounded-lg border border-white/10">
+                  <span className="text-gray-300 truncate">{formData.registrationBookName || 'Vehicle_Reg_Book'}</span>
+                  <a
+                    href={formData.registrationBook}
+                    download={formData.registrationBookName || `RegBook_${formData.registrationNumber || 'Vehicle'}.jpg`}
+                    className="text-emerald-400 hover:underline font-bold flex items-center gap-1 shrink-0"
+                  >
+                    <Download size={11} /> Download
+                  </a>
+                </div>
+              )}
+            </div>
+
+            {/* 2. Vehicle Owner ID Card Upload */}
+            <div className="space-y-2 bg-white/5 p-3 rounded-xl border border-white/10">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white">2. Vehicle Owner ID Card (CNIC) *</span>
+                {formData.ownerIdCardUrl ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                    ✓ Uploaded
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold">
+                    Missing
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <label htmlFor="owner-id-upload" className="flex-1 cursor-pointer border border-dashed border-brand-500/40 hover:border-brand-400 bg-brand-500/5 hover:bg-brand-500/10 rounded-xl p-2.5 text-center transition-all">
+                  <input 
+                    type="file" 
+                    id="owner-id-upload" 
+                    className="hidden" 
+                    accept="image/*,application/pdf"
+                    onChange={handleOwnerIdUpload} 
+                  />
+                  <div className="flex items-center justify-center gap-1.5 text-brand-300 text-xs font-semibold">
+                    <UploadCloud size={15} />
+                    <span>{formData.ownerIdCardUrl ? 'Replace Owner ID' : 'Upload Owner ID'}</span>
+                  </div>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScannerTarget('OWNER_ID');
+                    setShowDocScanner(true);
+                  }}
+                  className="px-3 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold flex items-center gap-1"
+                  title="Scan Owner ID Card Document"
+                >
+                  <Camera size={14} /> Scan Doc
+                </button>
+              </div>
+              {formData.ownerIdCardUrl && (
+                <div className="flex items-center justify-between text-[11px] bg-black/40 p-2 rounded-lg border border-white/10">
+                  <span className="text-gray-300 truncate">{formData.ownerIdCardName || 'Owner_CNIC'}</span>
+                  <a
+                    href={formData.ownerIdCardUrl}
+                    download={formData.ownerIdCardName || `OwnerID_${formData.registrationNumber || 'Vehicle'}.jpg`}
+                    className="text-emerald-400 hover:underline font-bold flex items-center gap-1 shrink-0"
+                  >
+                    <Download size={11} /> Download
+                  </a>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Vehicle Owner Name (Optional)</label>
               <input 
                 type="text" 
                 placeholder="Owner Full Name" 
-                className="w-full glass-input rounded p-2 text-white text-sm" 
-                value={formData.ownerName} 
+                className="w-full glass-input rounded p-2 text-white text-xs" 
+                value={formData.ownerName || ''} 
                 onChange={e => setFormData({...formData, ownerName: e.target.value})} 
               />
             </div>
             <div>
-              <label className="text-xs text-brand-300 block mb-1 font-medium">Owner CNIC / ID No</label>
+              <label className="text-xs text-gray-400 block mb-1">Owner CNIC / ID Number (Optional)</label>
               <input 
                 type="text" 
                 placeholder="e.g. 42101-1234567-1" 
-                className="w-full glass-input rounded p-2 text-white font-mono text-sm" 
-                value={formData.ownerCnic} 
+                className="w-full glass-input rounded p-2 text-white font-mono text-xs" 
+                value={formData.ownerCnic || ''} 
                 onChange={e => setFormData({...formData, ownerCnic: e.target.value})} 
               />
             </div>
-
-            <div className="sm:col-span-2 mt-1">
-              <label className="text-xs text-gray-300 block mb-1 font-medium flex items-center justify-between">
-                <span>Owner ID Card / CNIC Document Upload</span>
-                {formData.ownerIdCardName && (
-                  <span className="text-emerald-400 text-[11px] font-semibold flex items-center gap-1">
-                    <CheckCircle size={12} /> {formData.ownerIdCardName}
-                  </span>
-                )}
-              </label>
-              <div className="relative border border-dashed border-brand-500/40 hover:border-brand-400 bg-brand-500/5 hover:bg-brand-500/10 rounded-xl p-3.5 text-center transition-all">
-                <input 
-                  type="file" 
-                  id="owner-id-upload" 
-                  className="hidden" 
-                  accept="image/*,application/pdf"
-                  onChange={handleOwnerIdUpload} 
-                />
-                <label htmlFor="owner-id-upload" className="cursor-pointer block">
-                  <div className="flex items-center justify-center gap-2 text-brand-300">
-                    <UploadCloud size={18} className="text-brand-400" />
-                    <span className="text-xs font-semibold">
-                      {formData.ownerIdCardName ? 'Change Owner ID Card Document' : 'Upload Owner ID Card (Image / Scan)'}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-gray-400 mt-1">Accepts PNG, JPG, or PDF</p>
-                </label>
-              </div>
-            </div>
-
-            {/* Uploaded Files Summary List with Download Option */}
-            {formData.ownerIdCardUrl && (
-              <div className="sm:col-span-2 p-3 bg-black/40 border border-white/10 rounded-xl space-y-1.5">
-                <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
-                  <Download size={11} className="text-brand-400" />
-                  Uploaded Vehicle Owner Files
-                </h5>
-                <div className="flex items-center justify-between text-xs p-1.5 rounded bg-black/20 border border-white/5">
-                  <span className="text-gray-200 font-medium truncate max-w-[150px] sm:max-w-none">
-                    {formData.ownerIdCardName || 'Owner_CNIC'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const link = document.createElement('a');
-                      link.href = formData.ownerIdCardUrl!;
-                      const ext = formData.ownerIdCardUrl!.startsWith('data:application/pdf') ? '.pdf' : '.jpg';
-                      const defaultName = formData.ownerIdCardName || 'owner_id_card';
-                      link.download = defaultName.endsWith('.pdf') || defaultName.endsWith('.jpg') ? defaultName : `${defaultName}${ext}`;
-                      document.body.appendChild(link);
-                      link.click();
-                      document.body.removeChild(link);
-                    }}
-                    className="text-brand-400 hover:text-brand-300 font-bold hover:underline flex items-center gap-1 bg-brand-500/10 border border-brand-500/20 px-2 py-0.5 rounded text-[10px]"
-                  >
-                    <Download size={11} /> Download
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
 
-          <div>
-             <label className="text-xs text-gray-400 block mb-1">Category</label>
-             <select className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
-               {Object.values(VehicleCategory).map(c => <option key={c} value={c}>{c}</option>)}
-             </select>
-          </div>
-          <div>
-             <label className="text-xs text-gray-400 block mb-1">Type</label>
-             <select className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})}>
-               {Object.values(VehicleType).map(t => <option key={t} value={t}>{t}</option>)}
-             </select>
-          </div>
-
-          {formData.type === VehicleType.CONTAINER && (
+          {/* Row 6: Category, Type & Capacity */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Container Size</label>
-              <select className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900" value={formData.size} onChange={e => setFormData({...formData, size: e.target.value})}>
-                <option value="20ft">20ft</option>
-                <option value="40ft">40ft</option>
-                <option value="45ft">45ft</option>
+              <label className="text-xs text-gray-400 block mb-1">Category</label>
+              <select className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 text-xs" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+                {Object.values(VehicleCategory).map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
-          )}
-
-          <div>
-            <label className="text-xs text-gray-400 block mb-1">Weight Capacity</label>
-            <select className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900" value={formData.weightCapacity} onChange={e => setFormData({...formData, weightCapacity: e.target.value})}>
-              <option value="">Select Weight Range</option>
-              <option value="1-5 Ton">1-5 Ton</option>
-              <option value="5-10 Ton">5-10 Ton</option>
-              <option value="10-15 Ton">10-15 Ton</option>
-              <option value="15-20 Ton">15-20 Ton</option>
-              <option value="20-25 Ton">20-25 Ton</option>
-              <option value="25-30 Ton">25-30 Ton</option>
-              <option value="30-35 Ton">30-35 Ton</option>
-              <option value="35-40 Ton">35-40 Ton</option>
-              <option value="40-45 Ton">40-45 Ton</option>
-              <option value="45-50 Ton">45-50 Ton</option>
-            </select>
-          </div>
-
-          <div className="flex gap-2">
-            <div className="flex-1 border border-dashed border-white/20 rounded p-3 text-center cursor-pointer hover:bg-white/5 relative">
-              <input 
-                type="file" 
-                className="hidden" 
-                id="reg-upload" 
-                accept=".xlsx, .xls, .docx, .pdf, image/*"
-                onChange={handleFileUpload} 
-                disabled={isExtracting} 
-              />
-              <label htmlFor="reg-upload" className="cursor-pointer block">
-                {isExtracting ? (
-                  <div className="flex items-center justify-center gap-2 text-brand-400">
-                    <Loader2 size={16} className="animate-spin" />
-                    <span className="text-xs font-medium">Scanning & Extracting Vehicle Specs...</span>
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-brand-400 font-medium text-xs">Upload Document (Excel, Word, PDF, Photo)</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Extracts Reg No, Engine, Chassis, Driver, Specs</p>
-                  </>
-                )}
-              </label>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Type</label>
+              <select className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 text-xs" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})}>
+                {Object.values(VehicleType).map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
             </div>
-            
-            <button
-              type="button"
-              onClick={() => setShowDocScanner(true)}
-              disabled={isExtracting}
-              className="border border-dashed border-amber-500/40 rounded p-3 text-center cursor-pointer hover:bg-amber-500/10 relative shrink-0 flex flex-col items-center justify-center px-3 text-amber-400 transition"
-              title="Scan document using camera"
-            >
-              <Camera size={18} />
-              <span className="text-[10px] font-bold mt-1">Camera Scan</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <input type="text" placeholder="Engine No" className="glass-input rounded p-2 text-white" value={formData.engineNo} onChange={e => setFormData({...formData, engineNo: e.target.value})} />
-            <input type="text" placeholder="Chassis No" className="glass-input rounded p-2 text-white" value={formData.chassisNo} onChange={e => setFormData({...formData, chassisNo: e.target.value})} />
-          </div>
-          
-          {showValidationDate && (
-            <div className="bg-yellow-500/10 p-3 rounded border border-yellow-500/20">
-              <label className="text-xs text-yellow-400 block mb-1">Validation Start Date (Bonded/Afghan)</label>
-              <input type="date" className="glass-input rounded p-2 text-white w-full" value={formData.validationStartDate} onChange={e => setFormData({...formData, validationStartDate: e.target.value})} />
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Weight Capacity</label>
+              <select className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 text-xs" value={formData.weightCapacity} onChange={e => setFormData({...formData, weightCapacity: e.target.value})}>
+                <option value="">Select Weight Range</option>
+                <option value="20-25 Ton">20-25 Ton</option>
+                <option value="25-30 Ton">25-30 Ton</option>
+                <option value="30-35 Ton">30-35 Ton</option>
+                <option value="35-40 Ton">35-40 Ton</option>
+                <option value="40-45 Ton">40-45 Ton</option>
+                <option value="45-50 Ton">45-50 Ton</option>
+              </select>
             </div>
-          )}
+          </div>
         </div>
 
-        <div className="flex justify-end gap-2 mt-6">
-          <button onClick={onClose} className="px-4 py-2 text-gray-400 hover:text-white">Cancel</button>
+        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-white/10">
+          <button onClick={onClose} className="px-4 py-2 text-gray-400 hover:text-white text-sm">Cancel</button>
           <button onClick={() => {
+             if (!formData.registrationNumber?.trim()) {
+               alert('Please enter Vehicle Registration Number (VEHICLE NO.).');
+               return;
+             }
              const selectedTransporter = transporters.find((t: Transporter) => t.id === formData.transporterId);
-             const transName = selectedTransporter?.name || (formData.brokerName?.trim() ? `${formData.brokerName.trim()} (Broker)` : 'Direct Transporter');
-             const finalBroker = formData.brokerName?.trim() || selectedTransporter?.name || 'Direct Transporter';
+             const syncedTransporter = (formData.transporterName || formData.brokerName || selectedTransporter?.name || 'Direct Transporter').trim();
              onSave({ 
                ...formData, 
-               transporterName: transName,
-               brokerName: finalBroker
+               transporterName: syncedTransporter,
+               brokerName: syncedTransporter
              });
-          }} className="bg-brand-600 text-white px-4 py-2 rounded-lg">Save Vehicle</button>
+          }} className="bg-brand-600 hover:bg-brand-500 text-white px-5 py-2 rounded-xl font-semibold text-sm shadow-lg shadow-brand-600/30">
+            {initialVehicle ? 'Save Vehicle Updates' : 'Register Vehicle'}
+          </button>
         </div>
 
         <CameraDocumentScannerModal
           isOpen={showDocScanner}
           onClose={() => setShowDocScanner(false)}
-          documentTitle="Vehicle Registration & Specifications"
-          suggestedFileName={`Scanned_Vehicle_Doc_${Date.now()}`}
+          documentTitle={scannerTarget === 'REG_BOOK' ? 'Vehicle Registration Book' : scannerTarget === 'OWNER_ID' ? 'Vehicle Owner ID Card' : 'Vehicle Registration & Specifications'}
+          suggestedFileName={`Scanned_Vehicle_${scannerTarget}_${Date.now()}`}
           onScanComplete={async (result) => {
             setShowDocScanner(false);
-            await handleFileUpload({ target: { files: [result.file] } } as any);
+            if (scannerTarget === 'REG_BOOK') {
+              setFormData((prev: any) => ({
+                ...prev,
+                registrationBook: (result as any).dataUrl || result.pdfDataUrl,
+                registrationBookName: result.file.name
+              }));
+            } else if (scannerTarget === 'OWNER_ID') {
+              setFormData((prev: any) => ({
+                ...prev,
+                ownerIdCardUrl: (result as any).dataUrl || result.pdfDataUrl,
+                ownerIdCardName: result.file.name
+              }));
+            } else {
+              await handleFileUpload({ target: { files: [result.file] } } as any);
+            }
           }}
         />
       </div>
@@ -2835,10 +3154,14 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, onClose, onSa
 const VehicleProfileModal = ({ 
   vehicle, 
   onClose,
+  onEditVehicle,
+  onRenewVehicle,
   onCancelVehicle
 }: { 
   vehicle: Vehicle; 
   onClose: () => void;
+  onEditVehicle?: (v: Vehicle) => void;
+  onRenewVehicle?: (v: Vehicle) => void;
   onCancelVehicle?: (v: Vehicle) => void;
 }) => {
   const [isExporting, setIsExporting] = useState(false);
@@ -2849,42 +3172,91 @@ const VehicleProfileModal = ({
   const [directDownloadFilename, setDirectDownloadFilename] = useState<string>('');
   const [isPdfViewerOpen, setIsPdfViewerOpen] = useState(false);
 
-  // Dynamically load trip history for this vehicle from live operational cases
+  // Combine persisted `vehicle.tripsHistory` + live operational cases from `dpl_live_cases` and `dpl_cases_data`
   const trips = useMemo(() => {
+    const combinedTrips: Array<{
+      id: string;
+      caseNo?: string;
+      containerNumber: string;
+      driverName: string;
+      driverCnic?: string;
+      importerName: string;
+      clientName: string;
+      route?: string;
+      date: string;
+      status: string;
+    }> = [];
+    const seenKeys = new Set<string>();
+
+    // 1. Add persisted trips from vehicle.tripsHistory
+    if (Array.isArray(vehicle.tripsHistory)) {
+      vehicle.tripsHistory.forEach((t, idx) => {
+        const key = `${t.date || ''}_${t.containerNumber || ''}_${t.status || idx}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          combinedTrips.push({
+            id: t.id || `PERSIST-${idx}`,
+            containerNumber: t.containerNumber || '-',
+            driverName: t.driverName || vehicle.driverName || '-',
+            driverCnic: t.driverCnic || vehicle.driverCnic || '',
+            importerName: t.importerName || 'N/A',
+            clientName: t.clientName || 'N/A',
+            date: t.date || '-',
+            status: t.status || 'Completed'
+          });
+        }
+      });
+    }
+
+    // 2. Scan live operational cases for all trips assigned to this vehicle
     try {
-      const casesList = safeAppStorage.getJSON<any[]>('dpl_live_cases', []);
-      if (!Array.isArray(casesList)) return [];
-      const cleanReg = vehicle.registrationNumber.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      
-      const matchedCases = casesList.filter(c => {
-        const cReg = (c.vehicleNumber || c.extractedData?.vehicleNumber || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        const hasContainerMatch = Array.isArray(c.containers) && c.containers.some((cntr: any) => (cntr.vehicleNo || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanReg);
-        return (cReg && cReg === cleanReg) || hasContainerMatch;
-      });
+      const liveCases = safeAppStorage.getJSON<any[]>('dpl_live_cases', []) || [];
+      const cachedCases = safeAppStorage.getJSON<any[]>('dpl_cases_data', []) || [];
+      const casesList = [...liveCases, ...cachedCases];
+      const cleanReg = normalizeVehiclePlate(vehicle.registrationNumber);
 
-      const mapped = matchedCases.map((c, idx) => {
-        const matchingContainer = Array.isArray(c.containers) 
-          ? c.containers.find((cntr: any) => (cntr.vehicleNo || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() === cleanReg)
+      casesList.forEach((c, idx) => {
+        const vaReg = normalizeVehiclePlate(c.vehicleAssignment?.vehicleNo || '');
+        const cReg = normalizeVehiclePlate(c.vehicleNumber || c.extractedData?.vehicleNumber || '');
+        const addVehMatch = Array.isArray(c.vehicleAssignment?.additionalVehicles)
+          ? c.vehicleAssignment.additionalVehicles.find((av: any) => normalizeVehiclePlate(av.vehicleNo || '') === cleanReg)
           : null;
-        const resolvedDriver = matchingContainer?.driverName || c.driverName || c.extractedData?.driverName || 'Designated Driver';
-        return {
-          id: c.id || `TRP-${idx + 1}`,
-          caseNo: c.caseNo,
-          containerNumber: matchingContainer?.number || c.containerNumber || c.extractedData?.containerNumber || '-',
-          driverName: resolvedDriver,
-          importerName: c.extractedData?.cargoOwner || c.clientName || 'N/A',
-          clientName: c.clientName || 'N/A',
-          route: `${c.pol || 'Port'} to ${c.pod || 'Destination'}`,
-          date: c.registrationDate || c.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
-          status: c.status || 'Completed'
-        };
-      });
+        const matchingContainer = Array.isArray(c.containers)
+          ? c.containers.find((cntr: any) => normalizeVehiclePlate(cntr.vehicleNo || '') === cleanReg)
+          : null;
 
-      return mapped;
+        if ((vaReg && vaReg === cleanReg) || (cReg && cReg === cleanReg) || addVehMatch || matchingContainer) {
+          const caseNum = c.caseNumber || c.caseNo || `CASE-${idx + 1}`;
+          const cntrStr = matchingContainer?.number ||
+            (Array.isArray(c.containers) && c.containers.length > 0 ? c.containers.map((cn: any) => cn.number).filter(Boolean).join(', ') : '') ||
+            c.containerNumber ||
+            c.extractedData?.containerNumber ||
+            '-';
+          const dedupeKey = `${caseNum}_${cntrStr}`;
+          if (!seenKeys.has(dedupeKey) && !combinedTrips.some(existing => existing.status.includes(caseNum))) {
+            seenKeys.add(dedupeKey);
+            const resolvedDriver = addVehMatch?.driverName || c.vehicleAssignment?.driverName || matchingContainer?.driverName || c.driverName || vehicle.driverName || 'Assigned Driver';
+            const resolvedCnic = addVehMatch?.driverCnic || c.vehicleAssignment?.driverCnic || vehicle.driverCnic || '';
+            combinedTrips.push({
+              id: c.id || `TRP-${idx + 1}`,
+              caseNo: caseNum,
+              containerNumber: cntrStr,
+              driverName: resolvedDriver,
+              driverCnic: resolvedCnic,
+              importerName: c.importerName || c.consignee || c.extractedData?.cargoOwner || c.clientName || 'N/A',
+              clientName: c.clientName || 'N/A',
+              route: `${c.pol || c.loadingPort || 'Karachi Port'} → ${c.pod || c.destination || 'Destination'}`,
+              date: c.vehicleAssignment?.allocationDate || c.date || c.registrationDate || c.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+              status: `${c.status || 'In Transit'} (${caseNum})`
+            });
+          }
+        }
+      });
     } catch (e) {
       console.error("Error reading cases for trip mapping:", e);
-      return [];
     }
+
+    return combinedTrips;
   }, [vehicle]);
 
   const handleDownloadPdf = async () => {
@@ -2927,14 +3299,39 @@ const VehicleProfileModal = ({
       <div className="glass-card w-full max-w-4xl h-[85vh] flex flex-col rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
         <div className="bg-slate-900/90 p-5 md:p-6 border-b border-white/10 flex flex-wrap justify-between items-center gap-3">
            <div>
-             <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-               {vehicle.registrationNumber}
+             <h2 className="text-2xl font-bold text-white flex items-center gap-3 flex-wrap">
+               <span>{vehicle.registrationNumber}</span>
+               <span className="text-xs font-bold uppercase px-2.5 py-1 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                 {vehicle.companyName || (vehicle.operatingCompany === 'truckit' ? 'TRUCKIT PVT LTD' : 'DOCKS PVT LTD')}
+               </span>
                <span className="text-sm font-normal bg-white/10 px-2 py-1 rounded text-gray-300">{vehicle.type}</span>
              </h2>
-             <p className="text-gray-400 text-sm mt-1">{vehicle.brokerName || vehicle.transporterName || 'Direct Transporter'} • {vehicle.category}</p>
+             <p className="text-gray-400 text-sm mt-1">
+               Transporter & Broker: <strong className="text-white">{vehicle.transporterName || vehicle.brokerName || 'Direct Transporter'}</strong> • {vehicle.category}
+             </p>
            </div>
            
-           <div className="flex items-center gap-2">
+           <div className="flex items-center gap-2 flex-wrap">
+             {onEditVehicle && (
+               <button
+                 type="button"
+                 onClick={() => onEditVehicle(vehicle)}
+                 className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow"
+               >
+                 <Settings size={14} />
+                 <span>Edit / Upload Docs</span>
+               </button>
+             )}
+             {onRenewVehicle && (
+               <button
+                 type="button"
+                 onClick={() => onRenewVehicle(vehicle)}
+                 className="bg-amber-600/25 hover:bg-amber-600 border border-amber-500/40 text-amber-300 hover:text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all"
+               >
+                 <Clock size={14} />
+                 <span>Renew 6M</span>
+               </button>
+             )}
              {vehicle.status === 'CANCELLED' ? (
                 <span className="bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
                   <Ban size={13} /> De-registered / Cancelled
@@ -2957,7 +3354,7 @@ const VehicleProfileModal = ({
                title={`Download complete Trip & Fleet Report for vehicle ${vehicle.registrationNumber} (Excel / CSV)`}
              >
                {isExportingTripReport ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-               <span>Trip Report</span>
+               <span>Trip Report ({trips.length})</span>
              </button>
 
              <button

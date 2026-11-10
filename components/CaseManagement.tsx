@@ -9294,7 +9294,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   );
                 })()}
 
-                {/* 3. Usse niche: Sare uploaded document honge jinke naam likhe a rahe honge aur aage download ka button hoga */}
+                {/* 3. Uploaded Case Documents List with Direct Download Action */}
                 {selectedCase.documents && selectedCase.documents.length > 0 ? (
                   selectedCase.documents.map((doc: any, idx: number) => {
                     const docName = doc.name || ('Document_' + (idx + 1));

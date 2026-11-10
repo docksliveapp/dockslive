@@ -13,8 +13,7 @@
  * SERIAL = Running sequential number (001, 002... up to 100,000+) that continues sequentially until the Year changes.
  * 
  * Invoice Number Rule:
- * "Aur Jo hamara case number hoga vahi hamara invoice number hoga same to same"
- * Case Number is identical to the Invoice Number.
+ * The Invoice Number is always identical to the Case Number.
  */
 
 import { getActiveCompanyPrefix } from './companyService';
@@ -170,7 +169,7 @@ export function generateDplCaseNumber(
 
 /**
  * Returns the exact Invoice Number for a case.
- * Business Rule: "Aur Jo hamara case number hoga vahi hamara invoice number hoga same to same"
+ * Business Rule: The Invoice Number is always identical to the Case Number.
  */
 export function getCaseInvoiceNumber(caseItem?: { caseNo?: string; id?: string; extractedData?: any }): string {
   const prefix = getActiveCompanyPrefix();

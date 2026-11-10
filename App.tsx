@@ -498,12 +498,13 @@ const App: React.FC = () => {
     const items: Array<{ id: string; label: string; icon: any }> = [];
 
     const hasCasesAccess = currentRoles.includes(UserRole.OPERATIONS_MANAGER) || 
+                           currentRoles.includes(UserRole.VEHICLE_MANAGER) ||
                            currentRoles.includes(UserRole.LOADING_PORT_STAFF) || 
                            currentRoles.includes(UserRole.UNLOADING_PORT_STAFF) ||
                            currentRoles.includes(UserRole.DESTINATION_PORT_STAFF) ||
                            currentRoles.includes(UserRole.OFFICE_STAFF);
     const hasFinanceAccess = currentRoles.includes(UserRole.FINANCE_MANAGER);
-    const hasVehiclesAccess = currentRoles.includes(UserRole.VEHICLE_MANAGER);
+    const hasVehiclesAccess = currentRoles.includes(UserRole.VEHICLE_MANAGER) || currentRoles.includes(UserRole.LOADING_PORT_STAFF);
 
     if (hasCasesAccess) {
       items.push({ id: 'cases', label: 'Case Management', icon: FolderKanban });
@@ -729,14 +730,21 @@ const App: React.FC = () => {
         return <Finance initialFilter={navigationFilter} onActionComplete={handleActionComplete} customLogo={customLogo} />;
       }
       case 'vehicles': {
-        const canAccessVehicles = currentRoles.includes(UserRole.ADMIN) || currentRole === UserRole.ADMIN || currentRoles.includes(UserRole.VEHICLE_MANAGER) || currentRole === UserRole.VEHICLE_MANAGER || (currentRole as any) === UserRole.TRANSPORTER;
+        const canAccessVehicles =
+          currentRoles.includes(UserRole.ADMIN) ||
+          currentRole === UserRole.ADMIN ||
+          currentRoles.includes(UserRole.VEHICLE_MANAGER) ||
+          currentRole === UserRole.VEHICLE_MANAGER ||
+          currentRoles.includes(UserRole.LOADING_PORT_STAFF) ||
+          (currentRole as any) === UserRole.LOADING_PORT_STAFF ||
+          (currentRole as any) === UserRole.TRANSPORTER;
         if (!canAccessVehicles) {
           return (
             <div className="p-8 text-center bg-slate-900/60 rounded-2xl border border-white/10 m-6 max-w-lg mx-auto">
               <ShieldAlert className="w-12 h-12 text-rose-400 mx-auto mb-3" />
               <h3 className="text-lg font-bold text-white mb-1">Access Restricted</h3>
               <p className="text-xs text-gray-400 leading-relaxed">
-                Fleet management is restricted to Vehicle Managers and Fleet Coordinators.
+                Fleet management is restricted to Vehicle Managers, Loading Port Staff, and Administrators.
               </p>
             </div>
           );

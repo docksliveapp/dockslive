@@ -23,6 +23,7 @@ import {
 import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver } from '../types';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
+import { dedupeAndMergeVehicles, normalizeVehiclePlate, getDeterministicVehicleId } from './documentParserService';
 import { getActiveCompanyId, subscribeToActiveCompany, CompanyId, PARENT_GROUP, GROUP_COMPANIES } from './companyService';
 import { 
   saveDocumentToIndexedDB, 
@@ -1328,7 +1329,8 @@ export function subscribeToVehicles(
   try {
     const localCached = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
     if (localCached && localCached.length > 0) {
-      onData(dedupeArrayById(localCached));
+      const { merged } = dedupeAndMergeVehicles(dedupeArrayById(localCached));
+      onData(merged);
     }
   } catch (_) {}
 
@@ -1338,12 +1340,28 @@ export function subscribeToVehicles(
     cachedDocs.forEach((data) => {
       // NOTE: Vehicles are universally shared across all 4 subsidiaries (Docks, Truckit, Muhib, Vantage)
       const numId = parseNumericDocId(data.id, data._docId || String(idx), idx++);
-      firestoreItems.push({ ...data, id: numId } as Vehicle);
+      const syncedBroker = data.transporterName || data.brokerName || '';
+      firestoreItems.push({
+        ...data,
+        id: numId,
+        transporterName: syncedBroker,
+        brokerName: syncedBroker
+      } as Vehicle);
     });
 
-    const finalVehicles = dedupeArrayById(firestoreItems);
+    // Deduplicate & merge global vehicles by registrationNumber (moving Docks duplicates to Truckit)
+    const { merged: finalVehicles, removedIds } = dedupeAndMergeVehicles(dedupeArrayById(firestoreItems));
+
+    // Clean up duplicate vehicle doc IDs from Firestore in background so vehicles never double
+    if (removedIds.length > 0) {
+      removedIds.forEach((dupId) => {
+        deleteDoc(doc(db, path, String(dupId))).catch(() => {});
+      });
+    }
+
     if (hasReceivedSnapshot) {
       safeAppStorage.setJSON('dpl_live_vehicles', finalVehicles);
+      safeAppStorage.setJSON('dpl_vehicles_data', finalVehicles);
       backupVehiclesToIndexedDB(finalVehicles).catch(() => {});
     }
     onData(finalVehicles);
@@ -1363,7 +1381,8 @@ export function subscribeToVehicles(
       console.warn(`Firestore subscription notice on ${path}:`, error);
       const localCached = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
       if (localCached && localCached.length > 0) {
-        onData(localCached);
+        const { merged } = dedupeAndMergeVehicles(localCached);
+        onData(merged);
       }
       if (onError) onError(error);
     }
@@ -1532,20 +1551,49 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
 
 export async function saveVehicleToFirestore(vehicle: Vehicle, skipNotification = false): Promise<void> {
   const path = 'vehicles';
-  const docId = String(vehicle.id || Date.now());
   const activeCompany = getActiveCompanyId();
-  backupVehiclesToIndexedDB([vehicle]).catch(() => {});
+  const syncedBroker = (vehicle.transporterName || vehicle.brokerName || '').trim();
+  const cleanReg = (vehicle.registrationNumber || '').trim().toUpperCase();
+  const normPlate = normalizeVehiclePlate(cleanReg);
+
+  // Check if a vehicle with this registration plate already exists in local cache; if so, move/merge it instead of copying
+  let resolvedVehicle: Vehicle = {
+    ...vehicle,
+    registrationNumber: cleanReg,
+    transporterName: syncedBroker,
+    brokerName: syncedBroker,
+    id: Number(vehicle.id || getDeterministicVehicleId(cleanReg))
+  };
+
+  try {
+    const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+    const { merged, removedIds } = dedupeAndMergeVehicles([...liveVehicles, resolvedVehicle]);
+    const matched = merged.find(v => normalizeVehiclePlate(v.registrationNumber) === normPlate);
+    if (matched) {
+      resolvedVehicle = matched;
+    }
+    safeAppStorage.setJSON('dpl_live_vehicles', merged);
+    safeAppStorage.setJSON('dpl_vehicles_data', merged);
+    removedIds.forEach(dupId => {
+      if (Number(dupId) !== Number(resolvedVehicle.id)) {
+        deleteDoc(doc(db, path, String(dupId))).catch(() => {});
+      }
+    });
+  } catch (_) {}
+
+  const docId = String(resolvedVehicle.id || Date.now());
+  backupVehiclesToIndexedDB([resolvedVehicle]).catch(() => {});
   try {
     const payload = sanitizeForFirestore({
-      ...vehicle,
-      companyId: (vehicle as any).companyId || activeCompany,
+      ...resolvedVehicle,
+      companyId: (resolvedVehicle as any).companyId || resolvedVehicle.operatingCompany || activeCompany,
       id: Number(docId),
       createdBy: auth.currentUser?.uid || 'guest',
       updatedAt: new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload);
     if (!skipNotification) {
-      dispatchTransporterVehicleNotifications({ ...vehicle, id: Number(docId) }, null, true);
+      dispatchTransporterVehicleNotifications({ ...resolvedVehicle, id: Number(docId) }, null, true);
     }
   } catch (error) {
     console.warn(`Firestore saveVehicle warning:`, error);
@@ -1556,16 +1604,34 @@ export async function saveVehiclesBulkToFirestore(vehiclesList: Vehicle[]): Prom
   if (!vehiclesList || vehiclesList.length === 0) return;
   const path = 'vehicles';
   const activeCompany = getActiveCompanyId();
-  backupVehiclesToIndexedDB(vehiclesList).catch(() => {});
+
+  // Merge & deduplicate against existing fleet so Docks vehicles shifting to Truckit move cleanly without doubling
+  const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+  const { merged: deduplicatedAll, removedIds } = dedupeAndMergeVehicles([...liveVehicles, ...vehiclesList]);
+  safeAppStorage.setJSON('dpl_live_vehicles', deduplicatedAll);
+  safeAppStorage.setJSON('dpl_vehicles_data', deduplicatedAll);
+
+  const uploadedPlates = new Set(vehiclesList.map(v => normalizeVehiclePlate(v.registrationNumber)));
+  const vehiclesToWrite = deduplicatedAll.filter(v => uploadedPlates.has(normalizeVehiclePlate(v.registrationNumber)));
+
+  backupVehiclesToIndexedDB(deduplicatedAll).catch(() => {});
   try {
-    for (let i = 0; i < vehiclesList.length; i += 400) {
-      const chunk = vehiclesList.slice(i, i + 400);
+    // Delete any duplicate Firestore doc IDs that were consolidated into Truckit
+    for (const dupId of removedIds) {
+      deleteDoc(doc(db, path, String(dupId))).catch(() => {});
+    }
+
+    for (let i = 0; i < vehiclesToWrite.length; i += 400) {
+      const chunk = vehiclesToWrite.slice(i, i + 400);
       const batch = writeBatch(db);
       chunk.forEach((v, idx) => {
-        const docId = String(v.id || (Date.now() + i + idx));
+        const docId = String(v.id || getDeterministicVehicleId(v.registrationNumber) || (Date.now() + i + idx));
+        const syncedBroker = (v.transporterName || v.brokerName || '').trim();
         const payload = sanitizeForFirestore({
           ...v,
-          companyId: (v as any).companyId || activeCompany,
+          transporterName: syncedBroker,
+          brokerName: syncedBroker,
+          companyId: (v as any).companyId || v.operatingCompany || activeCompany,
           id: Number(docId) || v.id,
           createdBy: auth.currentUser?.uid || 'guest',
           updatedAt: new Date().toISOString()
@@ -1581,22 +1647,38 @@ export async function saveVehiclesBulkToFirestore(vehiclesList: Vehicle[]): Prom
 
 export async function updateVehicleInFirestore(vehicle: Vehicle): Promise<void> {
   const path = 'vehicles';
-  const docId = String(vehicle.id);
   const activeCompany = getActiveCompanyId();
+  const syncedBroker = (vehicle.transporterName || vehicle.brokerName || '').trim();
+  const updatedVeh: Vehicle = {
+    ...vehicle,
+    transporterName: syncedBroker,
+    brokerName: syncedBroker
+  };
   let prevVehicle: Vehicle | null = null;
   try {
     const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
-    prevVehicle = liveVehicles.find(v => Number(v.id) === Number(vehicle.id)) || null;
+    prevVehicle = liveVehicles.find(v => Number(v.id) === Number(updatedVeh.id)) || null;
+    const { merged, removedIds } = dedupeAndMergeVehicles(
+      liveVehicles.map(v => Number(v.id) === Number(updatedVeh.id) ? { ...v, ...updatedVeh } : v)
+    );
+    safeAppStorage.setJSON('dpl_live_vehicles', merged);
+    safeAppStorage.setJSON('dpl_vehicles_data', merged);
+    removedIds.forEach(dupId => {
+      if (Number(dupId) !== Number(updatedVeh.id)) {
+        deleteDoc(doc(db, path, String(dupId))).catch(() => {});
+      }
+    });
   } catch (_) {}
 
+  const docId = String(updatedVeh.id);
   try {
     const payload = sanitizeForFirestore({ 
-      ...vehicle, 
-      companyId: (vehicle as any).companyId || activeCompany,
+      ...updatedVeh, 
+      companyId: (updatedVeh as any).companyId || updatedVeh.operatingCompany || activeCompany,
       updatedAt: new Date().toISOString() 
     });
     await setDoc(doc(db, path, docId), payload, { merge: true });
-    const mergedVehicle = prevVehicle ? { ...prevVehicle, ...vehicle } : vehicle;
+    const mergedVehicle = prevVehicle ? { ...prevVehicle, ...updatedVeh } : updatedVeh;
     dispatchTransporterVehicleNotifications(mergedVehicle, prevVehicle, false);
   } catch (error) {
     console.warn(`Firestore updateVehicle warning:`, error);
@@ -1606,9 +1688,240 @@ export async function updateVehicleInFirestore(vehicle: Vehicle): Promise<void> 
 export async function deleteVehicleFromFirestore(vehicleId: number | string): Promise<void> {
   const path = 'vehicles';
   try {
+    const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+    const filtered = liveVehicles.filter(v => String(v.id) !== String(vehicleId));
+    safeAppStorage.setJSON('dpl_live_vehicles', filtered);
+    safeAppStorage.setJSON('dpl_vehicles_data', filtered);
+  } catch (_) {}
+  try {
     await deleteDoc(doc(db, path, String(vehicleId)));
   } catch (error) {
     console.warn(`Firestore deleteVehicle warning:`, error);
+  }
+}
+
+/**
+ * Looks up a driver by CNIC number across the saved Drivers database (`dpl_live_drivers`),
+ * historical Cases (`dpl_live_cases` / `dpl_cases_data`), and Vehicles (`dpl_live_vehicles`)
+ * so typing a Driver CNIC automatically pulls the driver's Name, Contact, and Front/Back CNIC images from backup.
+ */
+export function lookupDriverByCnic(cnicInput: string): {
+  name: string;
+  contact: string;
+  cnic: string;
+  cnicFrontUrl?: string;
+  cnicFrontName?: string;
+  cnicBackUrl?: string;
+  cnicBackName?: string;
+} | null {
+  const cleanDigits = (cnicInput || '').replace(/[^0-9]/g, '');
+  if (cleanDigits.length < 13) return null;
+
+  // 1. Check dedicated Drivers backup (`dpl_live_drivers`)
+  try {
+    const drivers = safeAppStorage.getJSON<Driver[]>('dpl_live_drivers', []) || [];
+    const found = drivers.find(d => (d.cnic || '').replace(/[^0-9]/g, '') === cleanDigits);
+    if (found && found.name) {
+      return {
+        name: found.name,
+        contact: found.contact || '',
+        cnic: found.cnic,
+        cnicFrontUrl: found.cnicFrontUrl,
+        cnicFrontName: found.cnicFrontName || 'Driver_CNIC_Front (Backup)',
+        cnicBackUrl: found.cnicBackUrl,
+        cnicBackName: found.cnicBackName || 'Driver_CNIC_Back (Backup)',
+      };
+    }
+  } catch (_) {}
+
+  // 2. Check historical Cases (`dpl_live_cases` and `dpl_cases_data`)
+  try {
+    const liveCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []) || [];
+    const cachedCases = safeAppStorage.getJSON<Case[]>('dpl_cases_data', []) || [];
+    const allCases = [...liveCases, ...cachedCases];
+    for (const c of allCases) {
+      const va = c.vehicleAssignment;
+      if (va && (va.driverCnic || '').replace(/[^0-9]/g, '') === cleanDigits && va.driverName) {
+        return {
+          name: va.driverName,
+          contact: va.driverContact || '',
+          cnic: va.driverCnic || cnicInput,
+          cnicFrontUrl: va.driverCnicFrontUrl || va.driverCnicUrl,
+          cnicFrontName: va.driverCnicFrontName || va.driverCnicName || 'Driver_CNIC_Front (Backup)',
+          cnicBackUrl: va.driverCnicBackUrl,
+          cnicBackName: va.driverCnicBackName || 'Driver_CNIC_Back (Backup)',
+        };
+      }
+      // Also check additionalVehicles in case of multi-vehicle assignments
+      if (Array.isArray(va?.additionalVehicles)) {
+        for (const av of va!.additionalVehicles) {
+          if ((av.driverCnic || '').replace(/[^0-9]/g, '') === cleanDigits && av.driverName) {
+            return {
+              name: av.driverName,
+              contact: av.driverContact || '',
+              cnic: av.driverCnic || cnicInput,
+              cnicFrontUrl: av.driverCnicFrontUrl || av.driverCnicUrl,
+              cnicFrontName: av.driverCnicFrontName || av.driverCnicName || 'Driver_CNIC_Front (Backup)',
+              cnicBackUrl: av.driverCnicBackUrl,
+              cnicBackName: av.driverCnicBackName || 'Driver_CNIC_Back (Backup)',
+            };
+          }
+        }
+      }
+    }
+  } catch (_) {}
+
+  // 3. Check registered Vehicles list for matching driverCnic
+  try {
+    const vehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []) || [];
+    const vMatch = vehicles.find(v => (v.driverCnic || '').replace(/[^0-9]/g, '') === cleanDigits && v.driverName);
+    if (vMatch && vMatch.driverName) {
+      return {
+        name: vMatch.driverName,
+        contact: vMatch.driverContact || '',
+        cnic: vMatch.driverCnic || cnicInput,
+        cnicFrontUrl: vMatch.driverCnicDoc,
+        cnicFrontName: vMatch.driverCnicDocName || 'Driver_CNIC_Front (Backup)',
+      };
+    }
+  } catch (_) {}
+
+  return null;
+}
+
+/**
+ * Saves/updates a driver in the global Driver Backup (`drivers` collection + `dpl_live_drivers`)
+ * whenever a driver is assigned or updated in workflow.
+ */
+export async function upsertDriverBackupFromWorkflow(driverData: {
+  driverCnic?: string;
+  driverName?: string;
+  driverContact?: string;
+  driverCnicFrontUrl?: string;
+  driverCnicFrontName?: string;
+  driverCnicBackUrl?: string;
+  driverCnicBackName?: string;
+  vehiclePlate?: string;
+  transporterName?: string;
+}): Promise<void> {
+  const cleanDigits = (driverData.driverCnic || '').replace(/[^0-9]/g, '');
+  if (cleanDigits.length < 13 || !driverData.driverName) return;
+
+  const docId = `drv_${cleanDigits}`;
+  let existing: Partial<Driver> = {};
+  try {
+    const drivers = safeAppStorage.getJSON<Driver[]>('dpl_live_drivers', []) || [];
+    const match = drivers.find(d => d.id === docId || (d.cnic || '').replace(/[^0-9]/g, '') === cleanDigits);
+    if (match) existing = match;
+  } catch (_) {}
+
+  const record: Driver = {
+    id: existing.id || docId,
+    name: driverData.driverName.trim(),
+    cnic: driverData.driverCnic!.trim(),
+    contact: (driverData.driverContact || existing.contact || '').trim(),
+    licenseNumber: existing.licenseNumber || 'N/A',
+    status: existing.status || 'AVAILABLE',
+    transporterName: driverData.transporterName || existing.transporterName || 'Truckit Fleet',
+    assignedVehicleNo: driverData.vehiclePlate || existing.assignedVehicleNo,
+    cnicFrontUrl: driverData.driverCnicFrontUrl || existing.cnicFrontUrl,
+    cnicFrontName: driverData.driverCnicFrontName || existing.cnicFrontName,
+    cnicBackUrl: driverData.driverCnicBackUrl || existing.cnicBackUrl,
+    cnicBackName: driverData.driverCnicBackName || existing.cnicBackName,
+    createdAt: existing.createdAt || new Date().toISOString().split('T')[0],
+  };
+
+  await saveDriverToFirestore(record);
+}
+
+/**
+ * Records or updates a trip in the assigned vehicle's `tripsHistory` and syncs any newly uploaded
+ * Vehicle Registration Book or Owner ID Card back to the master Vehicle record.
+ */
+export async function recordVehicleTripFromCase(shipmentCase: Case): Promise<void> {
+  const va: any = shipmentCase.vehicleAssignment || {};
+  const wfVeh: any = shipmentCase.workflowDetails?.['Vehicle Assignment'] || {};
+  const firstCntr: any = shipmentCase.containers?.[0] || {};
+
+  const primaryPlate = va.vehicleNo || wfVeh.assignedVehicleNo || firstCntr.vehicleNo || '';
+  if (!primaryPlate && (!Array.isArray(va.additionalVehicles) || va.additionalVehicles.length === 0)) return;
+
+  const assignments = [
+    {
+      vehicleNo: primaryPlate,
+      driverName: va.driverName || wfVeh.driverName || firstCntr.driverName,
+      driverCnic: va.driverCnic || wfVeh.driverCnic || firstCntr.driverCnic,
+      driverContact: va.driverContact || wfVeh.driverContact || firstCntr.driverContact,
+      registrationBookUrl: va.registrationBookUrl || wfVeh.registrationBookUrl,
+      registrationBookName: va.registrationBookName || wfVeh.registrationBookName,
+      ownerCnicUrl: va.ownerCnicUrl || wfVeh.ownerCnicUrl,
+      ownerCnicName: va.ownerCnicName || wfVeh.ownerCnicName,
+      allocationDate: va.allocationDate || wfVeh.date,
+    },
+    ...(va.additionalVehicles || []).map((av: any) => ({
+      vehicleNo: av.vehicleNo,
+      driverName: av.driverName,
+      driverCnic: av.driverCnic,
+      driverContact: av.driverContact,
+      registrationBookUrl: av.registrationBookUrl,
+      registrationBookName: av.registrationBookName,
+      ownerCnicUrl: av.ownerCnicUrl,
+      ownerCnicName: av.ownerCnicName,
+      allocationDate: va.allocationDate || wfVeh.date,
+    }))
+  ];
+
+  const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []) || [];
+  const caseDisplayNo = shipmentCase.caseNo || shipmentCase.caseNumber || 'N/A';
+
+  for (const item of assignments) {
+    const plate = (item.vehicleNo || '').trim();
+    if (!plate) continue;
+    const normPlate = normalizeVehiclePlate(plate);
+    const matched = liveVehicles.find(v => normalizeVehiclePlate(v.registrationNumber) === normPlate);
+    if (!matched) continue;
+
+    const containerNumbers = Array.isArray(shipmentCase.containers) && shipmentCase.containers.length > 0
+      ? shipmentCase.containers.map(c => c.number).filter(Boolean).join(', ')
+      : (shipmentCase.containerNumber || 'N/A');
+
+    const tripEntry = {
+      id: `TRIP-${caseDisplayNo}-${normPlate}`,
+      caseNo: caseDisplayNo,
+      date: item.allocationDate || shipmentCase.date || new Date().toISOString().split('T')[0],
+      containerNumber: containerNumbers,
+      driverName: item.driverName || matched.driverName || 'N/A',
+      driverCnic: item.driverCnic || matched.driverCnic || '',
+      driverPhone: item.driverContact || matched.driverContact || '',
+      importerName: (shipmentCase as any).importerName || shipmentCase.importer || (shipmentCase as any).consignee || 'N/A',
+      clientName: shipmentCase.clientName || 'N/A',
+      route: `${shipmentCase.pol || 'Karachi'} ➔ ${shipmentCase.pod || 'Destination'}`,
+      status: `${shipmentCase.status || 'In Transit'} (${caseDisplayNo})`
+    };
+
+    const existingTrips = Array.isArray(matched.tripsHistory) ? [...matched.tripsHistory] : [];
+    const existingIdx = existingTrips.findIndex(
+      t => t.id === tripEntry.id || t.caseNo === caseDisplayNo || (t.status && t.status.includes(caseDisplayNo))
+    );
+    if (existingIdx >= 0) {
+      existingTrips[existingIdx] = { ...existingTrips[existingIdx], ...tripEntry };
+    } else {
+      existingTrips.unshift(tripEntry);
+    }
+
+    const updatedVehicle: Vehicle = {
+      ...matched,
+      tripsHistory: existingTrips,
+      driverName: item.driverName || matched.driverName,
+      driverCnic: item.driverCnic || matched.driverCnic,
+      driverContact: item.driverContact || matched.driverContact,
+      registrationBook: matched.registrationBook || item.registrationBookUrl,
+      registrationBookName: matched.registrationBookName || item.registrationBookName,
+      ownerIdCardUrl: matched.ownerIdCardUrl || item.ownerCnicUrl,
+      ownerIdCardName: matched.ownerIdCardName || item.ownerCnicName,
+    };
+
+    await updateVehicleInFirestore(updatedVehicle);
   }
 }
 
@@ -2071,9 +2384,9 @@ export async function updateNotificationInFirestore(notif: AppNotification): Pro
   const docId = String((notif as any)._docId || numId);
   const nowIso = new Date().toISOString();
   const isResolved =
-    notif.approvalData?.status === 'APPROVED' ||
-    notif.approvalData?.status === 'REJECTED' ||
-    notif.actionStatus === 'COMPLETED';
+    (notif.approvalData as any)?.status === 'APPROVED' ||
+    (notif.approvalData as any)?.status === 'REJECTED' ||
+    (notif as any).actionStatus === 'COMPLETED';
   const payload = sanitizeForFirestore({
     ...notif,
     read: isResolved ? true : Boolean(notif.read),

@@ -1041,7 +1041,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                       </span>
                     </div>
                     <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-                      Yeh logo <strong>Splash Screen</strong>, <strong>Login Screen</strong>, aur main app portal header par nazar aayega. Transparent PNG ya SVG file upload karein.
+                      This logo is displayed on the <strong>Splash Screen</strong>, <strong>Login Screen</strong>, and main portal header. Please upload a transparent PNG or SVG file.
                     </p>
 
                     <input
@@ -1111,7 +1111,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                       </span>
                     </div>
                     <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-                      Jo bhi SVG (ya PNG) file yahan upload ki jayegi, wahi browser tab ka official <strong>Favicon icon</strong> aur mobile/desktop app install shortcut icon ban jayega.
+                      Any SVG (or PNG) file uploaded here will serve as the official browser tab <strong>Favicon icon</strong> and mobile/desktop application shortcut icon.
                     </p>
 
                     <input
@@ -1205,7 +1205,7 @@ export const GroupAdminManagementModal: React.FC<GroupAdminManagementModalProps>
                       </span>
                     </div>
                     <p className="text-xs text-gray-400 mb-4 leading-relaxed">
-                      Yeh logo koi bhi <strong>Document generate karne par</strong> (Client Ledger PDF, Commercial Invoice, Payment Receipt, Case Dossier, Delivery Order, NOC) official circular letterhead emblem mein print hoga.
+                      This logo is printed inside the official circular letterhead emblem whenever any <strong>official document is generated</strong> (Client Ledger PDF, Commercial Invoice, Payment Receipt, Case Dossier, Delivery Order, or NOC).
                     </p>
 
                     <input

@@ -1935,7 +1935,10 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     logActivity(`${entry.type}: ${entry.reference} - PKR ${entry.amount.toLocaleString()} for ${entry.party}`, 'FINANCE');
     
     // Live finance notification dispatch
-    notifyLiveFinanceTransaction(entry).catch(() => {});
+    notifyLiveFinanceTransaction({
+      ...entry,
+      direction: entry.type === 'INCOME' || entry.type === 'RECEIVABLE' ? 'RECEIVED' : 'PAID'
+    } as any).catch(() => {});
 
     setShowAddModal(false);
     setIsOtherClient(false);
@@ -2349,7 +2352,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             requireInteractiveAuthIfMissingToken: false
           });
           setLedgerEmailLogs(getMonthlyLedgerEmailLogs());
-          console.log(`Auto-dispatched 1st-of-month ledger for ${cName} to ${clientEmail}:`, logItem.status);
+          console.log(`Auto-dispatched 1st-of-month ledger for ${cName} to ${clientEmail}:`, (logItem as any).status || logItem.log?.status);
         } catch (e) {
           console.warn(`Auto-dispatch notice for ${cName}:`, e);
         }
@@ -6551,7 +6554,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     FBR & Corporate Tax Compliance
                   </span>
                   <span className="text-xs text-gray-400 font-mono">
-                    NTN: {branding.ntn || activeCompany?.ntn || 'Registered Corporate Entity'}
+                    NTN: {(branding as any).ntn || (activeCompany as any)?.ntn || 'Registered Corporate Entity'}
                   </span>
                 </div>
                 <h3 className="text-base sm:text-lg font-bold text-white">

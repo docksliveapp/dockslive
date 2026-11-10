@@ -216,23 +216,23 @@ export function exportVehiclesToExcel(vehicles: Vehicle[]) {
 
   const headers = [
     'Sr No',
-    'Vehicle Registration Number',
-    `${prefix} Serial No`,
-    'Category',
-    'Type',
-    'Size',
-    'Weight Capacity',
-    'Engine Number',
-    'Chassis Number',
-    'Transporter / Fleet Owner',
-    'Broker Name',
-    'Driver Name',
-    'Driver CNIC',
-    'Driver Contact',
-    'Registration Date',
-    'Validity Expiry Date',
-    'Tracking Status',
-    'Current Trip Status'
+    'VEHICLE NO.',
+    'CHASSIS NO.',
+    'ENGINE NO.',
+    'MAKER',
+    'MODEL',
+    'TRANSPORTER NAME',
+    'BROKER NAME',
+    'REGISTRATION DATE',
+    'VALIDITY EXPIRY (6 MONTHS)',
+    'COMPANY',
+    'CUSTOMS 6M STATUS',
+    'REG BOOK',
+    'OWNER ID CARD',
+    'DRIVER NAME',
+    'DRIVER CNIC',
+    'DRIVER CONTACT',
+    'TRIPS COUNT'
   ];
 
   const sheetData: any[][] = [
@@ -241,55 +241,57 @@ export function exportVehiclesToExcel(vehicles: Vehicle[]) {
     [`Operations: ${activeComp.address || 'Office No. 14-B, 1st Floor, State Life Bldg No. 7, G-Allana Road Tower, Karachi'}`],
     [`Contact: ${activeComp.phone || '+92-21-32330103'} | Web: ${activeComp.web || 'www.dockspk.com'}`],
     [],
-    ['PAKISTAN CUSTOMS BONDED FLEET - MASTER VEHICLE REGISTRY'],
-    [`Export Date: ${today}`, `Total Vehicles Active: ${vehicles.length}`, `Status: Customs Transit Approved Fleet`],
+    ['PAKISTAN CUSTOMS BONDED FLEET - MASTER VEHICLE REGISTRY (SHARED DATABASE)'],
+    [`Export Date: ${today}`, `Total Vehicles: ${vehicles.length}`, `Customs Rule: 6-Month Registration Validity`],
     [],
     headers
   ];
 
   vehicles.forEach((v, idx) => {
+    const transporter = v.transporterName || v.brokerName || '';
+    const companyDisplay = v.companyName || (v.operatingCompany === 'truckit' ? 'TRUCKIT PVT LTD' : v.operatingCompany === 'docks' ? 'DOCKS PVT LTD' : (v.operatingCompany || 'TRUCKIT PVT LTD').toUpperCase());
     sheetData.push([
       idx + 1,
       v.registrationNumber || '',
-      v.dplSerial || '',
-      v.category || '',
-      v.type || '',
-      v.size || '',
-      v.weightCapacity || '',
-      v.engineNo || '',
       v.chassisNo || '',
-      v.transporterName || '',
-      v.brokerName || v.transporterName || '',
+      v.engineNo || '',
+      v.make || '',
+      v.model || '',
+      transporter,
+      transporter,
+      v.registrationDate || '',
+      v.validationExpiryDate || '',
+      companyDisplay,
+      v.status || 'AVAILABLE',
+      v.registrationBook ? 'Uploaded' : 'Missing',
+      v.ownerIdCardUrl ? 'Uploaded' : 'Missing',
       v.driverName || '',
       v.driverCnic || '',
       v.driverContact || '',
-      v.createdAt || '',
-      v.validationExpiryDate || '',
-      v.isOnline ? 'Online At Station' : 'Offline',
-      v.status || 'AVAILABLE'
+      (v.tripsHistory || []).length
     ]);
   });
 
   const ws = XLSX.utils.aoa_to_sheet(sheetData);
   ws['!cols'] = [
     { wch: 8 },  // Sr
-    { wch: 22 }, // Reg No
-    { wch: 22 }, // DPL Serial
-    { wch: 18 }, // Category
-    { wch: 16 }, // Type
-    { wch: 12 }, // Size
-    { wch: 18 }, // Weight
-    { wch: 20 }, // Engine
-    { wch: 20 }, // Chassis
-    { wch: 30 }, // Transporter
-    { wch: 26 }, // Broker
-    { wch: 24 }, // Driver
-    { wch: 20 }, // Driver CNIC
-    { wch: 18 }, // Driver Contact
-    { wch: 16 }, // Reg Date
-    { wch: 18 }, // Expiry Date
-    { wch: 18 }, // Tracking
-    { wch: 18 }  // Status
+    { wch: 20 }, // VEHICLE NO.
+    { wch: 24 }, // CHASSIS NO.
+    { wch: 20 }, // ENGINE NO.
+    { wch: 16 }, // MAKER
+    { wch: 14 }, // MODEL
+    { wch: 30 }, // TRANSPORTER NAME
+    { wch: 30 }, // BROKER NAME
+    { wch: 18 }, // REGISTRATION DATE
+    { wch: 22 }, // VALIDITY EXPIRY
+    { wch: 22 }, // COMPANY
+    { wch: 18 }, // STATUS
+    { wch: 14 }, // REG BOOK
+    { wch: 16 }, // OWNER ID
+    { wch: 22 }, // DRIVER NAME
+    { wch: 20 }, // DRIVER CNIC
+    { wch: 18 }, // DRIVER CONTACT
+    { wch: 14 }  // TRIPS COUNT
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Fleet Master');
@@ -308,23 +310,23 @@ export function generateVehiclesExcelBuffer(vehicles: Vehicle[]): { buffer: Arra
 
   const headers = [
     'Sr No',
-    'Vehicle Registration Number',
-    `${prefix} Serial No`,
-    'Category',
-    'Type',
-    'Size',
-    'Weight Capacity',
-    'Engine Number',
-    'Chassis Number',
-    'Transporter / Fleet Owner',
-    'Broker Name',
-    'Driver Name',
-    'Driver CNIC',
-    'Driver Contact',
-    'Registration Date',
-    'Validity Expiry Date',
-    'Tracking Status',
-    'Current Trip Status'
+    'VEHICLE NO.',
+    'CHASSIS NO.',
+    'ENGINE NO.',
+    'MAKER',
+    'MODEL',
+    'TRANSPORTER NAME',
+    'BROKER NAME',
+    'REGISTRATION DATE',
+    'VALIDITY EXPIRY (6 MONTHS)',
+    'COMPANY',
+    'CUSTOMS 6M STATUS',
+    'REG BOOK',
+    'OWNER ID CARD',
+    'DRIVER NAME',
+    'DRIVER CNIC',
+    'DRIVER CONTACT',
+    'TRIPS COUNT'
   ];
 
   const sheetData: any[][] = [
@@ -333,55 +335,57 @@ export function generateVehiclesExcelBuffer(vehicles: Vehicle[]): { buffer: Arra
     [`Operations: ${activeComp.address || 'Office No. 14-B, 1st Floor, State Life Bldg No. 7, G-Allana Road Tower, Karachi'}`],
     [`Contact: ${activeComp.phone || '+92-21-32330103'} | Web: ${activeComp.web || 'www.dockspk.com'}`],
     [],
-    ['PAKISTAN CUSTOMS BONDED FLEET - MASTER VEHICLE REGISTRY'],
-    [`Export Date: ${today}`, `Total Vehicles Active: ${vehicles.length}`, `Status: Customs Transit Approved Fleet`],
+    ['PAKISTAN CUSTOMS BONDED FLEET - MASTER VEHICLE REGISTRY (SHARED DATABASE)'],
+    [`Export Date: ${today}`, `Total Vehicles: ${vehicles.length}`, `Customs Rule: 6-Month Registration Validity`],
     [],
     headers
   ];
 
   vehicles.forEach((v, idx) => {
+    const transporter = v.transporterName || v.brokerName || '';
+    const companyDisplay = v.companyName || (v.operatingCompany === 'truckit' ? 'TRUCKIT PVT LTD' : v.operatingCompany === 'docks' ? 'DOCKS PVT LTD' : (v.operatingCompany || 'TRUCKIT PVT LTD').toUpperCase());
     sheetData.push([
       idx + 1,
       v.registrationNumber || '',
-      v.dplSerial || '',
-      v.category || '',
-      v.type || '',
-      v.size || '',
-      v.weightCapacity || '',
-      v.engineNo || '',
       v.chassisNo || '',
-      v.transporterName || '',
-      v.brokerName || '',
+      v.engineNo || '',
+      v.make || '',
+      v.model || '',
+      transporter,
+      transporter,
+      v.registrationDate || '',
+      v.validationExpiryDate || '',
+      companyDisplay,
+      v.status || 'AVAILABLE',
+      v.registrationBook ? 'Uploaded' : 'Missing',
+      v.ownerIdCardUrl ? 'Uploaded' : 'Missing',
       v.driverName || '',
       v.driverCnic || '',
       v.driverContact || '',
-      v.registrationDate || '',
-      v.validationExpiryDate || '',
-      v.tracker ? `${v.tracker.provider} (${v.tracker.paymentStatus})` : 'Unassigned',
-      v.status || ''
+      (v.tripsHistory || []).length
     ]);
   });
 
   const ws = XLSX.utils.aoa_to_sheet(sheetData);
   ws['!cols'] = [
     { wch: 8 },  // Sr
-    { wch: 22 }, // Reg No
-    { wch: 22 }, // DPL Serial
-    { wch: 18 }, // Category
-    { wch: 16 }, // Type
-    { wch: 12 }, // Size
-    { wch: 18 }, // Weight
-    { wch: 20 }, // Engine
-    { wch: 20 }, // Chassis
-    { wch: 30 }, // Transporter
-    { wch: 26 }, // Broker
-    { wch: 24 }, // Driver
-    { wch: 20 }, // Driver CNIC
-    { wch: 18 }, // Driver Contact
-    { wch: 16 }, // Reg Date
-    { wch: 18 }, // Expiry Date
-    { wch: 18 }, // Tracking
-    { wch: 18 }  // Status
+    { wch: 20 }, // VEHICLE NO.
+    { wch: 24 }, // CHASSIS NO.
+    { wch: 20 }, // ENGINE NO.
+    { wch: 16 }, // MAKER
+    { wch: 14 }, // MODEL
+    { wch: 30 }, // TRANSPORTER NAME
+    { wch: 30 }, // BROKER NAME
+    { wch: 18 }, // REGISTRATION DATE
+    { wch: 22 }, // VALIDITY EXPIRY
+    { wch: 22 }, // COMPANY
+    { wch: 18 }, // STATUS
+    { wch: 14 }, // REG BOOK
+    { wch: 16 }, // OWNER ID
+    { wch: 22 }, // DRIVER NAME
+    { wch: 20 }, // DRIVER CNIC
+    { wch: 18 }, // DRIVER CONTACT
+    { wch: 14 }  // TRIPS COUNT
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Fleet Master');
@@ -393,72 +397,54 @@ export function generateVehiclesExcelBuffer(vehicles: Vehicle[]): { buffer: Arra
 
 /**
  * Generates and downloads a clean Excel template (.xlsx) for Bulk Vehicle Import
+ * matching the exact Truckit Pvt Ltd & Docks Pvt Ltd Customs sheet structure.
  */
 export function downloadBulkVehicleExcelTemplate() {
   const wb = XLSX.utils.book_new();
+  const today = new Date().toISOString().split('T')[0];
 
   const sampleRows: any[][] = [
     [
-      'Vehicle Registration Number',
-      'Category (Bonded Carrier / Afghan Transit / TIR / Local Fleet)',
-      'Vehicle Type (Flatbed / Lowbed / Container Carrier / Box Truck)',
-      'Vehicle Size (20ft / 40ft / 45ft / Loose)',
-      'Weight Capacity (e.g. 35 Ton / 40 Ton)',
-      'Engine Number',
-      'Chassis Number',
-      'Transporter / Company Name',
-      'Broker Name',
-      'Validity Expiry Date (YYYY-MM-DD)'
+      'VEHICLE NO.',
+      'CHASSIS NO.',
+      'ENGINE NO.',
+      'MAKER',
+      'MODEL',
+      'TRANSPORTER NAME',
+      'REGISTRATION DATE',
+      'COMPANY'
     ],
     [
-      'TLP-101',
-      'Bonded Carrier',
-      'Flatbed',
-      '40ft',
-      '40 Ton',
-      'ENG-99881',
-      'CHS-44332',
-      'Al-Madina Goods Transport',
-      'Haji Aslam Broker',
-      '2026-12-31'
+      'TMA-133',
+      'CV450BN-50039',
+      'PE6-070941',
+      'NISSAN',
+      '1990',
+      'TRUCKIT CARGO',
+      today,
+      'TRUCKIT PVT LTD'
     ],
     [
-      'KBL-505',
-      'Afghan Transit',
-      'Lowbed',
-      '45ft',
-      '45 Ton',
-      'ENG-55443',
-      'CHS-88771',
-      'Khyber Logistics',
-      'Khyber Logistics',
-      '2026-11-30'
-    ],
-    [
-      'TIR-808',
-      'TIR',
-      'Container Carrier',
-      '40ft',
-      '38 Ton',
-      'ENG-11223',
-      'CHS-99001',
-      'Indus International',
-      'Direct Fleet',
-      '2027-01-15'
+      'JU-1929',
+      'KC-CW52AHN-10023',
+      'RF8-106448',
+      'NISSAN',
+      '1995',
+      'DOCKS LOGISTICS',
+      '07/05/2025',
+      'DOCKS PVT LTD'
     ]
   ];
 
   const ws = XLSX.utils.aoa_to_sheet(sampleRows);
   ws['!cols'] = [
-    { wch: 26 },
-    { wch: 22 },
+    { wch: 20 },
+    { wch: 24 },
     { wch: 20 },
     { wch: 16 },
-    { wch: 18 },
-    { wch: 18 },
-    { wch: 20 },
+    { wch: 14 },
     { wch: 30 },
-    { wch: 26 },
+    { wch: 22 },
     { wch: 24 }
   ];
 

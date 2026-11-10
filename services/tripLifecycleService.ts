@@ -250,6 +250,7 @@ export async function recordDriverTripLocationToActiveCases(params: {
     const transitStepKeys = getTransitStepKeysForCase(c);
     for (const stepKey of transitStepKeys) {
       const existingStep: CaseStepDetail = updatedWorkflow[stepKey] || {
+        status: stepKey,
         stepName: stepKey,
         completed: false
       };

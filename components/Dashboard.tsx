@@ -200,7 +200,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
       }
 
       // Filter out logs for cases that no longer exist after reset or deletion
-      const explicitCaseNum = String(item.caseNumber || '').trim().toUpperCase();
+      const explicitCaseNum = String((item as any).caseNumber || '').trim().toUpperCase();
       if (explicitCaseNum && !activeCaseNumbers.has(explicitCaseNum)) {
         return false;
       }

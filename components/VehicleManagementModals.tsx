@@ -15,7 +15,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { Vehicle, Transporter } from '../types';
-import { parseVehicleFile, parseTextOrCsvVehicles, ParsedVehicleRow } from '../services/documentParserService';
+import { parseVehicleFile, parseTextOrCsvVehicles, dedupeAndMergeVehicles } from '../services/documentParserService';
 import { downloadBulkVehicleExcelTemplate } from '../services/excelExportService';
 
 // ==========================================
@@ -38,6 +38,7 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
   const [csvText, setCsvText] = useState('');
   const [fileName, setFileName] = useState('');
   const [parsedRows, setParsedRows] = useState<Partial<Vehicle>[]>([]);
+  const [shiftedToTruckitCount, setShiftedToTruckitCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [detectedFormat, setDetectedFormat] = useState<string | null>(null);
@@ -49,12 +50,12 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
   };
 
   const handleDownloadSample = () => {
-    const sampleHeaders = 'RegistrationNumber,Category,Type,Size,Capacity,EngineNo,ChassisNo,TransporterBrokerName,ExpiryDate';
+    const sampleHeaders = 'VEHICLE NO.,CHASSIS NO.,ENGINE NO.,MAKER,MODEL,TRANSPORTER NAME,REGISTRATION DATE,COMPANY';
+    const today = new Date().toISOString().split('T')[0];
     const sampleData = [
       sampleHeaders,
-      'TLP-101,Bonded Carrier,Flatbed,40ft,40 Ton,ENG-99881,CHS-44332,Al-Madina Goods Transport,2026-12-31',
-      'KBL-505,Afghan Transit,Lowbed,45ft,45 Ton,ENG-55443,CHS-88771,Khyber Logistics,2026-11-30',
-      'TIR-808,TIR,Container Carrier,40ft,38 Ton,ENG-11223,CHS-99001,Indus International,2027-01-15'
+      `TMA-133,CV450BN-50039,PE6-070941,NISSAN,1990,TRUCKIT CARGO,${today},TRUCKIT PVT LTD`,
+      'JU-1929,KC-CW52AHN-10023,RF8-106448,NISSAN,1995,DOCKS LOGISTICS,07/05/2025,DOCKS PVT LTD',
     ].join('\n');
 
     const blob = new Blob([sampleData], { type: 'text/csv;charset=utf-8;' });
@@ -75,7 +76,10 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
         setError('No valid vehicle records could be extracted.');
       } else {
         setDetectedFormat('CSV_TEXT');
-        setParsedRows(rows);
+        const combined = [...parsedRows, ...rows] as Vehicle[];
+        const { merged } = dedupeAndMergeVehicles(combined);
+        setShiftedToTruckitCount(Math.max(0, combined.length - merged.length));
+        setParsedRows(merged);
       }
     } catch (err: any) {
       setError(`Failed to parse CSV: ${err.message || err}`);
@@ -83,27 +87,37 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setFileName(files.map(f => f.name).join(' + '));
     setError(null);
     setIsParsing(true);
 
     try {
-      const result = await parseVehicleFile(file);
-      if (result.error) {
-        setError(result.error);
-        setParsedRows([]);
-      } else if (result.rows.length === 0) {
-        setError(`No vehicle records could be identified in "${file.name}". Please ensure the file contains vehicle registration numbers (e.g. Registration No, Truck No, Plate No) or download our sample template.`);
-        setParsedRows([]);
+      let newlyParsed: Partial<Vehicle>[] = [];
+      let lastType: string | null = null;
+
+      for (const file of files) {
+        const result = await parseVehicleFile(file);
+        if (result.error) {
+          setError(result.error);
+        } else if (result.rows.length > 0) {
+          lastType = result.fileType;
+          newlyParsed = [...newlyParsed, ...result.rows];
+        }
+      }
+
+      if (newlyParsed.length === 0) {
+        setError(`No vehicle records could be identified in the uploaded file(s). Please ensure the sheet contains columns like VEHICLE NO., CHASSIS NO., ENGINE NO., MAKER, MODEL, TRANSPORTER NAME, REGISTRATION DATE, COMPANY.`);
       } else {
-        setDetectedFormat(result.fileType);
-        setParsedRows(result.rows);
+        setDetectedFormat(lastType);
+        const combined = [...parsedRows, ...newlyParsed] as Vehicle[];
+        const { merged } = dedupeAndMergeVehicles(combined);
+        setShiftedToTruckitCount(prev => prev + Math.max(0, combined.length - merged.length));
+        setParsedRows(merged);
       }
     } catch (err: any) {
       setError(`Failed to read file: ${err.message || err}`);
-      setParsedRows([]);
     } finally {
       setIsParsing(false);
       try { e.target.value = ''; } catch (_) {}
@@ -124,9 +138,12 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
     }
   };
 
+  const activeCount = parsedRows.filter(r => r.status !== 'EXPIRED').length;
+  const expiredCount = parsedRows.filter(r => r.status === 'EXPIRED').length;
+
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-start justify-center z-50 pt-3 sm:pt-6 pb-6 px-3 sm:px-4 overflow-y-auto animate-in fade-in">
-      <div className="glass-card w-full max-w-3xl rounded-2xl border border-white/10 overflow-hidden shadow-2xl bg-slate-950/95 flex flex-col max-h-[90vh] mb-6">
+      <div className="glass-card w-full max-w-5xl rounded-2xl border border-white/10 overflow-hidden shadow-2xl bg-slate-950/95 flex flex-col max-h-[92vh] mb-6">
         {/* Header */}
         <div className="p-5 border-b border-white/10 flex justify-between items-center bg-white/5">
           <div className="flex items-center gap-3">
@@ -134,8 +151,10 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
               <FileSpreadsheet size={22} />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white">Bulk Vehicle Fleet Import</h3>
-              <p className="text-xs text-gray-400">Full compatibility with Excel (.xlsx, .xls), Word (.docx), and CSV files</p>
+              <h3 className="text-lg font-bold text-white">Bulk Vehicle Fleet Import (Truckit & Docks Shared Database)</h3>
+              <p className="text-xs text-gray-400">
+                Supports VEHICLE NO., CHASSIS NO., ENGINE NO., MAKER, MODEL, TRANSPORTER NAME (= BROKER), REGISTRATION DATE (6M Customs Rule) & COMPANY
+              </p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-white/5">
@@ -147,10 +166,12 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
         <div className="p-6 space-y-5 overflow-y-auto flex-1 custom-scrollbar">
           {/* Action to download templates */}
           <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-            <div className="space-y-0.5">
-              <span className="text-xs font-bold text-emerald-300 block">Download Official Fleet Import Templates</span>
+            <div className="space-y-1">
+              <span className="text-xs font-bold text-emerald-300 block">Customs 6-Month Registration & Docks-to-Truckit Auto-Move Rules</span>
               <p className="text-[11px] text-emerald-200/80">
-                Standard fleet fields: Reg No, Category, Type, Size, Capacity, Engine, Chassis, Transporter/Broker, Expiry. (Drivers are assigned dynamically per case workflow).
+                • Registration Date within 6 months = <strong>ACTIVE</strong> | Older than 6 months or blank = <strong>EXPIRED</strong>.<br />
+                • Transporter Name automatically populates Broker Name.<br />
+                • If a vehicle appears in both <strong>DOCKS PVT LTD</strong> and <strong>TRUCKIT PVT LTD</strong>, it automatically moves to <strong>TRUCKIT PVT LTD</strong> (no duplicates).
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -177,6 +198,7 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
           <div className="border-2 border-dashed border-white/20 hover:border-emerald-500/50 rounded-2xl p-6 text-center transition-colors bg-white/[0.02]">
             <input
               type="file"
+              multiple
               accept=".xlsx, .xls, .xlsm, .docx, .csv, .txt, .tsv"
               onChange={handleFileUpload}
               className="hidden"
@@ -193,10 +215,10 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
               )}
               <div>
                 <span className="text-sm font-semibold text-white block">
-                  {fileName ? fileName : 'Upload Excel (.xlsx), Word (.docx), or CSV file'}
+                  {fileName ? `Loaded: ${fileName} (Click to add another sheet)` : 'Upload Truckit Pvt Ltd & Docks Pvt Ltd Excel (.xlsx) Files'}
                 </span>
                 <span className="text-xs text-gray-400 mt-1 block">
-                  Supports .xlsx, .xls, .docx tables/lists, and .csv with automatic column recognition
+                  You can select both Truckit and Docks Excel files together or one after another — duplicates automatically move to Truckit Pvt Ltd
                 </span>
               </div>
               {detectedFormat && (
@@ -211,7 +233,7 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
           <div className="space-y-2">
             <label className="text-xs text-gray-300 font-semibold block">Or Paste CSV / Tab-Delimited Vehicle Rows Directly:</label>
             <textarea
-              rows={3}
+              rows={2}
               value={csvText}
               onChange={(e) => {
                 setCsvText(e.target.value);
@@ -219,7 +241,7 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
                   parseCsvContent(e.target.value);
                 }
               }}
-              placeholder="TLP-101,Bonded Carrier,Flatbed,40ft,ENG-99881,CHS-44332,Naveed Goods,Al-Madina Goods,2026-12-31"
+              placeholder="TMA-133,CV450BN-50039,PE6-070941,NISSAN,1990,TRUCKIT CARGO,07/05/2026,TRUCKIT PVT LTD"
               className="w-full glass-input rounded-xl p-3 text-xs font-mono outline-none border border-white/10"
             />
           </div>
@@ -233,41 +255,101 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
 
           {/* Preview Table */}
           {parsedRows.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
-                  <CheckCircle size={14} /> Ready to Import: {parsedRows.length} Vehicles
-                </span>
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap justify-between items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
+                    <CheckCircle size={14} /> Ready to Import: {parsedRows.length} Unique Vehicles
+                  </span>
+                  <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
+                    Active (≤ 6 Months): {activeCount}
+                  </span>
+                  <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 font-semibold">
+                    Expired (&gt; 6 Months / Blank Date): {expiredCount}
+                  </span>
+                  {shiftedToTruckitCount > 0 && (
+                    <span className="text-[11px] px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-semibold">
+                      {shiftedToTruckitCount} Duplicate(s) Moved from Docks → Truckit
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setParsedRows([]);
+                    setFileName('');
+                    setShiftedToTruckitCount(0);
+                  }}
+                  className="text-[11px] text-gray-400 hover:text-rose-400 underline"
+                >
+                  Clear Loaded Rows
+                </button>
               </div>
-              <div className="max-h-48 overflow-y-auto border border-white/10 rounded-xl custom-scrollbar">
+              <div className="max-h-60 overflow-y-auto border border-white/10 rounded-xl custom-scrollbar">
                 <table className="w-full text-left text-xs text-gray-300">
-                  <thead className="bg-white/5 uppercase text-[10px] text-gray-400 sticky top-0">
+                  <thead className="bg-slate-900 uppercase text-[10px] text-gray-400 sticky top-0 z-10">
                     <tr>
-                      <th className="p-2.5">Vehicle Reg No</th>
-                      <th className="p-2.5">Category</th>
-                      <th className="p-2.5">Capacity / Specs</th>
-                      <th className="p-2.5">Transporter / Broker</th>
-                      <th className="p-2.5">Expiry</th>
+                      <th className="p-2.5">Vehicle No.</th>
+                      <th className="p-2.5">Chassis No. / Engine No.</th>
+                      <th className="p-2.5">Maker / Model</th>
+                      <th className="p-2.5">Transporter (= Broker)</th>
+                      <th className="p-2.5">Reg Date → 6M Expiry</th>
+                      <th className="p-2.5">Status</th>
+                      <th className="p-2.5">Company</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {parsedRows.slice(0, 15).map((row, idx) => (
-                      <tr key={idx} className="hover:bg-white/5">
-                        <td className="p-2.5 font-mono font-bold text-white">{row.registrationNumber}</td>
-                        <td className="p-2.5">{row.category} ({row.size})</td>
-                        <td className="p-2.5 text-gray-300">{row.weightCapacity || row.type || 'Standard'}</td>
-                        <td className="p-2.5">{row.brokerName || row.transporterName}</td>
-                        <td className="p-2.5 font-mono text-gray-400">{row.validationExpiryDate}</td>
-                      </tr>
-                    ))}
+                    {parsedRows.slice(0, 50).map((row, idx) => {
+                      const isExpired = row.status === 'EXPIRED';
+                      const isTruckit = row.operatingCompany === 'truckit' || (row.companyName || '').toUpperCase().includes('TRUCKIT');
+                      return (
+                        <tr key={idx} className="hover:bg-white/5">
+                          <td className="p-2.5 font-mono font-bold text-white">{row.registrationNumber}</td>
+                          <td className="p-2.5 font-mono text-[11px]">
+                            <div className="text-gray-200">{row.chassisNo || '—'}</div>
+                            <div className="text-gray-500">{row.engineNo || '—'}</div>
+                          </td>
+                          <td className="p-2.5">
+                            <span className="font-semibold text-white">{row.make || '—'}</span>
+                            {row.model ? <span className="text-gray-400 ml-1">({row.model})</span> : null}
+                          </td>
+                          <td className="p-2.5 text-gray-200">{row.transporterName || row.brokerName || '—'}</td>
+                          <td className="p-2.5 font-mono text-[11px]">
+                            {row.registrationDate ? (
+                              <div>
+                                <div className="text-gray-200">Reg: {row.registrationDate}</div>
+                                <div className="text-gray-500">Exp: {row.validationExpiryDate || '—'}</div>
+                              </div>
+                            ) : (
+                              <span className="text-rose-400 font-semibold">Blank Date (Expired)</span>
+                            )}
+                          </td>
+                          <td className="p-2.5">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              isExpired
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            }`}>
+                              {isExpired ? 'EXPIRED' : 'ACTIVE'}
+                            </span>
+                          </td>
+                          <td className="p-2.5">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              isTruckit
+                                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                                : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            }`}>
+                              {row.companyName || (isTruckit ? 'TRUCKIT PVT LTD' : 'DOCKS PVT LTD')}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
-              <p className="text-[11px] text-gray-400 text-center italic">
-                * Note: Driver details are not required during fleet registration; drivers are dynamically assigned when a case reaches Vehicle Assign workflow.
-              </p>
-              {parsedRows.length > 15 && (
-                <p className="text-[11px] text-gray-500 text-center">+ {parsedRows.length - 15} more records</p>
+              {parsedRows.length > 50 && (
+                <p className="text-[11px] text-gray-500 text-center">+ {parsedRows.length - 50} more vehicle records ready for import</p>
               )}
             </div>
           )}
@@ -287,7 +369,7 @@ export const BulkVehicleImportModal: React.FC<BulkVehicleImportModalProps> = ({
             className="px-5 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white flex items-center gap-1.5 transition-colors shadow-lg shadow-emerald-600/30"
           >
             <CheckCircle size={14} />
-            <span>Confirm & Import ({parsedRows.length} Vehicles)</span>
+            <span>Confirm & Sync Global Fleet ({parsedRows.length} Vehicles)</span>
           </button>
         </div>
       </div>

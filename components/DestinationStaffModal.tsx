@@ -372,7 +372,7 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
                       By Default Per Container Charges (PKR) — Payable to Karachi Head Office
                     </label>
                     <p className="text-[11px] text-gray-300 mt-0.5">
-                      Jitne container is destination staff ko assign honge, ye per-container charges automatically iske ledger mein add ho jayenge jo isne Karachi Head Office send karne honge (Internal Company Transaction).
+                      For every container assigned to this destination officer, these per-container charges are automatically posted to their ledger for remittance to the Karachi Head Office (Internal Company Transaction).
                     </p>
                   </div>
                   <div className="sm:w-52 shrink-0">

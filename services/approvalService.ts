@@ -834,7 +834,7 @@ export async function approveActionRequest(notification: AppNotification): Promi
     } catch (err) {
       console.warn("Could not execute NOC approval:", err);
     }
-  } else if (actionType === 'CONFIRM_TRANSPORTER_PAYMENT') {
+  } else if ((actionType as string) === 'CONFIRM_TRANSPORTER_PAYMENT') {
     const numId = Number(entityId);
     const amount = Number(notification.approvalData.amount || 0);
     const transporterName = notification.targetClientName || notification.approvalData.requestedBy || 'Transporter';

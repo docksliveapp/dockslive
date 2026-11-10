@@ -5,7 +5,7 @@ import { getActiveCompanyId } from './companyService';
 export interface CreateNotificationPayload {
   title: string;
   description: string;
-  details: string;
+  details?: string;
   type?: 'ALERT' | 'APPROVAL' | 'INFO' | 'ACTION' | 'SUCCESS';
   notificationSubType?: AppNotification['notificationSubType'];
   priority?: 'HIGH' | 'MEDIUM' | 'LOW';
@@ -25,6 +25,7 @@ export interface CreateNotificationPayload {
     [key: string]: any;
   };
   performedBy?: string;
+  performedByRole?: string;
   approvalData?: AppNotification['approvalData'];
 }
 

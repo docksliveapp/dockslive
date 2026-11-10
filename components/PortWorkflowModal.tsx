@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, Ship, Camera, ShieldCheck, CheckCircle2, 
   Truck, User, Phone, MapPin, Receipt, FileCheck, Download, AlertCircle, Save 
 } from 'lucide-react';
-import { Case, Container, CaseStatus } from '../types';
-import { saveCaseToFirestore } from '../services/dbService';
+import { Case, Container, CaseStatus, Vehicle } from '../types';
+import { saveCaseToFirestore, subscribeToVehicles, recordVehicleTripFromCase } from '../services/dbService';
+import { checkVehicleWorkflowReadiness } from '../services/documentParserService';
 import { compressAndPrepareFile, convertImageToPdf } from '../services/fileUtils';
 import { downloadCustomsDeliveryOrderPdf } from '../services/pdfExportService';
 import { PortMakeBillModal } from './PortMakeBillModal';
@@ -30,10 +31,21 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
   onSuccess
 }) => {
   const { customLogo, companyName } = useBranding();
+  const [liveVehicles, setLiveVehicles] = useState<Vehicle[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const unsub = subscribeToVehicles((list) => {
+      setLiveVehicles(list || []);
+    });
+    return () => unsub();
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const container: Container | undefined = targetCase.containers?.[0];
   const wfDetails: Record<string, any> = targetCase.workflowDetails || {};
+  const vehicleStep: any = wfDetails[CaseStatus.VEHICLE_ASSIGNMENT] || {};
   const loadingStep: any = wfDetails[CaseStatus.LOADING_PORT_PROCESSING] || {};
   const destStep: any = wfDetails[CaseStatus.DESTINATION_PORT_ARRIVAL] || {};
 
@@ -130,6 +142,35 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
       return;
     }
 
+    const assignedPlate =
+      container?.vehicleNo ||
+      vehicleStep.assignedVehicleNo ||
+      loadingStep.assignedVehicleNo ||
+      '';
+    const hasDriverFront = !!(
+      vehicleStep.driverCnicFrontUrl ||
+      loadingStep.driverCnicFrontUrl ||
+      targetCase.documents?.some((d: any) => /driver.*cnic.*front/i.test(`${d.name || ''} ${d.type || ''}`))
+    );
+    const hasDriverBack = !!(
+      vehicleStep.driverCnicBackUrl ||
+      loadingStep.driverCnicBackUrl ||
+      targetCase.documents?.some((d: any) => /driver.*cnic.*back/i.test(`${d.name || ''} ${d.type || ''}`))
+    );
+
+    const readiness = checkVehicleWorkflowReadiness(
+      assignedPlate,
+      liveVehicles,
+      hasDriverFront,
+      hasDriverBack
+    );
+    if (!readiness.ready) {
+      alert(
+        `⚠️ Case Completion / Dispatch Blocked:\n\n• ${readiness.errors.join('\n• ')}\n\nPlease ensure an active registered vehicle, Vehicle Registration Book, Vehicle Owner ID Card, and Driver ID Card (Front & Back) are completed before finishing this workflow.`
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const nowIso = new Date().toISOString();
@@ -208,6 +249,7 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
       };
 
       await saveCaseToFirestore(updatedCase);
+      await recordVehicleTripFromCase(updatedCase);
 
       const successText = isDestinationStaff
         ? `🎉 Case ${targetCase.caseNo} completed & permanently archived! Container unloaded & vehicle gated out.`

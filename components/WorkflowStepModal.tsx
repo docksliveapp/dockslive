@@ -64,6 +64,18 @@ import { LinerNvoccSteps } from './workflowSteps/LinerNvoccSteps';
 import { ImportExportSteps } from './workflowSteps/ImportExportSteps';
 import { enrichCaseWithTripTimings, expireDriverTripCredentialsOnGateOut } from '../services/tripLifecycleService';
 import { CaseTransitHistoryCard } from './CaseTransitHistoryCard';
+import { 
+  subscribeToVehicles, 
+  updateVehicleInFirestore, 
+  lookupDriverByCnic, 
+  upsertDriverBackupFromWorkflow, 
+  recordVehicleTripFromCase 
+} from '../services/dbService';
+import { 
+  normalizeVehiclePlate, 
+  evaluateVehicleRegistrationValidity, 
+  checkVehicleWorkflowReadiness 
+} from '../services/documentParserService';
 
 interface WorkflowStepModalProps {
   isOpen: boolean;
@@ -180,11 +192,25 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
     let canEdit = false;
 
-    // Loading Port Staff: Loading Port Processing & Shipping Line DO (when arranged by client)
+    // Vehicle Manager: Can assign and update vehicles in Step 4 (Vehicle Assignment)
+    if (rolesList.includes(UserRole.VEHICLE_MANAGER)) {
+      if (
+        stepIndex === 3 ||
+        stepStatus === CaseStatus.VEHICLE_ASSIGNMENT ||
+        stepStr.includes('vehicle') ||
+        stepStr.includes('transport')
+      ) {
+        canEdit = true;
+      }
+    }
+
+    // Loading Port Staff: Vehicle Assignment, Loading Port Processing & Shipping Line DO (when arranged by client)
     if (rolesList.includes(UserRole.LOADING_PORT_STAFF)) {
       if (
         stepIndex === 4 || 
         stepIndex === 3 || 
+        stepStatus === CaseStatus.VEHICLE_ASSIGNMENT ||
+        stepStr.includes('vehicle') ||
         stepStr.includes('loading') || 
         stepStr.includes('dispatch') || 
         stepStr.includes('wharfage') || 
@@ -375,40 +401,88 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
   const [billModalType, setBillModalType] = useState<'LOADING' | 'DESTINATION'>('LOADING');
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Load vehicles from storage if availableVehicles is empty
+  // Subscribe to live global vehicles so recently imported / updated vehicles are always available
+  const [liveFleetVehicles, setLiveFleetVehicles] = useState<Vehicle[]>([]);
+  const [driverBackupNotice, setDriverBackupNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = subscribeToVehicles((items) => {
+      if (Array.isArray(items) && items.length > 0) {
+        setLiveFleetVehicles(items);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Load vehicles from live subscription, props, or local storage
   const allVehicles = useMemo(() => {
+    if (liveFleetVehicles.length > 0) return liveFleetVehicles;
     if (availableVehicles && availableVehicles.length > 0) return availableVehicles;
+    const liveLocal = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+    if (liveLocal && liveLocal.length > 0) return liveLocal;
     return safeAppStorage.getJSON<Vehicle[]>('dpl_vehicles_data', []);
-  }, [availableVehicles]);
+  }, [liveFleetVehicles, availableVehicles]);
 
   // Check vehicle database match when assignedVehicleNo changes
   const matchedVehicle = useMemo(() => {
     if (!formData.assignedVehicleNo) return null;
-    const cleanInput = formData.assignedVehicleNo.trim().toUpperCase().replace(/\s+/g, '');
+    const cleanInput = normalizeVehiclePlate(formData.assignedVehicleNo);
     return allVehicles.find(v => 
-      v.registrationNumber.toUpperCase().replace(/\s+/g, '') === cleanInput
+      normalizeVehiclePlate(v.registrationNumber) === cleanInput
     ) || null;
   }, [formData.assignedVehicleNo, allVehicles]);
 
-  // Sync vehicle DB verification
+  // Sync vehicle DB verification & pre-uploaded Vehicle Registration Book + Owner ID Card
   useEffect(() => {
     if (matchedVehicle) {
-      const hasRegBook = !!matchedVehicle.registrationBook;
-      const hasCnic = !!matchedVehicle.driverCnic || !!matchedVehicle.photo;
       setFormData(prev => ({
         ...prev,
         vehicleVerifiedInDb: true,
-        registrationBookUrl: prev.registrationBookUrl || matchedVehicle.registrationBook,
-        registrationBookName: prev.registrationBookName || (matchedVehicle.registrationBook ? 'Vehicle Registration Book (Database)' : ''),
-        taxRenewalDate: prev.taxRenewalDate || matchedVehicle.validationStartDate || '',
+        registrationBookUrl: prev.registrationBookUrl || matchedVehicle.registrationBook || '',
+        registrationBookName: prev.registrationBookName || matchedVehicle.registrationBookName || (matchedVehicle.registrationBook ? 'Vehicle Registration Book (Fleet DB)' : ''),
+        ownerCnicUrl: prev.ownerCnicUrl || matchedVehicle.ownerIdCardUrl || '',
+        ownerCnicName: prev.ownerCnicName || matchedVehicle.ownerIdCardName || (matchedVehicle.ownerIdCardUrl ? 'Vehicle Owner ID Card (Fleet DB)' : ''),
+        taxRenewalDate: prev.taxRenewalDate || matchedVehicle.registrationDate || matchedVehicle.validationStartDate || '',
         taxExpiryDate: prev.taxExpiryDate || matchedVehicle.validationExpiryDate || '',
         driverName: prev.driverName || matchedVehicle.driverName || '',
         driverCnic: prev.driverCnic || matchedVehicle.driverCnic || ''
       }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        vehicleVerifiedInDb: false
+      }));
     }
   }, [matchedVehicle]);
 
-  // Validate vehicle registration against database
+  // Driver CNIC Backup Auto-Lookup: when user types Driver CNIC, auto-fill Name and Front/Back CNIC from backup if found
+  const handleDriverCnicChange = (cnicValue: string) => {
+    setFormData(prev => ({ ...prev, driverCnic: cnicValue }));
+    const cleanDigits = cnicValue.replace(/[^0-9]/g, '');
+    if (cleanDigits.length >= 13) {
+      const backupDriver = lookupDriverByCnic(cnicValue);
+      if (backupDriver) {
+        setFormData(prev => ({
+          ...prev,
+          driverCnic: cnicValue,
+          driverName: prev.driverName?.trim() ? prev.driverName : (backupDriver.name || prev.driverName),
+          driverCnicFrontUrl: prev.driverCnicFrontUrl || backupDriver.cnicFrontUrl || '',
+          driverCnicFrontName: prev.driverCnicFrontName || backupDriver.cnicFrontName || '',
+          driverCnicBackUrl: prev.driverCnicBackUrl || backupDriver.cnicBackUrl || '',
+          driverCnicBackName: prev.driverCnicBackName || backupDriver.cnicBackName || '',
+        }));
+        setDriverBackupNotice(
+          `Driver "${backupDriver.name}" found in backup!${backupDriver.cnicFrontUrl && backupDriver.cnicBackUrl ? ' Front & Back CNIC images auto-loaded from backup.' : ' Driver name auto-filled from backup.'}`
+        );
+      } else {
+        setDriverBackupNotice(null);
+      }
+    } else {
+      setDriverBackupNotice(null);
+    }
+  };
+
+  // Validate vehicle registration against database (including 6-month Customs rule)
   const handleValidateVehicle = (vehNoToCheck?: string) => {
     const rawNo = (vehNoToCheck || formData.assignedVehicleNo || '').trim();
     if (!rawNo) {
@@ -416,50 +490,38 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       return;
     }
 
-    const cleanInput = rawNo.toUpperCase().replace(/\s+/g, '');
+    const cleanInput = normalizeVehiclePlate(rawNo);
     const found = allVehicles.find(v => 
-      v.registrationNumber.toUpperCase().replace(/\s+/g, '') === cleanInput
+      normalizeVehiclePlate(v.registrationNumber) === cleanInput
     );
 
     if (!found) {
       setVehicleValidationResult({
         valid: false,
-        reason: `Vehicle "${rawNo}" was not found in our registered fleet list. Please search from registered vehicles list or register the vehicle first.`
+        reason: `Vehicle "${rawNo}" is NOT registered in our Fleet List. Only vehicles added in the Fleet List can be assigned to a case workflow.`
       });
       setShowVehicleValidateModal(true);
       return;
     }
 
-    const stat = (found.status || 'Active').toLowerCase();
-    if (stat === 'expired' || stat === 'cancelled' || stat === 'suspended' || stat === 'inactive') {
+    const validity = evaluateVehicleRegistrationValidity(
+      found.lastRenewalDate || found.registrationDate,
+      found.validationExpiryDate || found.registrationExpiryDate
+    );
+    const stat = (found.status || 'AVAILABLE').toUpperCase();
+    if (stat === 'EXPIRED' || stat === 'CANCELLED' || stat === 'SUSPENDED' || stat === 'INACTIVE' || validity.isExpired) {
       setVehicleValidationResult({
         valid: false,
-        reason: `Vehicle ${found.registrationNumber} status is ${found.status.toUpperCase()}. Expired or cancelled vehicles cannot be assigned.`,
+        reason: `Vehicle ${found.registrationNumber} (${found.companyName || 'Fleet'}) is EXPIRED or ${stat}. Registration Date: ${found.registrationDate || 'Blank (Missing)'}. Under Customs rules, registration is valid for 6 months and must be renewed before assigning.`,
         vehicle: found
       });
       setShowVehicleValidateModal(true);
       return;
     }
 
-    // Check expiry date
-    if (found.validationExpiryDate) {
-      const exp = new Date(found.validationExpiryDate);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      if (exp < today) {
-        setVehicleValidationResult({
-          valid: false,
-          reason: `Vehicle ${found.registrationNumber} tax token / fitness expired on ${found.validationExpiryDate}. Vehicle must be active & valid.`,
-          vehicle: found
-        });
-        setShowVehicleValidateModal(true);
-        return;
-      }
-    }
-
     setVehicleValidationResult({
       valid: true,
-      reason: `Vehicle ${found.registrationNumber} is VALID & ACTIVE in registered fleet.`,
+      reason: `Vehicle ${found.registrationNumber} (${found.companyName || 'TRUCKIT PVT LTD'}) is VALID & ACTIVE in registered fleet (Expires: ${validity.expiryDate || found.validationExpiryDate}).`,
       vehicle: found
     });
     setShowVehicleValidateModal(true);
@@ -469,6 +531,10 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     setFormData(prev => ({
       ...prev,
       assignedVehicleNo: veh.registrationNumber,
+      registrationBookUrl: prev.registrationBookUrl || veh.registrationBook || '',
+      registrationBookName: prev.registrationBookName || veh.registrationBookName || (veh.registrationBook ? 'Vehicle Registration Book (Fleet DB)' : ''),
+      ownerCnicUrl: prev.ownerCnicUrl || veh.ownerIdCardUrl || '',
+      ownerCnicName: prev.ownerCnicName || veh.ownerIdCardName || (veh.ownerIdCardUrl ? 'Vehicle Owner ID Card (Fleet DB)' : ''),
       driverName: prev.driverName || veh.driverName || '',
       driverCnic: prev.driverCnic || veh.driverCnic || '',
       vehicleVerifiedInDb: true
@@ -482,20 +548,30 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     return allVehicles.filter(v => 
       (v.registrationNumber && v.registrationNumber.toLowerCase().includes(q)) ||
       (v.transporterName && v.transporterName.toLowerCase().includes(q)) ||
+      (v.brokerName && v.brokerName.toLowerCase().includes(q)) ||
+      (v.companyName && v.companyName.toLowerCase().includes(q)) ||
       (v.driverName && v.driverName.toLowerCase().includes(q)) ||
       (v.category && v.category.toLowerCase().includes(q))
     );
   }, [allVehicles, vehicleSearchQuery]);
 
   const handleSelectVehicleFromList = (veh: Vehicle) => {
-    const stat = (veh.status || 'Active').toLowerCase();
-    if (stat === 'expired' || stat === 'cancelled' || stat === 'suspended' || stat === 'inactive') {
-      setValidationError(`Cannot assign vehicle ${veh.registrationNumber}: status is ${veh.status.toUpperCase()}. Only active and valid vehicles are permitted.`);
+    const validity = evaluateVehicleRegistrationValidity(
+      veh.lastRenewalDate || veh.registrationDate,
+      veh.validationExpiryDate || veh.registrationExpiryDate
+    );
+    const stat = (veh.status || 'AVAILABLE').toUpperCase();
+    if (stat === 'EXPIRED' || stat === 'CANCELLED' || stat === 'SUSPENDED' || stat === 'INACTIVE' || validity.isExpired) {
+      setValidationError(`Cannot assign vehicle ${veh.registrationNumber}: Customs 6-month validity is EXPIRED (Reg Date: ${veh.registrationDate || 'Blank'}). Please renew the vehicle first.`);
       return;
     }
     setFormData(prev => ({
       ...prev,
       assignedVehicleNo: veh.registrationNumber,
+      registrationBookUrl: prev.registrationBookUrl || veh.registrationBook || '',
+      registrationBookName: prev.registrationBookName || veh.registrationBookName || (veh.registrationBook ? 'Vehicle Registration Book (Fleet DB)' : ''),
+      ownerCnicUrl: prev.ownerCnicUrl || veh.ownerIdCardUrl || '',
+      ownerCnicName: prev.ownerCnicName || veh.ownerIdCardName || (veh.ownerIdCardUrl ? 'Vehicle Owner ID Card (Fleet DB)' : ''),
       driverName: prev.driverName || veh.driverName || '',
       driverCnic: prev.driverCnic || veh.driverCnic || '',
       vehicleVerifiedInDb: true
@@ -593,25 +669,57 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         }
       }
 
-      if (stepIndex === 3) { // Step 4: Vehicle Assignment
+      if (stepIndex === 3 || stepStatus === CaseStatus.VEHICLE_ASSIGNMENT) { // Step 4: Vehicle Assignment
         if (!formData.assignedVehicleNo?.trim()) {
-          return { valid: false, error: 'Vehicle Required: Please validate and assign a registered vehicle.' };
+          return { valid: false, error: 'Vehicle Required: Please select and validate a registered vehicle from the Fleet List.' };
         }
-        if (!formData.driverName?.trim()) {
-          return { valid: false, error: 'Driver Name is required.' };
-        }
-        if (!formData.driverCnic?.trim()) {
-          return { valid: false, error: 'Driver CNIC Number is required.' };
-        }
-        if (!formData.driverCnicFrontUrl || !formData.driverCnicBackUrl) {
-          return { valid: false, error: 'Driver CNIC Verification: Dual-sided Driver CNIC (Front & Back) uploads are compulsory.' };
+        const readiness = checkVehicleWorkflowReadiness({
+          vehicleNo: formData.assignedVehicleNo,
+          registeredVehicles: allVehicles,
+          caseRegistrationBookUrl: formData.registrationBookUrl || matchedVehicle?.registrationBook,
+          caseOwnerCnicUrl: formData.ownerCnicUrl || matchedVehicle?.ownerIdCardUrl,
+          driverName: formData.driverName,
+          driverCnic: formData.driverCnic,
+          driverCnicFrontUrl: formData.driverCnicFrontUrl,
+          driverCnicBackUrl: formData.driverCnicBackUrl,
+        });
+        const isLoadingStaffUser =
+          userRole === UserRole.LOADING_PORT_STAFF ||
+          userRoles.includes(UserRole.LOADING_PORT_STAFF);
+        // Vehicle Manager must complete Vehicle Registration Book & Owner ID Card; Loading Staff must also complete Driver CNIC Front & Back
+        const relevantErrors = isLoadingStaffUser
+          ? readiness.errors
+          : readiness.errors.filter(err => !err.includes('Driver ID Card'));
+        if (relevantErrors.length > 0) {
+          return {
+            valid: false,
+            error: `Vehicle Assignment Incomplete:\n• ${relevantErrors.join('\n• ')}`
+          };
         }
         if (formData.vehicleRentArrangedBy === 'DPL' && (!formData.vehicleRentAmount || Number(formData.vehicleRentAmount) <= 0)) {
           return { valid: false, error: 'Vehicle Rent Amount (PKR) is required when arranged by DPL.' };
         }
       }
 
-      if (stepIndex === 4) { // Step 5: Loading Port Processing
+      if (stepIndex === 4 || stepStatus === CaseStatus.LOADING_PORT_PROCESSING) { // Step 5: Loading Port Processing
+        const vehStepDetail = targetCase.workflowDetails?.[CaseStatus.VEHICLE_ASSIGNMENT];
+        const assignedPlate = formData.assignedVehicleNo || vehStepDetail?.assignedVehicleNo || targetCase.vehicleAssignment?.vehicleNo || targetCase.containers?.[0]?.vehicleNo || '';
+        const readiness = checkVehicleWorkflowReadiness({
+          vehicleNo: assignedPlate,
+          registeredVehicles: allVehicles,
+          caseRegistrationBookUrl: formData.registrationBookUrl || vehStepDetail?.registrationBookUrl || targetCase.vehicleAssignment?.registrationBookUrl,
+          caseOwnerCnicUrl: formData.ownerCnicUrl || vehStepDetail?.ownerCnicUrl || targetCase.vehicleAssignment?.ownerCnicUrl,
+          driverName: formData.driverName || vehStepDetail?.driverName || targetCase.vehicleAssignment?.driverName || targetCase.containers?.[0]?.driverName,
+          driverCnic: formData.driverCnic || vehStepDetail?.driverCnic || targetCase.vehicleAssignment?.driverCnic || targetCase.containers?.[0]?.driverCnic,
+          driverCnicFrontUrl: formData.driverCnicFrontUrl || vehStepDetail?.driverCnicFrontUrl || targetCase.vehicleAssignment?.driverCnicFrontUrl,
+          driverCnicBackUrl: formData.driverCnicBackUrl || vehStepDetail?.driverCnicBackUrl || targetCase.vehicleAssignment?.driverCnicBackUrl,
+        });
+        if (!readiness.ready) {
+          return {
+            valid: false,
+            error: `Cannot Complete Loading Port Workflow — Vehicle & Driver Compliance Incomplete:\n• ${readiness.errors.join('\n• ')}`
+          };
+        }
         if (!formData.portGatePassUrl) {
           return { valid: false, error: 'Port Gate Pass upload is required before completing loading step.' };
         }
@@ -623,7 +731,26 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         }
       }
 
-      if (stepIndex === 6) { // Step 7: Destination Port Arrival
+      if (stepIndex === 6 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL) { // Step 7: Destination Port Arrival
+        const vehStepDetail = targetCase.workflowDetails?.[CaseStatus.VEHICLE_ASSIGNMENT];
+        const loadingStepDetail = targetCase.workflowDetails?.[CaseStatus.LOADING_PORT_PROCESSING];
+        const assignedPlate = formData.assignedVehicleNo || vehStepDetail?.assignedVehicleNo || loadingStepDetail?.assignedVehicleNo || targetCase.vehicleAssignment?.vehicleNo || targetCase.containers?.[0]?.vehicleNo || '';
+        const readiness = checkVehicleWorkflowReadiness({
+          vehicleNo: assignedPlate,
+          registeredVehicles: allVehicles,
+          caseRegistrationBookUrl: formData.registrationBookUrl || vehStepDetail?.registrationBookUrl || loadingStepDetail?.registrationBookUrl || targetCase.vehicleAssignment?.registrationBookUrl,
+          caseOwnerCnicUrl: formData.ownerCnicUrl || vehStepDetail?.ownerCnicUrl || loadingStepDetail?.ownerCnicUrl || targetCase.vehicleAssignment?.ownerCnicUrl,
+          driverName: formData.driverName || vehStepDetail?.driverName || loadingStepDetail?.driverName || targetCase.vehicleAssignment?.driverName || targetCase.containers?.[0]?.driverName,
+          driverCnic: formData.driverCnic || vehStepDetail?.driverCnic || loadingStepDetail?.driverCnic || targetCase.vehicleAssignment?.driverCnic || targetCase.containers?.[0]?.driverCnic,
+          driverCnicFrontUrl: formData.driverCnicFrontUrl || vehStepDetail?.driverCnicFrontUrl || loadingStepDetail?.driverCnicFrontUrl || targetCase.vehicleAssignment?.driverCnicFrontUrl,
+          driverCnicBackUrl: formData.driverCnicBackUrl || vehStepDetail?.driverCnicBackUrl || loadingStepDetail?.driverCnicBackUrl || targetCase.vehicleAssignment?.driverCnicBackUrl,
+        });
+        if (!readiness.ready) {
+          return {
+            valid: false,
+            error: `Cannot Complete Case — Vehicle & Driver Compliance Incomplete:\n• ${readiness.errors.join('\n• ')}`
+          };
+        }
         if (!formData.secondaryCustomsSealNumber?.trim()) {
           return { valid: false, error: 'Customs Seal Verification Required: Secondary Customs Seal Number is mandatory.' };
         }
@@ -813,7 +940,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     }
 
     // Loading Gate-Out auto-completion trigger:
-    // "We can get out karte hi loading staff ka kam khatm aur loading ka workflow complete ho jaega finish ho jaega. Aur transit per chala jaega workflow"
+    // Once Gate-Out is confirmed at the loading port, the Loading Port workflow completes automatically and transitions the case to In Transit.
     if (
       (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 4)) &&
       (formData.gateOutToggled || forceGateOutComplete) &&
@@ -888,9 +1015,53 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       });
     });
 
+    // If Loading Port Staff updated driver CNIC / name / front & back in Step 5, sync it to VEHICLE_ASSIGNMENT step as well
+    if (
+      (stepIndex === 4 || stepStatus === CaseStatus.LOADING_PORT_PROCESSING) &&
+      (formData.driverCnic || formData.driverName || formData.driverCnicFrontUrl || formData.driverCnicBackUrl)
+    ) {
+      const existingVehStep = mergedWorkflowDetails[CaseStatus.VEHICLE_ASSIGNMENT] || ({ status: CaseStatus.VEHICLE_ASSIGNMENT } as CaseStepDetail);
+      mergedWorkflowDetails[CaseStatus.VEHICLE_ASSIGNMENT] = {
+        ...existingVehStep,
+        assignedVehicleNo: existingVehStep.assignedVehicleNo || formData.assignedVehicleNo || targetCase.containers?.[0]?.vehicleNo,
+        driverName: formData.driverName || existingVehStep.driverName,
+        driverCnic: formData.driverCnic || existingVehStep.driverCnic,
+        driverCnicFrontUrl: formData.driverCnicFrontUrl || existingVehStep.driverCnicFrontUrl,
+        driverCnicFrontName: formData.driverCnicFrontName || existingVehStep.driverCnicFrontName,
+        driverCnicBackUrl: formData.driverCnicBackUrl || existingVehStep.driverCnicBackUrl,
+        driverCnicBackName: formData.driverCnicBackName || existingVehStep.driverCnicBackName,
+      };
+    }
+
+    const vehStep = mergedWorkflowDetails[CaseStatus.VEHICLE_ASSIGNMENT] || ((stepIndex === 3 || stepStatus === CaseStatus.VEHICLE_ASSIGNMENT) ? updatedStepDetail : undefined);
+    const loadingStepForSync = mergedWorkflowDetails[CaseStatus.LOADING_PORT_PROCESSING];
+    const resolvedPlate = vehStep?.assignedVehicleNo || loadingStepForSync?.assignedVehicleNo || targetCase.vehicleAssignment?.vehicleNo || targetCase.containers?.[0]?.vehicleNo;
+    const syncedVehicleAssignment = resolvedPlate ? {
+      ...(targetCase.vehicleAssignment || {}),
+      vehicleId: matchedVehicle ? String(matchedVehicle.id) : targetCase.vehicleAssignment?.vehicleId,
+      vehicleNo: resolvedPlate,
+      driverName: formData.driverName || vehStep?.driverName || loadingStepForSync?.driverName || targetCase.vehicleAssignment?.driverName || '',
+      driverCnic: formData.driverCnic || vehStep?.driverCnic || loadingStepForSync?.driverCnic || targetCase.vehicleAssignment?.driverCnic || '',
+      driverContact: matchedVehicle?.driverContact || targetCase.vehicleAssignment?.driverContact || '',
+      transporterName: matchedVehicle?.transporterName || matchedVehicle?.brokerName || targetCase.vehicleAssignment?.transporterName || '',
+      brokerName: matchedVehicle?.brokerName || matchedVehicle?.transporterName || targetCase.vehicleAssignment?.brokerName || '',
+      allocationDate: vehStep?.date || targetCase.vehicleAssignment?.allocationDate || new Date().toISOString().split('T')[0],
+      registrationBookUrl: vehStep?.registrationBookUrl || matchedVehicle?.registrationBook || targetCase.vehicleAssignment?.registrationBookUrl,
+      registrationBookName: vehStep?.registrationBookName || matchedVehicle?.registrationBookName || targetCase.vehicleAssignment?.registrationBookName,
+      ownerCnicUrl: vehStep?.ownerCnicUrl || matchedVehicle?.ownerIdCardUrl || targetCase.vehicleAssignment?.ownerCnicUrl,
+      ownerCnicName: vehStep?.ownerCnicName || matchedVehicle?.ownerIdCardName || targetCase.vehicleAssignment?.ownerCnicName,
+      driverCnicFrontUrl: formData.driverCnicFrontUrl || vehStep?.driverCnicFrontUrl || loadingStepForSync?.driverCnicFrontUrl || targetCase.vehicleAssignment?.driverCnicFrontUrl,
+      driverCnicFrontName: formData.driverCnicFrontName || vehStep?.driverCnicFrontName || loadingStepForSync?.driverCnicFrontName || targetCase.vehicleAssignment?.driverCnicFrontName,
+      driverCnicBackUrl: formData.driverCnicBackUrl || vehStep?.driverCnicBackUrl || loadingStepForSync?.driverCnicBackUrl || targetCase.vehicleAssignment?.driverCnicBackUrl,
+      driverCnicBackName: formData.driverCnicBackName || vehStep?.driverCnicBackName || loadingStepForSync?.driverCnicBackName || targetCase.vehicleAssignment?.driverCnicBackName,
+    } : targetCase.vehicleAssignment;
+
     let updatedCase: Case = {
       ...targetCase,
       status: finalStatus,
+      vehicleNumber: syncedVehicleAssignment?.vehicleNo || targetCase.vehicleNumber,
+      driverName: syncedVehicleAssignment?.driverName || targetCase.driverName,
+      vehicleAssignment: syncedVehicleAssignment,
       charges: updatedCharges,
       containers: updatedContainers,
       documents: existingDocs,
@@ -905,6 +1076,38 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
     // Enrich with loading port gate-out duration, transit duration, and destination unloading & gate-out duration across all categories
     updatedCase = enrichCaseWithTripTimings(updatedCase, String(stepStatus), updatedStepDetail);
+
+    // Sync Vehicle Registration Book & Owner ID Card back to the master Vehicle record if uploaded here
+    if (matchedVehicle && (formData.registrationBookUrl || formData.ownerCnicUrl)) {
+      const updatedVeh: Vehicle = {
+        ...matchedVehicle,
+        registrationBook: formData.registrationBookUrl || matchedVehicle.registrationBook,
+        registrationBookName: formData.registrationBookName || matchedVehicle.registrationBookName || 'Vehicle_Reg_Book',
+        ownerIdCardUrl: formData.ownerCnicUrl || matchedVehicle.ownerIdCardUrl,
+        ownerIdCardName: formData.ownerCnicName || matchedVehicle.ownerIdCardName || 'Owner_CNIC',
+      };
+      updateVehicleInFirestore(updatedVeh).catch(() => {});
+    }
+
+    // Persist Driver to Global Driver Backup (so future CNIC lookups auto-fill Name & Front/Back CNIC)
+    if (formData.driverCnic && formData.driverName) {
+      upsertDriverBackupFromWorkflow({
+        driverCnic: formData.driverCnic,
+        driverName: formData.driverName,
+        driverContact: matchedVehicle?.driverContact || targetCase.vehicleAssignment?.driverContact || '',
+        driverCnicFrontUrl: formData.driverCnicFrontUrl,
+        driverCnicFrontName: formData.driverCnicFrontName,
+        driverCnicBackUrl: formData.driverCnicBackUrl,
+        driverCnicBackName: formData.driverCnicBackName,
+        vehiclePlate: formData.assignedVehicleNo,
+        transporterName: matchedVehicle?.transporterName || matchedVehicle?.brokerName
+      }).catch(() => {});
+    }
+
+    // Record / update this case in the assigned vehicle's Trips History
+    if (updatedCase.vehicleAssignment?.vehicleNo) {
+      recordVehicleTripFromCase(updatedCase).catch(() => {});
+    }
 
     // If container is unloaded & vehicle gates out at destination (or final step completes), automatically expire/block Driver Trip Login ID
     const isDestGateOutDone =
@@ -949,8 +1152,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       notificationSubType: 'WORKFLOW_TASK',
       actionLabel: 'View Case Workflow',
       category: 'CASE',
-      performedBy: String(userRole),
-      performedByRole: String(userRole)
+      performedBy: String(userRole)
     }).catch(e => console.warn('Could not dispatch step update notification:', e));
 
     // 2. If completing this step, dispatch Action Required notification for Next Step (or Case Finish)
@@ -993,8 +1195,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
           notificationSubType: 'WORKFLOW_TASK',
           actionLabel: 'Open Step Workflow',
           category: 'CASE',
-          performedBy: String(userRole),
-          performedByRole: String(userRole)
+          performedBy: String(userRole)
         }).catch(e => console.warn('Could not dispatch workflow step notification:', e));
       } else {
         // All steps completed (Case Finish) - Notify Operations Manager, Client, and Finance Manager
@@ -1010,8 +1211,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
           notificationSubType: 'WORKFLOW_TASK',
           actionLabel: 'View Completed Case Dossier',
           category: 'CASE',
-          performedBy: String(userRole),
-          performedByRole: String(userRole)
+          performedBy: String(userRole)
         }).catch(e => console.warn('Could not dispatch workflow completed notification:', e));
       }
     }
@@ -1095,8 +1295,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       notificationSubType: 'WORKFLOW_TASK',
       actionLabel: 'Open Destination Workflow',
       category: 'CASE',
-      performedBy: String(userRole),
-      performedByRole: String(userRole)
+      performedBy: String(userRole)
     }).catch(e => console.warn('Could not dispatch destination arrival notification:', e));
   };
 
@@ -1952,35 +2151,194 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                 </div>
 
                 {/* If matched in DB, show verified particulars */}
-                {matchedVehicle && (
-                  <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                {matchedVehicle ? (
+                  <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]">
                     <div>
-                      <span className="text-gray-400 block text-[10px]">Transporter:</span>
-                      <span className="text-white font-semibold">{matchedVehicle.transporterName || 'Self'}</span>
+                      <span className="text-gray-400 block text-[10px]">Registered Company:</span>
+                      <span className="text-cyan-300 font-bold">
+                        {matchedVehicle.companyName || (matchedVehicle.operatingCompany === 'truckit' ? 'TRUCKIT PVT LTD' : 'DOCKS PVT LTD')}
+                      </span>
                     </div>
                     <div>
-                      <span className="text-gray-400 block text-[10px]">Make / Model:</span>
-                      <span className="text-white font-semibold">{matchedVehicle.makeModel || 'Carrier'}</span>
+                      <span className="text-gray-400 block text-[10px]">Transporter / Broker:</span>
+                      <span className="text-white font-semibold">{matchedVehicle.transporterName || matchedVehicle.brokerName || 'Self'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-400 block text-[10px]">Status:</span>
-                      <span className="text-emerald-300 font-bold">{matchedVehicle.status || 'Active'}</span>
+                      <span className="text-gray-400 block text-[10px]">Maker / Model:</span>
+                      <span className="text-white font-semibold">{[matchedVehicle.make, matchedVehicle.model].filter(Boolean).join(' ') || matchedVehicle.makeModel || 'Carrier'}</span>
                     </div>
                     <div>
-                      <span className="text-gray-400 block text-[10px]">Tax Token Expiry:</span>
-                      <span className="text-amber-300 font-mono">{matchedVehicle.validationExpiryDate || 'Valid'}</span>
+                      <span className="text-gray-400 block text-[10px]">6M Customs Status:</span>
+                      <span className={matchedVehicle.status === 'EXPIRED' ? 'text-rose-400 font-bold' : 'text-emerald-300 font-bold'}>
+                        {matchedVehicle.status || 'AVAILABLE'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400 block text-[10px]">6M Validity Expiry:</span>
+                      <span className="text-amber-300 font-mono">{matchedVehicle.validationExpiryDate || 'N/A'}</span>
+                    </div>
+                  </div>
+                ) : formData.assignedVehicleNo ? (
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+                    <AlertTriangle size={15} className="shrink-0" />
+                    <span>
+                      Vehicle <strong>{formData.assignedVehicleNo}</strong> is not in the registered Fleet List. Only vehicles registered in the Fleet List can be assigned.
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Mandatory Pre-Uploaded Vehicle Documents: Registration Book & Owner ID Card (Uploaded by Vehicle Manager) */}
+              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <label className="font-bold text-white text-sm">
+                        Vehicle Registration Book & Vehicle Owner ID Card
+                      </label>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-bold">
+                        Uploaded by Vehicle Manager
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-gray-400 block mt-0.5">
+                      Vehicle Registration Book and Vehicle Owner ID Card are uploaded by the Vehicle Manager. Once uploaded on the vehicle record, they are automatically attached here.
+                    </span>
+                  </div>
+                  {(formData.registrationBookUrl || matchedVehicle?.registrationBook) && (formData.ownerCnicUrl || matchedVehicle?.ownerIdCardUrl) ? (
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                      ✓ Vehicle Manager Docs Complete
+                    </span>
+                  ) : (
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold">
+                      Vehicle Manager Upload Required
+                    </span>
+                  )}
+                </div>
+
+                {(userRole === UserRole.VEHICLE_MANAGER || userRole === UserRole.ADMIN || userRoles.includes(UserRole.VEHICLE_MANAGER) || userRoles.includes(UserRole.ADMIN)) ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <WorkflowMultiUploader
+                      label="1. Vehicle Registration Book (Vehicle Manager) *"
+                      sublabel={matchedVehicle?.registrationBook ? '✓ Pre-uploaded in Fleet Database (Can view or replace)' : 'Vehicle Manager: Upload or scan Vehicle Registration Book'}
+                      urlField="registrationBookUrl"
+                      nameField="registrationBookName"
+                      required={true}
+                      allowCamera={true}
+                      compact={true}
+                      formData={formData}
+                      setFormData={setFormData}
+                      onPreview={setActivePdfPreview}
+                    />
+
+                    <WorkflowMultiUploader
+                      label="2. Vehicle Owner ID Card / CNIC (Vehicle Manager) *"
+                      sublabel={matchedVehicle?.ownerIdCardUrl ? '✓ Pre-uploaded in Fleet Database (Can view or replace)' : 'Vehicle Manager: Upload or scan Vehicle Owner ID Card'}
+                      urlField="ownerCnicUrl"
+                      nameField="ownerCnicName"
+                      required={true}
+                      allowCamera={true}
+                      compact={true}
+                      formData={formData}
+                      setFormData={setFormData}
+                      onPreview={setActivePdfPreview}
+                    />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                      (formData.registrationBookUrl || matchedVehicle?.registrationBook)
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                        : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                    }`}>
+                      <div>
+                        <span className="font-bold block">1. Vehicle Registration Book</span>
+                        <span className="text-[10px] opacity-80">
+                          {(formData.registrationBookUrl || matchedVehicle?.registrationBook)
+                            ? '✓ Uploaded by Vehicle Manager'
+                            : '✕ Pending upload by Vehicle Manager'}
+                        </span>
+                      </div>
+                      {(formData.registrationBookUrl || matchedVehicle?.registrationBook) && (
+                        <button
+                          type="button"
+                          onClick={() => setActivePdfPreview({
+                            url: formData.registrationBookUrl || matchedVehicle?.registrationBook || '',
+                            title: formData.registrationBookName || matchedVehicle?.registrationBookName || 'Vehicle Registration Book'
+                          })}
+                          className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[11px] font-bold"
+                        >
+                          View
+                        </button>
+                      )}
+                    </div>
+                    <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                      (formData.ownerCnicUrl || matchedVehicle?.ownerIdCardUrl)
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                        : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                    }`}>
+                      <div>
+                        <span className="font-bold block">2. Vehicle Owner ID Card (CNIC)</span>
+                        <span className="text-[10px] opacity-80">
+                          {(formData.ownerCnicUrl || matchedVehicle?.ownerIdCardUrl)
+                            ? '✓ Uploaded by Vehicle Manager'
+                            : '✕ Pending upload by Vehicle Manager'}
+                        </span>
+                      </div>
+                      {(formData.ownerCnicUrl || matchedVehicle?.ownerIdCardUrl) && (
+                        <button
+                          type="button"
+                          onClick={() => setActivePdfPreview({
+                            url: formData.ownerCnicUrl || matchedVehicle?.ownerIdCardUrl || '',
+                            title: formData.ownerCnicName || matchedVehicle?.ownerIdCardName || 'Vehicle Owner ID Card'
+                          })}
+                          className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[11px] font-bold"
+                        >
+                          View
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* Driver Information & Compulsory Dual-Sided CNIC */}
+              {/* Driver Information & Compulsory Dual-Sided CNIC (Uploaded by Loading Staff — With Backup Auto-Fill by CNIC) */}
               <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-4">
-                <label className="font-bold text-white text-sm block">Driver Particulars & Verification</label>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <label className="font-bold text-white text-sm">Driver Particulars & Driver ID Card (Front & Back)</label>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
+                        Uploaded by Loading Staff
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-gray-400 block mt-0.5">
+                      Driver ID Card (Front & Back) copies are uploaded by Loading Port Staff. Enter the Driver CNIC Number to automatically retrieve existing driver records and CNIC copies from backup.
+                    </span>
+                  </div>
+                </div>
+
+                {driverBackupNotice && (
+                  <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                    <CheckCircle2 size={15} className="shrink-0 text-emerald-400" />
+                    <span>{driverBackupNotice}</span>
+                  </div>
+                )}
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-gray-400 block mb-1">Driver Full Name</label>
+                    <label className="text-gray-300 text-xs font-semibold block mb-1">
+                      Driver CNIC Number * <span className="text-emerald-400 font-normal">(Type to auto-fill from backup)</span>
+                    </label>
+                    <input 
+                      type="text"
+                      value={formData.driverCnic}
+                      onChange={(e) => handleDriverCnicChange(e.target.value)}
+                      placeholder="e.g. 42101-1234567-1"
+                      className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-300 text-xs font-semibold block mb-1">Driver Full Name *</label>
                     <input 
                       type="text"
                       value={formData.driverName}
@@ -1989,27 +2347,17 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                       className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white"
                     />
                   </div>
-                  <div>
-                    <label className="text-gray-400 block mb-1">Driver CNIC Number</label>
-                    <input 
-                      type="text"
-                      value={formData.driverCnic}
-                      onChange={(e) => setFormData({ ...formData, driverCnic: e.target.value })}
-                      placeholder="e.g. 42101-1234567-1"
-                      className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white font-mono"
-                    />
-                  </div>
                 </div>
 
                 {/* Dual-Sided CNIC Compulsory Uploads */}
                 <div className="space-y-3 pt-1">
                   <span className="text-gray-300 font-semibold block text-xs">
-                    Driver CNIC (Dual-Sided Upload with Multi-Page & Camera Support)
+                    Driver CNIC Front & Back (Mandatory on Every Case Assignment — Auto-loaded if in Backup)
                   </span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <WorkflowMultiUploader
-                      label="Driver CNIC Front Side"
-                      sublabel="Upload or take photo of CNIC front (Image / Picture Format)"
+                      label="Driver CNIC Front Side *"
+                      sublabel="Upload or scan CNIC front (Image / Document Scan)"
                       urlField="driverCnicFrontUrl"
                       nameField="driverCnicFrontName"
                       required={true}
@@ -2023,8 +2371,8 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                     />
 
                     <WorkflowMultiUploader
-                      label="Driver CNIC Back Side"
-                      sublabel="Upload or take photo of CNIC back (Image / Picture Format)"
+                      label="Driver CNIC Back Side *"
+                      sublabel="Upload or scan CNIC back (Image / Document Scan)"
                       urlField="driverCnicBackUrl"
                       nameField="driverCnicBackName"
                       required={true}
@@ -2267,6 +2615,97 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                     </div>
                   </div>
                 )}
+
+                {/* Driver ID Card (Front & Back) — Uploaded by Loading Staff at Loading Port */}
+                <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/25 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-white text-xs uppercase tracking-wider">
+                          Driver ID Card (CNIC Front & Back) — Loading Staff Mandatory Upload
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          Loading Staff Responsibility
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-gray-300 block mt-0.5">
+                        Enter the Driver CNIC Number to automatically populate Driver Name and CNIC Front/Back copies if available in the driver backup database.
+                      </span>
+                    </div>
+                    {formData.driverCnicFrontUrl && formData.driverCnicBackUrl ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        ✓ Driver CNIC Front & Back Ready
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                        Driver CNIC Front & Back Required
+                      </span>
+                    )}
+                  </div>
+
+                  {driverBackupNotice && (
+                    <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                      <CheckCircle2 size={14} className="shrink-0 text-emerald-400" />
+                      <span>{driverBackupNotice}</span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-gray-300 text-xs font-semibold block mb-1">
+                        Driver CNIC Number * <span className="text-emerald-400 font-normal">(Auto-fills from Backup)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.driverCnic || ''}
+                        onChange={(e) => handleDriverCnicChange(e.target.value)}
+                        placeholder="e.g. 42101-1234567-1"
+                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-gray-300 text-xs font-semibold block mb-1">Driver Full Name *</label>
+                      <input
+                        type="text"
+                        value={formData.driverName || ''}
+                        onChange={(e) => setFormData({ ...formData, driverName: e.target.value })}
+                        placeholder="e.g. Muhammad Ramzan"
+                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <WorkflowMultiUploader
+                      label="Driver CNIC Front Side (Loading Staff) *"
+                      sublabel="Upload or take document scan of Driver CNIC Front"
+                      urlField="driverCnicFrontUrl"
+                      nameField="driverCnicFrontName"
+                      required={true}
+                      isPhotoOnly={true}
+                      accept="image/*"
+                      allowCamera={true}
+                      compact={true}
+                      formData={formData}
+                      setFormData={setFormData}
+                      onPreview={setActivePdfPreview}
+                    />
+                    <WorkflowMultiUploader
+                      label="Driver CNIC Back Side (Loading Staff) *"
+                      sublabel="Upload or take document scan of Driver CNIC Back"
+                      urlField="driverCnicBackUrl"
+                      nameField="driverCnicBackName"
+                      required={true}
+                      isPhotoOnly={true}
+                      accept="image/*"
+                      allowCamera={true}
+                      compact={true}
+                      formData={formData}
+                      setFormData={setFormData}
+                      onPreview={setActivePdfPreview}
+                    />
+                  </div>
+                </div>
 
                 <WorkflowMultiUploader
                   label="Port Gate Pass *"
@@ -3343,9 +3782,8 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
           onClose={() => setShowLoadingBillModal(false)}
           targetCase={targetCase}
           isDestinationBill={billModalType === 'DESTINATION'}
-          staffUserId={formData.officer || String(userRole)}
-          staffName={formData.officer || (billModalType === 'DESTINATION' ? 'Destination Port Staff' : 'Loading Port Staff')}
-          onSaveBill={(billData, newCharges, newDocs, generatedBill) => {
+          onSaveBill={(billData, newCharges, newDocs, ...rest: any[]) => {
+            const generatedBill = rest[0];
             if (billModalType === 'DESTINATION') {
               setFormData(prev => ({
                 ...prev,

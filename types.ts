@@ -22,6 +22,7 @@ export enum CaseStatus {
   WHARFAGE_PAYMENT = 'Wharfage Payment',
   VEHICLE_ASSIGNMENT = 'Vehicle Assignment',
   LOADING_PORT_PROCESSING = 'Loading Port Processing',
+  LOADING_PORT_PROCESS = 'Loading Port Processing',
   IN_TRANSIT = 'In Transit',
   DESTINATION_PORT_ARRIVAL = 'Destination Port Arrival',
   COMPLETED = 'Case Completed',
@@ -55,6 +56,7 @@ export interface Container {
   weight: number;
   tareWeight?: number;
   sealNo?: string;
+  seal?: string;
   shipperSealNo?: string;
   vehicleNo?: string;
   driverName?: string;
@@ -122,6 +124,10 @@ export interface Driver {
   licenseDocName?: string;
   cnicDocUrl?: string;
   cnicDocName?: string;
+  cnicFrontUrl?: string;
+  cnicFrontName?: string;
+  cnicBackUrl?: string;
+  cnicBackName?: string;
   notes?: string;
   userId?: string;
   password?: string;
@@ -347,6 +353,7 @@ export interface StaffPrivateLedgerEntry {
   remarks?: string;
   caseNo?: string;
   containerNo?: string;
+  arrangedBy?: 'Client' | 'DPL' | string;
   createdAt: string;
 }
 
@@ -527,8 +534,8 @@ export interface CaseStepDetail {
   // Delivery Order (DO) Details at Loading (for Client-arranged DO or verification)
   clientDoPhotoUrl?: string;
   clientDoPhotoName?: string;
-  clientDoFavorOf?: string; // Kiske naam per DO utha hai (Favor of Consignee / Clearing Agent / Client)
-  clientDoShippingLine?: string; // Kaun si shipping line ka DO hai (Maersk, MSC, CMA CGM, COSCO, etc.)
+  clientDoFavorOf?: string; // Party in whose favor the DO is issued (Consignee / Clearing Agent / Client)
+  clientDoShippingLine?: string; // Issuing Shipping Line (Maersk, MSC, CMA CGM, COSCO, etc.)
   clientDoNumber?: string; // DO Number
   clientDoDate?: string;
 
@@ -1062,10 +1069,10 @@ export interface StaffLedgerEntry {
   id: string;
   staffId: number | string;
   staffName: string;
-  type: 'SALARY' | 'DAILY_ROUTINE' | 'DAILY' | 'CONTAINER_CHARGES'; // Salary/Fuel/Loan vs Daily Khana Peena / Petty Cash vs Destination Per-Container Remittance
+  type: 'SALARY' | 'DAILY_ROUTINE' | 'DAILY' | 'CONTAINER_CHARGES'; // Salary/Fuel/Loan vs Daily Petty Cash vs Destination Per-Container Remittance
   date: string;
   description: string;
-  category?: string; // 'Monthly Salary', 'Fuel Allowance', 'Mobile Allowance', 'Loan / Advance', 'Daily Meal / Chai', 'Market Purchase', 'Cash Return', 'Settlement', 'Internal Company Transaction (Per Container Charge)'
+  category?: string; // 'Monthly Salary', 'Fuel Allowance', 'Mobile Allowance', 'Loan / Advance', 'Daily Meal / Refreshments', 'Market Purchase', 'Cash Return', 'Settlement', 'Internal Company Transaction (Per Container Charge)'
   debit: number; // For Salary: Salary payable, Loan given. For Daily: Cash given to staff. For Container Charges: Amount received by Destination Staff payable to Karachi Head Office
   credit: number; // For Salary: Salary paid, Loan recovered. For Daily: Expense bill submitted. For Container Charges: Amount remitted to Karachi Head Office
   balance: number;
@@ -1283,9 +1290,13 @@ export interface Vehicle {
   
   // Documents
   registrationBook?: string;
+  registrationBookName?: string;
   customsRegCertDoc?: string; // Customs Registration Certificate
   licenseDoc?: string;
+  driverCnicDoc?: string;
+  driverCnicDocName?: string;
   photo?: string;
+  vehicleNo?: string;
   
   // Tracker
   tracker?: TrackerInfo;
@@ -1321,9 +1332,11 @@ export interface Vehicle {
     caseNo: string;
     containerNumber?: string;
     clientName: string;
+    importerName?: string;
     route: string;
     date: string;
     driverName?: string;
+    driverCnic?: string;
     driverPhone?: string;
     status: string;
   }>;
