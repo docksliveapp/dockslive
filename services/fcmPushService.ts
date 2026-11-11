@@ -11,17 +11,36 @@ import { AppNotification, AppUser, UserRole } from '../types';
  * Read Web Push VAPID public key from environment (`VITE_FIREBASE_VAPID_KEY`)
  * or set the public key string directly in `FALLBACK_FIREBASE_VAPID_KEY` below.
  */
-const FALLBACK_FIREBASE_VAPID_KEY = '';
+const FALLBACK_FIREBASE_VAPID_KEY =
+  'BD47zgOxbdSbVr4nx0j3HVIEnLhotWl2PaSxlQ8R-EsMzzcc9qUH1jH3nUvBbJKGhXxAiS60HdOs5nDm-npzyM0';
 export const FIREBASE_VAPID_KEY: string = (
   ((import.meta as any).env?.VITE_FIREBASE_VAPID_KEY as string | undefined) ||
   FALLBACK_FIREBASE_VAPID_KEY ||
   ''
 ).trim();
 
+export const FIREBASE_VAPID_SUBJECT: string = (
+  ((import.meta as any).env?.VITE_FIREBASE_VAPID_SUBJECT as string | undefined) ||
+  'mailto:arbab@mak-group.com.pk'
+).trim();
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const buffer = new ArrayBuffer(rawData.length);
+  const outputArray = new Uint8Array(buffer);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 const FCM_SW_URL = '/firebase-messaging-sw.js';
 const FCM_SW_SCOPE = '/firebase-cloud-messaging-push-scope';
 
 const LOCAL_FCM_TOKEN_KEY = 'dpl_device_fcm_token';
+const LOCAL_VAPID_SIG_KEY = 'dpl_device_vapid_sig';
 const LOCAL_PUSH_PREF_KEY = 'dpl_push_notifications_enabled';
 const LOCAL_SOUND_PREF_KEY = 'dpl_push_sound_enabled';
 const MAX_TOKENS_PER_USER = 20;
@@ -221,7 +240,8 @@ async function syncTokenToUserDatabaseRecord(
   token: string,
   identity: Required<PushIdentityContext>,
   action: 'ADD' | 'REMOVE',
-  previousTokenToReplace?: string
+  previousTokenToReplace?: string,
+  webPushSubscription?: PushSubscriptionJSON | null
 ): Promise<void> {
   if (!token) return;
   const nowIso = new Date().toISOString();
@@ -240,6 +260,18 @@ async function syncTokenToUserDatabaseRecord(
         roles: identity.roles.map(String),
         clientName: identity.clientName || '',
         platform: detectDevicePlatform(),
+        vapidSubject: FIREBASE_VAPID_SUBJECT,
+        ...(webPushSubscription && webPushSubscription.endpoint && webPushSubscription.keys
+          ? {
+              subscription: {
+                endpoint: webPushSubscription.endpoint,
+                keys: {
+                  p256dh: webPushSubscription.keys.p256dh || '',
+                  auth: webPushSubscription.keys.auth || ''
+                }
+              }
+            }
+          : {}),
         enabled: action === 'ADD',
         updatedAt: nowIso
       },
@@ -520,12 +552,23 @@ export async function enablePushNotificationsForCurrentUser(
   await initForegroundPushListener();
 
   const previousToken = getSavedDeviceFcmToken();
+  const previousVapidSig = safeAppStorage.getItem(LOCAL_VAPID_SIG_KEY) || '';
+  const currentVapidSig = FIREBASE_VAPID_KEY.slice(0, 24);
   let fcmToken = '';
   let mode: 'fcm' | 'browser-local' = 'fcm';
 
   try {
     const messaging = await getFirebaseMessagingSafe();
     if (messaging) {
+      // If VAPID public key was rotated since last registration, clear old PushSubscription first
+      if (previousVapidSig && currentVapidSig && previousVapidSig !== currentVapidSig && swRegistration?.pushManager) {
+        try {
+          const oldSub = await swRegistration.pushManager.getSubscription();
+          if (oldSub) await oldSub.unsubscribe();
+          await deleteToken(messaging).catch(() => {});
+        } catch (_) {}
+      }
+
       const tokenOptions: { vapidKey?: string; serviceWorkerRegistration?: ServiceWorkerRegistration } = {};
       if (FIREBASE_VAPID_KEY) {
         tokenOptions.vapidKey = FIREBASE_VAPID_KEY;
@@ -533,22 +576,56 @@ export async function enablePushNotificationsForCurrentUser(
       if (swRegistration) {
         tokenOptions.serviceWorkerRegistration = swRegistration;
       }
-      fcmToken = await getToken(messaging, tokenOptions);
+
+      try {
+        fcmToken = await getToken(messaging, tokenOptions);
+      } catch (firstErr: any) {
+        // Auto-heal if browser had a PushSubscription from a different applicationServerKey
+        if (swRegistration?.pushManager) {
+          try {
+            const staleSub = await swRegistration.pushManager.getSubscription();
+            if (staleSub) await staleSub.unsubscribe();
+            fcmToken = await getToken(messaging, tokenOptions);
+          } catch (retryErr: any) {
+            console.warn('[MAK Push] getToken retry notice:', retryErr?.message || firstErr?.message);
+          }
+        }
+      }
     }
   } catch (err: any) {
     console.warn('[MAK Push] getToken fallback notice:', err?.message || err);
   }
 
+  let webPushSubJson: PushSubscriptionJSON | null = null;
+  if (swRegistration?.pushManager) {
+    try {
+      let pushSub = await swRegistration.pushManager.getSubscription();
+      if (!pushSub && FIREBASE_VAPID_KEY) {
+        pushSub = await swRegistration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(FIREBASE_VAPID_KEY)
+        });
+      }
+      if (pushSub) {
+        webPushSubJson = pushSub.toJSON();
+      }
+    } catch (_) {}
+  }
+
   if (!fcmToken) {
     mode = 'browser-local';
-    fcmToken = getOrCreateLocalDeviceFallbackToken();
+    fcmToken = webPushSubJson?.endpoint
+      ? `webpush_${hashDeviceDocId(webPushSubJson.endpoint)}`
+      : getOrCreateLocalDeviceFallbackToken();
+  } else if (currentVapidSig) {
+    safeAppStorage.setItem(LOCAL_VAPID_SIG_KEY, currentVapidSig);
   }
 
   safeAppStorage.setItem(LOCAL_FCM_TOKEN_KEY, fcmToken);
   safeAppStorage.setItem(LOCAL_PUSH_PREF_KEY, 'true');
 
   const identity = resolveCurrentIdentity(identityOverride);
-  await syncTokenToUserDatabaseRecord(fcmToken, identity, 'ADD', previousToken);
+  await syncTokenToUserDatabaseRecord(fcmToken, identity, 'ADD', previousToken, webPushSubJson);
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
@@ -773,11 +850,12 @@ export async function dispatchPushForNotification(notif: AppNotification): Promi
       });
     }
 
+    const subscriptions: Array<{ endpoint: string; keys: { p256dh: string; auth: string } }> = [];
+
     if (devicesSnap) {
       devicesSnap.forEach((docSnap) => {
         const dev = docSnap.data() as any;
-        if (!dev || dev.enabled === false || !dev.token) return;
-        if (String(dev.token).startsWith('local-browser-perm-')) return;
+        if (!dev || dev.enabled === false) return;
         if (
           doesUserMatchNotificationTarget(
             {
@@ -791,13 +869,18 @@ export async function dispatchPushForNotification(notif: AppNotification): Promi
             notif
           )
         ) {
-          tokenSet.add(String(dev.token));
+          if (dev.token && !String(dev.token).startsWith('local-browser-perm-') && !String(dev.token).startsWith('webpush_')) {
+            tokenSet.add(String(dev.token));
+          }
+          if (dev.subscription?.endpoint && dev.subscription?.keys?.p256dh && dev.subscription?.keys?.auth) {
+            subscriptions.push(dev.subscription);
+          }
         }
       });
     }
 
     const tokens = Array.from(tokenSet);
-    if (tokens.length === 0) return;
+    if (tokens.length === 0 && subscriptions.length === 0) return;
 
     const caseNo = notif.targetFilter?.caseNo ? String(notif.targetFilter.caseNo) : '';
     const targetView = notif.targetView ? String(notif.targetView) : caseNo ? 'cases' : 'dashboard';
@@ -810,6 +893,7 @@ export async function dispatchPushForNotification(notif: AppNotification): Promi
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tokens,
+        subscriptions,
         notificationId: String(notif.id || ''),
         title: notif.title || 'MAK Group of Companies',
         body: notif.description || 'New logistics alert or task assignment.',

@@ -18,6 +18,16 @@ env:
     value: production
     availability:
       - RUNTIME
+  - variable: VITE_FIREBASE_VAPID_KEY
+    value: "BD47zgOxbdSbVr4nx0j3HVIEnLhotWl2PaSxlQ8R-EsMzzcc9qUH1jH3nUvBbJKGhXxAiS60HdOs5nDm-npzyM0"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: VAPID_SUBJECT
+    value: "mailto:arbab@mak-group.com.pk"
+    availability:
+      - BUILD
+      - RUNTIME
 
 
 
