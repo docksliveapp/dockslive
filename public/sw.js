@@ -2,8 +2,8 @@
 // Production Cache-First + Stale-While-Revalidate App Shell Strategy
 // Provides instant offline-capable native launch for Android APK (PWABuilder / TWA), iOS, Windows, and macOS.
 
-const CACHE_NAME = 'mak-group-cache-first-v2026-19';
-const FONT_CACHE_NAME = 'mak-group-fonts-v2026-19';
+const CACHE_NAME = 'mak-group-cache-first-v2026-20';
+const FONT_CACHE_NAME = 'mak-group-fonts-v2026-20';
 
 const CORE_APP_SHELL = [
   '/',
@@ -144,13 +144,23 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+  const notifData = (event.notification && event.notification.data) || {};
+  const targetUrl = notifData.url || '/';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if ('focus' in client) {
-          return client.focus();
-        }
+        try {
+          if (new URL(client.url).origin === self.location.origin && 'focus' in client) {
+            client.postMessage({
+              type: 'MAK_PUSH_CLICK',
+              url: targetUrl,
+              caseNo: notifData.caseNo || '',
+              targetView: notifData.targetView || '',
+              notificationId: notifData.notificationId || ''
+            });
+            return client.focus();
+          }
+        } catch (_) {}
       }
       if (self.clients.openWindow) {
         return self.clients.openWindow(targetUrl);

@@ -85,7 +85,7 @@
 
           if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
             window.addEventListener('load', function() {
-              navigator.serviceWorker.register('/sw.js?v=2026-19', { scope: '/', updateViaCache: 'none' })
+              navigator.serviceWorker.register('/sw.js?v=2026-20', { scope: '/', updateViaCache: 'none' })
                 .then(function(reg) {
                   try { reg.update(); } catch (_) {}
                 })

@@ -30,6 +30,7 @@ import { safeAppStorage } from '../services/storage';
 import { compressAndPrepareFile } from '../services/fileUtils';
 import { AvailableVehiclesView } from './AvailableVehiclesView';
 import { LiveNotificationCenter } from './LiveNotificationCenter';
+import { PushNotificationToggle } from './PushNotificationToggle';
 import { PWAInstallButton } from './PWAInstallButton';
 import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
 import { ThemeToggleSwitch } from './ThemeToggleSwitch';
@@ -746,6 +747,16 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
 
               {/* Theme Switcher */}
               <ThemeToggleSwitch compact />
+
+              {/* Push Notifications Toggle */}
+              <PushNotificationToggle
+                variant="header"
+                identity={{
+                  userName: selectedTransporterName,
+                  role: UserRole.TRANSPORTER,
+                  clientName: selectedTransporterName
+                }}
+              />
 
               {/* Live Notification Center */}
               <LiveNotificationCenter 

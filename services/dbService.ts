@@ -2850,6 +2850,13 @@ export async function saveNotificationToFirestore(notif: AppNotification): Promi
   } catch (error) {
     console.warn(`Firestore saveNotification warning:`, error);
   }
+
+  // Automatically dispatch FCM Web Push to target User IDs / Roles / Clients across mobile & desktop
+  if (payload.status !== 'RESOLVED' && payload.status !== 'REJECTED' && !payload.read) {
+    import('./fcmPushService')
+      .then(({ dispatchPushForNotification }) => dispatchPushForNotification(payload as AppNotification))
+      .catch(() => {});
+  }
 }
 
 export async function updateNotificationInFirestore(notif: AppNotification): Promise<void> {
@@ -3603,6 +3610,18 @@ export async function saveUserToFirestore(user: AppUser): Promise<void> {
 
     const existingUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', DEFAULT_DATABASE_USERS) || [];
     const userKey = (user.userId || String(numericId)).toLowerCase().trim();
+    const matchedExisting = existingUsers.find(
+      u =>
+        String(u.id) === String(numericId) ||
+        String((u as any)._docId || '') === docId ||
+        (u.userId || '').toLowerCase().trim() === userKey
+    );
+    if (matchedExisting && payload.fcmTokens === undefined && Array.isArray(matchedExisting.fcmTokens)) {
+      payload.fcmTokens = matchedExisting.fcmTokens;
+    }
+    if (matchedExisting && payload.pushNotificationsEnabled === undefined && matchedExisting.pushNotificationsEnabled !== undefined) {
+      payload.pushNotificationsEnabled = matchedExisting.pushNotificationsEnabled;
+    }
     const filtered = existingUsers.filter(
       u =>
         String(u.id) !== String(numericId) &&

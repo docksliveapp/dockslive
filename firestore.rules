@@ -224,6 +224,13 @@ service cloud.firestore {
       allow delete: if isValidDocId(chunkId);
     }
 
+    // FCM Web Push Device Subscriptions (Mobile TWA/PWA & Desktop)
+    match /fcm_devices/{deviceId} {
+      allow read: if true;
+      allow create, update: if isValidDocId(deviceId) && isValidPayload();
+      allow delete: if isValidDocId(deviceId);
+    }
+
     // Admin Authorizations
     match /admins/{adminId} {
       allow read: if true;

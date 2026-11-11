@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { CheckCircle2, MapPin, Truck, User, LogOut, RefreshCw, ShieldCheck, AlertTriangle, Loader2 } from 'lucide-react';
-import { Vehicle, Driver, AppNotification } from '../types';
+import { Vehicle, Driver, AppNotification, UserRole } from '../types';
+import { PushNotificationToggle, ForegroundPushToastHost } from './PushNotificationToggle';
 import {
   subscribeToVehicles,
   subscribeToDrivers,
@@ -239,7 +240,20 @@ export const DriverLocationPortal: React.FC<DriverLocationPortalProps> = ({
 
   return (
     <div className="min-h-screen w-full bg-slate-950 text-white flex flex-col items-center justify-center p-4 sm:p-6 select-none">
+      <ForegroundPushToastHost theme="charcoal" />
       <div className="w-full max-w-md bg-slate-900 border border-white/15 rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-6 animate-fade-in">
+        <div className="flex items-center justify-end">
+          <PushNotificationToggle
+            variant="header"
+            theme="charcoal"
+            identity={{
+              userId: effectiveDriverId,
+              userName: effectiveDriverName,
+              role: UserRole.DRIVER,
+              clientName: resolvedTransporterName
+            }}
+          />
+        </div>
         
         {/* Status Icon */}
         {status === 'SENT' ? (

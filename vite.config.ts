@@ -1,8 +1,12 @@
 import path from 'path';
+import { createRequire } from 'node:module';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
+
+const require = createRequire(import.meta.url);
+const { handlePushSendRequest } = require('./serverPushSender.cjs');
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
@@ -40,7 +44,8 @@ export default defineConfig(({ mode }) => {
             'pwa-maskable-512x512.png',
             'pwa-maskable-512x512-v2.png',
             'pwa-maskable-512x512-v3.png',
-            'mak_pearl_grey_edge.png'
+            'mak_pearl_grey_edge.png',
+            'firebase-messaging-sw.js'
           ],
           workbox: {
             cleanupOutdatedCaches: true,
@@ -94,6 +99,10 @@ export default defineConfig(({ mode }) => {
         {
           name: 'gemini-ocr-server-endpoint',
           configureServer(server) {
+            server.middlewares.use('/api/push/send', (req, res) => {
+              handlePushSendRequest(req, res);
+            });
+
             server.middlewares.use('/api/extract-documents', (req, res) => {
               if (req.method !== 'POST') {
                 res.statusCode = 405;

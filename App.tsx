@@ -44,6 +44,7 @@ import PublicContainerTrackingPortal from './components/PublicContainerTrackingP
 import PublicVehicleTrackingPortal from './components/PublicVehicleTrackingPortal';
 import { initAuditSchedulerService } from './services/auditSchedulerService';
 import { ThemeToggleSwitch, useAppTheme } from './components/ThemeToggleSwitch';
+import { PushNotificationToggle } from './components/PushNotificationToggle';
 
 const isVehicleTrackingDomainOrRoute = (): boolean => {
   if (typeof window === 'undefined') return false;
@@ -1499,6 +1500,20 @@ const App: React.FC = () => {
 
             {/* Header Theme Switcher (Left = Charcoal Dark, Right = Pearl White) */}
             <ThemeToggleSwitch compact />
+
+            {/* Web Push Notification Permission & Device Toggle */}
+            <PushNotificationToggle
+              variant="header"
+              theme={appTheme}
+              identity={{
+                userId: safeAppStorage.getItem('dpl_current_user_id') || '',
+                userName: currentClientName || safeAppStorage.getItem('dpl_current_user_name') || firebaseUser?.displayName || 'Admin',
+                userEmail: firebaseUser?.email || '',
+                role: currentRole,
+                roles: currentRoles,
+                clientName: currentClientName
+              }}
+            />
 
             {/* Live Real-time Notification Center */}
             <LiveNotificationCenter

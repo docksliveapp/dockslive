@@ -16,6 +16,7 @@ import { PortSearchCaseModal } from './PortSearchCaseModal';
 import { DownloadLoadingBillSearchModal, DownloadClientLedgerModal, AddStaffPaymentModal } from './PortFinanceModals';
 import { downloadLoadingBillPdf } from '../services/pdfExportService';
 import { LiveNotificationCenter } from './LiveNotificationCenter';
+import { PushNotificationToggle } from './PushNotificationToggle';
 import { PWAInstallButton } from './PWAInstallButton';
 import { ThemeToggleSwitch } from './ThemeToggleSwitch';
 import VehicleManagement from './VehicleManagement';
@@ -557,6 +558,14 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
           <div className="flex items-center gap-3">
             <PWAInstallButton variant="header" />
             <ThemeToggleSwitch compact />
+            <PushNotificationToggle
+              variant="header"
+              identity={{
+                userId: staffUserId,
+                role: userRole,
+                roles: userRoles
+              }}
+            />
             <LiveNotificationCenter
               currentRole={userRole}
               currentRoles={userRoles}
@@ -600,6 +609,14 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
 
           <div className="flex items-center gap-2 shrink-0">
             <ThemeToggleSwitch compact />
+            <PushNotificationToggle
+              variant="header"
+              identity={{
+                userId: staffUserId,
+                role: userRole,
+                roles: userRoles
+              }}
+            />
             <LiveNotificationCenter
               currentRole={userRole}
               currentRoles={userRoles}

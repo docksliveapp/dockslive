@@ -68,6 +68,7 @@ import GroupAdminManagementModal, { AdminSettingsTab } from './GroupAdminManagem
 import Dashboard from './Dashboard';
 import { ThemeToggleSwitch } from './ThemeToggleSwitch';
 import { LiveNotificationCenter } from './LiveNotificationCenter';
+import { PushNotificationToggle } from './PushNotificationToggle';
 import PublicContainerTrackingPortal from './PublicContainerTrackingPortal';
 import PublicVehicleTrackingPortal from './PublicVehicleTrackingPortal';
 
@@ -812,6 +813,15 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
                 <span className="hidden md:inline">Open Workspace</span>
               </button>
             )}
+
+            <PushNotificationToggle
+              variant="header"
+              identity={{
+                userName: currentUserName || 'Arbabkhanboby',
+                role: UserRole.ADMIN,
+                roles: [UserRole.ADMIN]
+              }}
+            />
 
             <LiveNotificationCenter
               currentRole={UserRole.ADMIN}

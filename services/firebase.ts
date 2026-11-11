@@ -30,7 +30,7 @@ import firebaseConfig from '../firebase-applet-config.json';
 import { safeAppStorage } from './storage';
 
 // Initialize Firebase SDK
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 
 // Set log level to 'silent' to silence harmless background offline-mode reconnect notices
 setLogLevel('silent');

@@ -70,6 +70,9 @@
         "contact": { "type": "string", "description": "User phone or WhatsApp contact number", "maxLength": 40 },
         "status": { "type": "string", "description": "Account status ACTIVE or INACTIVE", "enum": ["ACTIVE", "INACTIVE"] },
         "clientName": { "type": "string", "description": "Associated company if role is CLIENT", "maxLength": 150 },
+        "fcmTokens": { "type": "array", "items": { "type": "string" }, "description": "Active Firebase Cloud Messaging device push tokens for mobile and desktop" },
+        "pushNotificationsEnabled": { "type": "boolean", "description": "Whether push notifications are enabled by the user" },
+        "lastFcmUpdatedAt": { "type": "string", "description": "ISO timestamp of last FCM token registration", "maxLength": 50 },
         "createdAt": { "type": "string", "description": "Account creation timestamp", "maxLength": 50 }
       },
       "required": ["uid", "name", "email", "role", "status"]
@@ -261,6 +264,23 @@
         "updatedAt": { "type": "string", "description": "Upload timestamp", "maxLength": 50 }
       },
       "required": ["docKey", "chunkIndex", "totalChunks", "data"]
+    },
+    "FcmDevice": {
+      "title": "FcmDevice",
+      "description": "Registered FCM Web Push device token linked to a user ID and role for multi-device push delivery",
+      "type": "object",
+      "properties": {
+        "token": { "type": "string", "description": "FCM Web Push registration token", "maxLength": 512 },
+        "userId": { "type": "string", "description": "System user ID", "maxLength": 120 },
+        "userName": { "type": "string", "description": "User full name", "maxLength": 150 },
+        "role": { "type": "string", "description": "Primary user role", "maxLength": 60 },
+        "roles": { "type": "array", "items": { "type": "string" }, "description": "Assigned roles" },
+        "clientName": { "type": "string", "description": "Associated client/transporter/vendor name", "maxLength": 150 },
+        "platform": { "type": "string", "description": "Device platform identifier", "maxLength": 120 },
+        "enabled": { "type": "boolean", "description": "Whether push delivery is active on this device" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of token sync", "maxLength": 50 }
+      },
+      "required": ["token", "enabled", "updatedAt"]
     }
   },
   "firestore": {
@@ -351,6 +371,10 @@
     "/document_chunks/{chunkId}": {
       "schema": "DocumentChunk",
       "description": "Cloud-synced binary chunks for multi-megabyte PDFs and document attachments"
+    },
+    "/fcm_devices/{deviceId}": {
+      "schema": "FcmDevice",
+      "description": "Registered FCM Web Push device subscriptions across mobile PWA and desktop browsers"
     }
   }
 }

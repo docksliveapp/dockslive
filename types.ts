@@ -1410,6 +1410,11 @@ export interface AppUser {
     other?: number;
   };
   loansAdvances?: number;
+
+  // Firebase Cloud Messaging (FCM) Multi-Device Web Push Tokens
+  fcmTokens?: string[];
+  pushNotificationsEnabled?: boolean;
+  lastFcmUpdatedAt?: string;
 }
 
 export const UNIVERSAL_CHARGE_TYPES = [

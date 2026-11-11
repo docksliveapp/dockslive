@@ -21,6 +21,7 @@ import { useBranding } from '../services/brandingService';
 import { useActiveCompany } from '../services/companyService';
 import { ThemeToggleSwitch } from './ThemeToggleSwitch';
 import LiveNotificationCenter from './LiveNotificationCenter';
+import { PushNotificationToggle } from './PushNotificationToggle';
 import { UserRole } from '../types';
 
 interface VendorPortalProps {
@@ -168,6 +169,15 @@ export const VendorPortal: React.FC<VendorPortalProps> = ({
             <div className="text-[10px] text-amber-400 font-mono">ID: {vendorId}</div>
           </div>
           <ThemeToggleSwitch compact />
+          <PushNotificationToggle
+            variant="header"
+            identity={{
+              userId: vendorId,
+              userName: vendorName,
+              role: UserRole.VENDOR,
+              clientName: vendorName
+            }}
+          />
           <LiveNotificationCenter
             currentRole={UserRole.VENDOR}
             userIdentifier={vendorName}

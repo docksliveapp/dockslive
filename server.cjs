@@ -1,6 +1,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const { handlePushSendRequest } = require('./serverPushSender.cjs');
 
 const DIST_DIR = path.join(__dirname, 'dist');
 const PORT = Number(process.env.PORT) || 8080;
@@ -157,6 +158,7 @@ function sendFile(res, filePath, urlPath) {
     ext === '.json' ||
     ext === '.webmanifest' ||
     urlPath === '/sw.js' ||
+    urlPath === '/firebase-messaging-sw.js' ||
     urlPath === '/'
   ) {
     cacheControl = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0';
@@ -199,6 +201,11 @@ function sendFile(res, filePath, urlPath) {
 const app = http.createServer((req, res) => {
   const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const pathname = decodeURIComponent(parsedUrl.pathname);
+
+  if (pathname === '/api/push/send') {
+    handlePushSendRequest(req, res);
+    return;
+  }
 
   if (pathname === '/api/extract-documents') {
     handleExtractDocuments(req, res);

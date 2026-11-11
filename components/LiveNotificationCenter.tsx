@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Bell, X, Check, CheckCircle2, Clock, FileText, DollarSign, 
@@ -16,6 +16,8 @@ import {
 import { useActiveCompany } from '../services/companyService';
 import NotificationModal from './NotificationModal';
 import { approveActionRequest, rejectActionRequest } from '../services/approvalService';
+import { PushNotificationToggle, ForegroundPushToastHost } from './PushNotificationToggle';
+import { initForegroundPushListener, triggerForegroundPushAlert } from '../services/fcmPushService';
 
 interface LiveNotificationCenterProps {
   currentRole: UserRole | string;
@@ -102,9 +104,12 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
 
     const isVehicleManager = 
       currentNorm === 'VEHICLEMANAGER' || 
+      currentNorm === 'DOCUMENTATIONMANAGER' ||
       userRolesNorm.includes('VEHICLEMANAGER') ||
+      userRolesNorm.includes('DOCUMENTATIONMANAGER') ||
       currentNorm.includes('VEHICLE') ||
-      userRolesNorm.some(r => r.includes('VEHICLE'));
+      currentNorm.includes('DOCUMENTATION') ||
+      userRolesNorm.some(r => r.includes('VEHICLE') || r.includes('DOCUMENTATION'));
 
     const isOperationsManager = 
       currentNorm === 'OPERATIONSMANAGER' || 
@@ -296,12 +301,12 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       }
 
       if (isVehicleManager) {
-        if (approvalStage === 'ADMIN_FINAL' && !declaredTargetRoles.some(tr => tr.includes('VEHICLE'))) {
+        if (approvalStage === 'ADMIN_FINAL' && !declaredTargetRoles.some(tr => tr.includes('VEHICLE') || tr.includes('DOCUMENTATION'))) {
           return false;
         }
         if (
           n.category === 'TRANSPORTER' || 
-          declaredTargetRoles.some(tr => tr.includes('VEHICLE') || tr.includes('FLEET'))
+          declaredTargetRoles.some(tr => tr.includes('VEHICLE') || tr.includes('FLEET') || tr.includes('DOCUMENTATION'))
         ) return true;
       }
 
@@ -344,6 +349,41 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
   // Unread Count
   const unreadCount = useMemo(() => {
     return relevantNotifications.filter(n => n.status === 'PENDING').length;
+  }, [relevantNotifications]);
+
+  // Foreground FCM + Real-time targeted notification toast & chime
+  const knownPendingIdsRef = useRef<Set<string> | null>(null);
+  const initialHydrationDoneRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    initForegroundPushListener().catch(() => {});
+    const timer = setTimeout(() => {
+      initialHydrationDoneRef.current = true;
+    }, 1800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const currentPending = relevantNotifications.filter(n => n.status === 'PENDING' && !n.read);
+    if (knownPendingIdsRef.current === null || !initialHydrationDoneRef.current) {
+      knownPendingIdsRef.current = new Set(currentPending.map(n => String(n.id)));
+      return;
+    }
+
+    for (const n of currentPending) {
+      const idStr = String(n.id);
+      if (!knownPendingIdsRef.current.has(idStr)) {
+        knownPendingIdsRef.current.add(idStr);
+        triggerForegroundPushAlert({
+          id: idStr,
+          title: n.title || 'MAK Group Notification',
+          body: n.description || 'New update requires your attention.',
+          caseNo: n.targetFilter?.caseNo ? String(n.targetFilter.caseNo) : undefined,
+          targetView: n.targetView,
+          priority: n.priority
+        }).catch(() => {});
+      }
+    }
   }, [relevantNotifications]);
 
   // Pending Approvals Count
@@ -950,6 +990,18 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
               </div>
             </div>
 
+            {/* Push Notification Permission & Device Toggle Bar */}
+            <PushNotificationToggle
+              variant="banner"
+              theme={isPearl ? 'pearl' : 'charcoal'}
+              identity={{
+                userName: userIdentifier,
+                role: currentRole,
+                roles: currentRoles,
+                clientName
+              }}
+            />
+
             {/* Filter Pills (Facebook Style: All | Unread | Approvals) */}
             <div className="px-4 pb-3 flex items-center gap-2 shrink-0 select-none border-b border-slate-200/70 dark:border-white/10">
               <button
@@ -1052,6 +1104,18 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
           onAction={handleNotificationAction}
         />
       )}
+
+      {/* Foreground Push Toast + Service Worker Click Deep-Link Host */}
+      <ForegroundPushToastHost
+        theme={isPearl ? 'pearl' : 'charcoal'}
+        onNavigate={(payload) => {
+          if (payload.caseNo && onNavigateToCase) {
+            onNavigateToCase(payload.caseNo, { caseNo: payload.caseNo });
+          } else if (payload.targetView && onNavigateToTab) {
+            onNavigateToTab(payload.targetView);
+          }
+        }}
+      />
     </>
   );
 };

@@ -37,6 +37,7 @@ import {
 } from '../services/dbService';
 import { AvailableVehiclesView } from './AvailableVehiclesView';
 import { LiveNotificationCenter } from './LiveNotificationCenter';
+import { PushNotificationToggle } from './PushNotificationToggle';
 import { PWAInstallButton } from './PWAInstallButton';
 import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
 import { ThemeToggleSwitch } from './ThemeToggleSwitch';
@@ -1187,6 +1188,16 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             {/* Theme Switcher */}
             <ThemeToggleSwitch compact />
 
+            {/* Push Notifications Toggle */}
+            <PushNotificationToggle
+              variant="header"
+              identity={{
+                userName: selectedClientName,
+                role: UserRole.CLIENT,
+                clientName: selectedClientName
+              }}
+            />
+
             {/* Live Notification Center */}
             <LiveNotificationCenter 
               currentRole={UserRole.CLIENT}
@@ -1232,6 +1243,16 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           <div className="flex items-center gap-2 shrink-0">
             {/* Theme Switcher */}
             <ThemeToggleSwitch compact />
+
+            {/* Push Notifications Toggle */}
+            <PushNotificationToggle
+              variant="header"
+              identity={{
+                userName: selectedClientName,
+                role: UserRole.CLIENT,
+                clientName: selectedClientName
+              }}
+            />
 
             {/* Live Notification Center */}
             <LiveNotificationCenter 
