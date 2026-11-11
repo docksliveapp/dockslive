@@ -499,29 +499,48 @@ export function exportVehicleTripsToExcel(
   vehicleReg: string,
   trips: Array<{
     date: string;
+    caseNo?: string;
+    pol?: string;
+    pod?: string;
     containerNumber: string;
     driverName: string;
+    driverPhone?: string;
+    driverCnic?: string;
     importerName: string;
+    itemDescription?: string;
     clientName: string;
     status: string;
   }>
 ): void {
   const headers = [
     'Trip Date',
+    'Case Number',
+    'Loading Port (From)',
+    'Destination Port (To)',
+    'Client Name',
+    'Importer Name',
+    'Cargo Item',
     'Container Number',
     'Driver Name',
-    'Importer / Consignee',
-    'Client Name',
+    'Driver Mobile',
+    'Driver ID Card (CNIC)',
     'Trip Status'
   ];
   const rows = trips.map(t => [
     t.date || '',
+    t.caseNo || '',
+    t.pol || '',
+    t.pod || '',
+    t.clientName || '',
+    t.importerName || '',
+    t.itemDescription || '',
     t.containerNumber || '',
     t.driverName || '',
-    t.importerName || '',
-    t.clientName || '',
+    t.driverPhone || '',
+    t.driverCnic || '',
     t.status || ''
   ]);
   const filename = `${vehicleReg.replace(/[^a-zA-Z0-9_-]/g, '_')}_trips_${new Date().toISOString().split('T')[0]}.xlsx`;
-  exportTableToExcel(filename, 'Vehicle Trips', headers, rows, [15, 20, 22, 28, 25, 18]);
+  exportTableToExcel(filename, 'Vehicle Trips', headers, rows, [14, 18, 22, 22, 24, 24, 24, 20, 22, 18, 20, 18]);
 }
+

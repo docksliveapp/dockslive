@@ -3704,3 +3704,182 @@ export async function downloadLoadingBillPdf(data: LoadingBillData): Promise<{ s
     throw error;
   }
 }
+
+export interface DriverIdCardPdfData {
+  vehicleNo: string;
+  caseNo?: string;
+  date?: string;
+  pol?: string;
+  pod?: string;
+  clientName?: string;
+  importerName?: string;
+  itemDescription?: string;
+  driverName?: string;
+  driverPhone?: string;
+  driverCnic?: string;
+  cnicFrontUrl?: string;
+  cnicBackUrl?: string;
+  branding?: BrandingInfo;
+}
+
+async function normalizeImageForJsPdf(src?: string): Promise<{ dataUrl: string; width: number; height: number } | null> {
+  if (!src || typeof window === 'undefined') return null;
+  return new Promise((resolve) => {
+    try {
+      const normalizedSrc = normalizeSvgDataUrlForCanvas(src);
+      const img = new Image();
+      if (!normalizedSrc.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
+      img.onload = () => {
+        try {
+          const nw = img.naturalWidth || img.width || 800;
+          const nh = img.naturalHeight || img.height || 500;
+          const maxDim = 1400;
+          const scale = Math.min(1, maxDim / Math.max(nw, nh));
+          const cw = Math.max(1, Math.round(nw * scale));
+          const ch = Math.max(1, Math.round(nh * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = cw;
+          canvas.height = ch;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(null);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, cw, ch);
+          ctx.drawImage(img, 0, 0, cw, ch);
+          resolve({
+            dataUrl: canvas.toDataURL('image/jpeg', 0.9),
+            width: cw,
+            height: ch
+          });
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = normalizedSrc;
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+export async function downloadDriverIdCardPdf(data: DriverIdCardPdfData) {
+  const doc = new jsPDF('p', 'mm', 'a4');
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 14;
+  const contentWidth = pageWidth - margin * 2;
+
+  let currentY = await drawPdfCorporateHeader(doc, {
+    title: 'DRIVER ID CARD & TRIP RECORD',
+    refNo: data.caseNo ? `CASE: ${data.caseNo}` : `VEHICLE: ${data.vehicleNo}`,
+    date: data.date || new Date().toISOString().split('T')[0],
+    subRef: `Vehicle Plate: ${data.vehicleNo || 'N/A'}`,
+    branding: data.branding,
+    accentColor: [14, 165, 233]
+  });
+
+  currentY += 3;
+
+  // Section 1: Driver Particulars & Trip Summary Box
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(margin, currentY, contentWidth, 48, 2, 2, 'FD');
+
+  doc.setFillColor(15, 23, 42);
+  doc.roundedRect(margin, currentY, contentWidth, 7.5, 2, 2, 'F');
+  doc.rect(margin, currentY + 4, contentWidth, 3.5, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text('DRIVER IDENTIFICATION & CONSIGNMENT PARTICULARS', margin + 4, currentY + 5.2);
+
+  const col1X = margin + 4;
+  const col2X = margin + contentWidth / 2 + 2;
+  let rowY = currentY + 13;
+
+  const drawFieldPair = (x: number, y: number, label: string, value: string) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(label, x, y);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(15, 23, 42);
+    const maxValW = contentWidth / 2 - 34;
+    const clipped = doc.splitTextToSize(cleanPdfText(value || 'Not Recorded'), maxValW)[0] || 'Not Recorded';
+    doc.text(clipped, x + 30, y);
+  };
+
+  drawFieldPair(col1X, rowY, 'Driver Name:', data.driverName || 'Not Recorded');
+  drawFieldPair(col2X, rowY, 'Vehicle Plate:', data.vehicleNo || 'N/A');
+  rowY += 6.5;
+
+  drawFieldPair(col1X, rowY, 'CNIC / ID No:', data.driverCnic || 'Not Recorded');
+  drawFieldPair(col2X, rowY, 'Case Number:', data.caseNo || 'N/A');
+  rowY += 6.5;
+
+  drawFieldPair(col1X, rowY, 'Mobile Number:', data.driverPhone || 'Not Recorded');
+  drawFieldPair(col2X, rowY, 'Trip Date:', data.date ? formatPdfDate(data.date) : 'N/A');
+  rowY += 6.5;
+
+  drawFieldPair(col1X, rowY, 'Loading Port:', data.pol || 'Karachi Port');
+  drawFieldPair(col2X, rowY, 'Destination:', data.pod || 'Destination Port');
+  rowY += 6.5;
+
+  drawFieldPair(col1X, rowY, 'Client Name:', data.clientName || 'N/A');
+  drawFieldPair(col2X, rowY, 'Importer / Item:', `${data.importerName || 'N/A'} (${data.itemDescription || 'Cargo'})`);
+
+  currentY += 54;
+
+  // Section 2: CNIC Front & Back Image Cards
+  const drawCnicSlot = async (slotTitle: string, imgSrc?: string, slotY: number = currentY): Promise<number> => {
+    const boxH = 82;
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(203, 213, 225);
+    doc.roundedRect(margin, slotY, contentWidth, boxH, 2, 2, 'FD');
+
+    doc.setFillColor(241, 245, 249);
+    doc.rect(margin + 0.3, slotY + 0.3, contentWidth - 0.6, 7.5, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(30, 41, 59);
+    doc.text(slotTitle, margin + 4, slotY + 5.2);
+
+    const parsedImg = await normalizeImageForJsPdf(imgSrc);
+    if (parsedImg) {
+      const availW = contentWidth - 16;
+      const availH = boxH - 14;
+      const scale = Math.min(availW / parsedImg.width, availH / parsedImg.height);
+      const drawW = parsedImg.width * scale;
+      const drawH = parsedImg.height * scale;
+      const drawX = margin + (contentWidth - drawW) / 2;
+      const drawY = slotY + 9.5 + (availH - drawH) / 2;
+      doc.addImage(parsedImg.dataUrl, 'JPEG', drawX, drawY, drawW, drawH, undefined, 'FAST');
+    } else {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(
+        'Driver CNIC scan image not uploaded for this side — verified via CNIC & mobile particulars above.',
+        pageWidth / 2,
+        slotY + boxH / 2 + 2,
+        { align: 'center' }
+      );
+    }
+
+    return slotY + boxH + 6;
+  };
+
+  currentY = await drawCnicSlot('1. DRIVER NATIONAL IDENTITY CARD (CNIC) — FRONT SIDE', data.cnicFrontUrl, currentY);
+  currentY = await drawCnicSlot('2. DRIVER NATIONAL IDENTITY CARD (CNIC) — BACK SIDE', data.cnicBackUrl, currentY);
+
+  drawPdfCorporateFooter(doc, 'Page 1 of 1', data.branding);
+
+  const safeDriver = (data.driverName || 'Driver').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeVehicle = (data.vehicleNo || 'Vehicle').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeCase = data.caseNo ? `_${data.caseNo.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
+  const filename = `Driver_ID_Card_${safeDriver}_${safeVehicle}${safeCase}.pdf`;
+  return await triggerDirectDownload(doc, filename);
+}
+

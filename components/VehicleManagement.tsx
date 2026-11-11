@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Truck, Plus, Search, FileText, User, Settings, Save, MapPin, Calendar, Clock, AlertTriangle, Trash2, CheckCircle, X, ChevronRight, Eye, Activity, CreditCard, Filter, AlertCircle, Download, Loader2, Ban, FileCheck, ShieldCheck, UploadCloud, CheckSquare, Square, Layers, Camera, Building, Globe, ExternalLink, Copy } from 'lucide-react';
-import { Vehicle, Transporter, VehicleCategory, VehicleType, TrackerInfo, VehicleHistory, UserRole } from '../types';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Truck, Plus, Search, FileText, User, Settings, Save, MapPin, Calendar, Clock, AlertTriangle, Trash2, CheckCircle, X, ChevronRight, ChevronDown, Eye, Activity, CreditCard, Filter, AlertCircle, Download, Loader2, Ban, FileCheck, ShieldCheck, UploadCloud, CheckSquare, Square, Layers, Camera, Building, Globe, ExternalLink, Copy } from 'lucide-react';
+import { Vehicle, Transporter, VehicleCategory, VehicleType, TrackerInfo, VehicleHistory, UserRole, Case, Driver, TransporterRequest } from '../types';
 import { submitVehicleActionApproval } from '../services/approvalService';
 import { autoFillVehicleData } from '../services/geminiService';
 import { safeAppStorage } from '../services/storage';
-import { downloadVehicleDetailsPdf, downloadVehicleNocPdf } from '../services/pdfExportService';
+import { downloadVehicleDetailsPdf, downloadVehicleNocPdf, downloadDriverIdCardPdf } from '../services/pdfExportService';
 import { PdfViewerModal } from './PdfViewerModal';
 import { UniversalDocumentPreviewModal, DataMappingCheckItem } from './UniversalDocumentPreviewModal';
 import { 
@@ -12,8 +12,16 @@ import {
   saveVehicleToFirestore, 
   saveVehiclesBulkToFirestore,
   updateVehicleInFirestore, 
-  deleteVehicleFromFirestore 
+  deleteVehicleFromFirestore,
+  subscribeToTransporterRequests,
+  updateTransporterRequestInFirestore,
+  dedupeArrayById,
+  subscribeToCases,
+  subscribeToDrivers,
+  extractCaseVehicleTripEntries,
+  syncAllCasesHistoryToVehicles
 } from '../services/dbService';
+import { restoreCasesFromIndexedDB, getDocumentFromIndexedDB } from '../services/documentStorage';
 import { 
   BulkVehicleImportModal, 
   VehicleOnlineModal, 
@@ -21,8 +29,6 @@ import {
 } from './VehicleManagementModals';
 import { AvailableVehiclesView } from './AvailableVehiclesView';
 import { VirtualizedList, VirtualizedTable } from './VirtualizedList';
-import { subscribeToTransporterRequests, updateTransporterRequestInFirestore, dedupeArrayById } from '../services/dbService';
-import { TransporterRequest } from '../types';
 import { sendAppNotification } from '../services/notificationService';
 import { exportVehiclesToExcel, exportVehicleTripsToExcel, generateVehiclesExcelBuffer } from '../services/excelExportService';
 import { 
@@ -36,11 +42,14 @@ import {
 } from '../services/documentParserService';
 import { OfficialDocumentsModal, DocumentType } from './OfficialDocumentsModal';
 import { 
+  generateRegistrationRenewalLetterDocx,
+  generateLeaseAgreementDocx,
   generateLeaseTerminationAgreementDocx, 
   generateCancellationLetterLetterheadDocx,
   generateVehicleNocDocx,
   generateDocxBlob,
-  downloadDocxBlob 
+  downloadDocxBlob,
+  formatDashDate
 } from '../services/vehicleDocxService';
 import { downloadCustomsVehicleListPdf } from '../services/pdfExportService';
 import { compressAndPrepareFile } from '../services/fileUtils';
@@ -52,6 +61,179 @@ import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
 const INITIAL_TRANSPORTERS: Transporter[] = [];
 
 const INITIAL_VEHICLES: Vehicle[] = [];
+
+interface ResolvedVehicleTrip {
+  id: string;
+  caseNo: string;
+  date: string;
+  pol: string;
+  pod: string;
+  route: string;
+  importerName: string;
+  itemDescription: string;
+  clientName: string;
+  containerNumber: string;
+  driverName: string;
+  driverPhone: string;
+  driverCnic: string;
+  driverCnicFrontUrl?: string;
+  driverCnicBackUrl?: string;
+  frontDocIdbKey?: string;
+  backDocIdbKey?: string;
+  status: string;
+}
+
+function resolveVehicleCompleteTrips(
+  registrationNumber: string,
+  persistedTrips: Vehicle['tripsHistory'],
+  fallbackDriver: { name?: string; cnic?: string; phone?: string },
+  allCases: Case[],
+  allDrivers: Driver[]
+): ResolvedVehicleTrip[] {
+  const cleanReg = normalizeVehiclePlate(registrationNumber || '');
+  if (!cleanReg) return [];
+
+  const tripsMap = new Map<string, ResolvedVehicleTrip>();
+
+  const findMatchingDriverRecord = (name?: string, cnic?: string) => {
+    const cleanDigits = String(cnic || '').replace(/[^0-9]/g, '');
+    return (allDrivers || []).find((d) => {
+      const dDigits = String(d.cnic || '').replace(/[^0-9]/g, '');
+      if (cleanDigits && cleanDigits.length >= 11 && dDigits === cleanDigits) return true;
+      if (name && d.name && d.name.trim().toLowerCase() === name.trim().toLowerCase()) return true;
+      if (d.assignedVehicleNo && normalizeVehiclePlate(d.assignedVehicleNo) === cleanReg) return true;
+      return false;
+    });
+  };
+
+  // 1. Extract trips from all registered cases (authoritative case details + driver scans)
+  const combinedCases: Case[] = Array.isArray(allCases) && allCases.length > 0
+    ? allCases
+    : [
+        ...(safeAppStorage.getJSON<Case[]>('dpl_live_cases', []) || []),
+        ...(safeAppStorage.getJSON<Case[]>('dpl_cases_data', []) || [])
+      ];
+
+  for (const c of combinedCases) {
+    if (!c || String(c.status || '').toUpperCase() === 'CANCELLED') continue;
+    const extracted = extractCaseVehicleTripEntries(c, allDrivers);
+    for (const item of extracted) {
+      if (item.normPlate !== cleanReg) continue;
+
+      let frontUrl = item.driverCnicFrontUrl;
+      let backUrl = item.driverCnicBackUrl;
+      let frontDocIdbKey: string | undefined;
+      let backDocIdbKey: string | undefined;
+
+      // Also inspect case.documents[] for uploaded Driver CNIC / ID Card attachments
+      if (Array.isArray(c.documents)) {
+        for (const docItem of c.documents) {
+          const label = `${docItem?.name || ''} ${docItem?.type || ''}`.toLowerCase();
+          const isDriverDoc =
+            label.includes('driver') &&
+            (label.includes('cnic') || label.includes('id') || label.includes('nic') || label.includes('card') || label.includes('license'));
+          if (isDriverDoc) {
+            const docKey = c.caseNo && docItem?.name ? `${c.caseNo}_${docItem.name}` : docItem?.name;
+            const docUrl = docItem && 'url' in docItem && typeof docItem.url === 'string' ? docItem.url : undefined;
+            if (label.includes('back')) {
+              if (!backUrl && docUrl) backUrl = docUrl;
+              if (!backDocIdbKey && docKey) backDocIdbKey = docKey;
+            } else {
+              if (!frontUrl && docUrl) frontUrl = docUrl;
+              if (!frontDocIdbKey && docKey) frontDocIdbKey = docKey;
+            }
+          }
+        }
+      }
+
+      const driverRec = findMatchingDriverRecord(item.driverName, item.driverCnic);
+      const resolvedName = (item.driverName || driverRec?.name || fallbackDriver.name || 'Not Recorded').trim();
+      const resolvedCnic = (item.driverCnic || driverRec?.cnic || fallbackDriver.cnic || 'Not Recorded').trim();
+      const resolvedPhone = (item.driverPhone || driverRec?.contact || fallbackDriver.phone || 'Not Recorded').trim();
+
+      const key = item.caseNo && item.caseNo !== 'N/A' ? `CASE_${item.caseNo}` : item.id;
+      tripsMap.set(key, {
+        id: item.id,
+        caseNo: item.caseNo || 'N/A',
+        date: item.date || '-',
+        pol: item.pol || 'Karachi Port',
+        pod: item.pod || 'Destination Port',
+        route: item.route || `${item.pol || 'Karachi Port'} → ${item.pod || 'Destination Port'}`,
+        importerName: item.importerName || 'N/A',
+        itemDescription: item.itemDescription || 'General Cargo',
+        clientName: item.clientName || 'N/A',
+        containerNumber: item.containerNumber || '-',
+        driverName: resolvedName,
+        driverPhone: resolvedPhone,
+        driverCnic: resolvedCnic,
+        driverCnicFrontUrl: frontUrl || driverRec?.cnicFrontUrl || driverRec?.cnicDocUrl,
+        driverCnicBackUrl: backUrl || driverRec?.cnicBackUrl,
+        frontDocIdbKey,
+        backDocIdbKey,
+        status: item.status || 'Dispatched'
+      });
+    }
+  }
+
+  // 2. Merge persisted vehicle.tripsHistory entries (for historical records or archived cases)
+  if (Array.isArray(persistedTrips)) {
+    persistedTrips.forEach((t, idx) => {
+      if (!t) return;
+      const parsedCaseMatch = t.status ? t.status.match(/\(([^)]+)\)/) : null;
+      const resolvedCaseNo = (t.caseNo || (parsedCaseMatch ? parsedCaseMatch[1] : '') || '').trim();
+      const mapKey = resolvedCaseNo && resolvedCaseNo !== 'N/A'
+        ? `CASE_${resolvedCaseNo}`
+        : `PERSIST_${t.date || ''}_${t.containerNumber || idx}`;
+
+      const routeParts = String(t.route || '').split(/\s*(?:→|->)\s*/);
+      const polFromRoute = routeParts[0]?.trim() || '';
+      const podFromRoute = routeParts[1]?.trim() || '';
+
+      const driverRec = findMatchingDriverRecord(t.driverName, t.driverCnic);
+      const existing = tripsMap.get(mapKey);
+
+      if (existing) {
+        tripsMap.set(mapKey, {
+          ...existing,
+          pol: existing.pol || t.pol || polFromRoute || 'Karachi Port',
+          pod: existing.pod || t.pod || podFromRoute || 'Destination Port',
+          importerName: existing.importerName !== 'N/A' ? existing.importerName : (t.importerName || 'N/A'),
+          itemDescription: existing.itemDescription || t.itemDescription || 'General Cargo',
+          clientName: existing.clientName !== 'N/A' ? existing.clientName : (t.clientName || 'N/A'),
+          containerNumber: existing.containerNumber !== '-' ? existing.containerNumber : (t.containerNumber || '-'),
+          driverName: existing.driverName !== 'Not Recorded' ? existing.driverName : (t.driverName || driverRec?.name || fallbackDriver.name || 'Not Recorded'),
+          driverPhone: existing.driverPhone !== 'Not Recorded' ? existing.driverPhone : (t.driverPhone || driverRec?.contact || fallbackDriver.phone || 'Not Recorded'),
+          driverCnic: existing.driverCnic !== 'Not Recorded' ? existing.driverCnic : (t.driverCnic || driverRec?.cnic || fallbackDriver.cnic || 'Not Recorded'),
+          driverCnicFrontUrl: existing.driverCnicFrontUrl || t.driverCnicFrontUrl || driverRec?.cnicFrontUrl || driverRec?.cnicDocUrl,
+          driverCnicBackUrl: existing.driverCnicBackUrl || t.driverCnicBackUrl || driverRec?.cnicBackUrl
+        });
+      } else {
+        const pol = (t.pol || polFromRoute || 'Karachi Port').trim();
+        const pod = (t.pod || podFromRoute || 'Destination Port').trim();
+        tripsMap.set(mapKey, {
+          id: t.id || `PERSIST-${idx}`,
+          caseNo: resolvedCaseNo || '-',
+          date: t.date || '-',
+          pol,
+          pod,
+          route: t.route || `${pol} → ${pod}`,
+          importerName: t.importerName || 'N/A',
+          itemDescription: t.itemDescription || 'General Cargo',
+          clientName: t.clientName || 'N/A',
+          containerNumber: t.containerNumber || '-',
+          driverName: (t.driverName || driverRec?.name || fallbackDriver.name || 'Not Recorded').trim(),
+          driverPhone: (t.driverPhone || driverRec?.contact || fallbackDriver.phone || 'Not Recorded').trim(),
+          driverCnic: (t.driverCnic || driverRec?.cnic || fallbackDriver.cnic || 'Not Recorded').trim(),
+          driverCnicFrontUrl: t.driverCnicFrontUrl || driverRec?.cnicFrontUrl || driverRec?.cnicDocUrl,
+          driverCnicBackUrl: t.driverCnicBackUrl || driverRec?.cnicBackUrl,
+          status: t.status || 'Completed'
+        });
+      }
+    });
+  }
+
+  return Array.from(tripsMap.values()).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
 
 interface VehicleManagementProps {
   initialFilter?: any;
@@ -152,7 +334,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       category: 'TRANSPORTER'
     });
 
-    alert(`Transporter request for ${req.vehicleNo} has been APPROVED!`);
+    setStatusBanner({ type: 'success', message: `Transporter request for ${req.vehicleNo} has been approved.` });
   };
 
   const handleRejectTransporterRequest = async (req: TransporterRequest) => {
@@ -180,7 +362,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       category: 'TRANSPORTER'
     });
 
-    alert(`Transporter request for ${req.vehicleNo} has been declined.`);
+    setStatusBanner({ type: 'info', message: `Transporter request for ${req.vehicleNo} has been declined.` });
   };
 
   const effectiveRole = propUserRole || (safeAppStorage.getItem('dpl_user_role') as UserRole) || UserRole.ADMIN;
@@ -206,13 +388,15 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   const [approvalTargetVehicle, setApprovalTargetVehicle] = useState<Vehicle | null>(null);
   const [approvalVehicleAction, setApprovalVehicleAction] = useState<'DELETE' | 'CANCEL' | 'EDIT'>('DELETE');
   const [approvalVehicleReason, setApprovalVehicleReason] = useState('');
+  const [approvalModalError, setApprovalModalError] = useState<string | null>(null);
   const [isSubmittingVehicleApproval, setIsSubmittingVehicleApproval] = useState(false);
+  const [statusBanner, setStatusBanner] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   useEffect(() => {
     safeAppStorage.setItem('dpl_vehicle_tab', activeTab);
   }, [activeTab]);
 
-  type VehicleStatusSubTab = 'ALL' | 'IN_TRANSIT' | 'EXPIRED' | 'EXPIRY_SOON' | 'TIR' | 'AFGHAN_TRANSIT' | 'BLACKLIST' | 'UPDATE_PENDING';
+  type VehicleStatusSubTab = 'ALL' | 'ACTIVE' | 'IN_TRANSIT' | 'EXPIRED' | 'EXPIRY_SOON' | 'TIR' | 'AFGHAN_TRANSIT' | 'BLACKLIST' | 'UPDATE_PENDING';
   const [vehicleStatusFilter, setVehicleStatusFilter] = useState<VehicleStatusSubTab>('ALL');
   const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
   const [renewalModalVehicle, setRenewalModalVehicle] = useState<Vehicle | null>(null);
@@ -268,8 +452,15 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   });
 
   const [copiedStatusPlate, setCopiedStatusPlate] = useState<string | null>(null);
+  const [allCases, setAllCases] = useState<Case[]>(() => {
+    return safeAppStorage.getJSON<Case[]>('dpl_live_cases', []) || [];
+  });
+  const [allDrivers, setAllDrivers] = useState<Driver[]>(() => {
+    return safeAppStorage.getJSON<Driver[]>('dpl_live_drivers', []) || [];
+  });
+  const syncedCasesSignatureRef = useRef<string>('');
 
-  // Real-time synchronization with Firestore
+  // Real-time synchronization with Firestore (Vehicles, All-Company Cases + IndexedDB Backups, and Drivers)
   useEffect(() => {
     const unsub = subscribeToVehicles(
       (firestoreVehicles) => {
@@ -285,6 +476,81 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     );
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const unsubCases = subscribeToCases(
+      async (firestoreCases) => {
+        if (!isMounted) return;
+        try {
+          const idbCases = await restoreCasesFromIndexedDB();
+          const idbByKey = new Map<string, any>();
+          (idbCases || []).forEach((ic: any) => {
+            const k = ic?.caseNo || ic?.id;
+            if (k) idbByKey.set(k, ic);
+          });
+
+          const merged = (firestoreCases || []).map((fc) => {
+            const k = fc.caseNo || fc.id;
+            const localBackup = k ? idbByKey.get(k) : null;
+            if (!localBackup) return fc;
+
+            const fcVa: any = fc.vehicleAssignment || {};
+            const lbVa: any = localBackup.vehicleAssignment || {};
+            return {
+              ...fc,
+              vehicleAssignment: (fc.vehicleAssignment || localBackup.vehicleAssignment)
+                ? {
+                    ...lbVa,
+                    ...fcVa,
+                    driverCnicFrontUrl: fcVa.driverCnicFrontUrl || lbVa.driverCnicFrontUrl || lbVa.driverCnicUrl,
+                    driverCnicBackUrl: fcVa.driverCnicBackUrl || lbVa.driverCnicBackUrl
+                  }
+                : undefined
+            } as Case;
+          });
+
+          if (isMounted) setAllCases(merged);
+        } catch (_) {
+          if (isMounted) setAllCases(firestoreCases || []);
+        }
+      },
+      (err) => console.warn('Cases subscription warning in VehicleManagement:', err),
+      { allCompanies: true }
+    );
+
+    const unsubDrivers = subscribeToDrivers(
+      (driversList) => {
+        if (isMounted && driversList) setAllDrivers(driversList);
+      },
+      (err) => console.warn('Drivers subscription warning in VehicleManagement:', err)
+    );
+
+    return () => {
+      isMounted = false;
+      unsubCases();
+      unsubDrivers();
+    };
+  }, []);
+
+  // Automatically backfill and sync all registered cases (including all cases registered this month) into their assigned vehicles in Firestore
+  useEffect(() => {
+    if (!allCases.length || !vehicles.length) return;
+    const assignmentSig = allCases
+      .map((c) => {
+        const va: any = c.vehicleAssignment || {};
+        const cntrPlates = Array.isArray(c.containers) ? c.containers.map((cn) => cn.vehicleNo || '').join(',') : '';
+        return `${c.caseNo || c.id}:${va.vehicleNo || ''}:${va.driverName || ''}:${cntrPlates}:${c.pol || ''}:${c.pod || ''}`;
+      })
+      .join('|');
+    const fullSig = `${vehicles.length}__${allDrivers.length}__${assignmentSig}`;
+    if (syncedCasesSignatureRef.current === fullSig) return;
+    syncedCasesSignatureRef.current = fullSig;
+
+    syncAllCasesHistoryToVehicles(allCases, vehicles, allDrivers).catch((err) => {
+      console.warn('Case-to-vehicle history sync notice:', err);
+    });
+  }, [allCases, vehicles, allDrivers]);
 
   useEffect(() => {
     safeAppStorage.setJSON('dpl_live_transporters', transporters);
@@ -689,10 +955,26 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   const vehiclesOnWay = vehicles.filter(v => v.status === 'ON_TRIP');
   const vehiclesExpired = vehicles.filter(v => v.status === 'EXPIRED' || getVehicleValidity(v).text === 'Expired');
   const vehiclesExpiringSoon = vehicles.filter(v => v.status === 'EXPIRE_SOON' || getVehicleValidity(v).text === 'Expiry Soon');
+  const vehiclesActiveValid = vehicles.filter(
+    v =>
+      !v.isBlacklisted &&
+      v.status !== 'CANCELLED' &&
+      v.status !== 'INACTIVE' &&
+      v.status !== 'EXPIRED' &&
+      getVehicleValidity(v).text !== 'Expired'
+  );
   
   const statusCounts = useMemo(() => {
     return {
       ALL: vehicles.length,
+      ACTIVE: vehicles.filter(
+        v =>
+          !v.isBlacklisted &&
+          v.status !== 'CANCELLED' &&
+          v.status !== 'INACTIVE' &&
+          v.status !== 'EXPIRED' &&
+          getVehicleValidity(v).text !== 'Expired'
+      ).length,
       IN_TRANSIT: vehicles.filter(v => v.status === 'ON_TRIP' || v.status === 'IN_LINE').length,
       EXPIRED: vehicles.filter(v => v.status === 'EXPIRED' || getVehicleValidity(v).text === 'Expired').length,
       EXPIRY_SOON: vehicles.filter(v => v.status === 'EXPIRE_SOON' || getVehicleValidity(v).text === 'Expiry Soon').length,
@@ -710,6 +992,11 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
         v.registrationNumber.toLowerCase().includes(q) ||
         (v.brokerName && v.brokerName.toLowerCase().includes(q)) ||
         v.transporterName.toLowerCase().includes(q) ||
+        (v.chassisNo && v.chassisNo.toLowerCase().includes(q)) ||
+        (v.engineNo && v.engineNo.toLowerCase().includes(q)) ||
+        (v.make && v.make.toLowerCase().includes(q)) ||
+        (v.model && v.model.toLowerCase().includes(q)) ||
+        (v.companyName && v.companyName.toLowerCase().includes(q)) ||
         (v.driverName && v.driverName.toLowerCase().includes(q)) ||
         (v.dplSerial && v.dplSerial.toLowerCase().includes(q))
       );
@@ -718,6 +1005,14 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
 
       const validity = getVehicleValidity(v);
       switch (vehicleStatusFilter) {
+        case 'ACTIVE':
+          return (
+            !v.isBlacklisted &&
+            v.status !== 'CANCELLED' &&
+            v.status !== 'INACTIVE' &&
+            v.status !== 'EXPIRED' &&
+            validity.text !== 'Expired'
+          );
         case 'IN_TRANSIT':
           return v.status === 'ON_TRIP' || v.status === 'IN_LINE';
         case 'EXPIRED':
@@ -731,7 +1026,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
         case 'BLACKLIST':
           return Boolean(v.isBlacklisted || v.status === 'CANCELLED' || v.status === 'INACTIVE');
         case 'UPDATE_PENDING':
-          return Boolean(v.isUpdatePending || !v.chassisNo || !v.engineNo || !v.validationExpiryDate);
+          return Boolean(v.isUpdatePending || !v.chassisNo || !v.engineNo || !v.registrationBook || !v.ownerIdCardUrl);
         case 'ALL':
         default:
           return true;
@@ -867,7 +1162,9 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       transporterName: syncedTransporter,
       brokerName: syncedTransporter,
       make: data.make || existingMatch?.make || '',
+      maker: data.make || data.maker || existingMatch?.maker || existingMatch?.make || '',
       model: data.model || existingMatch?.model || '',
+      mra: (data.mra !== undefined ? String(data.mra) : (existingMatch?.mra || '')).trim(),
       makeModel: [data.make || existingMatch?.make || '', data.model || existingMatch?.model || ''].filter(Boolean).join(' ') || data.makeModel || existingMatch?.makeModel || '',
       registrationDate: validity.registrationDate || data.registrationDate || '',
       validationExpiryDate: validity.expiryDate || data.validationExpiryDate || '',
@@ -922,10 +1219,11 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   const handleSubmitVehicleApproval = async () => {
     if (!approvalTargetVehicle) return;
     if (!approvalVehicleReason.trim()) {
-      alert("Please provide a reason for this action request.");
+      setApprovalModalError('Please provide a reason for this action request.');
       return;
     }
 
+    setApprovalModalError(null);
     setIsSubmittingVehicleApproval(true);
     try {
       const requesterName = safeAppStorage.getItem('dpl_user_name') || 'Vehicle Staff';
@@ -943,10 +1241,13 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
         setSelectedVehicle(res.updatedVehicle);
       }
       setShowVehicleApprovalModal(false);
-      alert(`Approval request submitted to Super Admin to ${approvalVehicleAction.toLowerCase()} vehicle ${approvalTargetVehicle.registrationNumber}.`);
+      setStatusBanner({
+        type: 'success',
+        message: `Approval request submitted to Super Admin to ${approvalVehicleAction.toLowerCase()} vehicle ${approvalTargetVehicle.registrationNumber}.`
+      });
     } catch (err) {
       console.error("Failed to submit vehicle approval request:", err);
-      alert("Failed to submit approval request. Please try again.");
+      setApprovalModalError('Failed to submit approval request. Please try again.');
     } finally {
       setIsSubmittingVehicleApproval(false);
     }
@@ -1163,437 +1464,436 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   );
 
   const renderVehiclesSection = () => (
-    <div className="space-y-6 animate-fade-in">
-      {/* Quick Action Navigation Bar */}
-      <div className="flex flex-wrap justify-between items-center gap-3 bg-white/5 p-4 rounded-xl border border-white/10">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button 
-            onClick={() => { setPreSelectedTransporterId(null); setShowAddVehicle(true); }}
-            className="bg-brand-600 hover:bg-brand-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold shadow-lg shadow-brand-600/30 transition-all hover:scale-105"
-          >
-            <Truck size={16} /> + Add Vehicle
-          </button>
-          <button 
-            onClick={() => setShowAddTransporter(true)} 
-            className="bg-purple-600/20 hover:bg-purple-600 border border-purple-500/30 text-purple-300 hover:text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-all"
-          >
-            <Plus size={16} /> + Add Transporter / Broker
-          </button>
-          <button 
-            onClick={() => setShowBulkUploadModal(true)}
-            className="bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/30 text-emerald-300 hover:text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-all"
-            title="Import multiple vehicles using Excel (.xlsx), Word (.docx), or CSV files"
-          >
-            <UploadCloud size={16} /> Bulk Upload (.xlsx, .docx, .csv)
-          </button>
-          <button 
-            type="button"
-            onClick={() => {
-              const host = (window.location.hostname || '').toLowerCase();
-              if (host.includes('makpk.online') || host.includes('mak-group.com')) {
-                window.location.href = 'https://vehicle.makpk.online';
-                return;
-              }
-              if (onOpenPublicTracker) onOpenPublicTracker();
-              else window.open('/?mode=vehicle', '_blank');
-            }}
-            className="bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 hover:text-white px-3.5 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-all cursor-pointer"
-            title="Open Live Public Vehicle Status Portal (vehicle.makpk.online)"
-          >
-            <Globe size={16} className="text-amber-400" />
-            <span>Vehicle Status Portal</span>
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <button 
-            onClick={() => handleOpenOfficialDocs('REG_LETTER')}
-            className="bg-blue-600/20 hover:bg-blue-600 border border-blue-500/30 text-blue-300 hover:text-white px-3.5 py-2 rounded-lg flex items-center gap-2 text-xs font-semibold transition-all shadow-sm"
-            title="Generate official Customs Application Letters, Permits & Lease Agreements in Word (.docx)"
-          >
-            <FileText size={15} /> Customs & Legal Docs (.docx)
-          </button>
-          <div className="flex items-center gap-1 bg-red-950/40 p-0.5 rounded-lg border border-red-500/30">
+    <div className="space-y-3 animate-fade-in w-full max-w-full min-w-0 overflow-x-hidden">
+      {/* Unified Compact Action & Customs Document Toolbar */}
+      <div className="w-full bg-slate-900/75 border border-white/10 rounded-xl p-3 space-y-2.5">
+        {/* Tier 1: Fleet Operations & Export Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button 
-              onClick={handlePreviewCustomsListPdf}
-              className="hover:bg-red-600/40 text-red-300 hover:text-white px-2.5 py-1.5 rounded flex items-center gap-1.5 text-xs font-semibold transition-all"
-              title="Preview official Pakistan Customs Vehicle List (PDF) with Data Mapping Verification"
+              onClick={() => { setPreSelectedTransporterId(null); setShowAddVehicle(true); }}
+              className="bg-brand-600 hover:bg-brand-500 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs font-semibold shadow-sm transition-colors whitespace-nowrap shrink-0"
             >
-              <Eye size={13} className="text-amber-300" /> Preview List (PDF)
+              <Plus size={14} /> Add Vehicle
             </button>
             <button 
-              onClick={handleDownloadCustomsListPdf}
-              className="bg-red-600/30 hover:bg-red-600 text-red-200 hover:text-white px-2.5 py-1.5 rounded flex items-center gap-1.5 text-xs font-semibold transition-all"
-              title="Download official Pakistan Customs Directorate General of Transit Trade Vehicle List (PDF)"
+              onClick={() => setShowAddTransporter(true)} 
+              className="bg-purple-600/20 hover:bg-purple-600 border border-purple-500/30 text-purple-300 hover:text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0"
             >
-              <Download size={13} /> PDF
+              <User size={14} /> Add Transporter
+            </button>
+            <button 
+              onClick={() => setShowBulkUploadModal(true)}
+              className="bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/30 text-emerald-300 hover:text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0"
+              title="Import multiple vehicles using Excel (.xlsx), Word (.docx), or CSV files"
+            >
+              <UploadCloud size={14} /> Bulk Upload (.xlsx / .csv)
+            </button>
+            <button 
+              type="button"
+              onClick={() => {
+                const host = (window.location.hostname || '').toLowerCase();
+                if (host.includes('makpk.online') || host.includes('mak-group.com')) {
+                  window.location.href = 'https://vehicle.makpk.online';
+                  return;
+                }
+                if (onOpenPublicTracker) onOpenPublicTracker();
+                else window.open('/?mode=vehicle', '_blank');
+              }}
+              className="bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 hover:text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="Open Live Public Vehicle Status Portal (vehicle.makpk.online)"
+            >
+              <Globe size={14} className="text-amber-400" />
+              <span>Status Portal</span>
             </button>
           </div>
-          <div className="flex items-center gap-1 bg-emerald-950/40 p-0.5 rounded-lg border border-emerald-500/30">
-            <button 
-              onClick={handlePreviewVehiclesExcel}
-              className="hover:bg-emerald-600/40 text-emerald-300 hover:text-white px-2.5 py-1.5 rounded flex items-center gap-1.5 text-xs font-semibold transition-all"
-              title="Preview Master Fleet Excel (.xlsx) spreadsheet with Data Mapping Verification"
-            >
-              <Eye size={13} className="text-emerald-300" /> Preview Fleet (.xlsx)
-            </button>
-            <button 
-              onClick={handleExportAllVehiclesList}
-              className="bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 hover:text-white px-2.5 py-1.5 rounded flex items-center gap-1.5 text-xs font-semibold transition-all"
-              title="Download formatted Excel (.xlsx) workbook of all entered commercial vehicles"
-            >
-              <Download size={13} /> .xlsx
-            </button>
-          </div>
-        </div>
-      </div>
 
-      {/* Official Customs & Legal Word Documents (.docx) - FBR & Customs Pakistan Section */}
-      <div className="w-full bg-gradient-to-r from-slate-900/90 via-slate-900/60 to-slate-900/90 border border-blue-500/25 rounded-2xl p-4 shadow-xl space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center font-bold text-xs border border-blue-500/30">
-              <FileText size={16} />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex items-center gap-0.5 bg-red-950/40 p-0.5 rounded-lg border border-red-500/30">
+              <button 
+                onClick={handlePreviewCustomsListPdf}
+                className="hover:bg-red-600/40 text-red-300 hover:text-white px-2 py-1 rounded flex items-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0"
+                title="Preview official Pakistan Customs Vehicle List (PDF)"
+              >
+                <Eye size={12} className="text-amber-300" /> Customs PDF
+              </button>
+              <button 
+                onClick={handleDownloadCustomsListPdf}
+                className="bg-red-600/30 hover:bg-red-600 text-red-200 hover:text-white px-2 py-1 rounded flex items-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0"
+                title="Download official Pakistan Customs Vehicle List (PDF)"
+              >
+                <Download size={12} /> PDF
+              </button>
             </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-bold text-white">Customs & FBR Legal Documents (.docx)</span>
-                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
-                  Pakistan Customs / FBR Format
-                </span>
-              </div>
-              <p className="text-[11px] text-gray-400">
-                Generate official 1:1 Word (.docx) files with current date, company & fleet data for Customs submission
-              </p>
+            <div className="flex items-center gap-0.5 bg-emerald-950/40 p-0.5 rounded-lg border border-emerald-500/30">
+              <button 
+                onClick={handlePreviewVehiclesExcel}
+                className="hover:bg-emerald-600/40 text-emerald-300 hover:text-white px-2 py-1 rounded flex items-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0"
+                title="Preview Master Fleet Excel (.xlsx)"
+              >
+                <Eye size={12} className="text-emerald-300" /> Fleet Excel
+              </button>
+              <button 
+                onClick={handleExportAllVehiclesList}
+                className="bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 hover:text-white px-2 py-1 rounded flex items-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0"
+                title="Download formatted Excel (.xlsx) workbook"
+              >
+                <Download size={12} /> .xlsx
+              </button>
             </div>
           </div>
+        </div>
 
-          {/* Process Workflow Buttons */}
-          <div className="flex items-center gap-2 flex-wrap">
+        {/* Tier 2: Compact Customs & FBR Word (.docx) Templates Strip */}
+        <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1 mr-1 whitespace-nowrap">
+              <FileText size={13} className="text-blue-400" />
+              <span>Customs (.docx):</span>
+            </span>
             <button
               type="button"
               onClick={() => handleOpenOfficialDocs('REG_LETTER', 'ALL')}
-              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-600/30 transition-all hover:scale-102"
+              className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
               title="Generate complete registration file for Pakistan Customs House"
             >
-              <FileText size={14} />
-              <span>Generate Registration Docs for Customs</span>
+              <span>Registration Docs</span>
             </button>
-
             <button
               type="button"
               onClick={() => handleOpenOfficialDocs('CUSTOMS_PERMIT', 'RENEWAL')}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all hover:scale-102"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
               title="Generate renewal permits for expired or due vehicles"
             >
-              <ShieldCheck size={14} />
-              <span>Generate Renewal Docs for Customs</span>
+              <span>Renewal Docs</span>
             </button>
-
             <button
               type="button"
               onClick={() => handleOpenOfficialDocs('CANCELLATION_NOC')}
-              className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md shadow-rose-600/30 transition-all hover:scale-102"
+              className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
               title="Generate cancellation & NOC docs for Customs panel de-registration"
             >
-              <Ban size={14} />
-              <span>Generate Cancellation Docs for Customs</span>
+              <span>Cancellation Docs</span>
             </button>
           </div>
-        </div>
 
-        {/* Buttons with Exact Uploaded Document Names */}
-        <div className="pt-2 border-t border-white/5 flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-semibold text-gray-400 mr-1">Uploaded Templates (.docx):</span>
-
-          <button
-            type="button"
-            onClick={() => handleOpenOfficialDocs('REG_LETTER')}
-            className="bg-white/5 hover:bg-blue-600/20 border border-white/10 hover:border-blue-500/40 text-gray-200 hover:text-blue-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
-            title="Letter 10 Vehicles registration letter (Company Letterhead)"
-          >
-            <FileText size={13} className="text-blue-400" />
-            <span>Letter 10 Vehicles registration letter</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleOpenOfficialDocs('CUSTOMS_PERMIT')}
-            className="bg-white/5 hover:bg-emerald-600/20 border border-white/10 hover:border-emerald-500/40 text-gray-200 hover:text-emerald-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
-            title="Custom Vehicle List (Customs Directorate Format)"
-          >
-            <ShieldCheck size={13} className="text-emerald-400" />
-            <span>Custom Vehicle List</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleOpenOfficialDocs('LEASE_AGREEMENT')}
-            className="bg-white/5 hover:bg-amber-600/20 border border-white/10 hover:border-amber-500/40 text-gray-200 hover:text-amber-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
-            title="Lease Agreement TAS-582 on Legal Stamp Paper"
-          >
-            <FileCheck size={13} className="text-amber-400" />
-            <span>Lease Agreement TAS-582</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleOpenOfficialDocs('AFFIDAVIT')}
-            className="bg-white/5 hover:bg-indigo-600/20 border border-white/10 hover:border-indigo-500/40 text-gray-200 hover:text-indigo-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
-            title="Affidavit (Stamp Paper - SRO 450(I)/2001)"
-          >
-            <FileCheck size={13} className="text-indigo-400" />
-            <span>Affidavit (SRO 450)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleOpenOfficialDocs('LEASE_TERMINATION')}
-            className="bg-white/5 hover:bg-rose-600/20 border border-white/10 hover:border-rose-500/40 text-gray-200 hover:text-rose-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
-            title="LEASE TERMINATION OF NOC on Stamp Paper"
-          >
-            <AlertTriangle size={13} className="text-rose-400" />
-            <span>LEASE TERMINATION OF NOC</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleOpenOfficialDocs('CANCELLATION_NOC')}
-            className="bg-white/5 hover:bg-purple-600/20 border border-white/10 hover:border-purple-500/40 text-gray-200 hover:text-purple-300 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all"
-            title="NOC on letter head (Panel De-registration)"
-          >
-            <Building size={13} className="text-purple-400" />
-            <span>NOC on letter head</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Vehicle Status Filter Tabs - Compact Wrap with Zero Horizontal Scroll */}
-      <div className="w-full">
-        <div className="flex flex-wrap gap-1.5 sm:gap-2 p-1.5 bg-black/40 rounded-2xl border border-white/10 w-full">
-          {[
-            { id: 'ALL', label: 'All', count: statusCounts.ALL, icon: Truck, color: 'text-gray-300' },
-            { id: 'IN_TRANSIT', label: 'In Transit', count: statusCounts.IN_TRANSIT, icon: MapPin, color: 'text-blue-400' },
-            { id: 'EXPIRED', label: 'Expired', count: statusCounts.EXPIRED, icon: AlertTriangle, color: 'text-red-400' },
-            { id: 'EXPIRY_SOON', label: 'Expiry Soon', count: statusCounts.EXPIRY_SOON, icon: Clock, color: 'text-yellow-400' },
-            { id: 'TIR', label: 'TIR', count: statusCounts.TIR, icon: ShieldCheck, color: 'text-purple-400' },
-            { id: 'AFGHAN_TRANSIT', label: 'Afghan Transit', count: statusCounts.AFGHAN_TRANSIT, icon: Activity, color: 'text-cyan-400' },
-            { id: 'BLACKLIST', label: 'Blacklist', count: statusCounts.BLACKLIST, icon: Ban, color: 'text-rose-500' },
-            { id: 'UPDATE_PENDING', label: 'Update Pending', count: statusCounts.UPDATE_PENDING, icon: AlertCircle, color: 'text-amber-400' },
-          ].map((tab, tIdx) => {
-            const isActive = vehicleStatusFilter === tab.id;
-            const Icon = tab.icon;
-            return (
-              <button
-                key={`veh_subtab_${tab.id}_${tIdx}`}
-                onClick={() => setVehicleStatusFilter(tab.id as VehicleStatusSubTab)}
-                className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all whitespace-nowrap ${
-                  isActive 
-                    ? 'bg-brand-600 text-white shadow-md shadow-brand-600/30' 
-                    : 'text-gray-400 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <Icon size={14} className={isActive ? 'text-white' : tab.color} />
-                <span>{tab.label}</span>
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  isActive ? 'bg-white/20 text-white' : 'bg-white/10 text-gray-300'
-                }`}>
-                  {tab.count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Dashboard Windows */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="glass-card p-4 rounded-xl border-l-4 border-blue-500 bg-gradient-to-br from-blue-500/10 to-transparent">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-gray-400 text-xs uppercase font-bold">In The Way</p>
-              <h3 className="text-2xl font-bold text-white mt-1">{vehiclesOnWay.length}</h3>
-            </div>
-            <Truck className="text-blue-400" size={24} />
-          </div>
-          <button onClick={() => setVehicleStatusFilter('IN_TRANSIT')} className="text-xs text-blue-400 mt-3 hover:underline">View Active Routes</button>
-        </div>
-
-        <div className="glass-card p-4 rounded-xl border-l-4 border-yellow-500 bg-gradient-to-br from-yellow-500/10 to-transparent">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-gray-400 text-xs uppercase font-bold">Expiry Soon</p>
-              <h3 className="text-2xl font-bold text-white mt-1">{vehiclesExpiringSoon.length}</h3>
-            </div>
-            <Clock className="text-yellow-400" size={24} />
-          </div>
-          <button onClick={() => setVehicleStatusFilter('EXPIRY_SOON')} className="text-[10px] text-yellow-400 mt-3 hover:underline">Filter Expiry Soon</button>
-        </div>
-
-        <div className="glass-card p-4 rounded-xl border-l-4 border-red-500 bg-gradient-to-br from-red-500/10 to-transparent">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-gray-400 text-xs uppercase font-bold">Expired</p>
-              <h3 className="text-2xl font-bold text-white mt-1">{vehiclesExpired.length}</h3>
-            </div>
-            <AlertTriangle className="text-red-400" size={24} />
-          </div>
-          <div className="flex items-center gap-2 mt-3">
-            <button onClick={() => setVehicleStatusFilter('EXPIRED')} className="text-xs text-red-400 hover:underline">
-              Filter Expired
-            </button>
-            <span className="text-gray-600 text-xs">•</span>
-            <button 
-              onClick={handleSelectAllExpiredVehicles} 
-              className="text-xs text-blue-400 hover:underline flex items-center gap-1 font-medium"
-              title="Select all expired vehicles and open Registration/Renewal Letter generator"
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              onClick={() => handleOpenOfficialDocs('REG_LETTER')}
+              className="bg-white/5 hover:bg-blue-600/20 border border-white/10 text-gray-300 hover:text-blue-300 px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap shrink-0"
+              title="Letter 10 Vehicles registration letter"
             >
-              <FileText size={12} /> Renewal Letter (.docx)
+              Letter 10 Vehicles
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenOfficialDocs('CUSTOMS_PERMIT')}
+              className="bg-white/5 hover:bg-emerald-600/20 border border-white/10 text-gray-300 hover:text-emerald-300 px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap shrink-0"
+              title="Custom Vehicle List (Customs Directorate Format)"
+            >
+              Custom List
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenOfficialDocs('LEASE_AGREEMENT')}
+              className="bg-white/5 hover:bg-amber-600/20 border border-white/10 text-gray-300 hover:text-amber-300 px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap shrink-0"
+              title="Lease Agreement TAS-582 on Legal Stamp Paper"
+            >
+              Lease TAS-582
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenOfficialDocs('AFFIDAVIT')}
+              className="bg-white/5 hover:bg-indigo-600/20 border border-white/10 text-gray-300 hover:text-indigo-300 px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap shrink-0"
+              title="Affidavit (Stamp Paper - SRO 450(I)/2001)"
+            >
+              Affidavit SRO 450
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenOfficialDocs('LEASE_TERMINATION')}
+              className="bg-white/5 hover:bg-rose-600/20 border border-white/10 text-gray-300 hover:text-rose-300 px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap shrink-0"
+              title="Lease Termination of NOC on Stamp Paper"
+            >
+              Lease Termination
+            </button>
+            <button
+              type="button"
+              onClick={() => handleOpenOfficialDocs('CANCELLATION_NOC')}
+              className="bg-white/5 hover:bg-purple-600/20 border border-white/10 text-gray-300 hover:text-purple-300 px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap shrink-0"
+              title="NOC on Letterhead (Panel De-registration)"
+            >
+              NOC Letterhead
             </button>
           </div>
         </div>
+      </div>
 
-        <div className="glass-card p-4 rounded-xl border-l-4 border-brand-500 bg-gradient-to-br from-brand-500/10 to-transparent flex flex-col justify-center items-center cursor-pointer hover:bg-brand-500/20 transition-colors" onClick={() => setVehicleStatusFilter('ALL')}>
-          <Search className="text-brand-400 mb-2" size={24} />
-          <span className="text-brand-400 font-bold">View All Vehicles</span>
-          <span className="text-xs text-brand-500/70 mt-1">{vehicles.length} Total Registered</span>
+      {/* Compact 5-Column Summary Strip (Including Active / Valid Vehicles Counter) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        <div
+          onClick={() => setVehicleStatusFilter('ACTIVE')}
+          className="bg-slate-900/75 hover:bg-slate-800/80 px-3 py-2 rounded-xl border border-emerald-500/25 flex items-center justify-between gap-2 cursor-pointer transition-colors"
+        >
+          <div className="min-w-0">
+            <span className="text-emerald-300/90 text-[11px] font-semibold block truncate">Active (Valid)</span>
+            <div className="flex items-baseline gap-1.5 mt-0.5">
+              <span className="text-lg font-bold text-emerald-400 font-mono tabular-nums">{vehiclesActiveValid.length}</span>
+              <span className="text-[10.5px] text-emerald-300/80 hover:underline whitespace-nowrap">Filter Valid</span>
+            </div>
+          </div>
+          <CheckCircle className="text-emerald-400 shrink-0" size={17} />
+        </div>
+
+        <div
+          onClick={() => setVehicleStatusFilter('IN_TRANSIT')}
+          className="bg-slate-900/75 hover:bg-slate-800/80 px-3 py-2 rounded-xl border border-white/10 flex items-center justify-between gap-2 cursor-pointer transition-colors"
+        >
+          <div className="min-w-0">
+            <span className="text-gray-400 text-[11px] font-medium block truncate">In Transit</span>
+            <div className="flex items-baseline gap-1.5 mt-0.5">
+              <span className="text-lg font-bold text-white font-mono tabular-nums">{vehiclesOnWay.length}</span>
+              <span className="text-[10.5px] text-blue-400 hover:underline whitespace-nowrap">Active Routes</span>
+            </div>
+          </div>
+          <Truck className="text-blue-400 shrink-0" size={17} />
+        </div>
+
+        <div
+          onClick={() => setVehicleStatusFilter('EXPIRY_SOON')}
+          className="bg-slate-900/75 hover:bg-slate-800/80 px-3 py-2 rounded-xl border border-white/10 flex items-center justify-between gap-2 cursor-pointer transition-colors"
+        >
+          <div className="min-w-0">
+            <span className="text-gray-400 text-[11px] font-medium block truncate">Expiry Soon (30d)</span>
+            <div className="flex items-baseline gap-1.5 mt-0.5">
+              <span className="text-lg font-bold text-amber-400 font-mono tabular-nums">{vehiclesExpiringSoon.length}</span>
+              <span className="text-[10.5px] text-amber-300 hover:underline whitespace-nowrap">Filter Due</span>
+            </div>
+          </div>
+          <Clock className="text-amber-400 shrink-0" size={17} />
+        </div>
+
+        <div className="bg-slate-900/75 px-3 py-2 rounded-xl border border-white/10 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <span className="text-gray-400 text-[11px] font-medium block truncate">Expired (6M Rule)</span>
+            <div className="flex items-baseline gap-1.5 mt-0.5 flex-wrap">
+              <span className="text-lg font-bold text-rose-400 font-mono tabular-nums">{vehiclesExpired.length}</span>
+              <button onClick={() => setVehicleStatusFilter('EXPIRED')} className="text-[10.5px] text-rose-300 hover:underline whitespace-nowrap">
+                Filter
+              </button>
+              <span className="text-gray-600 text-[10px]">·</span>
+              <button 
+                onClick={handleSelectAllExpiredVehicles} 
+                className="text-[10.5px] text-blue-400 hover:underline whitespace-nowrap font-medium"
+                title="Select all expired vehicles and open Renewal Letter generator"
+              >
+                Renewal
+              </button>
+            </div>
+          </div>
+          <AlertTriangle className="text-rose-400 shrink-0" size={17} />
+        </div>
+
+        <div
+          onClick={() => setVehicleStatusFilter('ALL')}
+          className="bg-slate-900/75 hover:bg-slate-800/80 px-3 py-2 rounded-xl border border-white/10 flex items-center justify-between gap-2 cursor-pointer transition-colors"
+        >
+          <div className="min-w-0">
+            <span className="text-gray-400 text-[11px] font-medium block truncate">Total Registered</span>
+            <div className="flex items-baseline gap-1.5 mt-0.5">
+              <span className="text-lg font-bold text-brand-400 font-mono tabular-nums">{vehicles.length}</span>
+              <span className="text-[10.5px] text-gray-400 whitespace-nowrap">View All</span>
+            </div>
+          </div>
+          <Search className="text-brand-400 shrink-0" size={17} />
         </div>
       </div>
 
-      {/* Main Vehicle List */}
-      <div className="glass-card rounded-xl border border-white/10 overflow-hidden">
-        <div className="p-4 border-b border-white/10 flex justify-between items-center">
-          <h3 className="text-white font-semibold flex items-center gap-2">
-            <Truck size={18}/> 
-            <span>Fleet Vehicles ({filteredVehicles.length})</span>
-            {vehicleStatusFilter !== 'ALL' && (
-              <span className="text-xs text-brand-400 bg-brand-500/10 px-2 py-0.5 rounded border border-brand-500/20">
-                Tab: {vehicleStatusFilter}
-              </span>
-            )}
-          </h3>
-          <div className="flex gap-2">
-             <div className="relative">
-                <Search className="absolute left-2 top-2 text-gray-500" size={14} />
-                <input type="text" placeholder="Search registration, broker, driver..." className="glass-input rounded-lg pl-8 pr-3 py-1.5 text-xs outline-none w-56" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-             </div>
-             <button onClick={() => setVehicleStatusFilter('ALL')} className="p-1.5 bg-white/5 rounded hover:bg-white/10 text-gray-400" title="Clear Filters"><Filter size={16}/></button>
+      {/* Unified Fleet Vehicles Workspace Card (Single-Line Rows, Tight Columns, Zero Horizontal Scroll) */}
+      <div className="glass-card rounded-xl border border-white/10 overflow-hidden w-full max-w-full min-w-0">
+        {/* Card Header: Title + Search + Integrated Filter Bar */}
+        <div className="px-3 py-2 border-b border-white/10 space-y-1.5 bg-slate-900/85">
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <h3 className="text-white text-sm font-semibold flex items-center gap-1.5">
+              <Truck size={15} className="text-brand-400 shrink-0" /> 
+              <span>Fleet Vehicles</span>
+              <span className="text-xs font-mono tabular-nums text-gray-400">({filteredVehicles.length})</span>
+              {vehicleStatusFilter !== 'ALL' && (
+                <span className="text-[11px] text-brand-300 font-medium">
+                  · {vehicleStatusFilter.replace('_', ' ')}
+                </span>
+              )}
+            </h3>
+            <div className="flex items-center gap-1.5 w-full sm:w-auto">
+              <div className="relative flex-1 sm:w-64">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={13} />
+                <input
+                  type="text"
+                  placeholder="Search plate, chassis, transporter..."
+                  className="glass-input rounded-lg pl-8 pr-7 py-1 text-xs outline-none w-full"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                    title="Clear search"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setVehicleStatusFilter('ALL');
+                  setSearchQuery('');
+                }}
+                className="px-2 py-1 bg-white/5 rounded-lg hover:bg-white/10 text-gray-300 hover:text-white text-xs font-medium flex items-center gap-1 whitespace-nowrap shrink-0"
+                title="Reset Filters"
+              >
+                <Filter size={12} />
+                <span>Reset</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Integrated Compact Filter Tabs */}
+          <div className="flex flex-wrap items-center gap-1">
+            {[
+              { id: 'ALL', label: 'All', count: statusCounts.ALL },
+              { id: 'ACTIVE', label: 'Active (Valid)', count: statusCounts.ACTIVE },
+              { id: 'IN_TRANSIT', label: 'In Transit', count: statusCounts.IN_TRANSIT },
+              { id: 'EXPIRED', label: 'Expired', count: statusCounts.EXPIRED },
+              { id: 'EXPIRY_SOON', label: 'Expiry Soon', count: statusCounts.EXPIRY_SOON },
+              { id: 'TIR', label: 'TIR', count: statusCounts.TIR },
+              { id: 'AFGHAN_TRANSIT', label: 'Afghan Transit', count: statusCounts.AFGHAN_TRANSIT },
+              { id: 'BLACKLIST', label: 'Blacklist', count: statusCounts.BLACKLIST },
+              { id: 'UPDATE_PENDING', label: 'Docs Pending', count: statusCounts.UPDATE_PENDING },
+            ].map((tab, tIdx) => {
+              const isActive = vehicleStatusFilter === tab.id;
+              return (
+                <button
+                  key={`veh_subtab_${tab.id}_${tIdx}`}
+                  type="button"
+                  onClick={() => setVehicleStatusFilter(tab.id as VehicleStatusSubTab)}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 ${
+                    isActive 
+                      ? 'bg-brand-600 text-white shadow-sm' 
+                      : 'text-gray-400 hover:text-white hover:bg-white/5 bg-white/[0.02]'
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  <span className={`font-mono tabular-nums text-[10px] ${
+                    isActive ? 'text-white/90 font-bold' : tab.id === 'ACTIVE' ? 'text-emerald-400 font-semibold' : 'text-gray-500'
+                  }`}>
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
         {/* Bulk Selection Action Bar */}
         {selectedVehicleIds.length > 0 && (
-          <div className="bg-gradient-to-r from-blue-950/90 via-slate-900 to-indigo-950/90 border-b border-blue-500/30 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-inner animate-in fade-in duration-150">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-300 flex items-center justify-center font-bold text-xs border border-blue-500/40">
+          <div className="bg-slate-900 border-b border-blue-500/30 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono tabular-nums font-bold text-xs border border-blue-500/30">
                 {selectedVehicleIds.length}
-              </div>
-              <div>
-                <span className="text-xs font-bold text-white block">
-                  {selectedVehicleIds.length} Vehicle{selectedVehicleIds.length > 1 ? 's' : ''} Selected
-                </span>
-                <span className="text-[11px] text-blue-200/80">
-                  Generate official Word (.docx) renewal letters, customs permits, or lease agreements
-                </span>
-              </div>
+              </span>
+              <span className="text-xs font-semibold text-white">
+                Selected — Generate Word (.docx):
+              </span>
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 flex-wrap">
               <button
                 type="button"
                 onClick={() => {
                   setDocsModalType('REG_LETTER');
                   setShowDocsModal(true);
                 }}
-                className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-blue-600/30 transition-all hover:scale-102"
-                title="Letter 10 Vehicles registration letter (Company Letterhead)"
+                className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold px-2 py-0.5 rounded whitespace-nowrap"
               >
-                <FileText size={14} /> Letter 10 Vehicles (.docx)
+                Letter 10
               </button>
-
               <button
                 type="button"
                 onClick={() => {
                   setDocsModalType('CUSTOMS_PERMIT');
                   setShowDocsModal(true);
                 }}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all hover:scale-102"
-                title="Custom Vehicle List (Customs Directorate Format)"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold px-2 py-0.5 rounded whitespace-nowrap"
               >
-                <ShieldCheck size={14} /> Custom Vehicle List (.docx)
+                Custom List
               </button>
-
               <button
                 type="button"
                 onClick={() => {
                   setDocsModalType('LEASE_AGREEMENT');
                   setShowDocsModal(true);
                 }}
-                className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-amber-600/30 transition-all hover:scale-102"
-                title="Vehicle Lease Agreement TAS-582 on Legal Stamp Paper"
+                className="bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-semibold px-2 py-0.5 rounded whitespace-nowrap"
               >
-                <FileCheck size={14} /> Lease Agreement TAS-582 (.docx)
+                Lease TAS-582
               </button>
-
               <button
                 type="button"
                 onClick={() => {
                   setDocsModalType('AFFIDAVIT');
                   setShowDocsModal(true);
                 }}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition-all hover:scale-102"
-                title="Affidavit (Stamp Paper - SRO 450(I)/2001)"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold px-2 py-0.5 rounded whitespace-nowrap"
               >
-                <FileCheck size={14} /> Affidavit (Stamp Paper) (.docx)
+                Affidavit
               </button>
-
               <button
                 type="button"
                 onClick={() => {
                   setDocsModalType('LEASE_TERMINATION');
                   setShowDocsModal(true);
                 }}
-                className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-rose-600/30 transition-all hover:scale-102"
-                title="LEASE TERMINATION OF NOC on Stamp Paper"
+                className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold px-2 py-0.5 rounded whitespace-nowrap"
               >
-                <AlertTriangle size={14} /> LEASE TERMINATION (.docx)
+                Termination
               </button>
-
               <button
                 type="button"
                 onClick={() => {
                   setDocsModalType('CANCELLATION_NOC');
                   setShowDocsModal(true);
                 }}
-                className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md shadow-purple-600/30 transition-all hover:scale-102"
-                title="NOC on letter head (Panel De-registration)"
+                className="bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold px-2 py-0.5 rounded whitespace-nowrap"
               >
-                <Building size={14} /> NOC on letter head (.docx)
+                NOC
               </button>
-
               <button
                 type="button"
                 onClick={() => setShowDocsModal(true)}
-                className="bg-white/10 hover:bg-white/20 text-white text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all"
+                className="bg-white/10 hover:bg-white/20 text-white text-[11px] font-medium px-2 py-0.5 rounded whitespace-nowrap"
               >
-                <Layers size={14} /> All Documents (.docx)
+                All Docs
               </button>
-
               <button
                 type="button"
                 onClick={() => setSelectedVehicleIds([])}
-                className="text-gray-400 hover:text-white text-xs px-2.5 py-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                className="text-gray-400 hover:text-white text-[11px] px-2 py-0.5 rounded hover:bg-white/5 whitespace-nowrap"
               >
-                Clear Selection
+                Clear
               </button>
             </div>
           </div>
         )}
-        {/* Mobile View (Cards) - Touch-Optimized Virtualized List */}
-        <div className="block sm:hidden touch-pan-y">
+
+        {/* Mobile View (Compact Single-Row Cards) */}
+        <div className="block md:hidden touch-pan-y">
           <VirtualizedList
             items={filteredVehicles}
-            itemHeight={130}
+            itemHeight={64}
             maxHeight={650}
             getItemKey={(v, idx) => `veh_mob_${v.id || idx}_${idx}`}
             emptyPlaceholder={
@@ -1601,98 +1901,61 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
             }
             renderItem={(v) => {
               const validity = getVehicleValidity(v);
+              const isTruckit = v.operatingCompany === 'truckit' || (v.companyName || '').toUpperCase().includes('TRUCKIT');
+              const compLabel = isTruckit ? 'TRUCKIT' : v.operatingCompany === 'muhib' ? 'MUHIB' : v.operatingCompany === 'vantage' ? 'VANTAGE' : 'DOCKS';
               return (
-                <div className="p-3.5 space-y-2 hover:bg-white/5 transition-colors border-b border-white/5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
+                <div
+                  onClick={() => setSelectedVehicle(v)}
+                  className="px-2.5 py-1.5 hover:bg-white/5 transition-colors border-b border-white/5 cursor-pointer flex flex-col justify-center h-full"
+                >
+                  <div className="flex items-center justify-between gap-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <button
                         type="button"
-                        onClick={() => toggleSelectVehicle(v.id)}
-                        className="text-gray-400 hover:text-white p-1"
-                        title={selectedVehicleIds.includes(v.id) ? "Deselect vehicle" : "Select vehicle"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSelectVehicle(v.id);
+                        }}
+                        className="text-gray-400 hover:text-white shrink-0"
                       >
                         {selectedVehicleIds.includes(v.id) ? (
-                          <CheckSquare size={18} className="text-blue-400" />
+                          <CheckSquare size={14} className="text-blue-400" />
                         ) : (
-                          <Square size={18} className="text-gray-600 hover:text-gray-400" />
+                          <Square size={14} className="text-gray-600" />
                         )}
                       </button>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-white text-base">{v.registrationNumber}</span>
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase">
-                            {v.companyName || (v.operatingCompany === 'truckit' ? 'Truckit' : v.operatingCompany === 'muhib' ? 'Muhib' : v.operatingCompany === 'vantage' ? 'Vantage' : 'Docks')}
-                          </span>
-                        </div>
-                        <span className="text-xs text-gray-400 font-medium">Broker: <strong className="text-gray-200 font-semibold">{v.brokerName || v.transporterName || 'Direct Broker'}</strong></span>
-                      </div>
+                      <span className="font-mono font-bold text-white text-xs tabular-nums shrink-0">{v.registrationNumber}</span>
+                      <span className={`text-[10px] font-semibold uppercase shrink-0 ${isTruckit ? 'text-cyan-300' : 'text-amber-300'}`}>
+                        {compLabel}
+                      </span>
+                      <span className="text-[11px] text-gray-400 truncate">
+                        · {v.transporterName || v.brokerName || 'Direct'}
+                      </span>
                     </div>
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold shrink-0 ${validity.badgeClass}`}>
-                      {validity.text}
+                    <span className={`text-[10.5px] font-semibold shrink-0 ${
+                      v.status === 'CANCELLED' ? 'text-gray-400' : validity.text === 'Expired' ? 'text-rose-400' : validity.text === 'Expiry Soon' ? 'text-amber-400' : 'text-emerald-400'
+                    }`}>
+                      {v.status === 'CANCELLED' ? 'Cancelled' : validity.text}
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap items-center justify-end gap-1.5 pt-1.5 border-t border-white/5">
-                    {v.status === 'CANCELLED' ? (
-                      <>
-                        <button
-                          onClick={() => handlePreviewNocDocx(v)}
-                          className="bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/30 text-sky-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
-                          title="Preview & Verify De-registration NOC Word Document (.docx)"
-                        >
-                          <Eye size={13} className="text-amber-300" />
-                          <span>Preview NOC (.docx)</span>
-                        </button>
-                        <button
-                          onClick={() => handlePreviewNocPdf(v)}
-                          className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
-                          title="Preview & Verify De-registration NOC PDF"
-                        >
-                          <Eye size={13} className="text-amber-300" />
-                          <span>Preview NOC PDF</span>
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => {
-                            setSelectedVehicleIds([v.id]);
-                            setShowDocsModal(true);
-                          }}
-                          className="bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 hover:text-white px-2 py-1 rounded-lg text-xs font-medium flex items-center gap-1"
-                          title="Generate Legal & Customs Word Docs (.docx)"
-                        >
-                          <FileText size={13} />
-                          <span>Docs (.docx)</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            setVehicleToCancel(v);
-                            setCancellationReason('Operational De-Registration & Contract Release');
-                          }}
-                          className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg text-xs flex items-center gap-1 bg-white/5 border border-white/5"
-                          title="Cancel / De-register Vehicle & Generate NOC"
-                        >
-                          <Ban size={14} />
-                          <span className="text-[11px]">Cancel</span>
-                        </button>
-                      </>
-                    )}
-                    <button 
-                      onClick={() => handlePreviewVehicleDetailsPdf(v)}
-                      className="text-emerald-400 hover:text-white p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium flex items-center gap-1" 
-                      title="Preview Vehicle Dossier PDF with Data Verification"
-                    >
-                      <Eye size={13} className="text-emerald-300" />
-                      <span>Preview PDF</span>
-                    </button>
-                    <button onClick={() => setSelectedVehicle(v)} className="text-brand-400 hover:text-white p-1.5 rounded-lg bg-white/5 text-xs flex items-center gap-1 border border-white/5" title="View Profile">
-                      <Eye size={14}/>
-                      <span>View</span>
-                    </button>
-                    <button onClick={() => handleDeleteVehicle(v.id)} className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg bg-white/5" title="Delete Vehicle">
-                      <Trash2 size={14}/>
-                    </button>
+                  <div className="flex items-center justify-between gap-1 mt-1" onClick={(e) => e.stopPropagation()}>
+                    <span className="text-[10px] font-mono text-gray-400 truncate">
+                      {v.registrationDate || 'No Reg Date'} · {v.registrationBook ? '✓RB' : '✗RB'} {v.ownerIdCardUrl ? '✓ID' : '✗ID'}
+                    </span>
+                    <div className="flex items-center shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingVehicle(v);
+                          setShowAddVehicle(true);
+                        }}
+                        className="bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/30 text-cyan-300 hover:text-white px-2 py-0.5 rounded text-[10.5px] font-semibold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                      >
+                        <Settings size={10} />
+                        <span>Edit / Docs</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -1700,13 +1963,15 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
           />
         </div>
 
-        {/* Desktop View (Table) - High-Performance Virtualized Table */}
-        <div className="hidden sm:block">
+        {/* Desktop View: Single-Line 34px Rows (Matching Vehicle No Font Height) & Tightly Packed Adjacent Columns */}
+        <div className="hidden md:block w-full max-w-full min-w-0 overflow-x-hidden">
           <VirtualizedTable<Vehicle>
             items={filteredVehicles}
-            rowHeight={72}
-            maxHeight={650}
-            minTableWidth={1000}
+            rowHeight={34}
+            maxHeight={700}
+            disableHorizontalScroll={true}
+            headerCellClassName="px-1.5"
+            onRowClick={(v) => setSelectedVehicle(v)}
             getItemKey={(v, idx) => `veh_row_${v.id || idx}_${idx}`}
             columns={[
               {
@@ -1714,232 +1979,184 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                   <button
                     type="button"
                     onClick={toggleSelectAllFiltered}
-                    className="text-gray-400 hover:text-white transition-colors"
+                    className="text-gray-400 hover:text-white transition-colors flex items-center justify-center mx-auto"
                     title={isAllFilteredSelected ? "Deselect all in view" : "Select all in view"}
                   >
                     {isAllFilteredSelected ? (
-                      <CheckSquare size={16} className="text-blue-400" />
+                      <CheckSquare size={14} className="text-blue-400" />
                     ) : (
-                      <Square size={16} className="text-gray-500 hover:text-gray-300" />
+                      <Square size={14} className="text-gray-500 hover:text-gray-300" />
                     )}
                   </button>
                 ),
-                width: 48,
+                width: '3%',
                 className: 'text-center'
               },
-              { header: 'Vehicle Registration No', width: '22%' },
-              { header: 'Category & Type', width: '16%' },
-              { header: 'Broker / Transporter', width: '16%' },
-              { header: 'Assigned Driver', width: '14%' },
-              { header: 'Status (Validity)', width: '14%' },
-              { header: 'Action', width: '18%', className: 'text-right' }
+              { header: 'Vehicle No', width: '11.5%' },
+              { header: 'Company', width: '9.5%' },
+              { header: 'Make / Model', width: '12%' },
+              { header: 'Chassis / Engine', width: '17%' },
+              { header: 'Transporter', width: '17%' },
+              { header: 'Docs', width: '8%' },
+              { header: 'Validity (6M)', width: '13%' },
+              { header: 'Action', width: '9%', className: 'text-right' }
             ]}
             emptyPlaceholder={
-              <div className="p-8 text-center text-gray-500 text-sm">
+              <div className="p-8 text-center text-gray-500 text-xs">
                 No vehicles found matching current filter ({vehicleStatusFilter}).
               </div>
             }
             renderRow={(v) => {
               const validity = getVehicleValidity(v);
-              const hasAssignedDriver = v.driverName && 
-                v.driverName !== v.transporterName && 
-                v.driverName !== v.brokerName && 
-                v.driverName.toLowerCase() !== 'n/a' &&
-                v.driverName.toLowerCase() !== 'none';
+              const isTruckit = v.operatingCompany === 'truckit' || (v.companyName || '').toUpperCase().includes('TRUCKIT');
+              const compactComp = isTruckit
+                ? 'TRUCKIT'
+                : v.operatingCompany === 'muhib'
+                ? 'MUHIB'
+                : v.operatingCompany === 'vantage'
+                ? 'VANTAGE'
+                : 'DOCKS';
+              const fullComp = v.companyName || (isTruckit ? 'TRUCKIT PVT LTD' : 'DOCKS PVT LTD');
+              const makeModelStr = [v.make, v.model].filter(Boolean).join(' ') || v.makeModel || v.category || 'Bonded';
+              const tripsCount = v.tripsHistory?.length || 0;
+              const isExpiredOrDue = v.status !== 'CANCELLED' && (validity.text === 'Expired' || validity.text === 'Expiry Soon');
 
               return (
                 <>
-                  <div className="p-3.5 text-center" style={{ width: 48, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                  {/* Col 1: Checkbox (3%) */}
+                  <div
+                    className="px-1 flex items-center justify-center"
+                    style={{ width: '3%', flexShrink: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <button
                       type="button"
                       onClick={() => toggleSelectVehicle(v.id)}
-                      className="text-gray-400 hover:text-white transition-colors"
+                      className="text-gray-400 hover:text-white transition-colors flex items-center justify-center"
                       title={selectedVehicleIds.includes(v.id) ? "Deselect vehicle" : "Select vehicle"}
                     >
                       {selectedVehicleIds.includes(v.id) ? (
-                        <CheckSquare size={16} className="text-blue-400" />
+                        <CheckSquare size={14} className="text-blue-400" />
                       ) : (
-                        <Square size={16} className="text-gray-600 hover:text-gray-400" />
+                        <Square size={14} className="text-gray-600 hover:text-gray-400" />
                       )}
                     </button>
                   </div>
-                  <div className="p-3.5 font-mono font-bold text-white text-base truncate" style={{ width: '22%', flexShrink: 0 }}>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span>{v.registrationNumber}</span>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase border ${
-                        v.operatingCompany === 'truckit' || (v.companyName || '').toUpperCase().includes('TRUCKIT')
-                          ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
-                          : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                      }`}>
-                        {v.companyName || (v.operatingCompany === 'truckit' ? 'TRUCKIT PVT LTD' : v.operatingCompany === 'muhib' ? 'MUHIB INT' : v.operatingCompany === 'vantage' ? 'VANTAGE' : 'DOCKS PVT LTD')}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-1 flex-wrap font-sans font-normal">
-                      <span className={`text-[9px] px-1.5 py-0.2 rounded font-semibold ${v.registrationBook ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'}`}>
-                        {v.registrationBook ? '✓ Reg Book' : '✗ Reg Book'}
-                      </span>
-                      <span className={`text-[9px] px-1.5 py-0.2 rounded font-semibold ${v.ownerIdCardUrl ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'}`}>
-                        {v.ownerIdCardUrl ? '✓ Owner ID' : '✗ Owner ID'}
-                      </span>
-                      {(v.tripsHistory?.length || 0) > 0 && (
-                        <span className="text-[9px] px-1.5 py-0.2 rounded font-semibold bg-blue-500/15 text-blue-300 border border-blue-500/30">
-                          {v.tripsHistory!.length} Trip{v.tripsHistory!.length > 1 ? 's' : ''}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="p-3.5 truncate" style={{ width: '16%', flexShrink: 0 }}>
-                    <span className="text-xs text-white font-semibold block truncate">
-                      {[v.make, v.model].filter(Boolean).join(' ') || v.makeModel || v.category || 'Bonded Carrier'}
-                    </span>
-                    <span className="block text-[10px] font-mono text-gray-400 truncate" title={`Chassis: ${v.chassisNo || 'N/A'} | Engine: ${v.engineNo || 'N/A'}`}>
-                      CH: {v.chassisNo || 'N/A'} • ENG: {v.engineNo || 'N/A'}
-                    </span>
-                  </div>
-                  <div className="p-3.5 font-medium text-gray-200 truncate" style={{ width: '16%', flexShrink: 0 }}>
-                    <span className="block truncate text-xs text-white">{v.transporterName || v.brokerName || 'Direct Transporter'}</span>
-                    <span className="block truncate text-[10px] text-gray-400">Broker: {v.brokerName || v.transporterName || 'Same'}</span>
-                  </div>
-                  <div className="p-3.5 text-xs truncate" style={{ width: '14%', flexShrink: 0 }}>
-                    {hasAssignedDriver ? (
-                      <>
-                        <span className="text-gray-200 font-medium block truncate">{v.driverName}</span>
-                        {v.driverContact && v.driverContact !== 'N/A' && (
-                          <span className="text-gray-400 font-mono text-[11px] block truncate">{v.driverContact}</span>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-gray-500 italic text-[11px] block" title="Driver is dynamically assigned when this vehicle is dispatched in Case Workflow (Vehicle Assign step)">
-                        Workflow Assigned
-                      </span>
-                    )}
-                  </div>
-                  <div className="p-3.5" style={{ width: '14%', flexShrink: 0 }}>
-                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold inline-block ${validity.badgeClass}`}>
-                      {validity.text}
-                    </span>
-                    {v.registrationDate ? (
-                      <span className="block text-[10px] text-gray-300 font-mono mt-0.5">Reg: {v.registrationDate}</span>
-                    ) : (
-                      <span className="block text-[10px] text-rose-400 font-semibold mt-0.5">No Reg Date (Expired)</span>
-                    )}
-                    {v.validationExpiryDate && (
-                      <span className="block text-[10px] text-gray-400 font-mono">Exp: {v.validationExpiryDate}</span>
-                    )}
-                  </div>
-                  <div className="p-3.5 text-right flex justify-end items-center gap-1.5 flex-wrap" style={{ width: '18%', flexShrink: 0 }}>
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        const plate = encodeURIComponent(v.registrationNumber);
-                        const host = (window.location.hostname || '').toLowerCase();
-                        const isCustom = host.includes('makpk.online') || host.includes('mak-group.com');
-                        const directUrl = isCustom
-                          ? `https://vehicle.makpk.online?vehicle=${plate}`
-                          : `${window.location.origin}/?mode=vehicle&plate=${plate}`;
-                        navigator.clipboard.writeText(directUrl).then(() => {
-                          setCopiedStatusPlate(v.registrationNumber);
-                          setTimeout(() => setCopiedStatusPlate(null), 3000);
-                        }).catch(() => {});
-                        if (isCustom) {
-                          window.location.href = directUrl;
-                        } else if (onOpenPublicTracker) {
-                          onOpenPublicTracker(v.registrationNumber);
-                        } else {
-                          window.open(directUrl, '_blank');
-                        }
-                      }}
-                      className="bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 hover:text-white transition-colors p-1.5 rounded-lg text-xs" 
-                      title={copiedStatusPlate === v.registrationNumber ? "Status Link Copied!" : "Open / Copy Vehicle Verification Status (vehicle.makpk.online)"}
-                    >
-                      <Globe size={13} className={copiedStatusPlate === v.registrationNumber ? "text-emerald-400" : "text-amber-400"} />
-                    </button>
-                    {v.status === 'CANCELLED' ? (
-                      <>
-                        <button
-                          onClick={() => handlePreviewNocDocx(v)}
-                          className="bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/30 text-sky-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
-                          title="Preview & Verify De-registration NOC Word Document (.docx)"
-                        >
-                          <Eye size={12} className="text-amber-300" />
-                          <span className="text-[11px]">NOC (.docx)</span>
-                        </button>
-                        <button
-                          onClick={() => handlePreviewNocPdf(v)}
-                          className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-semibold px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
-                          title="Preview & Verify De-registration NOC PDF"
-                        >
-                          <Eye size={12} className="text-amber-300" />
-                          <span className="text-[11px]">NOC PDF</span>
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => {
-                            setSelectedVehicleIds([v.id]);
-                            setShowDocsModal(true);
-                          }}
-                          className="bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 hover:text-white transition-colors px-2 py-1 rounded-lg text-xs font-medium flex items-center gap-1"
-                          title="Generate Official Customs / Lease Word Docs (.docx)"
-                        >
-                          <FileText size={12} />
-                          <span className="text-[11px]">Docs</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (hasAdminRole) {
-                              setVehicleToCancel(v);
-                              setCancellationReason('Operational De-Registration & Contract Release');
-                            } else {
-                              setApprovalTargetVehicle(v);
-                              setApprovalVehicleAction('CANCEL');
-                              setApprovalVehicleReason('');
-                              setShowVehicleApprovalModal(true);
-                            }
-                          }}
-                          className="text-gray-400 hover:text-red-400 hover:bg-red-500/10 px-1.5 py-1 rounded-lg transition-colors text-xs flex items-center gap-1 border border-white/5"
-                          title="Cancel / De-register Vehicle & Generate NOC"
-                        >
-                          <Ban size={12} />
-                          <span className="text-[11px]">Cancel</span>
-                        </button>
-                      </>
-                    )}
 
+                  {/* Col 2: Vehicle Registration No (11.5%) */}
+                  <div
+                    className="px-1.5 min-w-0 truncate font-mono font-bold text-[13px] leading-none text-white tabular-nums"
+                    style={{ width: '11.5%', flexShrink: 0 }}
+                    title={`${v.registrationNumber}${tripsCount > 0 ? ` (${tripsCount} Trips)` : ''}`}
+                  >
+                    {v.registrationNumber}
+                  </div>
+
+                  {/* Col 3: Company (9.5%) */}
+                  <div
+                    className={`px-1.5 min-w-0 truncate text-[11px] font-semibold uppercase leading-none ${
+                      isTruckit ? 'text-cyan-300' : 'text-amber-300'
+                    }`}
+                    style={{ width: '9.5%', flexShrink: 0 }}
+                    title={fullComp}
+                  >
+                    {compactComp}
+                  </div>
+
+                  {/* Col 4: Make / Model (12%) */}
+                  <div
+                    className="px-1.5 min-w-0 truncate text-xs font-medium text-gray-200 leading-none"
+                    style={{ width: '12%', flexShrink: 0 }}
+                    title={makeModelStr}
+                  >
+                    {makeModelStr}
+                  </div>
+
+                  {/* Col 5: Chassis / Engine (17%) */}
+                  <div
+                    className="px-1.5 min-w-0 truncate font-mono tabular-nums text-[11px] text-gray-300 leading-none"
+                    style={{ width: '17%', flexShrink: 0 }}
+                    title={`Chassis: ${v.chassisNo || 'N/A'} | Engine: ${v.engineNo || 'N/A'}`}
+                  >
+                    {v.chassisNo || '-'} <span className="text-gray-600">/</span> {v.engineNo || '-'}
+                  </div>
+
+                  {/* Col 6: Transporter / Broker (17%) */}
+                  <div
+                    className="px-1.5 min-w-0 truncate text-xs font-medium text-gray-100 leading-none"
+                    style={{ width: '17%', flexShrink: 0 }}
+                    title={`Transporter / Broker: ${v.transporterName || v.brokerName || 'Direct Transporter'}${v.driverName ? ` | Driver: ${v.driverName}` : ''}`}
+                  >
+                    {v.transporterName || v.brokerName || 'Direct'}
+                  </div>
+
+                  {/* Col 7: Compliance Docs (8%) */}
+                  <div
+                    className="px-1.5 min-w-0 truncate font-mono text-[10.5px] leading-none whitespace-nowrap"
+                    style={{ width: '8%', flexShrink: 0 }}
+                    title={`Reg Book: ${v.registrationBook ? 'Uploaded' : 'Missing'} | Owner ID: ${v.ownerIdCardUrl ? 'Uploaded' : 'Missing'}${tripsCount > 0 ? ` | Trips: ${tripsCount}` : ''}`}
+                  >
+                    <span className={v.registrationBook ? 'text-emerald-400 font-semibold' : 'text-rose-400'}>
+                      {v.registrationBook ? '✓RB' : '✗RB'}
+                    </span>
+                    <span className="text-gray-600 mx-0.5">·</span>
+                    <span className={v.ownerIdCardUrl ? 'text-emerald-400 font-semibold' : 'text-rose-400'}>
+                      {v.ownerIdCardUrl ? '✓ID' : '✗ID'}
+                    </span>
+                  </div>
+
+                  {/* Col 8: Validity & Date (13%) */}
+                  <div
+                    className="px-1.5 min-w-0 truncate leading-none flex items-center gap-1 whitespace-nowrap"
+                    style={{ width: '13%', flexShrink: 0 }}
+                    onClick={(e) => {
+                      if (isExpiredOrDue) {
+                        e.stopPropagation();
+                        setRenewalModalVehicle(v);
+                      }
+                    }}
+                    title={
+                      isExpiredOrDue
+                        ? `Click to Renew 6-Month Validity | Reg: ${v.registrationDate || 'None'} | Exp: ${v.validationExpiryDate || 'Expired'}`
+                        : `Reg: ${v.registrationDate || 'N/A'} | Exp: ${v.validationExpiryDate || 'N/A'}`
+                    }
+                  >
+                    <span
+                      className={`text-[11px] font-semibold shrink-0 ${
+                        v.status === 'CANCELLED'
+                          ? 'text-gray-400'
+                          : validity.text === 'Expired'
+                          ? 'text-rose-400 hover:underline'
+                          : validity.text === 'Expiry Soon'
+                          ? 'text-amber-400 hover:underline'
+                          : 'text-emerald-400'
+                      }`}
+                    >
+                      {v.status === 'CANCELLED' ? 'Canc' : validity.text === 'Expiry Soon' ? 'Soon' : validity.text}
+                    </span>
+                    <span className="text-[10px] font-mono tabular-nums text-gray-400 truncate">
+                      {v.registrationDate ? v.registrationDate.slice(2) : 'No Date'}
+                    </span>
+                  </div>
+
+                  {/* Col 9: Single Action Button — Edit / Docs (9%) */}
+                  <div
+                    className="px-1.5 flex items-center justify-end whitespace-nowrap min-w-0"
+                    style={{ width: '9%', flexShrink: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <button
                       type="button"
                       onClick={() => {
                         setEditingVehicle(v);
                         setShowAddVehicle(true);
                       }}
-                      className="bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/30 text-cyan-300 hover:text-white transition-colors px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1"
-                      title="Update Vehicle Specs, Upload Reg Book / Owner ID Card, or Renew 6-Month Validity"
+                      className="bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/30 text-cyan-300 hover:text-white transition-colors px-2 h-[22px] rounded text-[11px] font-semibold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                      title="Update Vehicle & Documents"
                     >
-                      <Settings size={12} />
-                      <span className="text-[11px]">Edit / Docs</span>
+                      <Settings size={11} />
+                      <span>Edit / Docs</span>
                     </button>
-                    <button 
-                      onClick={() => handlePreviewVehicleDetailsPdf(v)} 
-                      className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-400 hover:text-white transition-colors p-1.5 rounded-lg text-xs flex items-center gap-1" 
-                      title="Preview Vehicle Dossier PDF with Data Verification"
-                    >
-                      <Eye size={13} className="text-emerald-300"/>
-                      <span className="text-[10px] hidden xl:inline">PDF</span>
-                    </button>
-                    <button onClick={() => setSelectedVehicle(v)} className="text-brand-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5" title="View Profile & Trips History">
-                      <Eye size={14}/>
-                    </button>
-                    {v.pendingApproval ? (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                        <Clock size={11} className="animate-spin text-amber-400" />
-                        <span>Pending</span>
-                      </span>
-                    ) : (
-                      <button onClick={() => handleDeleteVehicle(v.id)} className="text-gray-500 hover:text-red-400 transition-colors p-1.5 rounded-lg hover:bg-white/5" title="Delete Vehicle Record">
-                        <Trash2 size={13}/>
-                      </button>
-                    )}
                   </div>
                 </>
               );
@@ -1953,36 +2170,52 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   // --- Main Render ---
 
   return (
-    <div className="space-y-6 pb-12 w-full max-w-full min-w-0 overflow-x-hidden">
-      {/* Header & Tabs */}
-      <div className="flex flex-col gap-4">
-        <h2 className="text-2xl font-bold text-white flex items-center gap-2 drop-shadow-md">
-          <Truck className="text-brand-400" /> Vehicle Management System
+    <div className="space-y-4 pb-10 w-full max-w-full min-w-0 overflow-x-hidden">
+      {/* Compact Single-Row Header & Tabs */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xl font-bold text-white flex items-center gap-2">
+          <Truck className="text-brand-400" size={20} /> Vehicle Management System
         </h2>
         
-        <div className="overflow-x-auto max-w-full pb-1 no-scrollbar">
-          <div className="flex gap-2 bg-white/5 rounded-lg p-1 border border-white/10 w-max">
-            <button 
-              onClick={() => setActiveTab('vehicles')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'vehicles' ? 'bg-brand-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
-            >
-              <Truck size={16} /> Fleet & Vehicles
-            </button>
-            <button 
-              onClick={() => setActiveTab('transporters')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'transporters' ? 'bg-brand-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
-            >
-              <User size={16} /> Transporters & Brokers
-            </button>
-            <button 
-              onClick={() => setActiveTab('ready_vehicles')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'ready_vehicles' ? 'bg-brand-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
-            >
-              <MapPin size={16} /> Available Fleet
-            </button>
-          </div>
+        <div className="flex flex-wrap gap-1 bg-white/5 rounded-lg p-1 border border-white/10">
+          <button 
+            onClick={() => setActiveTab('vehicles')}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${activeTab === 'vehicles' ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+          >
+            <Truck size={14} /> Fleet & Vehicles
+          </button>
+          <button 
+            onClick={() => setActiveTab('transporters')}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${activeTab === 'transporters' ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+          >
+            <User size={14} /> Transporters & Brokers
+          </button>
+          <button 
+            onClick={() => setActiveTab('ready_vehicles')}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${activeTab === 'ready_vehicles' ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+          >
+            <MapPin size={14} /> Available Fleet
+          </button>
         </div>
       </div>
+
+      {statusBanner && (
+        <div className={`px-4 py-2.5 rounded-xl border text-xs flex items-center justify-between gap-3 ${
+          statusBanner.type === 'success'
+            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+            : statusBanner.type === 'error'
+            ? 'bg-red-500/10 border-red-500/30 text-red-300'
+            : 'bg-cyan-500/10 border-cyan-500/30 text-cyan-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            {statusBanner.type === 'success' ? <CheckCircle size={15} className="shrink-0" /> : <AlertCircle size={15} className="shrink-0" />}
+            <span>{statusBanner.message}</span>
+          </div>
+          <button type="button" onClick={() => setStatusBanner(null)} className="text-gray-400 hover:text-white">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Transporter Incoming Requests Desk */}
       {transporterRequests.filter(r => r.status === 'PENDING').length > 0 && (
@@ -2060,6 +2293,9 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
           transporters={transporters} 
           preSelectedTransporterId={preSelectedTransporterId}
           initialVehicle={editingVehicle}
+          existingMraList={Array.from(new Set(vehicles.map(v => (v.mra || '').trim()).filter(Boolean)))}
+          allCases={allCases}
+          allDrivers={allDrivers}
           onClose={() => {
             setShowAddVehicle(false);
             setEditingVehicle(null);
@@ -2072,6 +2308,8 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       {selectedVehicle && (
         <VehicleProfileModal 
           vehicle={selectedVehicle} 
+          allCases={allCases}
+          allDrivers={allDrivers}
           onClose={() => setSelectedVehicle(null)} 
           onEditVehicle={(v) => {
             setEditingVehicle(v);
@@ -2317,6 +2555,13 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                 Modifying, canceling or deleting active fleet records requires authorization from the Administrator. An approval notification will be dispatched to the Super Admin.
               </p>
             </div>
+
+            {approvalModalError && (
+              <div className="p-2.5 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300 flex items-center gap-2">
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{approvalModalError}</span>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-gray-300 block">
@@ -2577,27 +2822,96 @@ const AddTransporterModal = ({ onClose, onSave }: any) => {
   );
 };
 
-const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicle, onClose, onSave }: any) => {
+const DEFAULT_VEHICLE_REGIONS = [
+  'Balochistan',
+  'Sindh',
+  'Punjab',
+  'Khyber Pakhtunkhwa (KPK)',
+  'Islamabad (ICT)',
+  'Gilgit-Baltistan',
+  'Azad Jammu & Kashmir (AJK)',
+  'Lasbela (Balochistan)',
+  'Quetta (Balochistan)',
+  'Karachi (Sindh)',
+  'Lahore (Punjab)',
+  'Peshawar (KPK)',
+  'Haripur (KPK)'
+];
+
+const CUSTOM_REGIONS_STORAGE_KEY = 'dpl_custom_vehicle_regions_v1';
+
+const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicle, existingMraList = [], allCases = [], allDrivers = [], onClose, onSave }: any) => {
   const [showDocScanner, setShowDocScanner] = useState(false);
   const [scannerTarget, setScannerTarget] = useState<'SPEC' | 'REG_BOOK' | 'OWNER_ID'>('SPEC');
+  const [showRegionDropdown, setShowRegionDropdown] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [generatingDocType, setGeneratingDocType] = useState<'REG_RENEWAL' | 'LEASE' | 'NOC' | null>(null);
+  const [downloadingTripId, setDownloadingTripId] = useState<string | null>(null);
+  const [docFeedback, setDocFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const todayIso = new Date().toISOString().split('T')[0];
+
+  const [savedCustomRegions, setSavedCustomRegions] = useState<string[]>(() => {
+    try {
+      const raw = safeAppStorage.getItem(CUSTOM_REGIONS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.map((item: any) => String(item || '').trim()).filter(Boolean);
+        }
+      }
+    } catch (_) {}
+    return [];
+  });
+
+  const allRegionOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const combined: string[] = [];
+    [...DEFAULT_VEHICLE_REGIONS, ...savedCustomRegions, ...(Array.isArray(existingMraList) ? existingMraList : [])].forEach(item => {
+      const clean = String(item || '').trim();
+      if (clean && !seen.has(clean.toLowerCase())) {
+        seen.add(clean.toLowerCase());
+        combined.push(clean);
+      }
+    });
+    return combined;
+  }, [savedCustomRegions, existingMraList]);
+
+  const persistCustomRegion = (rawVal: string) => {
+    const clean = String(rawVal || '').trim();
+    if (!clean) return;
+    const existsInDefaults = DEFAULT_VEHICLE_REGIONS.some(r => r.toLowerCase() === clean.toLowerCase());
+    const existsInCustom = savedCustomRegions.some(r => r.toLowerCase() === clean.toLowerCase());
+    if (!existsInDefaults && !existsInCustom) {
+      const updated = [...savedCustomRegions, clean];
+      setSavedCustomRegions(updated);
+      try {
+        safeAppStorage.setItem(CUSTOM_REGIONS_STORAGE_KEY, JSON.stringify(updated));
+      } catch (_) {}
+    }
+  };
 
   const [formData, setFormData] = useState<any>(() => {
     if (initialVehicle) {
       const syncedTrans = initialVehicle.transporterName || initialVehicle.brokerName || '';
+      const initType = initialVehicle.type || VehicleType.FLATBED;
+      const isSizedType = initType === VehicleType.FLATBED || initType === VehicleType.CONTAINER;
+      const initSize = isSizedType
+        ? (['20ft', '40ft', '45ft'].includes(initialVehicle.size) ? initialVehicle.size : '40ft')
+        : (initialVehicle.size || 'Loose');
       return {
         ...initialVehicle,
         transporterId: initialVehicle.transporterId || preSelectedTransporterId || '',
         operatingCompany: initialVehicle.operatingCompany || 'truckit',
         companyName: initialVehicle.companyName || (initialVehicle.operatingCompany === 'docks' ? 'DOCKS PVT LTD' : 'TRUCKIT PVT LTD'),
         category: initialVehicle.category || VehicleCategory.BONDED_CARRIER,
-        type: initialVehicle.type || VehicleType.FLATBED,
-        size: initialVehicle.size || '40ft',
+        type: initType,
+        size: initSize,
         registrationNumber: initialVehicle.registrationNumber || '',
         engineNo: initialVehicle.engineNo || '',
         chassisNo: initialVehicle.chassisNo || '',
-        make: initialVehicle.make || '',
+        make: initialVehicle.make || initialVehicle.maker || '',
         model: initialVehicle.model || '',
+        mra: initialVehicle.mra || '',
         transporterName: syncedTrans,
         brokerName: syncedTrans,
         ownerName: initialVehicle.ownerName || '',
@@ -2626,6 +2940,7 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
       chassisNo: '',
       make: '',
       model: '',
+      mra: '',
       transporterName: '',
       brokerName: '',
       ownerName: '',
@@ -2695,6 +3010,7 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
               size: first.size || prev.size,
               make: first.make || prev.make,
               model: first.model || prev.model,
+              mra: (first as any).mra || prev.mra,
               engineNo: first.engineNo !== 'N/A' ? (first.engineNo || prev.engineNo) : prev.engineNo,
               chassisNo: first.chassisNo !== 'N/A' ? (first.chassisNo || prev.chassisNo) : prev.chassisNo,
               registrationDate: first.registrationDate || prev.registrationDate,
@@ -2731,6 +3047,117 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
   };
 
   const validityPreview = evaluateVehicleRegistrationValidity(formData.registrationDate, formData.validationExpiryDate);
+  const resolvedExpiryDate = validityPreview.expiryDate || formData.validationExpiryDate || '';
+  const requiresContainerOrTrailerSize =
+    formData.type === VehicleType.FLATBED || formData.type === VehicleType.CONTAINER;
+
+  const buildLiveVehicleRecord = (): Vehicle => {
+    const cleanPlate = (formData.registrationNumber || '').trim().toUpperCase();
+    const syncedTransporter = (formData.transporterName || formData.brokerName || 'Direct Transporter').trim();
+    return {
+      ...(initialVehicle || {}),
+      id: initialVehicle?.id || getDeterministicVehicleId(cleanPlate || 'TEMP'),
+      dplSerial: initialVehicle?.dplSerial || `${getActiveCompanyPrefix()}-0001`,
+      registrationNumber: cleanPlate,
+      category: formData.category || VehicleCategory.BONDED_CARRIER,
+      type: formData.type || VehicleType.FLATBED,
+      size: requiresContainerOrTrailerSize
+        ? (['20ft', '40ft', '45ft'].includes(formData.size) ? formData.size : '40ft')
+        : 'Loose',
+      weightCapacity: formData.weightCapacity || '',
+      engineNo: (formData.engineNo || '').trim().toUpperCase(),
+      chassisNo: (formData.chassisNo || '').trim().toUpperCase(),
+      make: (formData.make || '').trim().toUpperCase(),
+      maker: (formData.make || formData.maker || '').trim().toUpperCase(),
+      model: (formData.model || '').trim(),
+      makeModel: [formData.make, formData.model].filter(Boolean).join(' '),
+      mra: (formData.mra || '').trim(),
+      ownerName: (formData.ownerName || '').trim() || undefined,
+      ownerCnic: (formData.ownerCnic || '').trim() || undefined,
+      registrationDate: formData.registrationDate || '',
+      validationExpiryDate: resolvedExpiryDate,
+      driverName: formData.driverName || 'Designated Driver',
+      driverCnic: formData.driverCnic || '',
+      driverContact: formData.driverContact || '',
+      transporterId: Number(formData.transporterId) || 0,
+      transporterName: syncedTransporter,
+      brokerName: syncedTransporter,
+      operatingCompany: formData.operatingCompany || 'truckit',
+      companyName: formData.companyName || 'TRUCKIT PVT LTD',
+      status: validityPreview.status,
+      history: initialVehicle?.history || [],
+      createdAt: initialVehicle?.createdAt || todayIso
+    };
+  };
+
+  const handleGenerateModalDoc = async (docKind: 'REG_RENEWAL' | 'LEASE' | 'NOC') => {
+    const cleanPlate = (formData.registrationNumber || '').trim().toUpperCase();
+    if (!cleanPlate) {
+      setDocFeedback({
+        type: 'error',
+        message: 'Please enter the Vehicle Registration Number first to generate official documents.'
+      });
+      return;
+    }
+
+    setGeneratingDocType(docKind);
+    setDocFeedback(null);
+    try {
+      const liveVehicle = buildLiveVehicleRecord();
+      const safePlateSlug = cleanPlate.replace(/\s+/g, '_');
+      const effectiveDocDate = formData.registrationDate || todayIso;
+
+      if (docKind === 'REG_RENEWAL') {
+        const doc = await generateRegistrationRenewalLetterDocx([liveVehicle], {
+          letterDate: effectiveDocDate,
+          leaveLetterheadSpace: true
+        });
+        const filename = `Registration_Renewal_Letter_${safePlateSlug}_${formatDashDate(new Date())}.docx`;
+        await downloadDocxBlob(doc, filename);
+        setDocFeedback({
+          type: 'success',
+          message: `Downloaded Registration / Renewal Letter (${cleanPlate}) in Word (.docx) format.`
+        });
+      } else if (docKind === 'LEASE') {
+        const doc = await generateLeaseAgreementDocx([liveVehicle], {
+          agreementDate: effectiveDocDate,
+          leaveStampPaperSpace: true,
+          customLessorName: formData.ownerName?.trim() || undefined,
+          customCnic: formData.ownerCnic?.trim() || undefined
+        });
+        const filename = `Lease_Agreement_${safePlateSlug}_${formatDashDate(new Date())}.docx`;
+        await downloadDocxBlob(doc, filename);
+        setDocFeedback({
+          type: 'success',
+          message: `Downloaded Lease Agreement (${cleanPlate}) for Stamp Paper in Word (.docx) format.`
+        });
+      } else if (docKind === 'NOC') {
+        const doc = await generateVehicleNocDocx(liveVehicle, {
+          nocDate: todayIso,
+          leaveLetterheadSpace: true
+        });
+        const filename = `Vehicle_NOC_Letter_${safePlateSlug}_${formatDashDate(new Date())}.docx`;
+        await downloadDocxBlob(doc, filename);
+        setDocFeedback({
+          type: 'success',
+          message: `Downloaded Official NOC Letter (${cleanPlate}) in Word (.docx) format.`
+        });
+      }
+    } catch (err: any) {
+      console.error('Document generation error inside modal:', err);
+      setDocFeedback({
+        type: 'error',
+        message: `Failed to generate document: ${err?.message || 'Unexpected error'}`
+      });
+    } finally {
+      setGeneratingDocType(null);
+    }
+  };
+
+  const typedMraTrimmed = String(formData.mra || '').trim();
+  const isCustomUnsavedMra =
+    Boolean(typedMraTrimmed) &&
+    !allRegionOptions.some(opt => opt.toLowerCase() === typedMraTrimmed.toLowerCase());
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-start justify-center pt-6 sm:pt-10 p-4 overflow-y-auto z-50">
@@ -2748,12 +3175,19 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
             <X size={20} />
           </button>
         </div>
+
+        {formError && (
+          <div className="mt-3 p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+            <AlertCircle size={14} className="shrink-0 text-rose-400" />
+            <span>{formError}</span>
+          </div>
+        )}
         
         <div className="flex flex-col gap-4 mb-4 mt-4">
           {/* Row 1: Registered Company & Vehicle Registration Number */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-cyan-300 block mb-1 font-bold">Registered Company (COMPANY) *</label>
+              <label className="text-xs text-cyan-300 block mb-1 font-semibold">Registered Company *</label>
               <select 
                 className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 border border-cyan-500/40 text-sm font-semibold"
                 value={formData.operatingCompany || 'truckit'}
@@ -2776,13 +3210,16 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
               </span>
             </div>
             <div>
-              <label className="text-xs text-gray-300 block mb-1 font-bold">VEHICLE NO. (Registration Plate) *</label>
+              <label className="text-xs text-gray-300 block mb-1 font-semibold">Vehicle No. (Registration Plate) *</label>
               <input 
                 type="text" 
                 placeholder="e.g. TMA-133 or JU-1929" 
                 className="w-full glass-input rounded p-2 text-white font-mono font-bold uppercase tracking-wider" 
                 value={formData.registrationNumber} 
-                onChange={e => setFormData({...formData, registrationNumber: e.target.value.toUpperCase()})} 
+                onChange={e => {
+                  setFormError(null);
+                  setFormData({...formData, registrationNumber: e.target.value.toUpperCase()});
+                }} 
                 required
               />
             </div>
@@ -2791,7 +3228,7 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
           {/* Row 2: Transporter Name & Broker Name (Automatically Identical) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-white/5 p-3 rounded-xl border border-white/10">
             <div>
-              <label className="text-xs text-emerald-300 block mb-1 font-bold">TRANSPORTER NAME *</label>
+              <label className="text-xs text-emerald-300 block mb-1 font-semibold">Transporter Name *</label>
               <input 
                 type="text" 
                 list="fleet-transporters-list"
@@ -2814,7 +3251,7 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
               </datalist>
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1 font-semibold">BROKER NAME (Auto-Synced with Transporter)</label>
+              <label className="text-xs text-gray-400 block mb-1 font-semibold">Broker Name (Auto-Synced with Transporter)</label>
               <input 
                 type="text" 
                 readOnly
@@ -2822,14 +3259,14 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
                 className="w-full glass-input rounded p-2 text-emerald-300 text-sm bg-black/40 cursor-not-allowed font-semibold" 
                 value={formData.transporterName || formData.brokerName || ''} 
               />
-              <span className="text-[10px] text-gray-400 mt-0.5 block">Transporter aur Broker hamesha same rehte hain.</span>
+              <span className="text-[10px] text-gray-400 mt-0.5 block">Transporter and Broker names remain synchronized automatically.</span>
             </div>
           </div>
 
-          {/* Row 3: Chassis No, Engine No, Maker, Model */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          {/* Row 3: Chassis No, Engine No, Maker, Model, & Registered In (Province / MRA) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
             <div>
-              <label className="text-xs text-gray-400 block mb-1 font-semibold">CHASSIS NO. *</label>
+              <label className="text-xs text-gray-400 block mb-1 font-semibold">Chassis No. *</label>
               <input 
                 type="text" 
                 placeholder="e.g. CV450BN-50039" 
@@ -2839,7 +3276,7 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
               />
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1 font-semibold">ENGINE NO. *</label>
+              <label className="text-xs text-gray-400 block mb-1 font-semibold">Engine No. *</label>
               <input 
                 type="text" 
                 placeholder="e.g. PE6-070941" 
@@ -2849,7 +3286,7 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
               />
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1 font-semibold">MAKER (Make)</label>
+              <label className="text-xs text-gray-400 block mb-1 font-semibold">Maker (Make)</label>
               <input 
                 type="text" 
                 placeholder="e.g. NISSAN / HINO" 
@@ -2859,7 +3296,7 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
               />
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1 font-semibold">MODEL (Year)</label>
+              <label className="text-xs text-gray-400 block mb-1 font-semibold">Model (Year)</label>
               <input 
                 type="text" 
                 placeholder="e.g. 1995 / 2018" 
@@ -2868,21 +3305,105 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
                 onChange={e => setFormData({...formData, model: e.target.value})} 
               />
             </div>
+            <div className="relative">
+              <label className="text-xs text-cyan-300 block mb-1 font-semibold">Registered In (MRA)</label>
+              <div className="relative flex items-center">
+                <input
+                  type="text"
+                  placeholder="Select or type e.g. Balochistan"
+                  className="w-full glass-input rounded p-2 pr-7 text-white text-xs font-semibold"
+                  value={formData.mra || ''}
+                  onFocus={() => setShowRegionDropdown(true)}
+                  onBlur={() => {
+                    if (formData.mra?.trim()) {
+                      persistCustomRegion(formData.mra.trim());
+                    }
+                    setTimeout(() => setShowRegionDropdown(false), 180);
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && formData.mra?.trim()) {
+                      e.preventDefault();
+                      persistCustomRegion(formData.mra.trim());
+                      setShowRegionDropdown(false);
+                    }
+                  }}
+                  onChange={e => {
+                    setFormData({...formData, mra: e.target.value});
+                    setShowRegionDropdown(true);
+                  }}
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    setShowRegionDropdown(prev => !prev);
+                  }}
+                  className="absolute right-1.5 text-gray-400 hover:text-white p-0.5"
+                  title="Select Registration Province / Authority"
+                >
+                  <ChevronDown size={14} />
+                </button>
+              </div>
+
+              {showRegionDropdown && (
+                <div className="absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-xl bg-slate-900 border border-white/15 shadow-2xl z-30 py-1 custom-scrollbar">
+                  {isCustomUnsavedMra && (
+                    <button
+                      type="button"
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        persistCustomRegion(typedMraTrimmed);
+                        setFormData({...formData, mra: typedMraTrimmed});
+                        setShowRegionDropdown(false);
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/15 flex items-center gap-1.5 border-b border-white/10"
+                    >
+                      <Plus size={12} className="shrink-0" />
+                      <span className="truncate">Save "{typedMraTrimmed}" to list</span>
+                    </button>
+                  )}
+                  {allRegionOptions.map(regionOpt => (
+                    <button
+                      key={`reg_opt_${regionOpt}`}
+                      type="button"
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        setFormData({...formData, mra: regionOpt});
+                        setShowRegionDropdown(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 text-xs transition-colors flex items-center justify-between ${
+                        (formData.mra || '').toLowerCase() === regionOpt.toLowerCase()
+                          ? 'bg-cyan-500/20 text-cyan-300 font-semibold'
+                          : 'text-gray-200 hover:bg-white/10'
+                      }`}
+                    >
+                      <span className="truncate">{regionOpt}</span>
+                      {(formData.mra || '').toLowerCase() === regionOpt.toLowerCase() && (
+                        <CheckCircle size={11} className="text-cyan-400 shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Row 4: Customs 6-Month Registration Date & Auto Expiry */}
-          <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 space-y-2">
+          {/* Row 4: Registration Section (Dates, Status & Official Document Generation) */}
+          <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                <Calendar size={14} /> REGISTRATION DATE & CUSTOMS 6-MONTH VALIDITY RULE
+              <span className="text-sm font-bold text-amber-300 flex items-center gap-1.5">
+                <Calendar size={15} /> Registration Section
               </span>
-              <div className="flex items-center gap-2">
-                <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold uppercase ${
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`px-2.5 py-0.5 rounded text-[11px] font-semibold tabular-nums ${
                   validityPreview.isExpired
                     ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
                     : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                 }`}>
-                  {validityPreview.isExpired ? 'EXPIRED (>6 Months or Blank)' : `ACTIVE (Valid until ${validityPreview.expiryDate})`}
+                  {validityPreview.isExpired
+                    ? (resolvedExpiryDate ? `Expired on ${resolvedExpiryDate}` : 'Expired (No Registration Date)')
+                    : `Active — Expires on ${resolvedExpiryDate}`}
                 </span>
                 <button
                   type="button"
@@ -2895,18 +3416,42 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
                       validationExpiryDate: evalNow.expiryDate
                     });
                   }}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg shadow whitespace-nowrap shrink-0"
                 >
                   Renew / Set Today (+6 Months)
                 </button>
               </div>
             </div>
+
+            {/* Explicit Registration & Expiry Dates Summary */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-gray-400">Registered Date:</span>
+                <span className="font-mono font-semibold text-white tabular-nums">
+                  {formData.registrationDate || 'Not Recorded'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-gray-400">
+                  {validityPreview.isExpired ? 'Expired Date:' : 'Will Expire On:'}
+                </span>
+                <span className={`font-mono font-semibold tabular-nums ${
+                  validityPreview.isExpired ? 'text-rose-300' : 'text-emerald-300'
+                }`}>
+                  {resolvedExpiryDate
+                    ? (validityPreview.isExpired ? `Expired on ${resolvedExpiryDate}` : `Expires on ${resolvedExpiryDate}`)
+                    : 'Not Recorded (Expired)'}
+                </span>
+              </div>
+            </div>
+
+            {/* Date Inputs */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] text-gray-300 block mb-1">Registration / Last Renewal Date (Blank = Expired)</label>
                 <input
                   type="date"
-                  className="w-full glass-input rounded p-2 text-white text-xs font-mono"
+                  className="w-full glass-input rounded p-2 text-white text-xs font-mono tabular-nums"
                   value={formData.registrationDate || ''}
                   onChange={e => {
                     const regDate = e.target.value;
@@ -2923,11 +3468,64 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
                 <label className="text-[11px] text-gray-300 block mb-1">6-Month Customs Expiry Date (Auto-Calculated)</label>
                 <input
                   type="date"
-                  className="w-full glass-input rounded p-2 text-gray-300 text-xs font-mono bg-black/30"
-                  value={validityPreview.expiryDate || formData.validationExpiryDate || ''}
+                  className="w-full glass-input rounded p-2 text-gray-300 text-xs font-mono tabular-nums bg-black/30"
+                  value={resolvedExpiryDate}
                   onChange={e => setFormData({...formData, validationExpiryDate: e.target.value})}
                 />
               </div>
+            </div>
+
+            {/* Integrated Official Document Generation */}
+            <div className="pt-2.5 border-t border-white/10 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-1">
+                <span className="text-xs font-semibold text-white">Generate Official Vehicle Documents (.docx)</span>
+                <span className="text-[10.5px] text-gray-300">
+                  New registration and 6-month renewal use the same official letter & documentation.
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  disabled={generatingDocType !== null}
+                  onClick={() => handleGenerateModalDoc('REG_RENEWAL')}
+                  className="bg-blue-600/25 hover:bg-blue-600/40 disabled:opacity-50 border border-blue-500/40 text-blue-200 hover:text-white px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
+                >
+                  {generatingDocType === 'REG_RENEWAL' ? <Loader2 size={13} className="animate-spin shrink-0" /> : <FileText size={13} className="shrink-0" />}
+                  <span>Generate Registration / Renewal Letter</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={generatingDocType !== null}
+                  onClick={() => handleGenerateModalDoc('LEASE')}
+                  className="bg-amber-600/25 hover:bg-amber-600/40 disabled:opacity-50 border border-amber-500/40 text-amber-200 hover:text-white px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
+                >
+                  {generatingDocType === 'LEASE' ? <Loader2 size={13} className="animate-spin shrink-0" /> : <FileCheck size={13} className="shrink-0" />}
+                  <span>Generate Lease Agreement</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={generatingDocType !== null}
+                  onClick={() => handleGenerateModalDoc('NOC')}
+                  className="bg-purple-600/25 hover:bg-purple-600/40 disabled:opacity-50 border border-purple-500/40 text-purple-200 hover:text-white px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
+                >
+                  {generatingDocType === 'NOC' ? <Loader2 size={13} className="animate-spin shrink-0" /> : <Building size={13} className="shrink-0" />}
+                  <span>Generate NOC Letter</span>
+                </button>
+              </div>
+
+              {docFeedback && (
+                <div className={`px-3 py-1.5 rounded-lg text-[11px] flex items-center gap-1.5 ${
+                  docFeedback.type === 'success'
+                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+                    : 'bg-rose-500/15 border border-rose-500/30 text-rose-300'
+                }`}>
+                  {docFeedback.type === 'success' ? <CheckCircle size={13} className="shrink-0" /> : <AlertCircle size={13} className="shrink-0" />}
+                  <span>{docFeedback.message}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2935,7 +3533,7 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-900/90 p-4 rounded-xl border border-brand-500/30">
             <div className="sm:col-span-2 flex items-center justify-between border-b border-white/10 pb-2">
               <div>
-                <h4 className="text-xs font-bold text-brand-300 uppercase tracking-wider">
+                <h4 className="text-xs font-bold text-brand-300">
                   Mandatory Vehicle Compliance Documents (Pre-Requisite for Workflow Assignment)
                 </h4>
                 <p className="text-[11px] text-gray-400">
@@ -2978,7 +3576,7 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
                     setScannerTarget('REG_BOOK');
                     setShowDocScanner(true);
                   }}
-                  className="px-3 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold flex items-center gap-1"
+                  className="px-3 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold flex items-center gap-1 whitespace-nowrap shrink-0"
                   title="Scan Registration Book Document"
                 >
                   <Camera size={14} /> Scan Doc
@@ -3032,7 +3630,7 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
                     setScannerTarget('OWNER_ID');
                     setShowDocScanner(true);
                   }}
-                  className="px-3 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold flex items-center gap-1"
+                  className="px-3 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold flex items-center gap-1 whitespace-nowrap shrink-0"
                   title="Scan Owner ID Card Document"
                 >
                   <Camera size={14} /> Scan Doc
@@ -3074,23 +3672,61 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
             </div>
           </div>
 
-          {/* Row 6: Category, Type & Capacity */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Row 6: Category, Type, Conditional Size (20ft / 40ft / 45ft) & Weight Capacity */}
+          <div className={`grid grid-cols-1 ${requiresContainerOrTrailerSize ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-3`}>
             <div>
               <label className="text-xs text-gray-400 block mb-1">Category</label>
-              <select className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 text-xs" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+              <select
+                className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 text-xs"
+                value={formData.category}
+                onChange={e => setFormData({...formData, category: e.target.value})}
+              >
                 {Object.values(VehicleCategory).map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div>
               <label className="text-xs text-gray-400 block mb-1">Type</label>
-              <select className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 text-xs" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})}>
+              <select
+                className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 text-xs"
+                value={formData.type}
+                onChange={e => {
+                  const nextType = e.target.value;
+                  const needsSize = nextType === VehicleType.FLATBED || nextType === VehicleType.CONTAINER;
+                  setFormData({
+                    ...formData,
+                    type: nextType,
+                    size: needsSize
+                      ? (['20ft', '40ft', '45ft'].includes(formData.size) ? formData.size : '40ft')
+                      : 'Loose'
+                  });
+                }}
+              >
                 {Object.values(VehicleType).map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
+
+            {requiresContainerOrTrailerSize && (
+              <div>
+                <label className="text-xs text-cyan-300 block mb-1 font-semibold">Size *</label>
+                <select
+                  className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 border border-cyan-500/40 text-xs font-semibold"
+                  value={['20ft', '40ft', '45ft'].includes(formData.size) ? formData.size : '40ft'}
+                  onChange={e => setFormData({...formData, size: e.target.value})}
+                >
+                  <option value="20ft">20ft</option>
+                  <option value="40ft">40ft</option>
+                  <option value="45ft">45ft</option>
+                </select>
+              </div>
+            )}
+
             <div>
               <label className="text-xs text-gray-400 block mb-1">Weight Capacity</label>
-              <select className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 text-xs" value={formData.weightCapacity} onChange={e => setFormData({...formData, weightCapacity: e.target.value})}>
+              <select
+                className="w-full glass-input rounded p-2 text-white outline-none bg-slate-900 text-xs"
+                value={formData.weightCapacity}
+                onChange={e => setFormData({...formData, weightCapacity: e.target.value})}
+              >
                 <option value="">Select Weight Range</option>
                 <option value="20-25 Ton">20-25 Ton</option>
                 <option value="25-30 Ton">25-30 Ton</option>
@@ -3101,19 +3737,182 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
               </select>
             </div>
           </div>
+
+          {/* Row 7: Vehicle Trips History Section */}
+          {(() => {
+            const vehicleTrips = resolveVehicleCompleteTrips(
+              formData.registrationNumber || initialVehicle?.registrationNumber || '',
+              initialVehicle?.tripsHistory || formData.tripsHistory,
+              {
+                name: formData.driverName || initialVehicle?.driverName,
+                cnic: formData.driverCnic || initialVehicle?.driverCnic,
+                phone: formData.driverContact || initialVehicle?.driverContact
+              },
+              allCases,
+              allDrivers
+            );
+
+            const handleDownloadTripDriverPdf = async (trip: ResolvedVehicleTrip) => {
+              setDownloadingTripId(trip.id);
+              setDocFeedback(null);
+              try {
+                let frontUrl = trip.driverCnicFrontUrl;
+                let backUrl = trip.driverCnicBackUrl;
+                if (!frontUrl && trip.frontDocIdbKey) {
+                  frontUrl = (await getDocumentFromIndexedDB(trip.frontDocIdbKey)) || undefined;
+                }
+                if (!backUrl && trip.backDocIdbKey) {
+                  backUrl = (await getDocumentFromIndexedDB(trip.backDocIdbKey)) || undefined;
+                }
+
+                const res = await downloadDriverIdCardPdf({
+                  driverName: trip.driverName,
+                  driverCnic: trip.driverCnic,
+                  driverPhone: trip.driverPhone,
+                  vehicleNo: formData.registrationNumber || initialVehicle?.registrationNumber || 'N/A',
+                  caseNo: trip.caseNo,
+                  date: trip.date,
+                  pol: trip.pol,
+                  pod: trip.pod,
+                  clientName: trip.clientName,
+                  importerName: trip.importerName,
+                  itemDescription: trip.itemDescription,
+                  cnicFrontUrl: frontUrl,
+                  cnicBackUrl: backUrl
+                });
+                setDocFeedback({
+                  type: 'success',
+                  message: `Driver ID Card PDF downloaded: ${res.filename}`
+                });
+              } catch (err) {
+                console.error('Failed to download Driver ID Card PDF:', err);
+                setDocFeedback({
+                  type: 'error',
+                  message: 'Failed to generate Driver ID Card PDF. Please try again.'
+                });
+              } finally {
+                setDownloadingTripId(null);
+              }
+            };
+
+            return (
+              <div className="p-3.5 rounded-xl bg-slate-900/70 border border-white/10 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2">
+                  <div className="flex items-center gap-2">
+                    <MapPin size={15} className="text-brand-400 shrink-0" />
+                    <span className="text-xs font-bold text-white">Vehicle Trips History</span>
+                  </div>
+                  <span className="text-xs text-gray-400 tabular-nums">
+                    {vehicleTrips.length === 0
+                      ? 'Empty'
+                      : `${vehicleTrips.length} ${vehicleTrips.length === 1 ? 'Trip' : 'Trips'} Recorded`}
+                  </span>
+                </div>
+
+                {vehicleTrips.length === 0 ? (
+                  <div className="py-6 px-4 text-center rounded-lg bg-black/30 border border-white/5 space-y-1">
+                    <p className="text-sm font-semibold text-gray-300">Empty</p>
+                    <p className="text-xs text-gray-500">
+                      No trip history recorded for this vehicle yet.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                    {vehicleTrips.map((trip, idx) => (
+                      <div
+                        key={trip.id || idx}
+                        className="p-3 rounded-lg bg-black/35 border border-white/10 hover:border-white/20 transition-colors space-y-2.5 text-xs"
+                      >
+                        {/* Top strip: Date, Case No, Departure Port -> Destination Port */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-white/5">
+                          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-gray-300">
+                            <span className="font-mono font-semibold text-white tabular-nums">{trip.date}</span>
+                            <span aria-hidden="true" className="text-gray-600">·</span>
+                            <span>
+                              Case No: <strong className="font-mono text-cyan-300 tabular-nums">{trip.caseNo}</strong>
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 text-gray-200 font-medium">
+                            <span className="text-gray-400">From:</span>
+                            <span className="text-white font-semibold">{trip.pol}</span>
+                            <span className="text-brand-400 font-bold">→</span>
+                            <span className="text-gray-400">To:</span>
+                            <span className="text-emerald-300 font-semibold">{trip.pod}</span>
+                          </div>
+                        </div>
+
+                        {/* Middle strip: Client, Importer, Cargo Item */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div>
+                            <span className="text-[11px] text-gray-500 block">Client</span>
+                            <span className="text-gray-200 font-semibold break-words">{trip.clientName || 'N/A'}</span>
+                          </div>
+                          <div>
+                            <span className="text-[11px] text-gray-500 block">Importer</span>
+                            <span className="text-gray-200 font-medium break-words">{trip.importerName || 'N/A'}</span>
+                          </div>
+                          <div>
+                            <span className="text-[11px] text-gray-500 block">Cargo Item</span>
+                            <span className="text-gray-200 font-medium break-words">{trip.itemDescription || 'General Cargo'}</span>
+                          </div>
+                        </div>
+
+                        {/* Bottom strip: Driver Name, Mobile No, ID Card (CNIC) No + PDF Download */}
+                        <div className="pt-2 border-t border-white/5 flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-gray-300">
+                            <span>
+                              Driver: <strong className="text-white">{trip.driverName || 'Not Recorded'}</strong>
+                            </span>
+                            <span aria-hidden="true" className="text-gray-600">·</span>
+                            <span>
+                              Mobile: <strong className="font-mono text-gray-200 tabular-nums">{trip.driverPhone || 'Not Recorded'}</strong>
+                            </span>
+                            <span aria-hidden="true" className="text-gray-600">·</span>
+                            <span>
+                              ID Card (CNIC): <strong className="font-mono text-gray-200 tabular-nums">{trip.driverCnic || 'Not Recorded'}</strong>
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={downloadingTripId === trip.id}
+                            onClick={() => handleDownloadTripDriverPdf(trip)}
+                            className="px-2.5 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 font-semibold text-[11px] flex items-center gap-1.5 transition-all whitespace-nowrap shrink-0 disabled:opacity-50"
+                          >
+                            {downloadingTripId === trip.id ? (
+                              <Loader2 size={12} className="animate-spin shrink-0" />
+                            ) : (
+                              <Download size={12} className="shrink-0" />
+                            )}
+                            <span>Download Driver ID Card (PDF)</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-white/10">
           <button onClick={onClose} className="px-4 py-2 text-gray-400 hover:text-white text-sm">Cancel</button>
           <button onClick={() => {
              if (!formData.registrationNumber?.trim()) {
-               alert('Please enter Vehicle Registration Number (VEHICLE NO.).');
+               setFormError('Please enter Vehicle Registration Number (Vehicle No.).');
                return;
+             }
+             if (formData.mra?.trim()) {
+               persistCustomRegion(formData.mra.trim());
              }
              const selectedTransporter = transporters.find((t: Transporter) => t.id === formData.transporterId);
              const syncedTransporter = (formData.transporterName || formData.brokerName || selectedTransporter?.name || 'Direct Transporter').trim();
              onSave({ 
                ...formData, 
+               size: requiresContainerOrTrailerSize
+                 ? (['20ft', '40ft', '45ft'].includes(formData.size) ? formData.size : '40ft')
+                 : 'Loose',
                transporterName: syncedTransporter,
                brokerName: syncedTransporter
              });
@@ -3153,12 +3952,16 @@ const AddVehicleModal = ({ transporters, preSelectedTransporterId, initialVehicl
 
 const VehicleProfileModal = ({ 
   vehicle, 
+  allCases = [],
+  allDrivers = [],
   onClose,
   onEditVehicle,
   onRenewVehicle,
   onCancelVehicle
 }: { 
   vehicle: Vehicle; 
+  allCases?: Case[];
+  allDrivers?: Driver[];
   onClose: () => void;
   onEditVehicle?: (v: Vehicle) => void;
   onRenewVehicle?: (v: Vehicle) => void;
@@ -3166,98 +3969,64 @@ const VehicleProfileModal = ({
 }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [isExportingTripReport, setIsExportingTripReport] = useState(false);
+  const [downloadingDriverTripId, setDownloadingDriverTripId] = useState<string | null>(null);
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [directDownloadUrl, setDirectDownloadUrl] = useState<string | null>(null);
   const [directDownloadFilename, setDirectDownloadFilename] = useState<string>('');
   const [isPdfViewerOpen, setIsPdfViewerOpen] = useState(false);
 
-  // Combine persisted `vehicle.tripsHistory` + live operational cases from `dpl_live_cases` and `dpl_cases_data`
   const trips = useMemo(() => {
-    const combinedTrips: Array<{
-      id: string;
-      caseNo?: string;
-      containerNumber: string;
-      driverName: string;
-      driverCnic?: string;
-      importerName: string;
-      clientName: string;
-      route?: string;
-      date: string;
-      status: string;
-    }> = [];
-    const seenKeys = new Set<string>();
+    return resolveVehicleCompleteTrips(
+      vehicle.registrationNumber,
+      vehicle.tripsHistory,
+      {
+        name: vehicle.driverName,
+        cnic: vehicle.driverCnic,
+        phone: vehicle.driverContact
+      },
+      allCases,
+      allDrivers
+    );
+  }, [vehicle, allCases, allDrivers]);
 
-    // 1. Add persisted trips from vehicle.tripsHistory
-    if (Array.isArray(vehicle.tripsHistory)) {
-      vehicle.tripsHistory.forEach((t, idx) => {
-        const key = `${t.date || ''}_${t.containerNumber || ''}_${t.status || idx}`;
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          combinedTrips.push({
-            id: t.id || `PERSIST-${idx}`,
-            containerNumber: t.containerNumber || '-',
-            driverName: t.driverName || vehicle.driverName || '-',
-            driverCnic: t.driverCnic || vehicle.driverCnic || '',
-            importerName: t.importerName || 'N/A',
-            clientName: t.clientName || 'N/A',
-            date: t.date || '-',
-            status: t.status || 'Completed'
-          });
-        }
-      });
-    }
-
-    // 2. Scan live operational cases for all trips assigned to this vehicle
+  const handleDownloadTripDriverIdPdf = async (trip: ResolvedVehicleTrip) => {
+    setDownloadingDriverTripId(trip.id);
+    setDownloadError(null);
+    setDownloadSuccess(null);
     try {
-      const liveCases = safeAppStorage.getJSON<any[]>('dpl_live_cases', []) || [];
-      const cachedCases = safeAppStorage.getJSON<any[]>('dpl_cases_data', []) || [];
-      const casesList = [...liveCases, ...cachedCases];
-      const cleanReg = normalizeVehiclePlate(vehicle.registrationNumber);
+      let frontUrl = trip.driverCnicFrontUrl;
+      let backUrl = trip.driverCnicBackUrl;
+      if (!frontUrl && trip.frontDocIdbKey) {
+        frontUrl = (await getDocumentFromIndexedDB(trip.frontDocIdbKey)) || undefined;
+      }
+      if (!backUrl && trip.backDocIdbKey) {
+        backUrl = (await getDocumentFromIndexedDB(trip.backDocIdbKey)) || undefined;
+      }
 
-      casesList.forEach((c, idx) => {
-        const vaReg = normalizeVehiclePlate(c.vehicleAssignment?.vehicleNo || '');
-        const cReg = normalizeVehiclePlate(c.vehicleNumber || c.extractedData?.vehicleNumber || '');
-        const addVehMatch = Array.isArray(c.vehicleAssignment?.additionalVehicles)
-          ? c.vehicleAssignment.additionalVehicles.find((av: any) => normalizeVehiclePlate(av.vehicleNo || '') === cleanReg)
-          : null;
-        const matchingContainer = Array.isArray(c.containers)
-          ? c.containers.find((cntr: any) => normalizeVehiclePlate(cntr.vehicleNo || '') === cleanReg)
-          : null;
-
-        if ((vaReg && vaReg === cleanReg) || (cReg && cReg === cleanReg) || addVehMatch || matchingContainer) {
-          const caseNum = c.caseNumber || c.caseNo || `CASE-${idx + 1}`;
-          const cntrStr = matchingContainer?.number ||
-            (Array.isArray(c.containers) && c.containers.length > 0 ? c.containers.map((cn: any) => cn.number).filter(Boolean).join(', ') : '') ||
-            c.containerNumber ||
-            c.extractedData?.containerNumber ||
-            '-';
-          const dedupeKey = `${caseNum}_${cntrStr}`;
-          if (!seenKeys.has(dedupeKey) && !combinedTrips.some(existing => existing.status.includes(caseNum))) {
-            seenKeys.add(dedupeKey);
-            const resolvedDriver = addVehMatch?.driverName || c.vehicleAssignment?.driverName || matchingContainer?.driverName || c.driverName || vehicle.driverName || 'Assigned Driver';
-            const resolvedCnic = addVehMatch?.driverCnic || c.vehicleAssignment?.driverCnic || vehicle.driverCnic || '';
-            combinedTrips.push({
-              id: c.id || `TRP-${idx + 1}`,
-              caseNo: caseNum,
-              containerNumber: cntrStr,
-              driverName: resolvedDriver,
-              driverCnic: resolvedCnic,
-              importerName: c.importerName || c.consignee || c.extractedData?.cargoOwner || c.clientName || 'N/A',
-              clientName: c.clientName || 'N/A',
-              route: `${c.pol || c.loadingPort || 'Karachi Port'} → ${c.pod || c.destination || 'Destination'}`,
-              date: c.vehicleAssignment?.allocationDate || c.date || c.registrationDate || c.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
-              status: `${c.status || 'In Transit'} (${caseNum})`
-            });
-          }
-        }
+      const res = await downloadDriverIdCardPdf({
+        driverName: trip.driverName,
+        driverCnic: trip.driverCnic,
+        driverPhone: trip.driverPhone,
+        vehicleNo: vehicle.registrationNumber,
+        caseNo: trip.caseNo,
+        date: trip.date,
+        pol: trip.pol,
+        pod: trip.pod,
+        clientName: trip.clientName,
+        importerName: trip.importerName,
+        itemDescription: trip.itemDescription,
+        cnicFrontUrl: frontUrl,
+        cnicBackUrl: backUrl
       });
-    } catch (e) {
-      console.error("Error reading cases for trip mapping:", e);
+      setDownloadSuccess(`Driver ID Card PDF downloaded: ${res.filename}`);
+    } catch (err) {
+      console.error(err);
+      setDownloadError('Failed to generate Driver ID Card PDF.');
+    } finally {
+      setDownloadingDriverTripId(null);
     }
-
-    return combinedTrips;
-  }, [vehicle]);
+  };
 
   const handleDownloadPdf = async () => {
     setIsExporting(true);
@@ -3629,16 +4398,16 @@ const VehicleProfileModal = ({
              </div>
            </div>
 
-           {/* Bottom Section: Vehicle Trips */}
+           {/* Bottom Section: Vehicle Trips History */}
            <div className="mb-8" id="vehicle-trips-section">
              <div className="flex items-center justify-between mb-4">
                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                 <MapPin size={18} className="text-brand-400"/> Vehicle Trips
+                 <MapPin size={18} className="text-brand-400"/> Vehicle Trips History
                </h3>
                <button
                  type="button"
                  onClick={handleDownloadTripAndFleetReport}
-                 className="text-xs text-brand-300 hover:text-white flex items-center gap-1 bg-brand-500/10 hover:bg-brand-500/20 px-2.5 py-1 rounded-lg border border-brand-500/20 transition-all"
+                 className="text-xs text-brand-300 hover:text-white flex items-center gap-1 bg-brand-500/10 hover:bg-brand-500/20 px-2.5 py-1 rounded-lg border border-brand-500/20 transition-all whitespace-nowrap shrink-0"
                  title="Download Trip Report for this vehicle as Excel (.xlsx)"
                >
                  <Download size={12} /> Export Vehicle Trips (Excel .xlsx)
@@ -3647,31 +4416,59 @@ const VehicleProfileModal = ({
 
              {trips.length === 0 ? (
                <div className="p-6 text-center text-gray-500 text-xs bg-black/20 rounded-xl border border-white/5 space-y-1">
-                 <p className="font-semibold text-gray-400">No Dispatched Trips Recorded Yet</p>
-                 <p className="text-[11px] text-gray-500">
-                   Trip history and assigned drivers are logged automatically when this vehicle is dispatched in Case Workflow (under Vehicle Assign step).
+                 <p className="font-semibold text-sm text-gray-300">Empty</p>
+                 <p className="text-xs text-gray-500">
+                   No trip history recorded for this vehicle yet.
                  </p>
                </div>
              ) : (
                <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/20">
                  <table className="w-full text-left text-xs">
-                   <thead className="bg-white/5 text-gray-400 uppercase font-semibold border-b border-white/10">
+                   <thead className="bg-white/5 text-gray-400 font-semibold border-b border-white/10">
                      <tr>
-                       <th className="p-3">Trip Date</th>
-                       <th className="p-3">Container Number</th>
-                       <th className="p-3">Driver Name</th>
-                       <th className="p-3">Importer Name</th>
-                       <th className="p-3">Client Name</th>
+                       <th className="p-3">Date & Case No.</th>
+                       <th className="p-3">Route (From → To)</th>
+                       <th className="p-3">Client, Importer & Item</th>
+                       <th className="p-3">Driver Details</th>
+                       <th className="p-3 text-right">Driver ID Card</th>
                      </tr>
                    </thead>
                    <tbody className="divide-y divide-white/5 text-gray-300">
                      {trips.map((trip, idx) => (
-                       <tr key={idx} className="hover:bg-white/5">
-                         <td className="p-3 font-mono text-gray-400">{trip.date}</td>
-                         <td className="p-3 font-mono font-medium text-white">{trip.containerNumber || '-'}</td>
-                         <td className="p-3 text-gray-200">{trip.driverName || vehicle.driverName || '-'}</td>
-                         <td className="p-3 text-gray-300">{trip.importerName || 'N/A'}</td>
-                         <td className="p-3 text-gray-200 font-semibold">{trip.clientName}</td>
+                       <tr key={trip.id || idx} className="hover:bg-white/5">
+                         <td className="p-3 align-top">
+                           <div className="font-mono font-semibold text-white tabular-nums">{trip.date}</div>
+                           <div className="font-mono text-cyan-300 text-[11px] tabular-nums mt-0.5">{trip.caseNo}</div>
+                         </td>
+                         <td className="p-3 align-top">
+                           <div className="text-white font-medium">{trip.pol}</div>
+                           <div className="text-emerald-300 text-[11px] mt-0.5">→ {trip.pod}</div>
+                         </td>
+                         <td className="p-3 align-top space-y-0.5">
+                           <div className="text-white font-semibold">{trip.clientName}</div>
+                           <div className="text-gray-300 text-[11px]">Importer: {trip.importerName || 'N/A'}</div>
+                           <div className="text-gray-400 text-[11px]">Item: {trip.itemDescription || 'General Cargo'}</div>
+                         </td>
+                         <td className="p-3 align-top space-y-0.5">
+                           <div className="text-white font-semibold">{trip.driverName || 'Not Recorded'}</div>
+                           <div className="font-mono text-gray-300 text-[11px] tabular-nums">Mobile: {trip.driverPhone || 'Not Recorded'}</div>
+                           <div className="font-mono text-gray-400 text-[11px] tabular-nums">CNIC: {trip.driverCnic || 'Not Recorded'}</div>
+                         </td>
+                         <td className="p-3 align-top text-right">
+                           <button
+                             type="button"
+                             disabled={downloadingDriverTripId === trip.id}
+                             onClick={() => handleDownloadTripDriverIdPdf(trip)}
+                             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 font-semibold text-[11px] transition-all whitespace-nowrap shrink-0 disabled:opacity-50"
+                           >
+                             {downloadingDriverTripId === trip.id ? (
+                               <Loader2 size={12} className="animate-spin shrink-0" />
+                             ) : (
+                               <Download size={12} className="shrink-0" />
+                             )}
+                             <span>ID Card PDF</span>
+                           </button>
+                         </td>
                        </tr>
                      ))}
                    </tbody>

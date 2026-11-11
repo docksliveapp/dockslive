@@ -219,6 +219,8 @@ export interface VirtualizedTableProps<T> {
   renderRow: (item: T, index: number, style?: CSSProperties) => ReactNode;
   columns?: { header: ReactNode; width?: string | number; className?: string }[];
   columnsHeader?: ReactNode;
+  headerCellClassName?: string;
+  disableHorizontalScroll?: boolean;
   height?: number;
   maxHeight?: number;
   minHeight?: number;
@@ -239,6 +241,8 @@ export function VirtualizedTable<T>({
   renderRow,
   columns,
   columnsHeader,
+  headerCellClassName = 'px-4',
+  disableHorizontalScroll = false,
   height,
   maxHeight = 650,
   minHeight = 200,
@@ -248,15 +252,17 @@ export function VirtualizedTable<T>({
   getItemKey,
   onRowClick,
 }: VirtualizedTableProps<T>): React.ReactElement {
+  const effectiveMinWidth = disableHorizontalScroll ? undefined : minTableWidth;
+
   const renderedHeader = columnsHeader || (columns ? (
     <div 
-      className="flex items-center text-xs font-bold uppercase tracking-wider text-gray-400 py-3 border-b border-white/10 bg-slate-950/90"
-      style={{ minWidth: minTableWidth || undefined }}
+      className="flex items-center w-full min-w-0 text-[10.5px] font-semibold uppercase tracking-wide text-gray-400 py-2 border-b border-white/10 bg-slate-950/95"
+      style={{ minWidth: effectiveMinWidth || undefined }}
     >
       {columns.map((col, idx) => (
         <div 
           key={`col_th_${idx}`} 
-          className={`px-4 truncate ${col.className || ''}`}
+          className={`${headerCellClassName} min-w-0 truncate ${col.className || ''}`}
           style={{ width: col.width, flexShrink: 0 }}
         >
           {col.header}
@@ -266,11 +272,15 @@ export function VirtualizedTable<T>({
   ) : null);
 
   return (
-    <div className={`w-full max-w-full min-w-0 overflow-x-auto custom-scrollbar border border-white/5 rounded-2xl bg-slate-900/60 backdrop-blur-md ${className}`}>
-      <div style={{ minWidth: minTableWidth || '100%' }}>
+    <div
+      className={`w-full max-w-full min-w-0 ${
+        disableHorizontalScroll ? 'overflow-x-hidden' : 'overflow-x-auto custom-scrollbar'
+      } border border-white/5 rounded-xl bg-slate-900/60 backdrop-blur-md ${className}`}
+    >
+      <div className="w-full min-w-0" style={{ minWidth: effectiveMinWidth || '100%' }}>
         {/* Sticky Table Header */}
         {renderedHeader && (
-          <div className="sticky top-0 z-10 bg-slate-950/95 border-b border-white/10 select-none">
+          <div className="sticky top-0 z-10 bg-slate-950/95 select-none">
             {renderedHeader}
           </div>
         )}
@@ -287,7 +297,7 @@ export function VirtualizedTable<T>({
           renderItem={(item, index, style) => (
             <div 
               onClick={() => onRowClick && onRowClick(item)}
-              className={`flex items-center border-b border-white/5 hover:bg-white/5 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
+              className={`flex items-center w-full min-w-0 overflow-hidden border-b border-white/5 hover:bg-white/[0.04] transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
               style={style}
             >
               {renderRow(item, index, style)}

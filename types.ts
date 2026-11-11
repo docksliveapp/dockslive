@@ -1333,11 +1333,16 @@ export interface Vehicle {
     containerNumber?: string;
     clientName: string;
     importerName?: string;
+    itemDescription?: string;
+    pol?: string;
+    pod?: string;
     route: string;
     date: string;
     driverName?: string;
     driverCnic?: string;
     driverPhone?: string;
+    driverCnicFrontUrl?: string;
+    driverCnicBackUrl?: string;
     status: string;
   }>;
   

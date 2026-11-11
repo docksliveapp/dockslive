@@ -536,7 +536,9 @@ export async function saveCaseToFirestore(newCase: Case): Promise<void> {
       updatedAt: new Date().toISOString()
     });
     await setDoc(doc(db, path, docId), payload);
-    dispatchCaseLifecycleNotifications({ ...newCase, id: docId }, null, true);
+    const savedCaseObj = { ...newCase, id: docId };
+    dispatchCaseLifecycleNotifications(savedCaseObj, null, true);
+    recordVehicleTripFromCase(savedCaseObj).catch(() => {});
   } catch (error) {
     console.warn(`Firestore saveCase warning for ${docId}:`, error);
   }
@@ -561,6 +563,7 @@ export async function updateCaseInFirestore(caseItem: Case): Promise<void> {
     await setDoc(doc(db, path, docId), payload, { merge: true });
     const mergedCase = prevCase ? { ...prevCase, ...caseItem } : caseItem;
     dispatchCaseLifecycleNotifications(mergedCase, prevCase, false);
+    recordVehicleTripFromCase(mergedCase).catch(() => {});
   } catch (error) {
     console.warn(`Firestore updateCase warning for ${docId}:`, error);
   }
@@ -1834,74 +1837,349 @@ export async function upsertDriverBackupFromWorkflow(driverData: {
   await saveDriverToFirestore(record);
 }
 
+export interface ExtractedVehicleTripCandidate {
+  normPlate: string;
+  rawPlate: string;
+  id: string;
+  caseNo: string;
+  date: string;
+  pol: string;
+  pod: string;
+  route: string;
+  importerName: string;
+  itemDescription: string;
+  clientName: string;
+  containerNumber: string;
+  driverName: string;
+  driverCnic: string;
+  driverPhone: string;
+  driverCnicFrontUrl?: string;
+  driverCnicBackUrl?: string;
+  registrationBookUrl?: string;
+  registrationBookName?: string;
+  ownerCnicUrl?: string;
+  ownerCnicName?: string;
+  status: string;
+}
+
+/**
+ * Extracts all vehicle assignments and rich cargo/driver metadata from a Case
+ * across `vehicleAssignment`, `additionalVehicles`, all `containers[]`, `workflowDetails`, and `extractedData`.
+ */
+export function extractCaseVehicleTripEntries(
+  shipmentCase: Case,
+  driversPool?: Driver[]
+): ExtractedVehicleTripCandidate[] {
+  if (!shipmentCase) return [];
+  const va: any = (shipmentCase as any).vehicleAssignment || {};
+  const wfMap: Record<string, any> = shipmentCase.workflowDetails || {};
+  const wfVeh: any = wfMap['Vehicle Assignment'] || wfMap['VEHICLE_ASSIGNMENT'] || {};
+  const wfLoad: any = wfMap['Loading Port Processing'] || wfMap['LOADING_PORT_PROCESSING'] || {};
+  const wfTp: any = wfMap['TP Filing'] || wfMap['TP_FILING'] || {};
+  const ext: any = shipmentCase.extractedData || {};
+
+  // Find any category-specific cargo description or vehicle/driver fields across workflowDetails
+  let wfCargoDesc = '';
+  const wfPlateEntries: Array<{
+    plate: string;
+    driverName?: string;
+    driverCnic?: string;
+    driverContact?: string;
+    frontUrl?: string;
+    backUrl?: string;
+    stepDate?: string;
+  }> = [];
+
+  Object.values(wfMap).forEach((step: any) => {
+    if (!step || typeof step !== 'object') return;
+    if (!wfCargoDesc && (step.cargoDescription || step.tpItemDescription || step.isoChemicalName)) {
+      wfCargoDesc = step.cargoDescription || step.tpItemDescription || step.isoChemicalName || '';
+    }
+    const candidatePlates = [
+      step.assignedVehicleNo,
+      step.assignedTruckNo,
+      step.attVehicleNo,
+      step.cargoTruckNo,
+      step.carCarrierTrailerNo,
+      step.isoHazmatVehicleNo,
+      step.isoVehicleRegNo,
+      step.assignedTrailerNo
+    ].filter(Boolean);
+
+    candidatePlates.forEach((p: string) => {
+      wfPlateEntries.push({
+        plate: p,
+        driverName:
+          step.driverName ||
+          step.assignedDriverName ||
+          step.attDriverName ||
+          step.cargoDriverName ||
+          step.isoHazmatDriverName ||
+          step.isoDriverName ||
+          step.assignedTrailerDriver,
+        driverCnic:
+          step.driverCnic ||
+          step.assignedDriverCnic ||
+          step.attDriverCnic ||
+          step.cargoDriverCnic,
+        driverContact:
+          step.driverContact ||
+          step.cargoDriverPhone ||
+          step.assignedDriverPhone,
+        frontUrl: step.driverCnicFrontUrl || step.cargoDriverCnicDocUrl,
+        backUrl: step.driverCnicBackUrl,
+        stepDate: step.date
+      });
+    });
+  });
+
+  const rawAssignments: Array<{
+    vehicleNo: string;
+    containerNo?: string;
+    driverName?: string;
+    driverCnic?: string;
+    driverContact?: string;
+    driverCnicFrontUrl?: string;
+    driverCnicBackUrl?: string;
+    registrationBookUrl?: string;
+    registrationBookName?: string;
+    ownerCnicUrl?: string;
+    ownerCnicName?: string;
+    allocationDate?: string;
+  }> = [];
+
+  const pushRaw = (entry: typeof rawAssignments[number]) => {
+    const clean = String(entry.vehicleNo || '').trim();
+    if (!clean || clean.toUpperCase() === 'TBD' || clean.toUpperCase() === 'N/A') return;
+    rawAssignments.push({ ...entry, vehicleNo: clean });
+  };
+
+  if (va.vehicleNo) {
+    pushRaw({
+      vehicleNo: va.vehicleNo,
+      driverName: va.driverName || wfVeh.driverName || wfLoad.driverName,
+      driverCnic: va.driverCnic || wfVeh.driverCnic || wfLoad.driverCnic,
+      driverContact: va.driverContact || wfVeh.driverContact,
+      driverCnicFrontUrl: va.driverCnicFrontUrl || va.driverCnicUrl || wfVeh.driverCnicFrontUrl || wfLoad.driverCnicFrontUrl,
+      driverCnicBackUrl: va.driverCnicBackUrl || wfVeh.driverCnicBackUrl || wfLoad.driverCnicBackUrl,
+      registrationBookUrl: va.registrationBookUrl || wfVeh.registrationBookUrl,
+      registrationBookName: va.registrationBookName || wfVeh.registrationBookName,
+      ownerCnicUrl: va.ownerCnicUrl || wfVeh.ownerCnicUrl,
+      ownerCnicName: va.ownerCnicName || wfVeh.ownerCnicName,
+      allocationDate: va.allocationDate || wfVeh.date || wfLoad.date
+    });
+  }
+
+  if (Array.isArray(va.additionalVehicles)) {
+    va.additionalVehicles.forEach((av: any) => {
+      if (!av?.vehicleNo) return;
+      pushRaw({
+        vehicleNo: av.vehicleNo,
+        driverName: av.driverName,
+        driverCnic: av.driverCnic,
+        driverContact: av.driverContact,
+        driverCnicFrontUrl: av.driverCnicFrontUrl || av.driverCnicUrl,
+        driverCnicBackUrl: av.driverCnicBackUrl,
+        registrationBookUrl: av.registrationBookUrl,
+        registrationBookName: av.registrationBookName,
+        ownerCnicUrl: av.ownerCnicUrl,
+        ownerCnicName: av.ownerCnicName,
+        allocationDate: av.allocationDate || va.allocationDate || wfVeh.date
+      });
+    });
+  }
+
+  if (Array.isArray(shipmentCase.containers)) {
+    shipmentCase.containers.forEach((cntr) => {
+      if (!cntr?.vehicleNo) return;
+      pushRaw({
+        vehicleNo: cntr.vehicleNo,
+        containerNo: cntr.number,
+        driverName: cntr.driverName || va.driverName || wfVeh.driverName,
+        driverCnic: cntr.driverCnic || va.driverCnic || wfVeh.driverCnic,
+        driverContact: cntr.driverContact || va.driverContact,
+        driverCnicFrontUrl: va.driverCnicFrontUrl || wfVeh.driverCnicFrontUrl || wfLoad.driverCnicFrontUrl,
+        driverCnicBackUrl: va.driverCnicBackUrl || wfVeh.driverCnicBackUrl || wfLoad.driverCnicBackUrl,
+        allocationDate: va.allocationDate || wfVeh.date || wfLoad.date
+      });
+    });
+  }
+
+  wfPlateEntries.forEach((wpe) => {
+    pushRaw({
+      vehicleNo: wpe.plate,
+      driverName: wpe.driverName || va.driverName,
+      driverCnic: wpe.driverCnic || va.driverCnic,
+      driverContact: wpe.driverContact || va.driverContact,
+      driverCnicFrontUrl: wpe.frontUrl || va.driverCnicFrontUrl || wfVeh.driverCnicFrontUrl,
+      driverCnicBackUrl: wpe.backUrl || va.driverCnicBackUrl || wfVeh.driverCnicBackUrl,
+      registrationBookUrl: wfVeh.registrationBookUrl || va.registrationBookUrl,
+      registrationBookName: wfVeh.registrationBookName || va.registrationBookName,
+      ownerCnicUrl: wfVeh.ownerCnicUrl || va.ownerCnicUrl,
+      ownerCnicName: wfVeh.ownerCnicName || va.ownerCnicName,
+      allocationDate: wpe.stepDate || va.allocationDate
+    });
+  });
+
+  const topPlate = (shipmentCase as any).vehicleNumber || (shipmentCase as any).assignedVehicleNo || ext.vehicleNumber || '';
+  if (topPlate) {
+    pushRaw({
+      vehicleNo: topPlate,
+      driverName: (shipmentCase as any).driverName || ext.driverName || va.driverName || wfVeh.driverName,
+      driverCnic: (shipmentCase as any).driverCnic || ext.driverCnic || va.driverCnic || wfVeh.driverCnic,
+      driverContact: (shipmentCase as any).driverContact || ext.driverContact || va.driverContact,
+      driverCnicFrontUrl: va.driverCnicFrontUrl || wfVeh.driverCnicFrontUrl || wfLoad.driverCnicFrontUrl,
+      driverCnicBackUrl: va.driverCnicBackUrl || wfVeh.driverCnicBackUrl || wfLoad.driverCnicBackUrl,
+      allocationDate: va.allocationDate || wfVeh.date
+    });
+  }
+
+  if (rawAssignments.length === 0) return [];
+
+  const drivers: Driver[] = driversPool || safeAppStorage.getJSON<Driver[]>('dpl_live_drivers', []) || [];
+  const caseDisplayNo = shipmentCase.caseNo || shipmentCase.caseNumber || shipmentCase.id || 'N/A';
+
+  const pol = (
+    shipmentCase.pol ||
+    ext.pol ||
+    ext.pickupDestination ||
+    wfLoad.portTerminalName ||
+    wfLoad.portTerminal ||
+    'Karachi Port'
+  ).trim();
+
+  const pod = (
+    shipmentCase.pod ||
+    ext.pod ||
+    ext.placeOfDelivery ||
+    ext.dropoffDestination ||
+    'Destination Port'
+  ).trim();
+
+  const clientName = (shipmentCase.clientName || shipmentCase.client || 'N/A').trim();
+
+  const importerName = (
+    shipmentCase.importer ||
+    (shipmentCase as any).importerName ||
+    ext.consigneeName ||
+    ext.cargoOwner ||
+    (shipmentCase as any).consignee ||
+    clientName ||
+    'N/A'
+  ).trim();
+
+  const itemDescription = (
+    shipmentCase.itemDescription ||
+    ext.itemDescription ||
+    ext.itemName ||
+    ext.itemType ||
+    wfTp.tpItemDescription ||
+    wfCargoDesc ||
+    shipmentCase.category ||
+    'General Cargo'
+  ).trim();
+
+  const allCaseContainers = Array.isArray(shipmentCase.containers) && shipmentCase.containers.length > 0
+    ? shipmentCase.containers.map(c => c.number).filter(Boolean).join(', ')
+    : (shipmentCase.containerNumber || ext.containerNo || '-');
+
+  const fallbackDateRaw =
+    shipmentCase.loadingPortGateOutTime ||
+    shipmentCase.registrationDate ||
+    shipmentCase.date ||
+    shipmentCase.createdAt ||
+    new Date().toISOString();
+  const fallbackDate = String(fallbackDateRaw).slice(0, 10);
+
+  // Merge per normalized plate within this case
+  const byPlate = new Map<string, ExtractedVehicleTripCandidate>();
+  for (const raw of rawAssignments) {
+    const normPlate = normalizeVehiclePlate(raw.vehicleNo);
+    if (!normPlate) continue;
+
+    const cleanCnicDigits = String(raw.driverCnic || '').replace(/[^0-9]/g, '');
+    const matchedDriver = drivers.find((d) => {
+      const dDigits = String(d.cnic || '').replace(/[^0-9]/g, '');
+      if (cleanCnicDigits && cleanCnicDigits.length >= 11 && dDigits === cleanCnicDigits) return true;
+      if (raw.driverName && d.name && d.name.trim().toLowerCase() === raw.driverName.trim().toLowerCase()) return true;
+      if (d.assignedVehicleNo && normalizeVehiclePlate(d.assignedVehicleNo) === normPlate) return true;
+      return false;
+    });
+
+    const existing = byPlate.get(normPlate);
+    const mergedContainers = existing?.containerNumber && raw.containerNo && !existing.containerNumber.includes(raw.containerNo)
+      ? `${existing.containerNumber}, ${raw.containerNo}`
+      : (raw.containerNo || existing?.containerNumber || allCaseContainers);
+
+    const candidate: ExtractedVehicleTripCandidate = {
+      normPlate,
+      rawPlate: existing?.rawPlate || raw.vehicleNo.toUpperCase(),
+      id: `TRIP-${caseDisplayNo}-${normPlate}`,
+      caseNo: caseDisplayNo,
+      date: String(raw.allocationDate || existing?.date || fallbackDate).slice(0, 10),
+      pol,
+      pod,
+      route: `${pol} → ${pod}`,
+      importerName,
+      itemDescription,
+      clientName,
+      containerNumber: mergedContainers,
+      driverName: (raw.driverName || existing?.driverName || matchedDriver?.name || '').trim(),
+      driverCnic: (raw.driverCnic || existing?.driverCnic || matchedDriver?.cnic || '').trim(),
+      driverPhone: (raw.driverContact || existing?.driverPhone || matchedDriver?.contact || '').trim(),
+      driverCnicFrontUrl: raw.driverCnicFrontUrl || existing?.driverCnicFrontUrl || matchedDriver?.cnicFrontUrl || matchedDriver?.cnicDocUrl,
+      driverCnicBackUrl: raw.driverCnicBackUrl || existing?.driverCnicBackUrl || matchedDriver?.cnicBackUrl,
+      registrationBookUrl: raw.registrationBookUrl || existing?.registrationBookUrl,
+      registrationBookName: raw.registrationBookName || existing?.registrationBookName,
+      ownerCnicUrl: raw.ownerCnicUrl || existing?.ownerCnicUrl,
+      ownerCnicName: raw.ownerCnicName || existing?.ownerCnicName,
+      status: `${shipmentCase.status || 'In Transit'} (${caseDisplayNo})`
+    };
+    byPlate.set(normPlate, candidate);
+  }
+
+  return Array.from(byPlate.values());
+}
+
 /**
  * Records or updates a trip in the assigned vehicle's `tripsHistory` and syncs any newly uploaded
  * Vehicle Registration Book or Owner ID Card back to the master Vehicle record.
  */
 export async function recordVehicleTripFromCase(shipmentCase: Case): Promise<void> {
-  const va: any = shipmentCase.vehicleAssignment || {};
-  const wfVeh: any = shipmentCase.workflowDetails?.['Vehicle Assignment'] || {};
-  const firstCntr: any = shipmentCase.containers?.[0] || {};
-
-  const primaryPlate = va.vehicleNo || wfVeh.assignedVehicleNo || firstCntr.vehicleNo || '';
-  if (!primaryPlate && (!Array.isArray(va.additionalVehicles) || va.additionalVehicles.length === 0)) return;
-
-  const assignments = [
-    {
-      vehicleNo: primaryPlate,
-      driverName: va.driverName || wfVeh.driverName || firstCntr.driverName,
-      driverCnic: va.driverCnic || wfVeh.driverCnic || firstCntr.driverCnic,
-      driverContact: va.driverContact || wfVeh.driverContact || firstCntr.driverContact,
-      registrationBookUrl: va.registrationBookUrl || wfVeh.registrationBookUrl,
-      registrationBookName: va.registrationBookName || wfVeh.registrationBookName,
-      ownerCnicUrl: va.ownerCnicUrl || wfVeh.ownerCnicUrl,
-      ownerCnicName: va.ownerCnicName || wfVeh.ownerCnicName,
-      allocationDate: va.allocationDate || wfVeh.date,
-    },
-    ...(va.additionalVehicles || []).map((av: any) => ({
-      vehicleNo: av.vehicleNo,
-      driverName: av.driverName,
-      driverCnic: av.driverCnic,
-      driverContact: av.driverContact,
-      registrationBookUrl: av.registrationBookUrl,
-      registrationBookName: av.registrationBookName,
-      ownerCnicUrl: av.ownerCnicUrl,
-      ownerCnicName: av.ownerCnicName,
-      allocationDate: va.allocationDate || wfVeh.date,
-    }))
-  ];
+  const candidates = extractCaseVehicleTripEntries(shipmentCase);
+  if (candidates.length === 0) return;
 
   const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []) || [];
-  const caseDisplayNo = shipmentCase.caseNo || shipmentCase.caseNumber || 'N/A';
 
-  for (const item of assignments) {
-    const plate = (item.vehicleNo || '').trim();
-    if (!plate) continue;
-    const normPlate = normalizeVehiclePlate(plate);
-    const matched = liveVehicles.find(v => normalizeVehiclePlate(v.registrationNumber) === normPlate);
+  for (const item of candidates) {
+    const matched = liveVehicles.find(v => normalizeVehiclePlate(v.registrationNumber) === item.normPlate);
     if (!matched) continue;
 
-    const containerNumbers = Array.isArray(shipmentCase.containers) && shipmentCase.containers.length > 0
-      ? shipmentCase.containers.map(c => c.number).filter(Boolean).join(', ')
-      : (shipmentCase.containerNumber || 'N/A');
+    const safeFront = item.driverCnicFrontUrl && item.driverCnicFrontUrl.length < 120000 ? item.driverCnicFrontUrl : undefined;
+    const safeBack = item.driverCnicBackUrl && item.driverCnicBackUrl.length < 120000 ? item.driverCnicBackUrl : undefined;
 
     const tripEntry = {
-      id: `TRIP-${caseDisplayNo}-${normPlate}`,
-      caseNo: caseDisplayNo,
-      date: item.allocationDate || shipmentCase.date || new Date().toISOString().split('T')[0],
-      containerNumber: containerNumbers,
-      driverName: item.driverName || matched.driverName || 'N/A',
+      id: item.id,
+      caseNo: item.caseNo,
+      date: item.date,
+      pol: item.pol,
+      pod: item.pod,
+      route: item.route,
+      containerNumber: item.containerNumber,
+      driverName: item.driverName || matched.driverName || 'Not Recorded',
       driverCnic: item.driverCnic || matched.driverCnic || '',
-      driverPhone: item.driverContact || matched.driverContact || '',
-      importerName: (shipmentCase as any).importerName || shipmentCase.importer || (shipmentCase as any).consignee || 'N/A',
-      clientName: shipmentCase.clientName || 'N/A',
-      route: `${shipmentCase.pol || 'Karachi'} ➔ ${shipmentCase.pod || 'Destination'}`,
-      status: `${shipmentCase.status || 'In Transit'} (${caseDisplayNo})`
+      driverPhone: item.driverPhone || matched.driverContact || '',
+      driverCnicFrontUrl: safeFront,
+      driverCnicBackUrl: safeBack,
+      importerName: item.importerName,
+      itemDescription: item.itemDescription,
+      clientName: item.clientName,
+      status: item.status
     };
 
     const existingTrips = Array.isArray(matched.tripsHistory) ? [...matched.tripsHistory] : [];
     const existingIdx = existingTrips.findIndex(
-      t => t.id === tripEntry.id || t.caseNo === caseDisplayNo || (t.status && t.status.includes(caseDisplayNo))
+      t => t.id === tripEntry.id || t.caseNo === item.caseNo || (t.status && t.status.includes(item.caseNo))
     );
     if (existingIdx >= 0) {
       existingTrips[existingIdx] = { ...existingTrips[existingIdx], ...tripEntry };
@@ -1914,7 +2192,7 @@ export async function recordVehicleTripFromCase(shipmentCase: Case): Promise<voi
       tripsHistory: existingTrips,
       driverName: item.driverName || matched.driverName,
       driverCnic: item.driverCnic || matched.driverCnic,
-      driverContact: item.driverContact || matched.driverContact,
+      driverContact: item.driverPhone || matched.driverContact,
       registrationBook: matched.registrationBook || item.registrationBookUrl,
       registrationBookName: matched.registrationBookName || item.registrationBookName,
       ownerIdCardUrl: matched.ownerIdCardUrl || item.ownerCnicUrl,
@@ -1923,6 +2201,103 @@ export async function recordVehicleTripFromCase(shipmentCase: Case): Promise<voi
 
     await updateVehicleInFirestore(updatedVehicle);
   }
+}
+
+/**
+ * Scans all registered cases (including all cases registered this month across all companies)
+ * and backfills/syncs their trip history into every assigned vehicle in Firestore.
+ */
+export async function syncAllCasesHistoryToVehicles(
+  casesList: Case[],
+  vehiclesList: Vehicle[],
+  driversPool?: Driver[]
+): Promise<number> {
+  if (!Array.isArray(casesList) || casesList.length === 0 || !Array.isArray(vehiclesList) || vehiclesList.length === 0) {
+    return 0;
+  }
+
+  const tripsByNormPlate = new Map<string, ExtractedVehicleTripCandidate[]>();
+  for (const c of casesList) {
+    if (String(c.status || '').toUpperCase() === 'CANCELLED') continue;
+    const entries = extractCaseVehicleTripEntries(c, driversPool);
+    for (const entry of entries) {
+      const list = tripsByNormPlate.get(entry.normPlate) || [];
+      list.push(entry);
+      tripsByNormPlate.set(entry.normPlate, list);
+    }
+  }
+
+  let updatedCount = 0;
+  for (const veh of vehiclesList) {
+    const normPlate = normalizeVehiclePlate(veh.registrationNumber);
+    if (!normPlate) continue;
+    const caseCandidates = tripsByNormPlate.get(normPlate);
+    if (!caseCandidates || caseCandidates.length === 0) continue;
+
+    const currentTrips = Array.isArray(veh.tripsHistory) ? [...veh.tripsHistory] : [];
+    let changed = false;
+
+    for (const item of caseCandidates) {
+      const safeFront = item.driverCnicFrontUrl && item.driverCnicFrontUrl.length < 120000 ? item.driverCnicFrontUrl : undefined;
+      const safeBack = item.driverCnicBackUrl && item.driverCnicBackUrl.length < 120000 ? item.driverCnicBackUrl : undefined;
+
+      const idx = currentTrips.findIndex(
+        t => t.id === item.id || t.caseNo === item.caseNo || (t.status && t.status.includes(item.caseNo))
+      );
+
+      const nextEntry = {
+        ...(idx >= 0 ? currentTrips[idx] : {}),
+        id: item.id,
+        caseNo: item.caseNo,
+        date: item.date,
+        pol: item.pol,
+        pod: item.pod,
+        route: item.route,
+        containerNumber: item.containerNumber,
+        driverName: item.driverName || (idx >= 0 ? currentTrips[idx].driverName : '') || veh.driverName || 'Not Recorded',
+        driverCnic: item.driverCnic || (idx >= 0 ? currentTrips[idx].driverCnic : '') || veh.driverCnic || '',
+        driverPhone: item.driverPhone || (idx >= 0 ? currentTrips[idx].driverPhone : '') || veh.driverContact || '',
+        driverCnicFrontUrl: safeFront || (idx >= 0 ? currentTrips[idx].driverCnicFrontUrl : undefined),
+        driverCnicBackUrl: safeBack || (idx >= 0 ? currentTrips[idx].driverCnicBackUrl : undefined),
+        importerName: item.importerName,
+        itemDescription: item.itemDescription,
+        clientName: item.clientName,
+        status: item.status
+      };
+
+      if (idx >= 0) {
+        const prev = currentTrips[idx];
+        if (
+          prev.pol !== nextEntry.pol ||
+          prev.pod !== nextEntry.pod ||
+          prev.itemDescription !== nextEntry.itemDescription ||
+          prev.importerName !== nextEntry.importerName ||
+          prev.clientName !== nextEntry.clientName ||
+          prev.driverName !== nextEntry.driverName ||
+          prev.driverCnic !== nextEntry.driverCnic ||
+          prev.driverPhone !== nextEntry.driverPhone ||
+          prev.date !== nextEntry.date
+        ) {
+          currentTrips[idx] = nextEntry;
+          changed = true;
+        }
+      } else {
+        currentTrips.unshift(nextEntry);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      currentTrips.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+      await updateVehicleInFirestore({
+        ...veh,
+        tripsHistory: currentTrips
+      });
+      updatedCount++;
+    }
+  }
+
+  return updatedCount;
 }
 
 // AVAILABLE VEHICLES (READY FOR LOADING)
