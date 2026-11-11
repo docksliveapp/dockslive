@@ -36,22 +36,11 @@ function isInternalStaffAutoApproving(role?: string | UserRole, roles?: UserRole
   const check = (r?: any) => {
     const s = norm(r);
     if (!s) return false;
-    if (s === UserRole.CLIENT || s === UserRole.TRANSPORTER || s === UserRole.VENDOR) {
+    // ONLY Client Portal users require approval; all interior/office/port staff are auto-confirmed directly
+    if (s === UserRole.CLIENT || s === 'CLIENT' || s === UserRole.TRANSPORTER || s === UserRole.VENDOR) {
       return false;
     }
-    return (
-      s === UserRole.ADMIN ||
-      s === UserRole.OPERATIONS_MANAGER ||
-      s === UserRole.CASE_MANAGER ||
-      s === UserRole.FINANCE_MANAGER ||
-      s === UserRole.OFFICE_STAFF ||
-      s === UserRole.VEHICLE_MANAGER ||
-      s.includes('ADMIN') ||
-      s.includes('OPERATION') ||
-      s.includes('CASE_MAN') ||
-      s.includes('FINANCE') ||
-      s.includes('OFFICE')
-    );
+    return true;
   };
 
   if (check(role)) return true;
@@ -81,7 +70,12 @@ import {
   supportsSubCategories, 
   getCategoryWorkflow, 
   getWorkflowStepIndex,
-  isDestinationUnloadedAndGateOut 
+  isDestinationUnloadedAndGateOut,
+  isClientPortalApprovalPending,
+  isDocumentationProcessingCase,
+  isLoadingPortProcessingCase,
+  isInTransitCase,
+  getUnifiedCaseStageLabel
 } from '../services/workflowConfig';
 import {
   getCategoryArrangements,
@@ -457,16 +451,36 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     }
   }, [view, selectedCase, cases]);
 
-  // Synchronize cases with Firestore
+  // Synchronize cases with Firestore & auto-confirm any interior office staff cases that were marked pending
   useEffect(() => {
     const unsubscribe = subscribeToCases(
       (firestoreCases) => {
         if (firestoreCases) {
-          setCases(firestoreCases);
-          safeAppStorage.setJSON('dpl_live_cases', firestoreCases);
+          const healedCases = firestoreCases.map((c) => {
+            const regRole = String(c.registeredByRole || '').toUpperCase().trim();
+            const isClientRegistered = regRole === UserRole.CLIENT || regRole === 'CLIENT';
+            if (!isClientRegistered && (c.approvalStatus === 'PENDING' || String(c.status || '').toLowerCase() === 'pending approval')) {
+              const wf = getCategoryWorkflow(c.category);
+              const nextStatus = String(c.status || '').toLowerCase() === 'pending approval'
+                ? (wf.steps[0]?.id || CaseStatus.SHIPPING_LINE_DO)
+                : c.status;
+              const fixed: Case = {
+                ...c,
+                status: nextStatus as any,
+                approvalStatus: 'APPROVED',
+                approvedBy: c.approvedBy || c.registeredByRole || 'OFFICE_STAFF',
+                approvedAt: c.approvedAt || c.createdAt || new Date().toISOString()
+              };
+              updateCaseInFirestore(fixed).catch(() => {});
+              return fixed;
+            }
+            return c;
+          });
+          setCases(healedCases);
+          safeAppStorage.setJSON('dpl_live_cases', healedCases);
           // If viewing details, update selectedCase with live Firestore changes
           if (view === 'details' && selectedCase) {
-            const updated = firestoreCases.find(c => c.id === selectedCase.id || c.caseNo === selectedCase.caseNo);
+            const updated = healedCases.find(c => c.id === selectedCase.id || c.caseNo === selectedCase.caseNo);
             if (updated) setSelectedCase(updated);
           }
         }
@@ -2485,9 +2499,19 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       if (activeDateFilter) {
           if (c.createdAt < activeDateFilter.start || c.createdAt > activeDateFilter.end) return false;
       }
-      // Status Filter (from Dashboard)
+      // Status Filter (from Dashboard Case Overview)
       if (statusFilter) {
-          if (c.status !== statusFilter) return false;
+          if (statusFilter === ('CASE_APPROVAL_PENDING' as any)) {
+              if (!isClientPortalApprovalPending(c)) return false;
+          } else if (statusFilter === ('DOCUMENTATION_PROCESSING' as any)) {
+              if (!isDocumentationProcessingCase(c)) return false;
+          } else if (statusFilter === CaseStatus.LOADING_PORT_PROCESSING) {
+              if (!isLoadingPortProcessingCase(c)) return false;
+          } else if (statusFilter === CaseStatus.IN_TRANSIT) {
+              if (!isInTransitCase(c)) return false;
+          } else if (c.status !== statusFilter) {
+              return false;
+          }
       }
       return true;
   });
@@ -3920,17 +3944,27 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                    </div>
                    <div className="p-4" style={{ width: '10%', flexShrink: 0 }}>
                      <div className="flex flex-col gap-1 items-start">
-                       <span className={`px-2 py-0.5 rounded text-xs font-medium border border-white/10 ${
-                         c.status === CaseStatus.COMPLETED ? 'bg-green-500/20 text-green-400' : 
-                         c.status === CaseStatus.IN_TRANSIT ? 'bg-blue-500/20 text-blue-400' : 'bg-yellow-500/20 text-yellow-400'
-                       }`}>
-                         {c.status}
-                       </span>
-                       {c.approvalStatus === 'PENDING' && (
-                         <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/25 text-amber-300 border border-amber-500/40 animate-pulse">
-                           Pending Approval
-                         </span>
-                       )}
+                       {(() => {
+                         const stageLabel = getUnifiedCaseStageLabel(c);
+                         return (
+                           <>
+                             <span className={`px-2 py-0.5 rounded text-xs font-medium border border-white/10 ${
+                               stageLabel === 'Completed' ? 'bg-green-500/20 text-green-400' : 
+                               stageLabel === 'In Transit' ? 'bg-blue-500/20 text-blue-400' :
+                               stageLabel === 'Loading Port Processing' ? 'bg-yellow-500/20 text-yellow-400' :
+                               stageLabel === 'Case Approval Pending' ? 'bg-amber-500/25 text-amber-300 border-amber-500/40 animate-pulse' :
+                               'bg-cyan-500/20 text-cyan-300'
+                             }`}>
+                               {stageLabel}
+                             </span>
+                             {stageLabel === 'Documentation Processing' && c.status && String(c.status) !== 'Documentation Processing' && (
+                               <span className="text-[10px] text-gray-400 font-mono truncate max-w-full">
+                                 {c.status}
+                               </span>
+                             )}
+                           </>
+                         );
+                       })()}
                      </div>
                    </div>
                    <div className="p-4 text-center" style={{ width: '6%', flexShrink: 0 }}>
@@ -4218,7 +4252,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                         </button>
                       )}
 
-                      {(targetCase?.approvalStatus === 'PENDING' || (targetCase?.status as any) === 'Pending Approval') && isOfficeStaffRole(effectiveRole) && (
+                      {isClientPortalApprovalPending(targetCase) && isOfficeStaffRole(effectiveRole) && (
                           <button onClick={handleApproveCase} className="bg-green-600 hover:bg-green-500 text-white px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 text-xs sm:text-sm shadow-lg shadow-green-600/20 animate-pulse font-medium">
                               <CheckCircle size={15} /> Approve & Process (Client Case)
                           </button>
@@ -4363,7 +4397,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
          )}
   
           {/* Client Case Approval Banner */}
-          {targetCase?.approvalStatus === 'PENDING' && (
+          {isClientPortalApprovalPending(targetCase) && (
             <div className="mb-4 p-4 rounded-2xl bg-amber-500/15 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-200 shadow-lg no-print">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">

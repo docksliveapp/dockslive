@@ -26,6 +26,8 @@ import {
 } from '../services/vehicleDocxService';
 import { downloadCustomsVehicleListPdf } from '../services/pdfExportService';
 import { useActiveCompany } from '../services/companyService';
+import { updateVehicleInFirestore } from '../services/dbService';
+import { evaluateVehicleRegistrationValidity } from '../services/documentParserService';
 import { UniversalDocumentPreviewModal, DataMappingCheckItem } from './UniversalDocumentPreviewModal';
 
 export type DocumentType = 
@@ -95,6 +97,22 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
   const [permitRefNo, setPermitRefNo] = useState<string>('No. SI/Mics./01/2021–(Licensing)');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [lastGeneratedMsg, setLastGeneratedMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const syncVehiclesSixMonthValidity = (targetList: Vehicle[], regIsoDate: string) => {
+    const evalRes = evaluateVehicleRegistrationValidity(regIsoDate);
+    targetList.forEach((veh) => {
+      const updatedVeh: Vehicle = {
+        ...veh,
+        registrationDate: regIsoDate,
+        lastRenewalDate: regIsoDate,
+        validationStartDate: regIsoDate,
+        validationExpiryDate: evalRes.expiryDate,
+        status: 'AVAILABLE'
+      };
+      updateVehicleInFirestore(updatedVeh).catch(() => {});
+    });
+  };
 
   // Custom Lessor / Witness overrides for Legal agreements
   const [customLessorName, setCustomLessorName] = useState<string>('');
@@ -187,9 +205,11 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
     if (selectedVehicles.length === 0) return;
     setIsGenerating(true);
     setLastGeneratedMsg(null);
+    setErrorMsg(null);
 
     try {
-      const dateObj = new Date(letterDate || todayStr);
+      const regIso = letterDate || todayStr;
+      const dateObj = new Date(regIso);
 
       if (activeTab === 'REG_LETTER') {
         const doc = await generateRegistrationRenewalLetterDocx(selectedVehicles, {
@@ -198,7 +218,8 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
         });
         const filename = `DPL_Vehicle_Registration_Renewal_Letter_${formatDashDate(dateObj)}.docx`;
         await downloadDocxBlob(doc, filename);
-        setLastGeneratedMsg(`Downloaded Registration / Renewal Letter (${selectedVehicles.length} vehicles) in Word format.`);
+        syncVehiclesSixMonthValidity(selectedVehicles, regIso);
+        setLastGeneratedMsg(`Downloaded Registration / Renewal Letter (${selectedVehicles.length} vehicles) and updated 6-month Customs validity from ${regIso}.`);
       } 
       else if (activeTab === 'CUSTOMS_PERMIT') {
         const doc = await generateCustomsPermitLetterDocx(selectedVehicles, {
@@ -281,7 +302,7 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
       }
     } catch (err) {
       console.error('Document generation error:', err);
-      alert('Failed to generate document: ' + (err as Error).message);
+      setErrorMsg('Failed to generate document: ' + (err as Error).message);
     } finally {
       setIsGenerating(false);
     }
@@ -402,7 +423,7 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
       }
     } catch (err: any) {
       console.error('Preview generation error:', err);
-      alert('Preview generation error: ' + err.message);
+      setErrorMsg('Preview generation error: ' + err.message);
     } finally {
       setIsGenerating(false);
     }
@@ -412,6 +433,7 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
   const handleDownloadCustomsPdf = async () => {
     if (selectedVehicles.length === 0) return;
     setIsGenerating(true);
+    setErrorMsg(null);
     try {
       const dateObj = new Date(letterDate || todayStr);
       await downloadCustomsVehicleListPdf({
@@ -422,7 +444,7 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
       setLastGeneratedMsg(`Downloaded Official Customs Directorate Vehicle List (${selectedVehicles.length} vehicles) in PDF.`);
     } catch (err) {
       console.error('Failed to generate Customs PDF:', err);
-      alert('Failed to generate Customs PDF: ' + (err as Error).message);
+      setErrorMsg('Failed to generate Customs PDF: ' + (err as Error).message);
     } finally {
       setIsGenerating(false);
     }
@@ -468,10 +490,11 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
       });
       await downloadDocxBlob(doc4, `4_Affidavit_SRO_450_Stamp_Paper_${formatDashDate(dateObj)}.docx`);
 
-      setLastGeneratedMsg(`Successfully downloaded all 4 official Word documents (.docx) for the ${selectedVehicles.length} vehicles!`);
+      syncVehiclesSixMonthValidity(selectedVehicles, letterDate || todayStr);
+      setLastGeneratedMsg(`Successfully downloaded all 4 official Word documents (.docx) and updated 6-month validity for ${selectedVehicles.length} vehicles!`);
     } catch (err) {
       console.error('Batch download error:', err);
-      alert('Batch generation error: ' + (err as Error).message);
+      setErrorMsg('Batch generation error: ' + (err as Error).message);
     } finally {
       setIsGenerating(false);
     }
@@ -517,10 +540,11 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
       });
       await downloadDocxBlob(doc4, `4_Renewal_Affidavit_SRO_450_${formatDashDate(dateObj)}.docx`);
 
-      setLastGeneratedMsg(`Successfully downloaded all 4 official Renewal Word documents (.docx) for Customs!`);
+      syncVehiclesSixMonthValidity(selectedVehicles, letterDate || todayStr);
+      setLastGeneratedMsg(`Successfully downloaded all 4 official Renewal Word documents (.docx) and renewed 6-month Customs validity!`);
     } catch (err) {
       console.error('Renewal batch download error:', err);
-      alert('Renewal batch generation error: ' + (err as Error).message);
+      setErrorMsg('Renewal batch generation error: ' + (err as Error).message);
     } finally {
       setIsGenerating(false);
     }
@@ -562,7 +586,7 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
       setLastGeneratedMsg(`Downloaded all 3 Cancellation, Stamp Paper Termination, and NOC documents in Word (.docx) format!`);
     } catch (err) {
       console.error('Cancellation docs error:', err);
-      alert('Cancellation docs generation error: ' + (err as Error).message);
+      setErrorMsg('Cancellation docs generation error: ' + (err as Error).message);
     } finally {
       setIsGenerating(false);
     }
@@ -597,6 +621,13 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
             <X size={18} />
           </button>
         </div>
+
+        {errorMsg && (
+          <div className="mx-4 mt-3 px-3.5 py-2 rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-300 text-xs flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2"><AlertTriangle size={14} className="shrink-0" /> {errorMsg}</span>
+            <button type="button" onClick={() => setErrorMsg(null)} className="text-rose-200 hover:text-white">✕</button>
+          </div>
+        )}
 
         {/* Tab Navigation for 6 Document Formats - Matching exact uploaded documents */}
         <div className="border-b border-white/10 bg-slate-950/60 px-4 flex flex-wrap items-center gap-1.5 sm:gap-2 py-2.5">

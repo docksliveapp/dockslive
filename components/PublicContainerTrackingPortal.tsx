@@ -7,7 +7,13 @@ import {
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Case, CaseStatus, Container } from '../types';
-import { getCategoryWorkflow, getWorkflowStepIndex } from '../services/workflowConfig';
+import { 
+  getCategoryWorkflow, 
+  getWorkflowStepIndex, 
+  getUnifiedCaseStageLabel, 
+  isClientPortalApprovalPending, 
+  isDocumentationProcessingCase 
+} from '../services/workflowConfig';
 import { 
   fetchAllTrackingCases, 
   searchTrackingCases, 
@@ -640,7 +646,7 @@ const SingleContainerDossierCard: React.FC<SingleContainerDossierCardProps> = ({
         </div>
       </div>
 
-      {/* 2. DEDICATED PROMINENT STATUS FIELD (Active Workflow Stage) */}
+      {/* 2. DEDICATED PROMINENT STATUS FIELD (Unified Container Status Stage) */}
       <div className="p-5 sm:p-7 bg-[#FCFAF5] border-b border-slate-200">
         <div className={`p-5 sm:p-6 rounded-2xl border-2 transition-all shadow-md ${
           isCompletedCase
@@ -648,35 +654,71 @@ const SingleContainerDossierCard: React.FC<SingleContainerDossierCardProps> = ({
             : 'bg-amber-50 border-amber-500 text-amber-950 shadow-amber-100'
         }`}>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-1.5 flex-1">
+            <div className="space-y-2 flex-1">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600 block font-mono">
-                CURRENT WORKFLOW STAGE
+                CONTAINER STATUS
               </span>
               <div className="flex flex-wrap items-center gap-3">
                 <span className={`text-2xl sm:text-3xl font-black font-mono tracking-tight ${
                   isCompletedCase ? 'text-emerald-700' : 'text-amber-800'
                 }`}>
-                  {item.currentWorkflowStep}
+                  {getUnifiedCaseStageLabel(caseItem)}
                 </span>
 
                 <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 ${
                   isCompletedCase
                     ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                    : 'bg-amber-100 text-amber-900 border-amber-300'
+                    : isClientPortalApprovalPending(caseItem)
+                      ? 'bg-rose-100 text-rose-900 border-rose-300'
+                      : 'bg-amber-100 text-amber-900 border-amber-300'
                 }`}>
                   {isCompletedCase ? (
                     <>
                       <CheckCircle2 size={14} className="text-emerald-600" />
-                      <span>Consignment Completed &amp; Delivered</span>
+                      <span>Completed</span>
+                    </>
+                  ) : isClientPortalApprovalPending(caseItem) ? (
+                    <>
+                      <Clock size={14} className="text-rose-600" />
+                      <span>Awaiting Case Approval</span>
                     </>
                   ) : (
                     <>
                       <span className="w-2 h-2 rounded-full bg-amber-600 animate-ping" />
-                      <span>In Progress • Active Milestone Stage</span>
+                      <span>{currentStep ? `Active Step: ${currentStep.title}` : 'In Progress'}</span>
                     </>
                   )}
                 </span>
               </div>
+
+              {isDocumentationProcessingCase(caseItem) && (
+                <div className="pt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                  {[
+                    { idx: 0, label: '1. Shipping Line DO' },
+                    { idx: 1, label: '2. TP Filing' },
+                    { idx: 2, label: '3. Excise Payment' },
+                    { idx: 3, label: '4. Vehicle Assignment' }
+                  ].map((sub) => {
+                    const done = sub.idx < activeStepIdx;
+                    const active = sub.idx === activeStepIdx;
+                    return (
+                      <span
+                        key={sub.idx}
+                        className={`px-2.5 py-1 rounded-lg font-bold border ${
+                          done
+                            ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                            : active
+                              ? 'bg-amber-200 text-amber-950 border-amber-500 shadow-xs'
+                              : 'bg-white/80 text-slate-600 border-slate-300'
+                        }`}
+                      >
+                        {done ? '✓ ' : active ? '● ' : ''}{sub.label}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
               <p className="text-xs text-slate-700 pt-1 leading-relaxed font-medium">
                 {item.currentWorkflowDescription}
               </p>

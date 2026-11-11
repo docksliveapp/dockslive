@@ -2,8 +2,8 @@
 // Production Cache-First + Stale-While-Revalidate App Shell Strategy
 // Provides instant offline-capable native launch for Android APK (PWABuilder / TWA), iOS, Windows, and macOS.
 
-const CACHE_NAME = 'mak-group-cache-first-v2026-14';
-const FONT_CACHE_NAME = 'mak-group-fonts-v2026-14';
+const CACHE_NAME = 'mak-group-cache-first-v2026-18';
+const FONT_CACHE_NAME = 'mak-group-fonts-v2026-18';
 
 const CORE_APP_SHELL = [
   '/',
@@ -97,11 +97,33 @@ self.addEventListener('fetch', (event) => {
   // Only handle same-origin requests for App Shell and static bundles
   if (url.origin !== self.location.origin) return;
 
-  // Cache-First with background Stale-While-Revalidate for all static assets & App Shell navigations
-  if (event.request.mode === 'navigate' || isStaticAsset(url, event.request)) {
+  // Network-First with offline cache fallback for HTML navigations so updates apply immediately
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request, { cache: 'no-store' })
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put('/index.html', copy).catch(() => {});
+            });
+          }
+          return networkResponse;
+        })
+        .catch(() => {
+          return caches.open(CACHE_NAME).then((cache) => {
+            return cache.match('/index.html') || cache.match('/');
+          });
+        })
+    );
+    return;
+  }
+
+  // Stale-While-Revalidate for static assets
+  if (isStaticAsset(url, event.request)) {
     event.respondWith(
       caches.open(CACHE_NAME).then((cache) => {
-        return cache.match(event.request, { ignoreSearch: event.request.mode === 'navigate' }).then((cachedResponse) => {
+        return cache.match(event.request).then((cachedResponse) => {
           const fetchPromise = fetch(event.request)
             .then((networkResponse) => {
               if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
@@ -109,14 +131,8 @@ self.addEventListener('fetch', (event) => {
               }
               return networkResponse;
             })
-            .catch(() => {
-              if (event.request.mode === 'navigate') {
-                return cache.match('/index.html') || cache.match('/');
-              }
-              return cachedResponse;
-            });
+            .catch(() => cachedResponse);
 
-          // Return cached response immediately if available (Cache-First), while updating cache in background
           return cachedResponse || fetchPromise;
         });
       })

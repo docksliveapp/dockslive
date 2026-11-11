@@ -759,3 +759,137 @@ export function getStepTargetRole(category: string | undefined, stepId: string, 
   return UserRole.OPERATIONS_MANAGER;
 }
 
+/**
+ * Returns true ONLY if the case was registered from the Client Portal (CLIENT role)
+ * AND has not yet been approved by internal office staff.
+ * Cases registered by interior office staff never require approval.
+ */
+export function isClientPortalApprovalPending(c?: any): boolean {
+  if (!c) return false;
+  const regRole = String(c.registeredByRole || '').toUpperCase().trim();
+  const isFromClient = regRole === UserRole.CLIENT || regRole === 'CLIENT';
+  if (!isFromClient) return false;
+  return c.approvalStatus === 'PENDING' || String(c.status || '').toLowerCase() === 'pending approval';
+}
+
+/**
+ * Workflow Steps 1–4:
+ *   1. Shipping Line DO
+ *   2. TP Filing
+ *   3. Excise Payment (and Wharfage Payment if legacy)
+ *   4. Vehicle Assignment
+ * (Plus equivalent pre-loading documentation steps in other categories)
+ * All 4 belong under the unified "Documentation Processing" status.
+ */
+export const DOCUMENTATION_PROCESSING_STATUSES: string[] = [
+  CaseStatus.SHIPPING_LINE_DO,
+  CaseStatus.TP_FILING,
+  CaseStatus.EXCISE_PAYMENT,
+  CaseStatus.WHARFAGE_PAYMENT,
+  CaseStatus.VEHICLE_ASSIGNMENT
+];
+
+export function isDocumentationProcessingCase(c?: any): boolean {
+  if (!c) return false;
+  if (isClientPortalApprovalPending(c)) return false;
+  if (c.isIncidentVault || c.status === CaseStatus.INCIDENT_STOPPAGE) return false;
+
+  const rawStatus = String(c.status || '').trim();
+  const lower = rawStatus.toLowerCase();
+
+  if (
+    rawStatus === CaseStatus.COMPLETED ||
+    lower.includes('completed') ||
+    lower.includes('delivered') ||
+    lower.includes('cancelled')
+  ) {
+    return false;
+  }
+
+  // Legacy office-created cases that had "Pending Approval" text without CLIENT role belong in Documentation Processing
+  if (lower === 'pending approval') {
+    return true;
+  }
+
+  if (DOCUMENTATION_PROCESSING_STATUSES.includes(rawStatus)) {
+    return true;
+  }
+
+  if (
+    lower.includes('shipping line do') ||
+    lower.includes('delivery order') ||
+    lower.includes('tp filing') ||
+    lower.includes('transit permit') ||
+    lower.includes('excise') ||
+    lower.includes('wharfage') ||
+    lower.includes('vehicle assignment') ||
+    lower.includes('documentation') ||
+    lower.includes('document intake') ||
+    lower.includes('gd filing') ||
+    lower.includes('carnet') ||
+    lower.includes('container booking') ||
+    lower.includes('vessel booking') ||
+    lower.includes('transport_arrangement')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+export function isLoadingPortProcessingCase(c?: any): boolean {
+  if (!c || isClientPortalApprovalPending(c)) return false;
+  if (c.isIncidentVault || c.status === CaseStatus.INCIDENT_STOPPAGE) return false;
+  const rawStatus = String(c.status || '').trim();
+  const lower = rawStatus.toLowerCase();
+  return (
+    rawStatus === CaseStatus.LOADING_PORT_PROCESSING ||
+    rawStatus === CaseStatus.LOADING_PORT_PROCESS ||
+    lower === 'loading port processing' ||
+    lower.includes('loading_port') ||
+    lower.includes('cargo_stuffing') ||
+    lower.includes('port_customs')
+  );
+}
+
+export function isInTransitCase(c?: any): boolean {
+  if (!c || isClientPortalApprovalPending(c)) return false;
+  if (c.isIncidentVault || c.status === CaseStatus.INCIDENT_STOPPAGE) return false;
+  const rawStatus = String(c.status || '').trim();
+  const lower = rawStatus.toLowerCase();
+  return (
+    rawStatus === CaseStatus.IN_TRANSIT ||
+    rawStatus === CaseStatus.DESTINATION_PORT_ARRIVAL ||
+    lower.includes('in transit') ||
+    lower.includes('highway transit') ||
+    lower.includes('destination port arrival') ||
+    lower.includes('vessel_loading') ||
+    lower.includes('dest_clearance')
+  );
+}
+
+/**
+ * Returns the unified high-level status label shown in Case Overview, Case Lists, and Container Status Check:
+ * - "Case Approval Pending" (Client Portal submissions awaiting office confirmation)
+ * - "Documentation Processing" (Workflow Steps 1-4: Shipping Line DO, TP Filing, Excise Payment, Vehicle Assignment)
+ * - "Loading Port Processing"
+ * - "In Transit"
+ * - "Completed" / "Cancelled" / "Incident / Stoppage" when applicable
+ */
+export function getUnifiedCaseStageLabel(c?: any): string {
+  if (!c) return 'Documentation Processing';
+  if (isClientPortalApprovalPending(c)) return 'Case Approval Pending';
+  if (c.isIncidentVault || c.status === CaseStatus.INCIDENT_STOPPAGE) return CaseStatus.INCIDENT_STOPPAGE;
+  const rawStatus = String(c.status || '').trim();
+  const lower = rawStatus.toLowerCase();
+  if (lower === 'cancelled') return 'Cancelled';
+  if (rawStatus === CaseStatus.COMPLETED || lower.includes('completed') || lower.includes('delivered')) {
+    return 'Completed';
+  }
+  if (isDocumentationProcessingCase(c)) return 'Documentation Processing';
+  if (isLoadingPortProcessingCase(c)) return 'Loading Port Processing';
+  if (isInTransitCase(c)) return 'In Transit';
+  return 'Documentation Processing';
+}
+
+

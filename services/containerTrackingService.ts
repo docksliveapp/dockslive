@@ -1,4 +1,5 @@
 import { Case, CaseStatus } from '../types';
+import { getUnifiedCaseStageLabel, isClientPortalApprovalPending, isDocumentationProcessingCase } from './workflowConfig';
 import { safeAppStorage } from './storage';
 import { restoreCasesFromIndexedDB } from './documentStorage';
 import { db } from './firebase';
@@ -247,10 +248,11 @@ export function extractMatchingContainers(
                      'Docks (Pvt.) Ltd.';
 
     const effectiveCaseNo = c.caseNo || c.caseNumber || String(c.id || '');
-    let workflowTitle = String(c.status || 'Active Operations');
+    const unifiedStage = getUnifiedCaseStageLabel(c);
+    let workflowTitle = unifiedStage;
     let workflowDesc = 'Consignment is undergoing authorized operational milestones.';
     let activeStepIdx = 0;
-    let totalSteps = 6;
+    let totalSteps = 7;
     const isCompleted =
       c.status === CaseStatus.COMPLETED ||
       String(c.status).toLowerCase().includes('completed') ||
@@ -260,15 +262,22 @@ export function extractMatchingContainers(
     if (getWorkflowFn && getStepIndexFn) {
       try {
         const wf = getWorkflowFn(c.category);
-        totalSteps = wf.totalSteps || 6;
+        totalSteps = wf.totalSteps || 7;
         activeStepIdx = getStepIndexFn(c.category, c.status);
         const curStep = wf.steps?.[activeStepIdx];
         if (isCompleted) {
-          workflowTitle = 'Completed & Delivered';
+          workflowTitle = 'Completed';
           workflowDesc = 'All customs and delivery milestones verified successfully.';
-        } else if (curStep) {
-          workflowTitle = curStep.title || curStep.shortTitle || String(c.status);
-          workflowDesc = curStep.description || '';
+        } else if (isClientPortalApprovalPending(c)) {
+          workflowTitle = 'Case Approval Pending';
+          workflowDesc = 'Client portal registration awaiting office confirmation.';
+        } else if (isDocumentationProcessingCase(c)) {
+          workflowTitle = 'Documentation Processing';
+          const stepLabel = curStep ? `${curStep.title}` : String(c.status || 'Shipping Line DO');
+          workflowDesc = `Documentation Processing Stage (1. Shipping Line DO • 2. TP Filing • 3. Excise Payment • 4. Vehicle Assignment) — Active: ${stepLabel}`;
+        } else {
+          workflowTitle = unifiedStage;
+          workflowDesc = curStep?.description || `Active Stage: ${unifiedStage}`;
         }
       } catch (_) {}
     }
@@ -280,10 +289,10 @@ export function extractMatchingContainers(
       containersList = c.containers;
     } else if (Array.isArray((c.extractedData as any)?.containers) && (c.extractedData as any).containers.length > 0) {
       containersList = (c.extractedData as any).containers.map((ec: any, i: number) =>
-        typeof ec === 'string' ? { id: i + 1, number: ec, size: '40ft', status: c.status } : ec
+        typeof ec === 'string' ? { id: i + 1, number: ec, size: '40ft', status: unifiedStage } : ec
       );
     } else if (c.containerNumber || (c as any).containerNo) {
-      containersList = [{ id: 1, number: c.containerNumber || (c as any).containerNo, size: '40ft', status: c.status }];
+      containersList = [{ id: 1, number: c.containerNumber || (c as any).containerNo, size: '40ft', status: unifiedStage }];
     }
 
     const blClean = String(c.blNumber || c.extractedData?.blNumber || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
@@ -316,7 +325,7 @@ export function extractMatchingContainers(
         category: c.category || 'Bonded Carrier',
         pol: c.pol || c.extractedData?.pol || 'Port of Loading',
         pod: c.pod || c.extractedData?.pod || 'Port of Discharge',
-        status: String(c.status || 'Active'),
+        status: unifiedStage,
         currentWorkflowStep: workflowTitle,
         currentWorkflowDescription: workflowDesc,
         currentWorkflowStepIndex: activeStepIdx,

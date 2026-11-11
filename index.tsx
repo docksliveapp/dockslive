@@ -4,24 +4,27 @@ import './index.css';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 
-// Global Build Version - Auto-invalidates stale caches on every refresh / domain open
-const APP_BUILD_VERSION = '2026.10.21-luxury-pearl-v16';
+// Global Build Version - Auto-invalidates stale caches on every version upgrade
+const APP_BUILD_VERSION = '2026.11.11-luxury-pearl-v18';
 
 try {
-  // Always clear browser CacheStorage so old JS/HTML/CSS bundles never persist
+  const prevBuildVersion = localStorage.getItem('dpl_app_build_version');
+  // Purge any outdated CacheStorage entries whenever build version upgrades
   if (typeof caches !== 'undefined') {
     caches.keys().then((names) => {
       names.forEach((name) => {
-        caches.delete(name).catch(() => {});
+        if (prevBuildVersion !== APP_BUILD_VERSION || (!name.includes('v2026-18'))) {
+          caches.delete(name).catch(() => {});
+        }
       });
     }).catch(() => {});
   }
 
-  // Unregister any old caching Service Workers that trap the domain on old builds
+  // Trigger Service Worker update check on version change
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then((registrations) => {
       for (const registration of registrations) {
-        registration.unregister().catch(() => {});
+        registration.update().catch(() => {});
       }
     }).catch(() => {});
   }

@@ -3,20 +3,19 @@ import {
   Packer,
   Paragraph,
   TextRun,
+  ImageRun,
   Table,
   TableRow,
   TableCell,
   WidthType,
   AlignmentType,
   BorderStyle,
-  Header,
-  Footer,
   convertInchesToTwip
 } from 'docx';
 import { Vehicle } from '../types';
-import { getActiveCompany, getActiveCompanyPrefix } from './companyService';
+import { getActiveCompany } from './companyService';
 
-// Company details
+// Standard company & witness registry (always consistent across Customs & Legal Word files; editable in Word anytime)
 export const DOCKS_COMPANY = {
   name: 'Docks (Pvt) Ltd.',
   fullLegalName: 'M/s. Docks (Pvt.) Ltd.',
@@ -32,17 +31,135 @@ export const DOCKS_COMPANY = {
   }
 };
 
-export function getActiveCompanyDocxDetails() {
+export interface ResolvedVehicleDocxCompany {
+  id: 'docks' | 'truckit' | 'muhib' | 'vantage';
+  name: string;
+  signoffName: string;       // e.g. TRUCKIT (PVT) LTD. / DOCKS (PVT) LTD.
+  legalMixed: string;        // e.g. TRUCKIT (Pvt.) Ltd. / DOCKS (Pvt.) Ltd.
+  legalCaps: string;         // e.g. TRUCKIT (PVT) LTD / DOCKS (PVT) LTD
+  legalCapsDot: string;      // e.g. TRUCKIT (PVT.) LTD / DOCKS (PVT.) LTD
+  fullLegalName: string;     // e.g. M/s. TRUCKIT (Pvt.) Ltd.
+  ntn: string;               // e.g. 5064083-8
+  customsNtn: string;        // e.g. 3997968
+  address: string;
+  addressUpper: string;
+  addressLine1: string;
+  addressLine2: string;
+  witnesses: typeof DOCKS_COMPANY.witnesses;
+}
+
+/**
+ * Resolves the exact operating company under which a specific vehicle is registered.
+ * Ensures every document (Registration, Lease, Affidavit, Cancellation NOC, Lease Termination)
+ * prints the company on whose panel THAT vehicle is registered.
+ */
+export function resolveVehicleDocxCompany(v?: Vehicle | null): ResolvedVehicleDocxCompany {
+  const opRaw = String(v?.operatingCompany || '').trim().toLowerCase();
+  const nameRaw = String(v?.companyName || '').trim().toUpperCase();
   const active = getActiveCompany();
+
+  let id: 'docks' | 'truckit' | 'muhib' | 'vantage' = active.id;
+  if (opRaw === 'truckit' || nameRaw.includes('TRUCKIT')) {
+    id = 'truckit';
+  } else if (opRaw === 'docks' || nameRaw.includes('DOCKS')) {
+    id = 'docks';
+  } else if (opRaw === 'muhib' || nameRaw.includes('MUHIB')) {
+    id = 'muhib';
+  } else if (opRaw === 'vantage' || nameRaw.includes('VANTAGE')) {
+    id = 'vantage';
+  }
+
+  const address = 'Office No 13 1st Floor State Life Building No 7 G-Allana Road Tower Karachi';
+  const addressUpper = 'OFFICE NO.13 FIRST FLOOR, STATE LIFE BUILDING NO. 7, G-ALLANA ROAD, TOWER, KARACHI';
+  const addressLine1 = 'Office 13, 1st Floor, State Life Building # 7,';
+  const addressLine2 = 'G.Allana Road, Tower, Karachi.';
+
+  if (id === 'truckit') {
+    return {
+      id: 'truckit',
+      name: 'TruckIt (Pvt.) Ltd.',
+      signoffName: 'TRUCKIT (PVT) LTD.',
+      legalMixed: 'TRUCKIT (Pvt.) Ltd.',
+      legalCaps: 'TRUCKIT (PVT) LTD',
+      legalCapsDot: 'TRUCKIT (PVT.) LTD',
+      fullLegalName: 'M/s. TRUCKIT (Pvt.) Ltd.',
+      ntn: '5064083-8',
+      customsNtn: '3997968',
+      address,
+      addressUpper,
+      addressLine1,
+      addressLine2,
+      witnesses: DOCKS_COMPANY.witnesses
+    };
+  }
+
+  if (id === 'muhib') {
+    return {
+      id: 'muhib',
+      name: 'Muhib International',
+      signoffName: 'MUHIB INTERNATIONAL',
+      legalMixed: 'MUHIB INTERNATIONAL',
+      legalCaps: 'MUHIB INTERNATIONAL',
+      legalCapsDot: 'MUHIB INTERNATIONAL',
+      fullLegalName: 'M/s. MUHIB INTERNATIONAL',
+      ntn: '5064083-9',
+      customsNtn: '3997968',
+      address,
+      addressUpper,
+      addressLine1,
+      addressLine2,
+      witnesses: DOCKS_COMPANY.witnesses
+    };
+  }
+
+  if (id === 'vantage') {
+    return {
+      id: 'vantage',
+      name: 'Vantage Shipping Line',
+      signoffName: 'VANTAGE SHIPPING LINE',
+      legalMixed: 'VANTAGE SHIPPING LINE',
+      legalCaps: 'VANTAGE SHIPPING LINE',
+      legalCapsDot: 'VANTAGE SHIPPING LINE',
+      fullLegalName: 'M/s. VANTAGE SHIPPING LINE',
+      ntn: '5064083-7',
+      customsNtn: '3997968',
+      address,
+      addressUpper,
+      addressLine1,
+      addressLine2,
+      witnesses: DOCKS_COMPANY.witnesses
+    };
+  }
+
   return {
-    name: active.name,
-    legalTitle: active.legalTitle || active.name,
-    fullLegalName: `M/s. ${active.legalTitle || active.name}`,
-    address: active.address || 'Office No 13 1st Floor State Life Building No 7 G-Allana Road Tower Karachi',
-    ntn: active.id === 'docks' ? '5064083-8' : (active.id === 'muhib' ? '5064083-9' : '5064083-7'),
+    id: 'docks',
+    name: 'Docks (Pvt) Ltd.',
+    signoffName: 'DOCKS (PVT) LTD.',
+    legalMixed: 'DOCKS (Pvt.) Ltd.',
+    legalCaps: 'DOCKS (PVT) LTD',
+    legalCapsDot: 'DOCKS (PVT.) LTD',
+    fullLegalName: 'M/s. DOCKS (Pvt.) Ltd.',
+    ntn: '5064083-8',
     customsNtn: '3997968',
-    phone: active.phone || '+92 21 3241 4500',
-    email: active.email || 'operations@makgroup.com.pk',
+    address,
+    addressUpper,
+    addressLine1,
+    addressLine2,
+    witnesses: DOCKS_COMPANY.witnesses
+  };
+}
+
+export function getActiveCompanyDocxDetails() {
+  const resolved = resolveVehicleDocxCompany(null);
+  return {
+    name: resolved.name,
+    legalTitle: resolved.legalMixed,
+    fullLegalName: resolved.fullLegalName,
+    address: resolved.address,
+    ntn: resolved.ntn,
+    customsNtn: resolved.customsNtn,
+    phone: '+92 21 3241 4500',
+    email: 'operations@makgroup.com.pk',
     witnesses: DOCKS_COMPANY.witnesses
   };
 }
@@ -50,17 +167,18 @@ export function getActiveCompanyDocxDetails() {
 // Date utilities
 export function getCleanDate(dateInput?: string | Date): Date {
   if (!dateInput) return new Date();
-  if (dateInput instanceof Date) return dateInput;
-  // Handle DD/MM/YYYY or DD-MM-YYYY
+  if (dateInput instanceof Date) return isNaN(dateInput.getTime()) ? new Date() : dateInput;
   if (typeof dateInput === 'string') {
-    const parts = dateInput.split(/[/\-.]/);
+    const trimmed = dateInput.trim();
+    if (!trimmed) return new Date();
+    const parts = trimmed.split(/[/\-.]/);
     if (parts.length === 3) {
       if (parts[0].length === 4) {
-        // YYYY-MM-DD
-        return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        if (!isNaN(d.getTime())) return d;
       } else {
-        // DD-MM-YYYY
-        return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+        const d = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+        if (!isNaN(d.getTime())) return d;
       }
     }
   }
@@ -92,10 +210,14 @@ export function formatDashDate(d: Date = new Date()): string {
 export function getOrdinalSuffix(n: number): string {
   if (n >= 11 && n <= 13) return 'th';
   switch (n % 10) {
-    case 1: return 'st';
-    case 2: return 'nd';
-    case 3: return 'rd';
-    default: return 'th';
+    case 1:
+      return 'st';
+    case 2:
+      return 'nd';
+    case 3:
+      return 'rd';
+    default:
+      return 'th';
   }
 }
 
@@ -108,23 +230,45 @@ export function formatAgreementDate(d: Date = new Date()): string {
   return `${dayStr} ${monthStr}, ${year}`;
 }
 
-// 6 months calculation
 export function calculateSixMonthsExpiry(startDate: Date = new Date()): Date {
   const expiry = new Date(startDate);
   expiry.setMonth(expiry.getMonth() + 6);
-  // Customs expiry is typically 6 months minus 1 day (e.g., 19.09.2026 -> 18.03.2027)
   expiry.setDate(expiry.getDate() - 1);
   return expiry;
 }
 
-// Helper to extract Maker, Model, MRA, Tare from Vehicle
+function cleanRealOwnerValue(val?: string): string {
+  if (!val) return '';
+  const trimmed = String(val).trim();
+  if (!trimmed) return '';
+  const upper = trimmed.toUpperCase();
+  if (
+    upper === 'N/A' ||
+    upper === 'NA' ||
+    upper === 'NONE' ||
+    upper === '-' ||
+    upper === 'DOCKS (PVT) LTD' ||
+    upper === 'DOCKS (PVT.) LTD.' ||
+    upper === 'TRUCKIT (PVT) LTD' ||
+    upper === 'TRUCKIT PVT LTD' ||
+    upper === 'DOCKS PVT LTD'
+  ) {
+    return '';
+  }
+  return trimmed;
+}
+
+/**
+ * Extracts exact vehicle technical and owner particulars from the vehicle record itself
+ * without substituting unrelated hardcoded owner names.
+ */
 export function extractVehicleFields(v: Vehicle) {
-  let maker = v.maker;
-  let model = v.model;
+  let maker = String(v.make || v.maker || '').trim().toUpperCase();
+  let model = String(v.model || '').trim();
 
   if (!maker && v.makeModel) {
     const parts = v.makeModel.trim().split(/\s+/);
-    maker = parts[0]?.toUpperCase() || 'HINO';
+    maker = parts[0]?.toUpperCase() || '';
     if (!model && parts.length > 1) {
       model = parts.slice(1).join(' ');
     }
@@ -141,14 +285,26 @@ export function extractVehicleFields(v: Vehicle) {
   }
 
   if (!model) {
-    model = v.registrationDate ? v.registrationDate.slice(0, 4) : '2018';
+    model = v.registrationDate && v.registrationDate.length >= 4 ? v.registrationDate.slice(0, 4) : '-';
   }
 
-  let mra = v.mra;
+  let mra = String(v.mra || '').trim().toUpperCase();
   if (!mra) {
     const reg = (v.registrationNumber || '').toUpperCase();
-    if (reg.includes('LS') || reg.includes('TLB') || reg.includes('TLD') || reg.includes('TLF') || reg.includes('TLK') || reg.includes('TMG') || reg.includes('TLX')) {
+    if (
+      reg.includes('LS') ||
+      reg.includes('TLB') ||
+      reg.includes('TLD') ||
+      reg.includes('TLF') ||
+      reg.includes('TLK') ||
+      reg.includes('TMG') ||
+      reg.includes('TLX') ||
+      reg.includes('TMA') ||
+      reg.includes('TMT')
+    ) {
       mra = 'LASBELA';
+    } else if (reg.includes('QTA') || reg.includes('Q-')) {
+      mra = 'QUETTA';
     } else if (reg.includes('LES') || reg.includes('LPT') || reg.includes('LCA')) {
       mra = 'LAHORE';
     } else if (reg.includes('Z-') || reg.includes('P-') || reg.includes('PR-')) {
@@ -160,13 +316,23 @@ export function extractVehicleFields(v: Vehicle) {
     }
   }
 
-  const tare = v.tareWeight || (v.weightCapacity ? `${v.weightCapacity} TARE` : '5100 KG');
-  const owner = v.ownerName || 'DOCKS (PVT) LTD';
-  const ownerFather = v.ownerFatherName || 'BARKHURDAR';
-  const ownerCnic = v.ownerCnic || '38301-4549550-1';
-  const ownerAddress = v.ownerAddress || 'TAJ MASJID ROAD H.NO.123/3 ST NO.23 MOH AGRA TAJ COLONY KARACHI';
+  const rawTare = String(v.tareWeight || '').trim();
+  const tare = rawTare || '';
+  const owner = cleanRealOwnerValue(v.ownerName);
+  const ownerFather = cleanRealOwnerValue(v.ownerFatherName);
+  const ownerCnic = cleanRealOwnerValue(v.ownerCnic);
+  const ownerAddress = cleanRealOwnerValue(v.ownerAddress);
 
-  return { maker, model, mra, tare, owner, ownerFather, ownerCnic, ownerAddress };
+  return {
+    maker,
+    model,
+    mra,
+    tare,
+    owner,
+    ownerFather,
+    ownerCnic,
+    ownerAddress
+  };
 }
 
 // Download & Blob utility
@@ -186,67 +352,75 @@ export async function downloadDocxBlob(doc: Document, filename: string): Promise
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// Table cell border styling helper
 const tableBorders = {
-  top: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-  bottom: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-  left: { style: BorderStyle.SINGLE, size: 4, color: '000000' },
-  right: { style: BorderStyle.SINGLE, size: 4, color: '000000' }
+  top: { style: BorderStyle.SINGLE, size: 6, color: '000000' },
+  bottom: { style: BorderStyle.SINGLE, size: 6, color: '000000' },
+  left: { style: BorderStyle.SINGLE, size: 6, color: '000000' },
+  right: { style: BorderStyle.SINGLE, size: 6, color: '000000' }
 };
+
+const noBorders = {
+  top: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+  bottom: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+  left: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' },
+  right: { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' }
+};
+
+const calibriFont = 'Calibri';
 
 // ============================================================================
 // 1. REGISTRATION & RENEWAL APPLICATION LETTER (Company Letterhead)
-// From: Letter 10 Vehicles registration letter 07-09-26.pdf
 // ============================================================================
 export interface RegistrationLetterOptions {
   letterDate?: string | Date;
   referenceNo?: string;
-  leaveLetterheadSpace?: boolean; // leaves top margin for pre-printed letterhead
+  leaveLetterheadSpace?: boolean;
 }
 
 export async function generateRegistrationRenewalLetterDocx(
   vehicles: Vehicle[],
   options: RegistrationLetterOptions = {}
 ): Promise<Document> {
-  const dateObj = getCleanDate(options.letterDate);
+  const dateObj = getCleanDate(options.letterDate || vehicles[0]?.registrationDate);
   const formattedDate = formatSlashDate(dateObj);
   const topMargin = options.leaveLetterheadSpace !== false ? convertInchesToTwip(2.2) : convertInchesToTwip(1.0);
+  const comp = resolveVehicleDocxCompany(vehicles[0]);
 
   const tableHeaderRow = new TableRow({
     tableHeader: true,
     children: [
       new TableCell({
-        children: [new Paragraph({ text: 'REG-NO.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'REG-NO.', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 15, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'CHASSIS', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'CHASSIS', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 18, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'ENGINE', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'ENGINE', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 16, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'MAKER', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'MAKER', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 12, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'MODEL', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'MODEL', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 10, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'M.R.A.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'M.R.A.', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 13, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'OWNER', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'OWNER', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 16, type: WidthType.PERCENTAGE },
         borders: tableBorders
       })
@@ -258,38 +432,38 @@ export async function generateRegistrationRenewalLetterDocx(
     return new TableRow({
       children: [
         new TableCell({
-          children: [new Paragraph({ text: v.registrationNumber || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.registrationNumber || '-', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.chassisNo || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.chassisNo || '-', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.engineNo || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.engineNo || '-', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: maker || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: maker || '-', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: String(model || '-'), alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(model || '-'), bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: mra || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: mra || '-', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: owner || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: owner ? owner.toUpperCase() : '-', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         })
       ]
     });
   });
 
-  const doc = new Document({
+  return new Document({
     sections: [
       {
         properties: {
@@ -303,101 +477,93 @@ export async function generateRegistrationRenewalLetterDocx(
           }
         },
         children: [
-          // Date right-aligned
           new Paragraph({
             alignment: AlignmentType.RIGHT,
             spacing: { after: 280 },
             children: [
-              new TextRun({ text: 'Date: ', bold: true, size: 22 }),
-              new TextRun({ text: formattedDate, size: 22 })
+              new TextRun({ text: 'Date: ', bold: true, size: 22, font: calibriFont }),
+              new TextRun({ text: formattedDate, bold: true, underline: {}, size: 22, font: calibriFont })
             ]
           }),
-
-          // Recipient Address
           new Paragraph({
             spacing: { line: 276, after: 300 },
             children: [
-              new TextRun({ text: 'The Deputy / Assistant Director,\n', bold: true, size: 22 }),
-              new TextRun({ text: 'Licensing of Bonded Carrier,\n', size: 22 }),
-              new TextRun({ text: 'Directorate of Transit Trade,\n', size: 22 }),
-              new TextRun({ text: 'Custom House,\n', size: 22 }),
-              new TextRun({ text: 'Karachi.', bold: true, underline: {}, size: 22 })
+              new TextRun({ text: 'The Deputy / Assistant Director,', bold: true, size: 22, font: calibriFont }),
+              new TextRun({ text: 'Licensing of Bonded Carrier,', bold: true, size: 22, font: calibriFont, break: 1 }),
+              new TextRun({ text: 'Directorate of Transit Trade,', bold: true, size: 22, font: calibriFont, break: 1 }),
+              new TextRun({ text: 'Custom House,', bold: true, size: 22, font: calibriFont, break: 1 }),
+              new TextRun({ text: 'Karachi.', bold: true, underline: {}, size: 22, font: calibriFont, break: 1 })
             ]
           }),
-
-          // Subject Line
           new Paragraph({
             spacing: { before: 180, after: 240 },
             children: [
-              new TextRun({ text: 'Subject:\t', bold: true, size: 22 }),
+              new TextRun({ text: 'Subject:\t', bold: true, size: 22, font: calibriFont }),
               new TextRun({
                 text: 'REGISTRATION OF VEHICLES AS PRIVATE BONDED CARRIER',
                 bold: true,
                 underline: {},
-                size: 22
+                size: 22,
+                font: calibriFont
               })
             ]
           }),
-
-          // Body text
           new Paragraph({
-            spacing: { line: 310, after: 260 },
+            spacing: { line: 300, after: 260 },
             children: [
               new TextRun({
-                text: `In terms of Rule 329 (5) of Chapter XIV of Customs Rules, 2001, `,
-                size: 21
+                text: 'In terms of Rule 329 (5) of Chapter XIV of Customs Rules, 2001, ',
+                bold: true,
+                size: 21,
+                font: calibriFont
               }),
               new TextRun({
                 text: `(${vehicles.length})`,
                 bold: true,
-                size: 21
+                underline: {},
+                size: 21,
+                font: calibriFont
               }),
               new TextRun({
-                text: ` vehicles indicated below is hereby required to be registered with us for transshipment of imported goods to upcountry Customs Dry Ports / Customs Stations for a period of six months.`,
-                size: 21
+                text: ' vehicles indicated below is hereby required to be registered with us for transshipment of imported goods to upcountry Customs Dry Ports / Customs Stations for a period of six months.',
+                bold: true,
+                size: 21,
+                font: calibriFont
               })
             ]
           }),
-
-          // Table
           new Table({
             rows: [tableHeaderRow, ...tableDataRows],
             width: { size: 100, type: WidthType.PERCENTAGE }
           }),
-
-          // Closing paragraph
           new Paragraph({
             spacing: { before: 300, line: 280, after: 360 },
             children: [
               new TextRun({
-                text: 'It is therefore, you are requested to register the aforementioned list and issue permit accordingly. Thanking for kind perusal',
-                size: 21
+                text: 'It is therefore, you are requested to register the aforementioned list and issue permit accordingly. Thanking for kind perusal.',
+                bold: true,
+                size: 21,
+                font: calibriFont
               })
             ]
           }),
-
-          // Company Sign-off
           new Paragraph({
-            spacing: { before: 200 },
+            spacing: { before: 200, line: 276 },
             children: [
-              new TextRun({
-                text: getActiveCompanyDocxDetails().name,
-                bold: true,
-                size: 23
-              })
+              new TextRun({ text: 'Yours Faithfully,', bold: true, size: 22, font: calibriFont }),
+              new TextRun({ text: '', break: 2 }),
+              new TextRun({ text: '_________________________', bold: true, size: 22, font: calibriFont, break: 1 }),
+              new TextRun({ text: `For: ${comp.signoffName}`, bold: true, size: 22, font: calibriFont, break: 1 })
             ]
           })
         ]
       }
     ]
   });
-
-  return doc;
 }
 
 // ============================================================================
 // 2. CUSTOMS PERMIT FOR RENEWAL / FRESH REGISTRATION (Customs Office Format)
-// From: Custom Vehicle List.pdf
 // ============================================================================
 export interface CustomsPermitOptions {
   letterDate?: string | Date;
@@ -410,53 +576,54 @@ export async function generateCustomsPermitLetterDocx(
   vehicles: Vehicle[],
   options: CustomsPermitOptions = {}
 ): Promise<Document> {
-  const dateObj = getCleanDate(options.letterDate);
+  const dateObj = getCleanDate(options.letterDate || vehicles[0]?.registrationDate);
   const formattedDated = formatDotDate(dateObj);
   const appDate = options.applicationDate ? formatDotDate(getCleanDate(options.applicationDate)) : formattedDated;
   const expiryDateObj = calculateSixMonthsExpiry(dateObj);
   const formattedExpiry = formatDotDate(expiryDateObj);
   const permitRef = options.permitNo || 'No. SI/Mics./01/2021–(Licensing)';
+  const comp = resolveVehicleDocxCompany(vehicles[0]);
 
   const tableHeaderRow = new TableRow({
     tableHeader: true,
     children: [
       new TableCell({
-        children: [new Paragraph({ text: 'S #', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'S #', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 6, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Reg. No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Reg. No.', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 15, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Chassis No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Chassis No.', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 18, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Engine No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Engine No.', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 17, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Make', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Make', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 12, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Model', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Model', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 10, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'MRA', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'MRA', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 11, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Expiry', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Expiry', bold: true, size: 18, font: calibriFont })] })],
         width: { size: 11, type: WidthType.PERCENTAGE },
         borders: tableBorders
       })
@@ -465,45 +632,46 @@ export async function generateCustomsPermitLetterDocx(
 
   const tableDataRows = vehicles.map((v, idx) => {
     const { maker, model, mra } = extractVehicleFields(v);
+    const vExp = v.validationExpiryDate ? formatDotDate(getCleanDate(v.validationExpiryDate)) : formattedExpiry;
     return new TableRow({
       children: [
         new TableCell({
-          children: [new Paragraph({ text: String(idx + 1), alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(idx + 1), size: 17, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.registrationNumber || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.registrationNumber || '-', size: 17, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.chassisNo || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.chassisNo || '-', size: 17, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.engineNo || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.engineNo || '-', size: 17, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: maker || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: maker || '-', size: 17, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: String(model || '-'), alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(model || '-'), size: 17, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: mra || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: mra || '-', size: 17, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: formattedExpiry, alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: vExp, size: 17, font: calibriFont })] })],
           borders: tableBorders
         })
       ]
     });
   });
 
-  const doc = new Document({
+  return new Document({
     sections: [
       {
         properties: {
@@ -517,127 +685,112 @@ export async function generateCustomsPermitLetterDocx(
           }
         },
         children: [
-          // Government Header
           new Paragraph({
             alignment: AlignmentType.CENTER,
             spacing: { line: 260, after: 120 },
             children: [
-              new TextRun({ text: 'Government of Pakistan\n', bold: true, size: 24 }),
-              new TextRun({ text: 'Directorate General of Transit Trade\n', bold: true, size: 22 }),
-              new TextRun({ text: 'Custom House\n', size: 21 }),
-              new TextRun({ text: 'Karachi\n', bold: true, size: 22 }),
-              new TextRun({ text: '****', size: 18 })
+              new TextRun({ text: 'Government of Pakistan', bold: true, size: 24, font: calibriFont }),
+              new TextRun({ text: 'Directorate General of Transit Trade', bold: true, size: 22, font: calibriFont, break: 1 }),
+              new TextRun({ text: 'Custom House', size: 21, font: calibriFont, break: 1 }),
+              new TextRun({ text: 'Karachi', bold: true, size: 22, font: calibriFont, break: 1 }),
+              new TextRun({ text: '****', size: 18, font: calibriFont, break: 1 })
             ]
           }),
-
-          // Reference & Date Row
           new Paragraph({
             spacing: { before: 140, after: 200 },
             children: [
-              new TextRun({ text: `${permitRef}`, bold: true, size: 20 }),
-              new TextRun({ text: `\t\t\t\tDated: ${formattedDated}`, bold: true, size: 20 })
+              new TextRun({ text: `${permitRef}`, bold: true, size: 20, font: calibriFont }),
+              new TextRun({ text: `\t\t\t\tDated: ${formattedDated}`, bold: true, size: 20, font: calibriFont })
             ]
           }),
-
-          // Addressee: active company
           new Paragraph({
             spacing: { line: 260, after: 220 },
             children: [
-              new TextRun({ text: `${getActiveCompanyDocxDetails().fullLegalName}\n`, bold: true, size: 21 }),
-              new TextRun({ text: 'Office No.13 First Floor State Life Building No.7\n', size: 20 }),
-              new TextRun({ text: 'G-Allana Road Tower,\n', size: 20 }),
-              new TextRun({ text: 'Karachi.', bold: true, size: 20 })
+              new TextRun({ text: `${comp.fullLegalName}`, bold: true, size: 21, font: calibriFont }),
+              new TextRun({ text: 'Office No.13 First Floor State Life Building No.7', size: 20, font: calibriFont, break: 1 }),
+              new TextRun({ text: 'G-Allana Road Tower,', size: 20, font: calibriFont, break: 1 }),
+              new TextRun({ text: 'Karachi.', bold: true, size: 20, font: calibriFont, break: 1 })
             ]
           }),
-
-          // Subject
           new Paragraph({
             spacing: { before: 120, after: 160 },
             children: [
-              new TextRun({ text: 'Subject: - \t', bold: true, size: 21 }),
+              new TextRun({ text: 'Subject: - \t', bold: true, size: 21, font: calibriFont }),
               new TextRun({
                 text: 'PERMIT FOR RENEWAL / FRESH REGISTRATION OF VEHICLES IN THE SYSTEM AS PRIVATE BONDED CARRIER / TRANSPORT OPERATOR',
                 bold: true,
                 underline: {},
-                size: 21
+                size: 21,
+                font: calibriFont
               })
             ]
           }),
-
-          // Reference line
           new Paragraph({
             spacing: { after: 180 },
             children: [
-              new TextRun({ text: 'Please refer to your application dated ', size: 20 }),
-              new TextRun({ text: `${appDate}`, bold: true, underline: {}, size: 20 }),
-              new TextRun({ text: ' on the subject cited above.', size: 20 })
+              new TextRun({ text: 'Please refer to your application dated ', size: 20, font: calibriFont }),
+              new TextRun({ text: `${appDate}`, bold: true, underline: {}, size: 20, font: calibriFont }),
+              new TextRun({ text: ' on the subject cited above.', size: 20, font: calibriFont })
             ]
           }),
-
-          // Paragraph 2
           new Paragraph({
             spacing: { line: 290, after: 200 },
             children: [
-              new TextRun({ text: '2.\tThe request for renewal of vehicles and fresh registration of ', size: 20 }),
-              new TextRun({ text: `${vehicles.length} vehicles`, bold: true, underline: {}, size: 20 }),
+              new TextRun({ text: '2.\tThe request for renewal of vehicles and fresh registration of ', size: 20, font: calibriFont }),
+              new TextRun({ text: `${vehicles.length} vehicles`, bold: true, underline: {}, size: 20, font: calibriFont }),
               new TextRun({
-                text: ` in terms of Rule 329 (5) & (6) of Chapter XIV, Rule 478 (d) of Chapter XXI and Rule 639 (d) of Customs Rules, 2001 notified vide SRO 450(I)/2001 dated 18.06.2001 acceded to and total `,
-                size: 20
+                text: ' in terms of Rule 329 (5) & (6) of Chapter XIV, Rule 478 (d) of Chapter XXI and Rule 639 (d) of Customs Rules, 2001 notified vide SRO 450(I)/2001 dated 18.06.2001 acceded to and total ',
+                size: 20,
+                font: calibriFont
               }),
-              new TextRun({ text: `${vehicles.length} vehicles`, bold: true, underline: {}, size: 20 }),
+              new TextRun({ text: `${vehicles.length} vehicles`, bold: true, underline: {}, size: 20, font: calibriFont }),
               new TextRun({
-                text: `, particulars of which indicated in the table below are hereby provisionally registered in the system in the with `,
-                size: 20
+                text: ', particulars of which indicated in the table below are hereby provisionally registered in the system with ',
+                size: 20,
+                font: calibriFont
               }),
-              new TextRun({ text: `${getActiveCompanyDocxDetails().fullLegalName} Karachi`, bold: true, underline: {}, size: 20 }),
+              new TextRun({ text: `${comp.fullLegalName} Karachi`, bold: true, underline: {}, size: 20, font: calibriFont }),
               new TextRun({
-                text: ` for providing transport facility to the transhipments to and from upcountry Customs Dry Ports as well as transit goods for a period of six months. The Customs House, However, reserves the right to revoke / suspend this provisional registration fully or partially at anytime during the period of its validity without any prior notice.`,
-                size: 20
+                text: ' for providing transport facility to the transhipments to and from upcountry Customs Dry Ports as well as transit goods for a period of six months. The Customs House, However, reserves the right to revoke / suspend this provisional registration fully or partially at anytime during the period of its validity without any prior notice.',
+                size: 20,
+                font: calibriFont
               })
             ]
           }),
-
-          // Table
           new Table({
             rows: [tableHeaderRow, ...tableDataRows],
             width: { size: 100, type: WidthType.PERCENTAGE }
           }),
-
-          // Paragraph 3
           new Paragraph({
             spacing: { before: 240, line: 280, after: 380 },
             children: [
               new TextRun({
                 text: '3.\tAppropriate Customs Officer assigned the job of issuing sealing certificate at exit point of Port / Airport must ensure the fulfilment of conditions in terms of Rule 327, 328 and 329 of Chapter XIV and Rule 477, 478 and 479 of Chapter XXI of Customs Rules, 2001 notified vide SRO 450(I)/2001 dated 18.06.2001 besides other conditions contained in the said rules. The Trackers in these vehicles may also be checked by the concerned Customs staff of tracking, sealing and monitoring at the time of exit of vehicles with goods from port.',
-                size: 20
+                size: 20,
+                font: calibriFont
               })
             ]
           }),
-
-          // Deputy Director Signature block
           new Paragraph({
             alignment: AlignmentType.RIGHT,
             spacing: { before: 300 },
             children: [
-              new TextRun({ text: '(Deputy Director)\n', bold: true, size: 22 }),
-              new TextRun({ text: '(Licensing)', bold: true, size: 21 })
+              new TextRun({ text: '(Deputy Director)', bold: true, size: 22, font: calibriFont }),
+              new TextRun({ text: '(Licensing)', bold: true, size: 21, font: calibriFont, break: 1 })
             ]
           })
         ]
       }
     ]
   });
-
-  return doc;
 }
 
 // ============================================================================
-// 3. VEHICLE LEASE AGREEMENT (Printed on Stamp Paper)
-// From: Lease Agreement TAS-582.pdf
+// 3. VEHICLE LEASE AGREEMENT (Printed on Stamp Paper — 1:1 Official Format)
 // ============================================================================
 export interface LeaseAgreementOptions {
   agreementDate?: string | Date;
-  leaveStampPaperSpace?: boolean; // leaves ~3.5 inches on top for legal stamp
+  leaveStampPaperSpace?: boolean;
   customLessorName?: string;
   customFatherName?: string;
   customCnic?: string;
@@ -652,23 +805,36 @@ export async function generateLeaseAgreementDocx(
   vehicles: Vehicle[],
   options: LeaseAgreementOptions = {}
 ): Promise<Document> {
-  const dateObj = getCleanDate(options.agreementDate);
-  const formattedAgrDate = formatAgreementDate(dateObj);
-  const startDateStr = formatDotDate(dateObj);
-  const expiryDateObj = calculateSixMonthsExpiry(dateObj);
-  const endDateStr = formatDotDate(expiryDateObj);
+  const firstV = vehicles[0] || ({} as Vehicle);
+  const comp = resolveVehicleDocxCompany(firstV);
+  const dateObj = getCleanDate(options.agreementDate || firstV.registrationDate);
 
-  // Default to leaving 3.5 inches at the top for Pakistani stamp paper
-  const topMargin = options.leaveStampPaperSpace !== false ? convertInchesToTwip(3.5) : convertInchesToTwip(1.0);
+  const dayNum = dateObj.getDate();
+  const dayPadded = String(dayNum).padStart(2, '0');
+  const dayOrdinal = getOrdinalSuffix(dayNum);
+  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  const monthStr = months[dateObj.getMonth()];
+  const yearNum = dateObj.getFullYear();
 
-  // Lessor information from first vehicle or options
-  const firstV = vehicles[0] || {} as Vehicle;
-  const { maker: m1, model: mod1, mra: mra1, tare: t1, owner: o1, ownerFather: of1, ownerCnic: oc1, ownerAddress: oa1 } = extractVehicleFields(firstV);
-  
-  const lessorName = options.customLessorName || o1 || 'GUL HAMEED';
-  const lessorFather = options.customFatherName || of1 || 'BARKHURDAR';
-  const lessorCnic = options.customCnic || oc1 || '38301-4549550-1';
-  const lessorAddress = options.customAddress || oa1 || 'TAJ MASJID ROAD H.NO.123/3 ST NO.23 MOH AGRA TAJ COLONY KARACHI';
+  const leaseStartObj = new Date(dateObj);
+  const leaseExpiryObj = firstV.validationExpiryDate
+    ? getCleanDate(firstV.validationExpiryDate)
+    : calculateSixMonthsExpiry(leaseStartObj);
+  const startDateStr = formatDotDate(leaseStartObj);
+  const endDateStr = formatDotDate(leaseExpiryObj);
+
+  const topMargin = options.leaveStampPaperSpace !== false ? convertInchesToTwip(3.4) : convertInchesToTwip(0.9);
+
+  const { owner, ownerFather, ownerCnic, ownerAddress } = extractVehicleFields(firstV);
+  const rawLessorName = (options.customLessorName || owner || '').trim();
+  const rawLessorFather = (options.customFatherName || ownerFather || '').trim();
+  const rawLessorCnic = (options.customCnic || ownerCnic || '').trim();
+  const rawLessorAddress = (options.customAddress || ownerAddress || '').trim();
+
+  const lessorNameDisplay = rawLessorName ? rawLessorName.toUpperCase() : '______________________';
+  const lessorFatherDisplay = rawLessorFather ? rawLessorFather.toUpperCase() : '____________________';
+  const lessorCnicDisplay = rawLessorCnic || '___________________';
+  const lessorAddressDisplay = rawLessorAddress ? rawLessorAddress.toUpperCase() : '___________________________________';
 
   const w1Name = options.witness1Name || DOCKS_COMPANY.witnesses.w1_arbaz.name;
   const w1Cnic = options.witness1Cnic || DOCKS_COMPANY.witnesses.w1_arbaz.cnic;
@@ -679,31 +845,31 @@ export async function generateLeaseAgreementDocx(
     tableHeader: true,
     children: [
       new TableCell({
-        children: [new Paragraph({ text: 'VEHICLE NO.', alignment: AlignmentType.CENTER, run: { bold: true, size: 17 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'VEHICLE NO.', bold: true, size: 18, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'CHASIS NUMBER', alignment: AlignmentType.CENTER, run: { bold: true, size: 17 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'CHASIS NUMBER', bold: true, size: 18, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'ENGINE NUMBER', alignment: AlignmentType.CENTER, run: { bold: true, size: 17 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'ENGINE NUMBER', bold: true, size: 18, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'MAKER', alignment: AlignmentType.CENTER, run: { bold: true, size: 17 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'MAKER', bold: true, size: 18, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'MODEL', alignment: AlignmentType.CENTER, run: { bold: true, size: 17 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'MODEL', bold: true, size: 18, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'TARE OF VEHICLE', alignment: AlignmentType.CENTER, run: { bold: true, size: 17 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'TARE OF\nVEHICLE', bold: true, size: 18, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'MRA OF VEHICLES', alignment: AlignmentType.CENTER, run: { bold: true, size: 17 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'MRA OF\nVEHICLES', bold: true, size: 18, font: calibriFont })] })],
         borders: tableBorders
       })
     ]
@@ -714,266 +880,332 @@ export async function generateLeaseAgreementDocx(
     return new TableRow({
       children: [
         new TableCell({
-          children: [new Paragraph({ text: v.registrationNumber || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.registrationNumber || '-', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.chassisNo || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.chassisNo || '-', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.engineNo || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.engineNo || '-', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: maker || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: maker || '-', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: String(model || '-'), alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(model || '-'), bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: tare || '5100', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: tare || '5100', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: mra || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: mra || '-', bold: true, size: 18, font: calibriFont })] })],
           borders: tableBorders
         })
       ]
     });
   });
 
-  const doc = new Document({
+  const signaturesTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 54, type: WidthType.PERCENTAGE },
+            borders: noBorders,
+            children: [
+              new Paragraph({
+                spacing: { before: 140, after: 40 },
+                children: [new TextRun({ text: 'LESSOR', bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { before: 220, after: 20 },
+                children: [new TextRun({ text: '___________________________', bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { after: 20 },
+                children: [new TextRun({ text: rawLessorName ? rawLessorName.toUpperCase() : '', bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { after: 140 },
+                children: [new TextRun({ text: `CNIC:${rawLessorCnic ? ` ${rawLessorCnic}` : ''}`, bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { before: 80, after: 40 },
+                children: [new TextRun({ text: 'Witness 1:', bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { before: 220, after: 20 },
+                children: [new TextRun({ text: '___________________________', bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { after: 20 },
+                children: [new TextRun({ text: w1Name, bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                children: [new TextRun({ text: `CNIC NO. ${w1Cnic}`, bold: true, size: 20, font: calibriFont })]
+              })
+            ]
+          }),
+          new TableCell({
+            width: { size: 46, type: WidthType.PERCENTAGE },
+            borders: noBorders,
+            children: [
+              new Paragraph({
+                spacing: { before: 140, after: 40 },
+                children: [new TextRun({ text: 'LEASEE', bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { before: 220, after: 20 },
+                children: [new TextRun({ text: '___________________________', bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { after: 20 },
+                children: [new TextRun({ text: comp.legalMixed, bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { after: 140 },
+                children: [
+                  new TextRun({ text: 'NTN No. ', bold: true, size: 20, font: calibriFont }),
+                  new TextRun({ text: comp.ntn, bold: true, underline: {}, size: 20, font: calibriFont })
+                ]
+              }),
+              new Paragraph({
+                spacing: { before: 80, after: 40 },
+                children: [new TextRun({ text: 'Witness 2:', bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { before: 220, after: 20 },
+                children: [new TextRun({ text: '___________________________', bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { after: 20 },
+                children: [new TextRun({ text: w2Name, bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                children: [new TextRun({ text: `CNIC NO. ${w2Cnic}`, bold: true, size: 20, font: calibriFont })]
+              })
+            ]
+          })
+        ]
+      })
+    ]
+  });
+
+  return new Document({
     sections: [
       {
         properties: {
           page: {
             margin: {
               top: topMargin,
-              bottom: convertInchesToTwip(0.8),
-              left: convertInchesToTwip(0.8),
-              right: convertInchesToTwip(0.8)
+              bottom: convertInchesToTwip(0.65),
+              left: convertInchesToTwip(0.75),
+              right: convertInchesToTwip(0.75)
             }
           }
         },
         children: [
-          // Title
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            spacing: { after: 200 },
+            spacing: { after: 160 },
             children: [
               new TextRun({
                 text: 'LEASE AGREEMENT',
                 bold: true,
                 underline: {},
-                size: 26
+                size: 26,
+                font: calibriFont
               })
             ]
           }),
-
-          // Date of Agreement
+          new Paragraph({
+            indent: { firstLine: convertInchesToTwip(1.1) },
+            spacing: { after: 80 },
+            children: [
+              new TextRun({ text: `This agreement is made at Karachi on ${dayPadded}`, bold: true, size: 20, font: calibriFont }),
+              new TextRun({ text: dayOrdinal, bold: true, superScript: true, size: 20, font: calibriFont }),
+              new TextRun({ text: ` ${monthStr}, ${yearNum}.`, bold: true, size: 20, font: calibriFont })
+            ]
+          }),
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            spacing: { after: 180 },
+            spacing: { after: 60 },
+            children: [new TextRun({ text: 'BETWEEN', bold: true, size: 20, font: calibriFont })]
+          }),
+          new Paragraph({
+            indent: { firstLine: convertInchesToTwip(1.1) },
+            spacing: { line: 255, after: 80 },
             children: [
+              new TextRun({ text: `M/S  ${lessorNameDisplay}`, bold: true, underline: {}, size: 20, font: calibriFont }),
+              new TextRun({ text: ' S/O ', bold: true, size: 20, font: calibriFont }),
+              new TextRun({ text: lessorFatherDisplay, bold: true, underline: {}, size: 20, font: calibriFont }),
+              new TextRun({ text: ' holder of CNIC NO. ', bold: true, size: 20, font: calibriFont }),
+              new TextRun({ text: lessorCnicDisplay, bold: true, underline: {}, size: 20, font: calibriFont }),
+              new TextRun({ text: ' Resident of ', bold: true, size: 20, font: calibriFont }),
+              new TextRun({ text: `${lessorAddressDisplay} `, bold: true, underline: {}, size: 20, font: calibriFont }),
               new TextRun({
-                text: `This agreement is made at Karachi on ${formattedAgrDate}.`,
-                size: 20
+                text: 'party of the first part here in after referred to as “Lessor” (which expression wherever the context so permits, shall mean and included their heirs, executors, administrators, successors, attorneys, representatives, nominees and assignee).',
+                bold: true,
+                size: 20,
+                font: calibriFont
               })
             ]
           }),
-
-          // BETWEEN
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            spacing: { after: 120 },
-            children: [
-              new TextRun({ text: 'BETWEEN', bold: true, size: 21 })
-            ]
+            spacing: { after: 60 },
+            children: [new TextRun({ text: 'AND', bold: true, size: 20, font: calibriFont })]
           }),
-
-          // Lessor paragraph
           new Paragraph({
-            spacing: { line: 280, after: 160 },
+            indent: { firstLine: convertInchesToTwip(1.1) },
+            spacing: { line: 255, after: 120 },
             children: [
-              new TextRun({ text: `M/S. ${lessorName.toUpperCase()} S/O ${lessorFather.toUpperCase()}`, bold: true, underline: {}, size: 20 }),
-              new TextRun({ text: ' holder of ', size: 20 }),
-              new TextRun({ text: `CNIC NO:${lessorCnic}`, bold: true, underline: {}, size: 20 }),
-              new TextRun({ text: ' Resident of ', size: 20 }),
-              new TextRun({ text: `${lessorAddress.toUpperCase()}`, bold: true, underline: {}, size: 20 }),
+              new TextRun({ text: 'M/s.', bold: true, size: 20, font: calibriFont }),
+              new TextRun({ text: `${comp.legalMixed},`, bold: true, underline: {}, size: 20, font: calibriFont }),
+              new TextRun({ text: ' (bonded Carrier) having ', bold: true, size: 20, font: calibriFont }),
+              new TextRun({ text: comp.addressUpper, bold: true, size: 17, font: calibriFont }),
               new TextRun({
-                text: ' the first part here in after referred to as “Lessor” (which expression wherever the context so permits, shall mean and included their heirs, executors, administrators, successors, attorneys, representatives, nominees and assignee).',
-                size: 20
+                text: ', to as “Lessee” (which expression whereas the context so permits, shall mean and include their heirs, executors, administrators, successors, attorneys, representatives, nominees and assignees). WHEREAS, the lessor is the lawful owner of the following vehicles:',
+                bold: true,
+                size: 20,
+                font: calibriFont
               })
             ]
           }),
-
-          // AND
-          new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 120 },
-            children: [
-              new TextRun({ text: 'AND', bold: true, size: 21 })
-            ]
-          }),
-
-          // Lessee paragraph
-          new Paragraph({
-            spacing: { line: 280, after: 180 },
-            children: [
-              new TextRun({ text: `${getActiveCompanyDocxDetails().fullLegalName}`, bold: true, underline: {}, size: 20 }),
-              new TextRun({
-                text: `, having ${getActiveCompanyDocxDetails().address.toUpperCase()}, to as “Lessee” (which expression whereas the context so permits, shall mean and include their heirs, executors, administrators, successors, attorneys, representatives, nominees and assignees). WHEREAS, the lessor is the lawful owner of the following vehicles:`,
-                size: 20
-              })
-            ]
-          }),
-
-          // Vehicle specs table
           new Table({
             rows: [tableHeaderRow, ...tableDataRows],
             width: { size: 100, type: WidthType.PERCENTAGE }
           }),
-
-          // Preamble to terms
           new Paragraph({
-            spacing: { before: 200, line: 270, after: 180 },
+            indent: { firstLine: convertInchesToTwip(1.1) },
+            spacing: { before: 100, line: 255, after: 120 },
             children: [
               new TextRun({
                 text: 'AND WHEREAS, the lessor has agreed to hand over the above referred vehicle for a period of (Six months) on the lease basis on the following terms and conditions:',
-                size: 20
+                bold: true,
+                size: 20,
+                font: calibriFont
               })
             ]
           }),
-
-          // Clause a
           new Paragraph({
-            spacing: { line: 270, after: 120 },
+            spacing: { line: 250, after: 40 },
             children: [
               new TextRun({
-                text: `a) The vehicle shall be indelibly painted on all four sides clearly indicating the name of “lessees” (Bonded Carrier) and shall be maintained an acceptable standard till the lease period and should not be registered on the other bonded carriers name within the agreement period i.e. `,
-                size: 19
+                text: 'a) The vehicle shall be indelibly painted on all four sides clearly indicating the name of “lessees” (Bonded Carrier) and shall be maintained an acceptable standard till the lease period and should not be registered on the other bonded carriers name within the agreement period i.e. ',
+                bold: true,
+                size: 19,
+                font: calibriFont
               }),
               new TextRun({
                 text: `(${startDateStr} to ${endDateStr}).`,
                 bold: true,
                 underline: {},
-                size: 19
+                size: 19,
+                font: calibriFont
               })
             ]
           }),
-
-          // Clause b
           new Paragraph({
-            spacing: { line: 270, after: 100 },
+            spacing: { line: 250, after: 40 },
             children: [
               new TextRun({
-                text: `b) The designated vehicle shall remain dedicated to ${getActiveCompanyDocxDetails().fullLegalName}.`,
-                size: 19
+                text: 'b) The designated vehicle shall remain dedicated to M/s. ',
+                bold: true,
+                size: 19,
+                font: calibriFont
+              }),
+              new TextRun({
+                text: comp.legalMixed,
+                bold: true,
+                underline: {},
+                size: 19,
+                font: calibriFont
               })
             ]
           }),
-
-          // Clause c
           new Paragraph({
-            spacing: { line: 270, after: 100 },
+            spacing: { line: 250, after: 40 },
             children: [
               new TextRun({
                 text: 'c) Payments to the lessor for services rendered shall be made in accordance with agreed rates.',
-                size: 19
+                bold: true,
+                size: 19,
+                font: calibriFont
               })
             ]
           }),
-
-          // Clause d
           new Paragraph({
-            spacing: { line: 270, after: 100 },
+            spacing: { line: 250, after: 40 },
             children: [
               new TextRun({
                 text: 'd) This lease agreement is an irrevocable agreement and cannot be terminated by either party during its validity, except by mutual consideration of both parties.',
-                size: 19
+                bold: true,
+                size: 19,
+                font: calibriFont
               })
             ]
           }),
-
-          // Clause e
           new Paragraph({
-            spacing: { line: 270, after: 100 },
+            spacing: { line: 250, after: 40 },
             children: [
               new TextRun({
                 text: 'e) The vehicle under this lease agreement remained at the disposal of “lessee” and is not used for any unlawful purpose i.e. (vehicle will be used only for the transportation of bonded carrier goods).',
-                size: 19
+                bold: true,
+                size: 19,
+                font: calibriFont
               })
             ]
           }),
-
-          // Clause f
           new Paragraph({
-            spacing: { line: 270, after: 100 },
+            spacing: { line: 250, after: 40 },
             children: [
               new TextRun({
                 text: 'f) The payment to the lessor will be made on monthly basis.',
-                size: 19
+                bold: true,
+                size: 19,
+                font: calibriFont
               })
             ]
           }),
-
-          // Clause g
           new Paragraph({
-            spacing: { line: 270, after: 100 },
+            spacing: { line: 250, after: 40 },
             children: [
               new TextRun({
                 text: 'g) The “Lessee” remained responsible for all the Govt. dues, duty & taxes, charges etc. whatever accrued during the lease period and by usage of vehicle by the “Lessee”.',
-                size: 19
+                bold: true,
+                size: 19,
+                font: calibriFont
               })
             ]
           }),
-
-          // Clause h
           new Paragraph({
-            spacing: { line: 270, after: 260 },
+            spacing: { line: 250, after: 100 },
             children: [
               new TextRun({
                 text: 'h) It is stated that the lessor is also responsible for any liabilities that may arrives on the lessee during transportation / transshipment of the goods including responsibility of payment of loss of government revenue (if any).',
-                size: 19
+                bold: true,
+                size: 19,
+                font: calibriFont
               })
             ]
           }),
-
-          // Signatures: Lessor & Lessee
-          new Paragraph({
-            spacing: { line: 270, after: 200 },
-            children: [
-              new TextRun({ text: 'LESSOR\t\t\t\t\t\t\tLEASEE\n\n', bold: true, size: 21 }),
-              new TextRun({ text: '__________________________\t\t\t__________________________\n', size: 20 }),
-              new TextRun({ text: `${lessorName}\t\t\t\t\t${getActiveCompanyDocxDetails().name}\n`, bold: true, size: 20 }),
-              new TextRun({ text: `CNIC: ${lessorCnic}\t\t\t\tNTN No. ${getActiveCompanyDocxDetails().ntn}`, size: 20 })
-            ]
-          }),
-
-          // Signatures: Witnesses
-          new Paragraph({
-            spacing: { line: 270, before: 180 },
-            children: [
-              new TextRun({ text: 'Witness 1:\t\t\t\t\t\tWitness 2:\n\n', bold: true, size: 21 }),
-              new TextRun({ text: '__________________________\t\t\t__________________________\n', size: 20 }),
-              new TextRun({ text: `${w1Name}\t\t\t\t${w2Name}\n`, bold: true, size: 20 }),
-              new TextRun({ text: `CNIC NO. ${w1Cnic}\t\t\tCNIC NO. ${w2Cnic}`, size: 20 })
-            ]
-          })
+          signaturesTable
         ]
       }
     ]
   });
-
-  return doc;
 }
 
 // ============================================================================
-// 4. LEASE CANCELLATION AND TERMINATION AGREEMENT (Printed on Stamp Paper)
-// From: LEASE TERMINATION OF NOC.pdf
+// 4. LEASE CANCELLATION AND TERMINATION AGREEMENT (Stamp Paper — 1:1 Format)
 // ============================================================================
 export interface LeaseTerminationOptions {
   terminationDate?: string | Date;
@@ -992,14 +1224,16 @@ export async function generateLeaseTerminationAgreementDocx(
   vehicle: Vehicle,
   options: LeaseTerminationOptions = {}
 ): Promise<Document> {
+  const comp = resolveVehicleDocxCompany(vehicle);
   const dateObj = getCleanDate(options.terminationDate);
-  const origDate = options.originalAgreementDate ? formatDashDate(getCleanDate(options.originalAgreementDate)) : formatDashDate(dateObj);
-  const topMargin = options.leaveStampPaperSpace !== false ? convertInchesToTwip(3.5) : convertInchesToTwip(1.0);
+  const origDateSource = options.originalAgreementDate || vehicle.registrationDate || dateObj;
+  const origDate = formatDashDate(getCleanDate(origDateSource));
+  const topMargin = options.leaveStampPaperSpace !== false ? convertInchesToTwip(3.4) : convertInchesToTwip(0.9);
 
   const { maker, model, mra, tare, owner, ownerCnic, ownerAddress } = extractVehicleFields(vehicle);
-  const lessorName = options.customLessorName || owner || 'M/S. FLEET OWNER';
-  const lessorCnic = options.customCnic || ownerCnic || '42101-0000000-0';
-  const lessorAddress = options.customAddress || ownerAddress || 'Karachi, Pakistan';
+  const realLessorName = (options.customLessorName || owner || '').trim();
+  const realLessorCnic = (options.customCnic || ownerCnic || '').trim();
+  const realLessorAddress = (options.customAddress || ownerAddress || '').trim();
 
   const w1Name = options.witness1Name || DOCKS_COMPANY.witnesses.w1_hasnain.name;
   const w1Cnic = options.witness1Cnic || DOCKS_COMPANY.witnesses.w1_hasnain.cnic;
@@ -1010,31 +1244,31 @@ export async function generateLeaseTerminationAgreementDocx(
     tableHeader: true,
     children: [
       new TableCell({
-        children: [new Paragraph({ text: 'Vehicle No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Vehicle No.', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Chassis No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Chassis No.', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Engine No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Engine No.', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Maker', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Maker', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Model', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Model', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Tare of Vehicle', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Tare of Vehicle', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'MRA of Vehicle', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'MRA of Vehicle', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       })
     ]
@@ -1043,164 +1277,198 @@ export async function generateLeaseTerminationAgreementDocx(
   const tableDataRow = new TableRow({
     children: [
       new TableCell({
-        children: [new Paragraph({ text: vehicle.registrationNumber || '-', alignment: AlignmentType.CENTER, run: { size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: vehicle.registrationNumber || '-', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: vehicle.chassisNo || '-', alignment: AlignmentType.CENTER, run: { size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: vehicle.chassisNo || '-', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: vehicle.engineNo || '-', alignment: AlignmentType.CENTER, run: { size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: vehicle.engineNo || '-', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: maker || '-', alignment: AlignmentType.CENTER, run: { size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: maker || '-', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: String(model || '-'), alignment: AlignmentType.CENTER, run: { size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(model || '-'), bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: tare || '15000 KG', alignment: AlignmentType.CENTER, run: { size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: tare || '15000 KG', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: mra || '-', alignment: AlignmentType.CENTER, run: { size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: mra || '-', bold: true, size: 19, font: calibriFont })] })],
         borders: tableBorders
       })
     ]
   });
 
-  const doc = new Document({
+  const witnessesTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 55, type: WidthType.PERCENTAGE },
+            borders: noBorders,
+            children: [
+              new Paragraph({
+                spacing: { after: 20 },
+                children: [new TextRun({ text: 'Witness 1 ', bold: true, underline: {}, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { after: 20 },
+                children: [new TextRun({ text: w1Name, bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                children: [new TextRun({ text: `CNIC NO. ${w1Cnic}`, bold: true, size: 20, font: calibriFont })]
+              })
+            ]
+          }),
+          new TableCell({
+            width: { size: 45, type: WidthType.PERCENTAGE },
+            borders: noBorders,
+            children: [
+              new Paragraph({
+                spacing: { after: 20 },
+                children: [new TextRun({ text: 'Witness-2', bold: true, underline: {}, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { after: 20 },
+                children: [new TextRun({ text: w2Name, bold: true, size: 20, font: calibriFont })]
+              }),
+              new Paragraph({
+                children: [new TextRun({ text: `CNIC NO. ${w2Cnic}`, bold: true, size: 20, font: calibriFont })]
+              })
+            ]
+          })
+        ]
+      })
+    ]
+  });
+
+  return new Document({
     sections: [
       {
         properties: {
           page: {
             margin: {
               top: topMargin,
-              bottom: convertInchesToTwip(0.9),
-              left: convertInchesToTwip(0.9),
-              right: convertInchesToTwip(0.9)
+              bottom: convertInchesToTwip(0.75),
+              left: convertInchesToTwip(0.85),
+              right: convertInchesToTwip(0.85)
             }
           }
         },
         children: [
-          // Title
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            spacing: { after: 240 },
+            spacing: { after: 180 },
             children: [
               new TextRun({
                 text: 'LEASE CANCELLATION AND TERMINATION AGREEMENT',
                 bold: true,
-                size: 24
+                size: 24,
+                font: calibriFont
               })
             ]
           }),
-
-          // Lessor Statement
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            spacing: { line: 260, after: 160 },
+            spacing: { line: 260, after: 100 },
             children: [
-              new TextRun({ text: 'This LEASE CANCELLATION AND TERMINATION AGREEMENT is made by\n', size: 20 }),
-              new TextRun({ text: `M/S. ${lessorName.toUpperCase()}\n`, bold: true, underline: {}, size: 21 }),
-              new TextRun({ text: '“Owner of Vehicle” hereafter referred to as the Lesser', bold: true, size: 20 })
-            ]
-          }),
-
-          // AND
-          new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 120 },
-            children: [
-              new TextRun({ text: 'AND', bold: true, size: 21 })
-            ]
-          }),
-
-          // Lessee Statement
-          new Paragraph({
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 240 },
-            children: [
-              new TextRun({ text: `${getActiveCompanyDocxDetails().fullLegalName}`, bold: true, size: 21 }),
-              new TextRun({ text: ' hereafter referred to as “Lessee”.', size: 20 })
-            ]
-          }),
-
-          // Cancellation clause
-          new Paragraph({
-            spacing: { line: 280, after: 200 },
-            children: [
-              new TextRun({ text: `The Lease agreement dated `, size: 20 }),
-              new TextRun({ text: `${origDate}`, bold: true, underline: {}, size: 20 }),
+              new TextRun({ text: 'This LEASE CANCELLATION AND TERMINATION AGREEMENT is made by', bold: true, size: 20, font: calibriFont }),
+              new TextRun({ text: 'M/S. ', bold: true, size: 21, font: calibriFont, break: 1 }),
               new TextRun({
-                text: ` made between the Lesser and the Lessee, pertaining to the following vehicles is hereby cancelled / terminated:`,
-                size: 20
+                text: realLessorName ? realLessorName.toUpperCase() : '____________________________',
+                bold: true,
+                underline: {},
+                size: 21,
+                font: calibriFont
+              }),
+              new TextRun({ text: '“Owner of Vehicle” hereafter referred to as the Lesser', bold: true, size: 20, font: calibriFont, break: 1 })
+            ]
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 100 },
+            children: [new TextRun({ text: 'AND', bold: true, size: 21, font: calibriFont })]
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 200 },
+            children: [
+              new TextRun({ text: 'M/s. ', bold: true, size: 21, font: calibriFont }),
+              new TextRun({ text: comp.legalCaps, bold: true, underline: {}, size: 21, font: calibriFont }),
+              new TextRun({ text: ' hereafter referred to as “Lessee”.', bold: true, size: 21, font: calibriFont })
+            ]
+          }),
+          new Paragraph({
+            spacing: { line: 270, after: 180 },
+            children: [
+              new TextRun({
+                text: `The Lease agreement dated ${origDate} made between the Lesser and the Lessee, pertaining to the following vehicles is hereby cancelled / terminated:`,
+                bold: true,
+                size: 20,
+                font: calibriFont
               })
             ]
           }),
-
-          // Vehicle Table
           new Table({
             rows: [tableHeaderRow, tableDataRow],
             width: { size: 100, type: WidthType.PERCENTAGE }
           }),
-
-          // Agreement Covenant
           new Paragraph({
-            spacing: { before: 240, line: 280, after: 300 },
+            indent: { firstLine: convertInchesToTwip(0.5) },
+            spacing: { before: 200, line: 270, after: 240 },
             children: [
               new TextRun({
                 text: 'The Lesser and Lessee have mutually agreed that the Lease shall be cancelled and terminated in consideration of the mutual covenants set forth and without any terms and conditions.',
-                size: 20
+                bold: true,
+                size: 20,
+                font: calibriFont
               })
             ]
           }),
-
-          // Lessor Sign Block
           new Paragraph({
             spacing: { line: 260, after: 200 },
             children: [
-              new TextRun({ text: 'LESSOR\nSIGNATURE\n\n\n', bold: true, size: 20 }),
-              new TextRun({ text: `CNIC No: ${lessorCnic}\n`, size: 20 }),
-              new TextRun({ text: `Address: ${lessorAddress}`, size: 20 })
+              new TextRun({ text: 'LESSOR', bold: true, size: 20, font: calibriFont }),
+              new TextRun({ text: 'SIGNATURE', bold: true, size: 20, font: calibriFont, break: 1 }),
+              new TextRun({ text: '', break: 2 }),
+              new TextRun({ text: `CNIC No${realLessorCnic ? `: ${realLessorCnic}` : ''}`, bold: true, size: 20, font: calibriFont, break: 1 }),
+              new TextRun({ text: `Address:${realLessorAddress ? ` ${realLessorAddress}` : ''}`, bold: true, size: 20, font: calibriFont, break: 1 })
             ]
           }),
-
-          // Lessee Sign Block
           new Paragraph({
-            spacing: { line: 260, after: 240 },
+            spacing: { line: 260, after: 260 },
             children: [
-              new TextRun({ text: 'LESSEE\nSIGNATURE\n\n\n', bold: true, size: 20 }),
-              new TextRun({ text: `${getActiveCompanyDocxDetails().fullLegalName.toUpperCase()}\n`, bold: true, size: 21 }),
-              new TextRun({ text: `CNIC No. / NTN No. ${getActiveCompanyDocxDetails().customsNtn}\n`, size: 20 }),
-              new TextRun({ text: `Address: ${getActiveCompanyDocxDetails().address}`, size: 20 })
+              new TextRun({ text: 'LESSES', bold: true, size: 20, font: calibriFont }),
+              new TextRun({ text: 'SIGNATURE', bold: true, size: 20, font: calibriFont, break: 1 }),
+              new TextRun({ text: '', break: 1 }),
+              new TextRun({ text: 'M/S. ', bold: true, size: 21, font: calibriFont, break: 1 }),
+              new TextRun({ text: comp.legalCapsDot, bold: true, underline: {}, size: 21, font: calibriFont }),
+              new TextRun({ text: 'CNIC No. / NTN No. ', bold: true, size: 20, font: calibriFont, break: 1 }),
+              new TextRun({ text: comp.customsNtn, bold: true, underline: {}, size: 20, font: calibriFont }),
+              new TextRun({ text: 'Address: ', bold: true, size: 20, font: calibriFont, break: 1 }),
+              new TextRun({ text: comp.addressLine1, bold: true, underline: {}, size: 20, font: calibriFont }),
+              new TextRun({ text: comp.addressLine2, bold: true, underline: {}, size: 20, font: calibriFont, break: 1 })
             ]
           }),
-
-          // Witnesses
-          new Paragraph({
-            spacing: { line: 260, before: 180 },
-            children: [
-              new TextRun({ text: 'Witness 1\t\t\t\t\t\tWitness-2\n\n', bold: true, size: 21 }),
-              new TextRun({ text: `${w1Name}\t\t\t\t${w2Name}\n`, bold: true, size: 20 }),
-              new TextRun({ text: `CNIC NO. ${w1Cnic}\t\t\tCNIC NO. ${w2Cnic}`, size: 20 })
-            ]
-          })
+          witnessesTable
         ]
       }
     ]
   });
-
-  return doc;
 }
 
 // ============================================================================
 // 5. CANCELLATION OF REGISTERED VEHICLE FROM OUR PANEL (Company Letterhead)
-// From: NOC on letter head.pdf
+// Exact 1:1 reproduction of 10-11-2026 "Noc on Letter head.docx"
 // ============================================================================
 export interface CancellationLetterOptions {
   letterDate?: string | Date;
@@ -1212,6 +1480,7 @@ export async function generateCancellationLetterLetterheadDocx(
   options: CancellationLetterOptions = {}
 ): Promise<Document> {
   const vList = Array.isArray(vehicles) ? vehicles : [vehicles];
+  const comp = resolveVehicleDocxCompany(vList[0]);
   const dateObj = getCleanDate(options.letterDate);
   const formattedDate = formatDashDate(dateObj);
   const topMargin = options.leaveLetterheadSpace !== false ? convertInchesToTwip(2.2) : convertInchesToTwip(1.0);
@@ -1220,43 +1489,43 @@ export async function generateCancellationLetterLetterheadDocx(
     tableHeader: true,
     children: [
       new TableCell({
-        children: [new Paragraph({ text: 'Sr. #', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Sr. #', bold: true, size: 20, font: calibriFont })] })],
         width: { size: 7, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Vehicle No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
-        width: { size: 15, type: WidthType.PERCENTAGE },
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Vehicle No.', bold: true, size: 20, font: calibriFont })] })],
+        width: { size: 14, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Chassis No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
-        width: { size: 18, type: WidthType.PERCENTAGE },
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: 'Engine No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Chassis No.', bold: true, size: 20, font: calibriFont })] })],
         width: { size: 17, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Maker', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
-        width: { size: 12, type: WidthType.PERCENTAGE },
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Engine No.', bold: true, size: 20, font: calibriFont })] })],
+        width: { size: 17, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Model', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
-        width: { size: 10, type: WidthType.PERCENTAGE },
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: 'MRA of Vehicle', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Maker', bold: true, size: 20, font: calibriFont })] })],
         width: { size: 11, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Lease Expiry Date', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Model', bold: true, size: 20, font: calibriFont })] })],
         width: { size: 10, type: WidthType.PERCENTAGE },
+        borders: tableBorders
+      }),
+      new TableCell({
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'MRA of Vehicle', bold: true, size: 20, font: calibriFont })] })],
+        width: { size: 12, type: WidthType.PERCENTAGE },
+        borders: tableBorders
+      }),
+      new TableCell({
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Lease Expiry Date', bold: true, size: 20, font: calibriFont })] })],
+        width: { size: 12, type: WidthType.PERCENTAGE },
         borders: tableBorders
       })
     ]
@@ -1271,42 +1540,42 @@ export async function generateCancellationLetterLetterheadDocx(
     return new TableRow({
       children: [
         new TableCell({
-          children: [new Paragraph({ text: String(idx + 1), alignment: AlignmentType.CENTER, run: { size: 18 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(idx + 1), bold: true, size: 20, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.registrationNumber || '-', alignment: AlignmentType.CENTER, run: { size: 18 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.registrationNumber || '-', bold: true, size: 20, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.chassisNo || '-', alignment: AlignmentType.CENTER, run: { size: 18 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.chassisNo || '-', bold: true, size: 20, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.engineNo || '-', alignment: AlignmentType.CENTER, run: { size: 18 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: v.engineNo || '-', bold: true, size: 20, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: maker || '-', alignment: AlignmentType.CENTER, run: { size: 18 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: maker || '-', bold: true, size: 20, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: String(model || '-'), alignment: AlignmentType.CENTER, run: { size: 18 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(model || '-'), bold: true, size: 20, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: mra || '-', alignment: AlignmentType.CENTER, run: { size: 18 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: mra || '-', bold: true, size: 20, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: leaseExp, alignment: AlignmentType.CENTER, run: { size: 18 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: leaseExp, bold: true, size: 20, font: calibriFont })] })],
           borders: tableBorders
         })
       ]
     });
   });
 
-  const doc = new Document({
+  return new Document({
     sections: [
       {
         properties: {
@@ -1314,339 +1583,111 @@ export async function generateCancellationLetterLetterheadDocx(
             margin: {
               top: topMargin,
               bottom: convertInchesToTwip(1.0),
-              left: convertInchesToTwip(1.0),
-              right: convertInchesToTwip(1.0)
+              left: convertInchesToTwip(0.95),
+              right: convertInchesToTwip(0.95)
             }
           }
         },
         children: [
-          // Date
           new Paragraph({
             alignment: AlignmentType.RIGHT,
             spacing: { after: 260 },
             children: [
-              new TextRun({ text: `Date: ${formattedDate}`, size: 22 })
+              new TextRun({ text: 'Date: ', bold: true, size: 22, font: calibriFont }),
+              new TextRun({ text: formattedDate, bold: true, underline: {}, size: 22, font: calibriFont })
             ]
           }),
-
-          // Addressee
           new Paragraph({
-            spacing: { line: 260, after: 260 },
+            spacing: { line: 270, after: 280 },
             children: [
-              new TextRun({ text: 'The Deputy Director,\n', bold: true, size: 22 }),
-              new TextRun({ text: 'Licensing of Bonded Carrier,\n', size: 22 }),
-              new TextRun({ text: 'Directorate of Transit Trade,\n', size: 22 }),
-              new TextRun({ text: 'Custom House,\n', size: 22 }),
-              new TextRun({ text: 'Karachi.', bold: true, underline: {}, size: 22 })
+              new TextRun({ text: 'The Deputy Director,', bold: true, size: 22, font: calibriFont }),
+              new TextRun({ text: 'Licensing of Bonded Carrier,', bold: true, size: 22, font: calibriFont, break: 1 }),
+              new TextRun({ text: 'Directorate of Transit Trade,', bold: true, size: 22, font: calibriFont, break: 1 }),
+              new TextRun({ text: 'Custom House,', bold: true, size: 22, font: calibriFont, break: 1 }),
+              new TextRun({ text: 'Karachi.', bold: true, underline: {}, size: 22, font: calibriFont, break: 1 })
             ]
           }),
-
-          // Subject
           new Paragraph({
-            spacing: { before: 140, after: 200 },
+            spacing: { before: 140, after: 220 },
             children: [
-              new TextRun({ text: 'Subject:\t', bold: true, size: 22 }),
+              new TextRun({ text: 'Subject:\t', bold: true, size: 22, font: calibriFont }),
               new TextRun({
                 text: 'CANCELLATION OF REGISTERED VEHICLE FROM OUR PANEL',
                 bold: true,
                 underline: {},
-                size: 22
+                size: 22,
+                font: calibriFont
               })
             ]
           }),
-
-          // Respected Sir
           new Paragraph({
-            spacing: { after: 140 },
-            children: [
-              new TextRun({ text: 'Respected Sir,', size: 21 })
-            ]
+            spacing: { after: 180 },
+            children: [new TextRun({ text: 'Respected Sir,', bold: true, size: 22, font: calibriFont })]
           }),
-
-          // Text
           new Paragraph({
             spacing: { line: 280, after: 240 },
             children: [
               new TextRun({
                 text: 'Reference to the above mentioned subject, this is to inform you that the contract agreement for the below mentioned vehicle gone cancelled. The details are listed as under',
-                size: 21
+                bold: true,
+                size: 22,
+                font: calibriFont
               })
             ]
           }),
-
-          // Table
           new Table({
             rows: [tableHeaderRow, ...tableDataRows],
             width: { size: 100, type: WidthType.PERCENTAGE }
           }),
-
-          // Cooperation
           new Paragraph({
-            spacing: { before: 300, after: 260 },
+            spacing: { before: 300, after: 280 },
             children: [
               new TextRun({
                 text: 'Your usual cooperation in this regard would highly be appreciated.',
-                size: 21
+                bold: true,
+                size: 22,
+                font: calibriFont
               })
             ]
           }),
-
-          // Closing
           new Paragraph({
-            spacing: { line: 260, after: 240 },
+            spacing: { line: 270, after: 240 },
             children: [
-              new TextRun({ text: 'Yours Faithfully,\n\n', size: 21 }),
-              new TextRun({ text: '_________________________\n', size: 21 }),
-              new TextRun({ text: `For: ${getActiveCompanyDocxDetails().name.toUpperCase()}`, bold: true, size: 23 })
+              new TextRun({ text: 'Yours Faithfully,', bold: true, size: 22, font: calibriFont }),
+              new TextRun({ text: '', break: 2 }),
+              new TextRun({ text: '_________________________', bold: true, size: 22, font: calibriFont, break: 1 }),
+              new TextRun({ text: `For: ${comp.signoffName}`, bold: true, size: 22, font: calibriFont, break: 1 })
             ]
           })
         ]
       }
     ]
   });
-
-  return doc;
 }
 
 // ============================================================================
-// 6. OFFICIAL VEHICLE NO OBJECTION CERTIFICATE (NOC) (.DOCX)
-// Printed on Pre-printed Company Letterhead or Government Stamp Paper
-// (Strict Rule: NO Company Logo or Header Banner at top of page)
+// 6. OFFICIAL VEHICLE NOC (.DOCX) — Unified to Exact 10-11-2026 Letterhead Format
 // ============================================================================
 export interface VehicleNocOptions {
   nocReference?: string;
   nocDate?: string | Date;
   reason?: string;
-  leaveLetterheadSpace?: boolean; // defaults to true (2.2 inches blank space on top)
-  useStampPaperSpace?: boolean;   // if true, leaves 3.5 inches blank space for stamp
+  leaveLetterheadSpace?: boolean;
+  useStampPaperSpace?: boolean;
 }
 
 export async function generateVehicleNocDocx(
   vehicle: Vehicle,
   options: VehicleNocOptions = {}
 ): Promise<Document> {
-  const dateObj = getCleanDate(options.nocDate || vehicle.nocDate);
-  const formattedDate = formatSlashDate(dateObj);
-  const prefix = getActiveCompanyPrefix();
-  const activeDetails = getActiveCompanyDocxDetails();
-  const nocRef = options.nocReference || vehicle.nocReference || `NOC-${prefix}-${vehicle.dplSerial || vehicle.registrationNumber.replace(/[^a-zA-Z0-9]/g, '')}`;
-  const reason = options.reason || vehicle.cancellationReason || 'Fleet Release & Operational De-Registration';
-
-  const topMargin = options.useStampPaperSpace
-    ? convertInchesToTwip(3.5)
-    : options.leaveLetterheadSpace !== false
-      ? convertInchesToTwip(2.2)
-      : convertInchesToTwip(1.0);
-
-  const { maker, model, mra, tare, owner, ownerCnic } = extractVehicleFields(vehicle);
-
-  const tableHeaderRow = new TableRow({
-    tableHeader: true,
-    children: [
-      new TableCell({
-        children: [new Paragraph({ text: 'Vehicle No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: 'Chassis No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: 'Engine No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: 'Maker / Model', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: 'M.R.A.', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: 'Tare Weight', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: 'Registered Owner', alignment: AlignmentType.CENTER, run: { bold: true, size: 18 } })],
-        borders: tableBorders
-      })
-    ]
+  return generateCancellationLetterLetterheadDocx([vehicle], {
+    letterDate: options.nocDate || vehicle.nocDate || new Date(),
+    leaveLetterheadSpace: options.leaveLetterheadSpace !== false
   });
-
-  const tableDataRow = new TableRow({
-    children: [
-      new TableCell({
-        children: [new Paragraph({ text: vehicle.registrationNumber || '-', alignment: AlignmentType.CENTER, run: { bold: true, size: 17 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: vehicle.chassisNo || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: vehicle.engineNo || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: `${maker || ''} ${model || ''}`.trim() || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: mra || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: tare || '-', alignment: AlignmentType.CENTER, run: { size: 17 } })],
-        borders: tableBorders
-      }),
-      new TableCell({
-        children: [new Paragraph({ text: `${owner}\nCNIC: ${ownerCnic}`, alignment: AlignmentType.CENTER, run: { size: 16 } })],
-        borders: tableBorders
-      })
-    ]
-  });
-
-  const doc = new Document({
-    sections: [
-      {
-        properties: {
-          page: {
-            margin: {
-              top: topMargin,
-              bottom: convertInchesToTwip(1.0),
-              left: convertInchesToTwip(1.0),
-              right: convertInchesToTwip(1.0)
-            }
-          }
-        },
-        children: [
-          // Reference & Date Row
-          new Paragraph({
-            spacing: { after: 240 },
-            children: [
-              new TextRun({ text: `Ref: ${nocRef}`, bold: true, size: 21 }),
-              new TextRun({ text: `\t\t\t\t\tDate: ${formattedDate}`, bold: true, size: 21 })
-            ]
-          }),
-
-          // Recipient Address
-          new Paragraph({
-            spacing: { line: 260, after: 260 },
-            children: [
-              new TextRun({ text: 'TO WHOM IT MAY CONCERN / MOTOR REGISTERING AUTHORITY,\n', bold: true, size: 22 }),
-              new TextRun({ text: 'Directorate General of Transit Trade / Pakistan Customs,\n', size: 21 }),
-              new TextRun({ text: 'Karachi, Pakistan.', bold: true, size: 21 })
-            ]
-          }),
-
-          // Subject Line
-          new Paragraph({
-            spacing: { before: 120, after: 240 },
-            children: [
-              new TextRun({ text: 'Subject:\t', bold: true, size: 22 }),
-              new TextRun({
-                text: 'NO OBJECTION CERTIFICATE (NOC) FOR DE-REGISTRATION & FLEET RELEASE',
-                bold: true,
-                underline: {},
-                size: 22
-              })
-            ]
-          }),
-
-          // Body Paragraph 1
-          new Paragraph({
-            spacing: { line: 280, after: 220 },
-            children: [
-              new TextRun({
-                text: `This is to certify that `,
-                size: 21
-              }),
-              new TextRun({
-                text: `${activeDetails.fullLegalName.toUpperCase()} `,
-                bold: true,
-                size: 21
-              }),
-              new TextRun({
-                text: `(Carrier License No. ${activeDetails.customsNtn} / NTN ${activeDetails.ntn}) has `,
-                size: 21
-              }),
-              new TextRun({
-                text: `NO OBJECTION `,
-                bold: true,
-                underline: {},
-                size: 21
-              }),
-              new TextRun({
-                text: `to the de-registration, release, and cancellation of the vehicle described below from our active carrier and domestic transport fleet:`,
-                size: 21
-              })
-            ]
-          }),
-
-          // Vehicle Specs Table
-          new Table({
-            rows: [tableHeaderRow, tableDataRow],
-            width: { size: 100, type: WidthType.PERCENTAGE }
-          }),
-
-          // Verification & Clearance Clauses
-          new Paragraph({
-            spacing: { before: 240, line: 280, after: 200 },
-            children: [
-              new TextRun({
-                text: `1.  All customs port gate passes, GPS tracking devices, container chassis locks, and transport documents issued under the authority of ${activeDetails.fullLegalName} have been surrendered, audited, and returned.\n`,
-                size: 20
-              }),
-              new TextRun({
-                text: `2.  All operational dues, demurrage, wharfage, tolls, driver compensation, and vehicle rent liabilities up to `,
-                size: 20
-              }),
-              new TextRun({
-                text: `${formattedDate} `,
-                bold: true,
-                size: 20
-              }),
-              new TextRun({
-                text: `have been fully cleared, reconciled, and settled.\n`,
-                size: 20
-              }),
-              new TextRun({
-                text: `3.  Reason for NOC / De-registration: `,
-                bold: true,
-                size: 20
-              }),
-              new TextRun({
-                text: `${reason}.\n`,
-                size: 20
-              }),
-              new TextRun({
-                text: `4.  The vehicle is unconditionally released to its lawful registered owner. The licensing authority may de-register the vehicle from the customs carrier registry without any hindrance.`,
-                size: 20
-              })
-            ]
-          }),
-
-          // Signatures block
-          new Paragraph({
-            spacing: { before: 360, line: 260 },
-            children: [
-              new TextRun({ text: '___________________________\t\t\t\t___________________________\n', size: 21 }),
-              new TextRun({ text: 'Authorized Signatory\t\t\t\t\tManager Operations & Fleet\n', bold: true, size: 21 }),
-              new TextRun({ text: `${activeDetails.fullLegalName}\t\t\t\t\t${activeDetails.fullLegalName}\n`, bold: true, size: 21 })
-            ]
-          })
-        ]
-      }
-    ]
-  });
-
-  return doc;
 }
 
 // ============================================================================
-// 7. AFFIDAVIT (LEGAL STAMP PAPER / CUSTOMS REGISTRATION)
-// Matches official template for Customs SRO 450(I)/2001
+// 7. AFFIDAVIT (STAMP PAPER — Exact 1:1 Reproduction of Uploaded Affidavit)
 // ============================================================================
 export interface AffidavitOptions {
   letterDate?: string | Date;
@@ -1658,24 +1699,26 @@ export async function generateAffidavitDocx(
   options: AffidavitOptions = {}
 ): Promise<Document> {
   const vList = Array.isArray(vehicles) ? vehicles : [vehicles];
-  const activeDetails = getActiveCompanyDocxDetails();
-  const topMargin = options.leaveStampPaperSpace !== false ? convertInchesToTwip(3.5) : convertInchesToTwip(1.0);
+  const firstV = vList[0] || ({} as Vehicle);
+  const comp = resolveVehicleDocxCompany(firstV);
+  const { owner, ownerCnic } = extractVehicleFields(firstV);
+  const topMargin = options.leaveStampPaperSpace !== false ? convertInchesToTwip(3.4) : convertInchesToTwip(0.95);
 
   const tableHeaderRow = new TableRow({
     tableHeader: true,
     children: [
       new TableCell({
-        children: [new Paragraph({ text: 'Vehicles No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 20 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 60, after: 60 }, children: [new TextRun({ text: 'Vehicles No.', bold: true, size: 22, font: calibriFont })] })],
         width: { size: 34, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Chassis No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 20 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 60, after: 60 }, children: [new TextRun({ text: 'Chassis No.', bold: true, size: 22, font: calibriFont })] })],
         width: { size: 33, type: WidthType.PERCENTAGE },
         borders: tableBorders
       }),
       new TableCell({
-        children: [new Paragraph({ text: 'Engine No.', alignment: AlignmentType.CENTER, run: { bold: true, size: 20 } })],
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 60, after: 60 }, children: [new TextRun({ text: 'Engine No.', bold: true, size: 22, font: calibriFont })] })],
         width: { size: 33, type: WidthType.PERCENTAGE },
         borders: tableBorders
       })
@@ -1686,118 +1729,780 @@ export async function generateAffidavitDocx(
     return new TableRow({
       children: [
         new TableCell({
-          children: [new Paragraph({ text: v.registrationNumber || '-', alignment: AlignmentType.CENTER, run: { size: 19 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: v.registrationNumber || '-', bold: true, size: 23, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.chassisNo || '-', alignment: AlignmentType.CENTER, run: { size: 19 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: v.chassisNo || '-', bold: true, size: 23, font: calibriFont })] })],
           borders: tableBorders
         }),
         new TableCell({
-          children: [new Paragraph({ text: v.engineNo || '-', alignment: AlignmentType.CENTER, run: { size: 19 } })],
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: v.engineNo || '-', bold: true, size: 23, font: calibriFont })] })],
           borders: tableBorders
         })
       ]
     });
   });
 
-  const companyHeading = activeDetails.fullLegalName.toUpperCase().replace('M/S. ', '');
+  const signWitnessTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 55, type: WidthType.PERCENTAGE },
+            borders: noBorders,
+            children: [
+              new Paragraph({
+                spacing: { before: 80, after: 40 },
+                children: [new TextRun({ text: 'LESSOR ', bold: true, underline: {}, size: 21, font: calibriFont })]
+              }),
+              ...(owner || ownerCnic
+                ? [
+                    new Paragraph({
+                      spacing: { after: 20 },
+                      children: [new TextRun({ text: owner ? owner.toUpperCase() : '', bold: true, size: 19, font: calibriFont })]
+                    }),
+                    new Paragraph({
+                      spacing: { after: 140 },
+                      children: [new TextRun({ text: ownerCnic ? `CNIC: ${ownerCnic}` : '', bold: true, size: 19, font: calibriFont })]
+                    })
+                  ]
+                : [
+                    new Paragraph({
+                      spacing: { after: 200 },
+                      children: [new TextRun({ text: '', size: 20, font: calibriFont })]
+                    })
+                  ]),
+              new Paragraph({
+                spacing: { before: 80, after: 20 },
+                children: [new TextRun({ text: '1.Witness_____________________', bold: true, size: 21, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { after: 160 },
+                children: [
+                  new TextRun({
+                    text: `${DOCKS_COMPANY.witnesses.w1_arbaz.name} (${DOCKS_COMPANY.witnesses.w1_arbaz.cnic})`,
+                    bold: true,
+                    size: 18,
+                    font: calibriFont
+                  })
+                ]
+              }),
+              new Paragraph({
+                spacing: { before: 80, after: 20 },
+                children: [new TextRun({ text: '2.Witness_____________________', bold: true, size: 21, font: calibriFont })]
+              }),
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: `${DOCKS_COMPANY.witnesses.w2_shams.name} (${DOCKS_COMPANY.witnesses.w2_shams.cnic})`,
+                    bold: true,
+                    size: 18,
+                    font: calibriFont
+                  })
+                ]
+              })
+            ]
+          }),
+          new TableCell({
+            width: { size: 45, type: WidthType.PERCENTAGE },
+            borders: noBorders,
+            children: [
+              new Paragraph({
+                spacing: { before: 80, after: 220 },
+                children: [new TextRun({ text: 'LESSEES', bold: true, underline: {}, size: 21, font: calibriFont })]
+              }),
+              new Paragraph({
+                spacing: { before: 100 },
+                children: [new TextRun({ text: '_________________________', bold: true, size: 21, font: calibriFont })]
+              })
+            ]
+          })
+        ]
+      })
+    ]
+  });
 
-  const doc = new Document({
+  return new Document({
     sections: [
       {
         properties: {
           page: {
             margin: {
               top: topMargin,
-              bottom: convertInchesToTwip(0.8),
-              left: convertInchesToTwip(0.9),
-              right: convertInchesToTwip(0.9)
+              bottom: convertInchesToTwip(0.75),
+              left: convertInchesToTwip(0.85),
+              right: convertInchesToTwip(0.85)
             }
           }
         },
         children: [
-          // Title
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            spacing: { before: 120, after: 260 },
+            spacing: { before: 80, after: 260 },
             children: [
               new TextRun({
                 text: 'AFFIDAVIT',
                 bold: true,
                 underline: {},
-                size: 26
+                size: 28,
+                font: calibriFont
               })
             ]
           }),
-
-          // Paragraph 1
           new Paragraph({
-            spacing: { line: 280, after: 200 },
-            alignment: AlignmentType.JUSTIFIED,
+            spacing: { line: 280, after: 220 },
             children: [
               new TextRun({
-                text: `In consideration of your allowing registration of vehicles for carrying transshipment of import bonded cargo to up country dry port as prescribe vide chapter XIV of SRO 450 (I) 201 dated 18.06.2011 as provided under sub-rule (5) of rule 329 read with Sub –rule (7) of Rule 328 of Customs Rule 2001. We M/S ${companyHeading}, and do hereby undertake that vehicles registered in our name will not be used by another bonded carrier during registration period 5 Years and that all vehicles (Trailer not prime mover) leased, owned shall be indelibly painted from four sides with color and clearly indicating name of the carrier and further that We shall be responsible for any discrepancy which arises subsequently in this regard.`,
-                size: 20
+                text: `In consideration of your allowing registration of vehicles for carrying transshipment of import bonded cargo to up country dry port as prescribe vide chapter XIV of SRO 450 (I) 201 dated 18.06.2011 as provided under sub-rule (5) of rule 329 read with Sub –rule (7) of Rule 328 of Customs Rule 2001. We M/S ${comp.legalCaps}, and do hereby undertake that vehicles registered in our name will not be used by another bonded carrier during registration period 5 Years and that all vehicles (Trailer not prime mover) leased, owned shall be indelibly painted from four sides with color and clearly indicating name of the carrier and further that We shall be responsible for any discrepancy which arises subsequently in this regard.`,
+                bold: true,
+                size: 21,
+                font: calibriFont
               })
             ]
           }),
-
-          // Paragraph 2
           new Paragraph({
             spacing: { line: 280, after: 240 },
-            alignment: AlignmentType.JUSTIFIED,
             children: [
               new TextRun({
-                text: `Further more, it is also added that after dispatch of vehicle loaded with cargo from port, however the driver of vehicle is custodian of the loaded cargo as well as his employer i.e. owner of the vehicle will be responsible destined for delivery.`,
-                size: 20
+                text: 'Further more, it is also added that after dispatch of vehicle loaded with cargo from port, however the driver of vehicle is custodian of the loaded cargo as well as his employer i.e. owner of the vehicle will be responsible destined for delivery.',
+                bold: true,
+                size: 21,
+                font: calibriFont
               })
             ]
           }),
-
-          // Table
           new Table({
             rows: [tableHeaderRow, ...tableDataRows],
             width: { size: 100, type: WidthType.PERCENTAGE }
           }),
-
-          // For Company
           new Paragraph({
-            alignment: AlignmentType.RIGHT,
-            spacing: { before: 300, after: 360 },
+            indent: { left: convertInchesToTwip(3.6) },
+            spacing: { before: 300, after: 320 },
             children: [
               new TextRun({
-                text: `FOR. ${companyHeading}`,
+                text: `FOR. ${comp.legalCaps}`,
                 bold: true,
-                size: 22
+                size: 22,
+                font: calibriFont
               })
             ]
           }),
-
-          // Signatures & Witnesses
-          new Paragraph({
-            spacing: { before: 200, line: 280 },
-            children: [
-              new TextRun({
-                text: 'LESSOR\t\t\t\t\t\t\tLESSEES\n\n',
-                bold: true,
-                underline: {},
-                size: 20
-              }),
-              new TextRun({
-                text: '1.Witness______________\t\t\t\t______________________\n\n',
-                size: 20
-              }),
-              new TextRun({
-                text: '2.Witness______________',
-                size: 20
-              })
-            ]
-          })
+          signWitnessTable
         ]
       }
     ]
   });
+}
 
-  return doc;
+// ============================================================================
+// 8. SUPPORTING REGISTRATION / RENEWAL COPY SHEETS (.DOCX):
+//    - Vehicle Registration Book Copy
+//    - Vehicle Owner ID Card (CNIC) Copy
+//    - Company Owner / Director ID Card (CNIC) Copy
+//    - Standard Witnesses ID Card (CNIC) Copy
+// ============================================================================
+
+async function convertDataUrlToPngImages(
+  dataUrl: string,
+  maxWidthPx: number = 560,
+  maxHeightPx: number = 640
+): Promise<Array<{ data: Uint8Array; width: number; height: number }>> {
+  if (!dataUrl || !dataUrl.includes(',')) return [];
+
+  // Handle PDF dataUrls by rendering pages to PNG via pdfjs-dist
+  if (dataUrl.startsWith('data:application/pdf')) {
+    try {
+      const pdfjsLib: any = await import('pdfjs-dist');
+      if (pdfjsLib.GlobalWorkerOptions && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
+      }
+      const b64 = dataUrl.split(',')[1];
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+      const pageCount = Math.min(pdf.numPages || 1, 3);
+      const rendered: Array<{ data: Uint8Array; width: number; height: number }> = [];
+      for (let p = 1; p <= pageCount; p++) {
+        const page = await pdf.getPage(p);
+        const viewport = page.getViewport({ scale: 1.8 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          const pngDataUrl = canvas.toDataURL('image/png');
+          const single = await convertSingleImageDataUrl(pngDataUrl, maxWidthPx, maxHeightPx);
+          if (single) rendered.push(single);
+        }
+      }
+      return rendered;
+    } catch (err) {
+      console.warn('PDF rasterization fallback in docx copy generator:', err);
+      return [];
+    }
+  }
+
+  const single = await convertSingleImageDataUrl(dataUrl, maxWidthPx, maxHeightPx);
+  return single ? [single] : [];
+}
+
+async function convertSingleImageDataUrl(
+  dataUrl: string,
+  maxWidthPx: number,
+  maxHeightPx: number
+): Promise<{ data: Uint8Array; width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const natW = img.naturalWidth || 800;
+          const natH = img.naturalHeight || 600;
+          const canvas = document.createElement('canvas');
+          canvas.width = natW;
+          canvas.height = natH;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(null);
+            return;
+          }
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, natW, natH);
+          ctx.drawImage(img, 0, 0, natW, natH);
+          const pngUrl = canvas.toDataURL('image/png');
+          const b64 = pngUrl.split(',')[1];
+          const bin = atob(b64);
+          const arr = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+
+          const scale = Math.min(maxWidthPx / natW, maxHeightPx / natH, 1);
+          resolve({
+            data: arr,
+            width: Math.max(120, Math.round(natW * scale)),
+            height: Math.max(80, Math.round(natH * scale))
+          });
+        } catch (_) {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+function buildVehicleAttachmentHeaderBlock(vehicle: Vehicle, docHeading: string, subTitle?: string): (Paragraph | Table)[] {
+  const comp = resolveVehicleDocxCompany(vehicle);
+  const { maker, model, mra, owner, ownerCnic } = extractVehicleFields(vehicle);
+
+  return [
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 60 },
+      children: [new TextRun({ text: docHeading.toUpperCase(), bold: true, underline: {}, size: 26, font: calibriFont })]
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 180 },
+      children: [
+        new TextRun({
+          text: subTitle || `Registered Panel Carrier: ${comp.signoffName} (NTN: ${comp.ntn})`,
+          bold: true,
+          size: 20,
+          font: calibriFont
+        })
+      ]
+    }),
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({
+              borders: tableBorders,
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Vehicle No: ${vehicle.registrationNumber || '-'}`, bold: true, size: 19, font: calibriFont })] })]
+            }),
+            new TableCell({
+              borders: tableBorders,
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Chassis No: ${vehicle.chassisNo || '-'}`, bold: true, size: 19, font: calibriFont })] })]
+            }),
+            new TableCell({
+              borders: tableBorders,
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Engine No: ${vehicle.engineNo || '-'}`, bold: true, size: 19, font: calibriFont })] })]
+            })
+          ]
+        }),
+        new TableRow({
+          children: [
+            new TableCell({
+              borders: tableBorders,
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Make / Model: ${maker || '-'} ${model || ''}`, bold: true, size: 18, font: calibriFont })] })]
+            }),
+            new TableCell({
+              borders: tableBorders,
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `MRA: ${mra || '-'}`, bold: true, size: 18, font: calibriFont })] })]
+            }),
+            new TableCell({
+              borders: tableBorders,
+              children: [
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  children: [
+                    new TextRun({
+                      text: `Owner: ${owner ? owner.toUpperCase() : '-'}${ownerCnic ? ` (${ownerCnic})` : ''}`,
+                      bold: true,
+                      size: 18,
+                      font: calibriFont
+                    })
+                  ]
+                })
+              ]
+            })
+          ]
+        })
+      ]
+    }),
+    new Paragraph({ spacing: { after: 180 }, children: [] })
+  ];
+}
+
+export async function generateVehicleBookCopyDocx(vehicle: Vehicle): Promise<Document> {
+  const images = vehicle.registrationBook ? await convertDataUrlToPngImages(vehicle.registrationBook, 580, 660) : [];
+
+  const bodyChildren: (Paragraph | Table)[] = [
+    ...buildVehicleAttachmentHeaderBlock(vehicle, 'COPY OF VEHICLE REGISTRATION BOOK')
+  ];
+
+  if (images.length > 0) {
+    images.forEach((img) => {
+      bodyChildren.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 120, after: 160 },
+          children: [
+            new ImageRun({
+              type: 'png',
+              data: img.data,
+              transformation: { width: img.width, height: img.height }
+            })
+          ]
+        })
+      );
+    });
+  } else {
+    bodyChildren.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                borders: tableBorders,
+                children: [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    spacing: { before: 1400, after: 1400 },
+                    children: [
+                      new TextRun({
+                        text: '[ ATTACH / PASTE VEHICLE REGISTRATION BOOK COPY HERE — OR UPLOAD IN VEHICLE FORM ]',
+                        bold: true,
+                        size: 20,
+                        font: calibriFont
+                      })
+                    ]
+                  })
+                ]
+              })
+            ]
+          })
+        ]
+      })
+    );
+  }
+
+  return new Document({
+    sections: [
+      {
+        properties: {
+          page: {
+            margin: {
+              top: convertInchesToTwip(0.7),
+              bottom: convertInchesToTwip(0.7),
+              left: convertInchesToTwip(0.75),
+              right: convertInchesToTwip(0.75)
+            }
+          }
+        },
+        children: bodyChildren
+      }
+    ]
+  });
+}
+
+export async function generateVehicleOwnerIdCopyDocx(vehicle: Vehicle): Promise<Document> {
+  const { owner, ownerFather, ownerCnic, ownerAddress } = extractVehicleFields(vehicle);
+  const images = vehicle.ownerIdCardUrl ? await convertDataUrlToPngImages(vehicle.ownerIdCardUrl, 520, 560) : [];
+
+  const bodyChildren: (Paragraph | Table)[] = [
+    ...buildVehicleAttachmentHeaderBlock(
+      vehicle,
+      'COPY OF VEHICLE OWNER ID CARD (CNIC)',
+      owner ? `Vehicle Owner (Lessor): ${owner.toUpperCase()}${ownerFather ? ` S/O ${ownerFather.toUpperCase()}` : ''}${ownerCnic ? ` — CNIC: ${ownerCnic}` : ''}` : undefined
+    )
+  ];
+
+  if (ownerAddress) {
+    bodyChildren.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 140 },
+        children: [new TextRun({ text: `Owner Address: ${ownerAddress.toUpperCase()}`, bold: true, size: 19, font: calibriFont })]
+      })
+    );
+  }
+
+  if (images.length > 0) {
+    images.forEach((img) => {
+      bodyChildren.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 100, after: 160 },
+          children: [
+            new ImageRun({
+              type: 'png',
+              data: img.data,
+              transformation: { width: img.width, height: img.height }
+            })
+          ]
+        })
+      );
+    });
+  } else {
+    bodyChildren.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                borders: tableBorders,
+                children: [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    spacing: { before: 1100, after: 1100 },
+                    children: [
+                      new TextRun({
+                        text: '[ ATTACH / PASTE VEHICLE OWNER CNIC (FRONT & BACK) COPY HERE — OR UPLOAD IN VEHICLE FORM ]',
+                        bold: true,
+                        size: 20,
+                        font: calibriFont
+                      })
+                    ]
+                  })
+                ]
+              })
+            ]
+          })
+        ]
+      })
+    );
+  }
+
+  return new Document({
+    sections: [
+      {
+        properties: {
+          page: {
+            margin: {
+              top: convertInchesToTwip(0.7),
+              bottom: convertInchesToTwip(0.7),
+              left: convertInchesToTwip(0.75),
+              right: convertInchesToTwip(0.75)
+            }
+          }
+        },
+        children: bodyChildren
+      }
+    ]
+  });
+}
+
+export interface CompanyOwnerIdCopyOptions {
+  companyOwnerName?: string;
+  companyOwnerCnic?: string;
+  frontImageUrl?: string;
+  backImageUrl?: string;
+}
+
+export async function generateCompanyOwnerIdCopyDocx(
+  vehicle: Vehicle,
+  options: CompanyOwnerIdCopyOptions = {}
+): Promise<Document> {
+  const comp = resolveVehicleDocxCompany(vehicle);
+  const frontImgs = options.frontImageUrl ? await convertDataUrlToPngImages(options.frontImageUrl, 480, 310) : [];
+  const backImgs = options.backImageUrl ? await convertDataUrlToPngImages(options.backImageUrl, 480, 310) : [];
+
+  const bodyChildren: (Paragraph | Table)[] = [
+    ...buildVehicleAttachmentHeaderBlock(
+      vehicle,
+      'COPY OF COMPANY OWNER / DIRECTOR ID CARD (CNIC)',
+      `${comp.signoffName} — NTN: ${comp.ntn} / Customs ID: ${comp.customsNtn}`
+    )
+  ];
+
+  if (options.companyOwnerName || options.companyOwnerCnic) {
+    bodyChildren.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 140 },
+        children: [
+          new TextRun({
+            text: `Director / Company Owner: ${(options.companyOwnerName || '').toUpperCase()}${options.companyOwnerCnic ? ` — CNIC: ${options.companyOwnerCnic}` : ''}`,
+            bold: true,
+            size: 20,
+            font: calibriFont
+          })
+        ]
+      })
+    );
+  }
+
+  if (frontImgs.length > 0 || backImgs.length > 0) {
+    [...frontImgs, ...backImgs].forEach((img) => {
+      bodyChildren.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 100, after: 140 },
+          children: [
+            new ImageRun({
+              type: 'png',
+              data: img.data,
+              transformation: { width: img.width, height: img.height }
+            })
+          ]
+        })
+      );
+    });
+  } else {
+    bodyChildren.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                borders: tableBorders,
+                children: [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    spacing: { before: 900, after: 900 },
+                    children: [
+                      new TextRun({
+                        text: `[ COMPANY OWNER / DIRECTOR CNIC COPY FOR ${comp.signoffName} — UPLOAD ONCE IN REGISTRATION PACK OR PASTE HERE ]`,
+                        bold: true,
+                        size: 20,
+                        font: calibriFont
+                      })
+                    ]
+                  })
+                ]
+              })
+            ]
+          })
+        ]
+      })
+    );
+  }
+
+  return new Document({
+    sections: [
+      {
+        properties: {
+          page: {
+            margin: {
+              top: convertInchesToTwip(0.7),
+              bottom: convertInchesToTwip(0.7),
+              left: convertInchesToTwip(0.75),
+              right: convertInchesToTwip(0.75)
+            }
+          }
+        },
+        children: bodyChildren
+      }
+    ]
+  });
+}
+
+export interface WitnessesIdCopyOptions {
+  witness1ImageUrl?: string;
+  witness2ImageUrl?: string;
+  witness1Name?: string;
+  witness1Cnic?: string;
+  witness2Name?: string;
+  witness2Cnic?: string;
+}
+
+export async function generateWitnessesIdCopyDocx(
+  vehicle: Vehicle,
+  options: WitnessesIdCopyOptions = {}
+): Promise<Document> {
+  const w1Name = options.witness1Name || DOCKS_COMPANY.witnesses.w1_arbaz.name;
+  const w1Cnic = options.witness1Cnic || DOCKS_COMPANY.witnesses.w1_arbaz.cnic;
+  const w2Name = options.witness2Name || DOCKS_COMPANY.witnesses.w2_shams.name;
+  const w2Cnic = options.witness2Cnic || DOCKS_COMPANY.witnesses.w2_shams.cnic;
+
+  const w1Imgs = options.witness1ImageUrl ? await convertDataUrlToPngImages(options.witness1ImageUrl, 470, 295) : [];
+  const w2Imgs = options.witness2ImageUrl ? await convertDataUrlToPngImages(options.witness2ImageUrl, 470, 295) : [];
+
+  const bodyChildren: (Paragraph | Table)[] = [
+    ...buildVehicleAttachmentHeaderBlock(vehicle, 'COPIES OF WITNESSES ID CARDS (CNIC)'),
+    new Paragraph({
+      spacing: { before: 60, after: 80 },
+      children: [
+        new TextRun({
+          text: `Witness 1: ${w1Name} — CNIC NO. ${w1Cnic}`,
+          bold: true,
+          underline: {},
+          size: 21,
+          font: calibriFont
+        })
+      ]
+    })
+  ];
+
+  if (w1Imgs.length > 0) {
+    w1Imgs.forEach((img) => {
+      bodyChildren.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 140 },
+          children: [
+            new ImageRun({
+              type: 'png',
+              data: img.data,
+              transformation: { width: img.width, height: img.height }
+            })
+          ]
+        })
+      );
+    });
+  } else {
+    bodyChildren.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                borders: tableBorders,
+                children: [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    spacing: { before: 520, after: 520 },
+                    children: [
+                      new TextRun({
+                        text: `[ WITNESS 1 CNIC COPY: ${w1Name} (${w1Cnic}) ]`,
+                        bold: true,
+                        size: 19,
+                        font: calibriFont
+                      })
+                    ]
+                  })
+                ]
+              })
+            ]
+          })
+        ]
+      })
+    );
+  }
+
+  bodyChildren.push(
+    new Paragraph({
+      spacing: { before: 180, after: 80 },
+      children: [
+        new TextRun({
+          text: `Witness 2: ${w2Name} — CNIC NO. ${w2Cnic}`,
+          bold: true,
+          underline: {},
+          size: 21,
+          font: calibriFont
+        })
+      ]
+    })
+  );
+
+  if (w2Imgs.length > 0) {
+    w2Imgs.forEach((img) => {
+      bodyChildren.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 100 },
+          children: [
+            new ImageRun({
+              type: 'png',
+              data: img.data,
+              transformation: { width: img.width, height: img.height }
+            })
+          ]
+        })
+      );
+    });
+  } else {
+    bodyChildren.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                borders: tableBorders,
+                children: [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    spacing: { before: 520, after: 520 },
+                    children: [
+                      new TextRun({
+                        text: `[ WITNESS 2 CNIC COPY: ${w2Name} (${w2Cnic}) ]`,
+                        bold: true,
+                        size: 19,
+                        font: calibriFont
+                      })
+                    ]
+                  })
+                ]
+              })
+            ]
+          })
+        ]
+      })
+    );
+  }
+
+  return new Document({
+    sections: [
+      {
+        properties: {
+          page: {
+            margin: {
+              top: convertInchesToTwip(0.65),
+              bottom: convertInchesToTwip(0.65),
+              left: convertInchesToTwip(0.75),
+              right: convertInchesToTwip(0.75)
+            }
+          }
+        },
+        children: bodyChildren
+      }
+    ]
+  });
 }

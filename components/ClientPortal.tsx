@@ -19,6 +19,7 @@ import {
   LoadingBillData
 } from '../services/pdfExportService';
 import { Case, CaseStatus, Container, FinanceEntry, ExtractedData, MockDocument, UserRole, Client, CaseCharge, AvailableVehicle } from '../types';
+import { getUnifiedCaseStageLabel } from '../services/workflowConfig';
 import { compressAndPrepareFile, convertImageToPdf } from '../services/fileUtils';
 import TopModeSwitcher, { ModeOption } from './TopModeSwitcher';
 import GoldenAmountWidget from './GoldenAmountWidget';
@@ -1508,7 +1509,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                           </p>
                         </div>
                         <span className="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs px-2.5 py-0.5 rounded-full font-medium">
-                          {c.status}
+                          {getUnifiedCaseStageLabel(c)}
                         </span>
                       </div>
 

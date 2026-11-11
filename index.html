@@ -85,7 +85,11 @@
 
           if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
             window.addEventListener('load', function() {
-              navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function() {});
+              navigator.serviceWorker.register('/sw.js?v=2026-18', { scope: '/', updateViaCache: 'none' })
+                .then(function(reg) {
+                  try { reg.update(); } catch (_) {}
+                })
+                .catch(function() {});
             });
           }
         } catch (_) {}

@@ -61,7 +61,14 @@ function handleExtractDocuments(req, res) {
       }
 
       const { GoogleGenAI } = await import('@google/genai');
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
 
       const parts = [];
       if (body.files && Array.isArray(body.files)) {
@@ -90,21 +97,36 @@ Carefully read EVERY page of the attached document(s) — including multi-page P
 
       parts.push({ text: extractionInstruction });
 
+      const desiredMime = body.responseMimeType === 'text/plain' ? 'text/plain' : 'application/json';
       let apiResponse = null;
       const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
       for (const m of models) {
         try {
+          const genConfig = {};
+          if (desiredMime === 'application/json') {
+            genConfig.responseMimeType = 'application/json';
+            if (body.responseSchema) {
+              genConfig.responseSchema = body.responseSchema;
+            }
+          }
+          if (body.systemInstruction) {
+            genConfig.systemInstruction = body.systemInstruction;
+          }
           apiResponse = await ai.models.generateContent({
             model: m,
             contents: { parts },
-            config: {
-              responseMimeType: 'application/json',
-            },
+            config: genConfig,
           });
           if (apiResponse && apiResponse.text) break;
         } catch (mErr) {
           console.warn(`OCR attempt with model ${m} notice:`, mErr);
         }
+      }
+
+      if (desiredMime === 'text/plain') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ text: ((apiResponse && apiResponse.text) || '').trim() }));
+        return;
       }
 
       const rawText = ((apiResponse && apiResponse.text) || '{}')

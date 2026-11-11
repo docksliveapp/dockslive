@@ -127,7 +127,14 @@ export default defineConfig(({ mode }) => {
                   }
 
                   const { GoogleGenAI } = await import('@google/genai');
-                  const ai = new GoogleGenAI({ apiKey });
+                  const ai = new GoogleGenAI({
+                    apiKey,
+                    httpOptions: {
+                      headers: {
+                        'User-Agent': 'aistudio-build'
+                      }
+                    }
+                  });
 
                   const parts: any[] = [];
                   if (body.files && Array.isArray(body.files)) {
@@ -154,21 +161,37 @@ Carefully read EVERY page of the attached document(s) — including multi-page P
 
                   parts.push({ text: extractionInstruction });
 
+                  const desiredMime = body.responseMimeType === 'text/plain' ? 'text/plain' : 'application/json';
                   let apiResponse: any = null;
                   const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
                   for (const m of models) {
                     try {
+                      const genConfig: any = {};
+                      if (desiredMime === 'application/json') {
+                        genConfig.responseMimeType = 'application/json';
+                        if (body.responseSchema) {
+                          genConfig.responseSchema = body.responseSchema;
+                        }
+                      }
+                      if (body.systemInstruction) {
+                        genConfig.systemInstruction = body.systemInstruction;
+                      }
                       apiResponse = await ai.models.generateContent({
                         model: m,
                         contents: { parts },
-                        config: {
-                          responseMimeType: 'application/json'
-                        }
+                        config: genConfig
                       });
                       if (apiResponse && apiResponse.text) break;
                     } catch (mErr) {
                       console.warn(`Vite OCR attempt with model ${m} notice:`, mErr);
                     }
+                  }
+
+                  if (desiredMime === 'text/plain') {
+                    res.statusCode = 200;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ text: (apiResponse?.text || '').trim() }));
+                    return;
                   }
 
                   const rawText = (apiResponse?.text || '{}').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
@@ -188,14 +211,6 @@ Carefully read EVERY page of the attached document(s) — including multi-page P
       ],
       define: {
         'process.env.NODE_ENV': JSON.stringify(mode),
-        'process.env.API_KEY': JSON.stringify(geminiKey),
-        'process.env.GEMINI_API_KEY': JSON.stringify(geminiKey),
-        '__GEMINI_API_KEY__': JSON.stringify(geminiKey),
-        'process.env': JSON.stringify({
-          NODE_ENV: mode,
-          API_KEY: geminiKey,
-          GEMINI_API_KEY: geminiKey,
-        }),
       },
       resolve: {
         alias: {

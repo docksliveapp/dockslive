@@ -560,6 +560,7 @@ export interface CaseStepDetail {
   finalSignedTransportNoteName?: string;
   dryPortGatePassUrl?: string;
   dryPortGatePassName?: string;
+  containerUnloadedToggled?: boolean;
   vehicleGateOutToggled?: boolean;
 
   // Category 2: Customs Clearance
@@ -1287,6 +1288,11 @@ export interface Vehicle {
   nocDocUrl?: string;
   nocDate?: string;
   nocReference?: string;
+  nocCollectorName?: string;
+  nocCollectorPhone?: string;
+  nocFeeCharged?: boolean;
+  nocFeeAmount?: number;
+  nocFinanceEntryId?: number;
   
   // Documents
   registrationBook?: string;

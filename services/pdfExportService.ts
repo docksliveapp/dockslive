@@ -2593,111 +2593,169 @@ export async function downloadVehicleNocPdf(
     });
 
     const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 14;
+    const margin = 18;
     const v = data.vehicle;
-    const today = data.date || new Date().toLocaleDateString('en-GB');
-    const compPrefix = getActiveCompanyPrefix();
-    const activeComp = getActiveCompany();
-    const compName = cleanPdfText(data.branding?.companyName || activeComp.legalTitle || activeComp.name);
-    const nocSerial = data.nocNo || v.nocReference || `NOC-${compPrefix}-${Date.now().toString().slice(-6)}`;
-    const reasonText = data.reason || v.cancellationReason || 'Fleet Contract Concluded & Operational Retirement';
 
-    let currentY = await drawPdfCorporateHeader(doc, {
-      title: 'NO OBJECTION CERTIFICATE',
-      refNo: nocSerial,
-      date: today,
-      subRef: `Vehicle: ${v.registrationNumber}`,
-      branding: data.branding,
-      accentColor: [185, 28, 28] // Corporate Crimson/Red
-    });
+    // Format date as DD-MM-YYYY matching 10-11-2026 format
+    const rawDate = data.date || v.cancellationDate || new Date().toISOString().slice(0, 10);
+    let formattedDate = rawDate;
+    const parts = String(rawDate).trim().split(/[/\-.]/);
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        formattedDate = `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`;
+      } else {
+        formattedDate = `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`;
+      }
+    }
 
-    currentY += 4;
+    // Resolve the specific company on whose panel this vehicle is registered
+    const opRaw = String(v.operatingCompany || '').trim().toLowerCase();
+    const nameRaw = String(v.companyName || '').trim().toUpperCase();
+    let signoffCompany = 'DOCKS (PVT) LTD.';
+    let resolvedCompId: CompanyId = 'docks';
+    if (opRaw === 'truckit' || nameRaw.includes('TRUCKIT')) {
+      signoffCompany = 'TRUCKIT (PVT) LTD.';
+      resolvedCompId = 'truckit';
+    } else if (opRaw === 'muhib' || nameRaw.includes('MUHIB')) {
+      signoffCompany = 'MUHIB INTERNATIONAL';
+      resolvedCompId = 'muhib';
+    } else if (opRaw === 'vantage' || nameRaw.includes('VANTAGE')) {
+      signoffCompany = 'VANTAGE SHIPPING LINE';
+      resolvedCompId = 'vantage';
+    } else if (opRaw === 'docks' || nameRaw.includes('DOCKS')) {
+      signoffCompany = 'DOCKS (PVT) LTD.';
+      resolvedCompId = 'docks';
+    } else if (nameRaw) {
+      signoffCompany = cleanPdfText(nameRaw);
+    }
 
-    // Header Subject Banner
-    doc.setFillColor(254, 242, 242);
-    doc.setDrawColor(252, 165, 165);
-    doc.roundedRect(margin, currentY, pageWidth - (margin * 2), 16, 2, 2, 'FD');
+    // Leave clean top space for pre-printed company letterhead (55mm)
+    let currentY = 56;
 
+    // Right-aligned Date: DD-MM-YYYY (underlined)
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(153, 27, 27);
-    doc.text('SUBJECT: ISSUANCE OF N.O.C. FOR FLEET DE-REGISTRATION & RELEASE', margin + 6, currentY + 6.5);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`TO: CUSTOMS AUTHORITIES / PORTS & TERMINALS / ALLIED LOGISTICS OPERATORS`, margin + 6, currentY + 12);
-
-    currentY += 21;
-
-    // Formal Certification Statement
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
-    doc.setTextColor(30, 41, 59);
-    const bodyP1 = `This is to officially certify that the commercial vehicle bearing Registration Number ${v.registrationNumber}, ${compPrefix} Serial ${v.dplSerial}, belonging to Transporter "${v.transporterName}", has formally been decommissioned and removed from the active customs bonded / domestic carrier fleet of ${compName.toUpperCase()}.`;
-    doc.text(bodyP1, margin, currentY, { maxWidth: pageWidth - (margin * 2), lineHeightFactor: 1.4 });
+    doc.setFontSize(11);
+    doc.setTextColor(0, 0, 0);
+    const datePrefix = 'Date: ';
+    const dateVal = formattedDate;
+    const dateValW = doc.getTextWidth(dateVal);
+    const dateTotalW = doc.getTextWidth(datePrefix + dateVal);
+    const dateStartX = pageWidth - margin - dateTotalW;
+    doc.text(datePrefix + dateVal, dateStartX, currentY);
+    doc.setLineWidth(0.35);
+    doc.setDrawColor(0, 0, 0);
+    doc.line(pageWidth - margin - dateValW, currentY + 1, pageWidth - margin, currentY + 1);
 
     currentY += 14;
 
-    const bodyP2 = `All customs port gate passes, GPS tracker hardware, container chassis locks, and bonded transit manifests issued under the authority of ${compName} have been safely surrendered, audited, and reconciled. All financial liabilities, wharfage dues, and terminal toll fees up to ${today} have been cleared.`;
-    doc.text(bodyP2, margin, currentY, { maxWidth: pageWidth - (margin * 2), lineHeightFactor: 1.4 });
-
-    currentY += 14;
-
-    const bodyP3 = `Consequently, ${compName} holds NO OBJECTION whatsoever to the cancellation, transfer of ownership, or re-registration of this vehicle under any other carrier or entity.`;
-    doc.text(bodyP3, margin, currentY, { maxWidth: pageWidth - (margin * 2), lineHeightFactor: 1.4 });
+    // Addressee Block
+    const addrLines = [
+      'The Deputy Director,',
+      'Licensing of Bonded Carrier,',
+      'Directorate of Transit Trade,',
+      'Custom House,'
+    ];
+    addrLines.forEach((ln) => {
+      doc.text(ln, margin, currentY);
+      currentY += 5.5;
+    });
+    doc.text('Karachi.', margin, currentY);
+    const khiW = doc.getTextWidth('Karachi.');
+    doc.line(margin, currentY + 1, margin + khiW, currentY + 1);
 
     currentY += 12;
 
-    // Specification Box
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(15, 23, 42);
-    doc.text('DE-REGISTERED VEHICLE PARTICULARS:', margin, currentY);
-    currentY += 3.5;
+    // Subject Line
+    doc.text('Subject:', margin, currentY);
+    const subjX = margin + 22;
+    const subjText = 'CANCELLATION OF REGISTERED VEHICLE FROM OUR PANEL';
+    doc.text(subjText, subjX, currentY);
+    const subjW = doc.getTextWidth(subjText);
+    doc.line(subjX, currentY + 1, subjX + subjW, currentY + 1);
 
-    const rows: [string, string][] = [
-      ['Vehicle Registration No:', v.registrationNumber],
-      [`${compPrefix} Fleet Serial No:`, v.dplSerial],
-      ['Vehicle Category / Type:', `${v.category} • ${v.type} (${v.size || 'Standard'})`],
-      ['Engine Number:', v.engineNo || 'N/A'],
-      ['Chassis Number:', v.chassisNo || 'N/A'],
-      ['Make / Model:', v.makeModel || 'Commercial Hauler'],
-      ['Associated Transporter:', v.transporterName],
-      ['Registered Driver / Contact:', `${v.driverName} (${v.driverContact || 'N/A'})`],
-      ['Effective Cancellation Date:', today],
-      ['De-Registration Reason:', reasonText],
-      ['NOC Reference Serial:', nocSerial],
+    currentY += 12;
+    doc.text('Respected Sir,', margin, currentY);
+
+    currentY += 9;
+    const bodyText =
+      'Reference to the above mentioned subject, this is to inform you that the contract agreement for the below mentioned vehicle gone cancelled. The details are listed as under';
+    const wrappedBody = doc.splitTextToSize(bodyText, pageWidth - margin * 2);
+    doc.text(wrappedBody, margin, currentY);
+    currentY += wrappedBody.length * 5.5 + 6;
+
+    // 8-Column Vehicle Table
+    const makerVal = cleanPdfText((v.make || v.maker || (v.makeModel ? v.makeModel.split(/\s+/)[0] : '') || 'HINO').toUpperCase());
+    const modelVal = cleanPdfText(String(v.model || (v.registrationDate ? v.registrationDate.slice(0, 4) : '-')));
+    const mraVal = cleanPdfText((v.mra || 'KARACHI').toUpperCase());
+    let leaseExpFormatted = formattedDate;
+    if (v.validationExpiryDate) {
+      const ep = String(v.validationExpiryDate).trim().split(/[/\-.]/);
+      if (ep.length === 3) {
+        leaseExpFormatted = ep[0].length === 4 ? `${ep[2]}-${ep[1]}-${ep[0]}` : `${ep[0]}-${ep[1]}-${ep[2]}`;
+      }
+    }
+
+    const colWidths = [11, 23, 33, 31, 19, 16, 20, 21]; // Total = 174mm (= 210 - 36)
+    const headers = ['Sr. #', 'Vehicle No.', 'Chassis No.', 'Engine No.', 'Maker', 'Model', 'MRA of\nVehicle', 'Lease Expiry\nDate'];
+    const rowValues = [
+      '1',
+      cleanPdfText(v.registrationNumber || '-'),
+      cleanPdfText(v.chassisNo || '-'),
+      cleanPdfText(v.engineNo || '-'),
+      makerVal,
+      modelVal,
+      mraVal,
+      leaseExpFormatted
     ];
 
-    rows.forEach(([label, val], idx) => {
-      if (idx % 2 === 0) {
-        doc.setFillColor(248, 250, 252);
-        doc.rect(margin, currentY, pageWidth - (margin * 2), 5.6, 'F');
+    const headerH = 11;
+    const rowH = 9;
+    doc.setFontSize(8.5);
+    doc.setLineWidth(0.35);
+
+    let xPos = margin;
+    headers.forEach((h, idx) => {
+      const cw = colWidths[idx];
+      doc.rect(xPos, currentY, cw, headerH);
+      const hLines = h.split('\n');
+      if (hLines.length === 1) {
+        doc.text(hLines[0], xPos + cw / 2, currentY + 6.5, { align: 'center' });
+      } else {
+        doc.text(hLines[0], xPos + cw / 2, currentY + 4.5, { align: 'center' });
+        doc.text(hLines[1], xPos + cw / 2, currentY + 8.5, { align: 'center' });
       }
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7.5);
-      doc.setTextColor(71, 85, 105);
-      doc.text(label, margin + 4, currentY + 3.8);
-
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(15, 23, 42);
-      doc.text(val, pageWidth - margin - 4, currentY + 3.8, { align: 'right' });
-
-      currentY += 5.6;
+      xPos += cw;
     });
 
-    currentY += 10;
+    currentY += headerH;
+    xPos = margin;
+    doc.setFontSize(8.2);
+    rowValues.forEach((val, idx) => {
+      const cw = colWidths[idx];
+      doc.rect(xPos, currentY, cw, rowH);
+      doc.text(val, xPos + cw / 2, currentY + 5.8, { align: 'center', maxWidth: cw - 1.5 });
+      xPos += cw;
+    });
 
-    // Official Company Stamp Only (In strict compliance with SRS policy)
-    const sigX = pageWidth - margin - 60;
-    drawOfficialCompanyStampOnly(doc, sigX, currentY, 'OFFICIAL NOC CARRIER SEAL');
+    currentY += rowH + 16;
 
-    // Corporate footer with company address and contact numbers
-    drawPdfCorporateFooter(doc, 'Official De-Registration NOC', data.branding);
+    doc.setFontSize(11);
+    doc.text('Your usual cooperation in this regard would highly be appreciated.', margin, currentY);
 
+    currentY += 14;
+    doc.text('Yours Faithfully,', margin, currentY);
+
+    currentY += 20;
+    doc.text('_________________________', margin, currentY);
+    currentY += 6.5;
+    doc.text(`For: ${signoffCompany}`, margin, currentY);
+
+    // Official Company Stamp on right side
+    drawOfficialCompanyStampOnly(doc, pageWidth - margin - 58, currentY - 22, 'OFFICIAL NOC CARRIER SEAL', resolvedCompId);
+
+    const nocSerial = data.nocNo || v.nocReference || `NOC-${Date.now().toString().slice(-6)}`;
     const cleanReg = v.registrationNumber.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const filename = `NOC_${cleanReg}_${nocSerial}.pdf`;
+    const filename = `Cancellation_NOC_${cleanReg}_${nocSerial}.pdf`;
     return triggerDirectDownload(doc, filename);
   } catch (error) {
     console.error('Failed to generate vehicle NOC PDF:', error);

@@ -372,6 +372,9 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     finalSignedTransportNoteName: existingDetail.finalSignedTransportNoteName || '',
     dryPortGatePassUrl: existingDetail.dryPortGatePassUrl || '',
     dryPortGatePassName: existingDetail.dryPortGatePassName || '',
+    destinationDoDocUrl: existingDetail.destinationDoDocUrl || '',
+    destinationDoDocName: existingDetail.destinationDoDocName || '',
+    containerUnloadedToggled: existingDetail.containerUnloadedToggled || false,
     vehicleGateOutToggled: existingDetail.vehicleGateOutToggled || false,
     destinationChargesArrangedBy: existingDetail.destinationChargesArrangedBy || (targetCase.serviceArrangements?.['destination_unloading']?.arrangedBy || targetCase.serviceArrangements?.['loading_unloading']?.arrangedBy || targetCase.serviceArrangements?.loadingUnloading?.arrangedBy || 'Client'),
     destinationChargesAmount: existingDetail.destinationChargesAmount || 0
@@ -612,9 +615,10 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     addDoc(detail.clientDoPhotoUrl, detail.clientDoPhotoName, 'Shipping Line DO Photo');
     addDoc(detail.portGateArrivalPhotoUrl, detail.portGateArrivalPhotoName, 'Port Gate Arrival Photo');
     addDoc(detail.secondaryCustomsSealPhotoUrl, detail.secondaryCustomsSealPhotoName, 'Secondary Customs Seal Photo');
-    addDoc(detail.destinationWeightSlipUrl, detail.destinationWeightSlipName, 'Destination Weighbridge Slip');
-    addDoc(detail.finalSignedTransportNoteUrl, detail.finalSignedTransportNoteName, 'Signed Consignment Transport Note');
+    addDoc(detail.destinationWeightSlipUrl, detail.destinationWeightSlipName, 'Port Weight Slip (Destination)');
+    addDoc(detail.finalSignedTransportNoteUrl, detail.finalSignedTransportNoteName, 'Transport Note');
     addDoc(detail.dryPortGatePassUrl, detail.dryPortGatePassName, 'Dry Port Gate Pass');
+    addDoc(detail.destinationDoDocUrl, detail.destinationDoDocName, 'Destination Delivery Order (DO)');
 
     if (detail.multiFiles) {
       Object.entries(detail.multiFiles).forEach(([fieldKey, files]) => {
@@ -731,31 +735,15 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         }
       }
 
-      if (stepIndex === 6 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL) { // Step 7: Destination Port Arrival
-        const vehStepDetail = targetCase.workflowDetails?.[CaseStatus.VEHICLE_ASSIGNMENT];
-        const loadingStepDetail = targetCase.workflowDetails?.[CaseStatus.LOADING_PORT_PROCESSING];
-        const assignedPlate = formData.assignedVehicleNo || vehStepDetail?.assignedVehicleNo || loadingStepDetail?.assignedVehicleNo || targetCase.vehicleAssignment?.vehicleNo || targetCase.containers?.[0]?.vehicleNo || '';
-        const readiness = checkVehicleWorkflowReadiness({
-          vehicleNo: assignedPlate,
-          registeredVehicles: allVehicles,
-          caseRegistrationBookUrl: formData.registrationBookUrl || vehStepDetail?.registrationBookUrl || loadingStepDetail?.registrationBookUrl || targetCase.vehicleAssignment?.registrationBookUrl,
-          caseOwnerCnicUrl: formData.ownerCnicUrl || vehStepDetail?.ownerCnicUrl || loadingStepDetail?.ownerCnicUrl || targetCase.vehicleAssignment?.ownerCnicUrl,
-          driverName: formData.driverName || vehStepDetail?.driverName || loadingStepDetail?.driverName || targetCase.vehicleAssignment?.driverName || targetCase.containers?.[0]?.driverName,
-          driverCnic: formData.driverCnic || vehStepDetail?.driverCnic || loadingStepDetail?.driverCnic || targetCase.vehicleAssignment?.driverCnic || targetCase.containers?.[0]?.driverCnic,
-          driverCnicFrontUrl: formData.driverCnicFrontUrl || vehStepDetail?.driverCnicFrontUrl || loadingStepDetail?.driverCnicFrontUrl || targetCase.vehicleAssignment?.driverCnicFrontUrl,
-          driverCnicBackUrl: formData.driverCnicBackUrl || vehStepDetail?.driverCnicBackUrl || loadingStepDetail?.driverCnicBackUrl || targetCase.vehicleAssignment?.driverCnicBackUrl,
-        });
-        if (!readiness.ready) {
-          return {
-            valid: false,
-            error: `Cannot Complete Case — Vehicle & Driver Compliance Incomplete:\n• ${readiness.errors.join('\n• ')}`
-          };
+      if (stepIndex === 6 || stepIndex === 7 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL) { // Step 7: Destination Port Arrival
+        if (!formData.destinationGateInToggled) {
+          return { valid: false, error: 'Please mark Vehicle Received.' };
         }
-        if (!formData.secondaryCustomsSealNumber?.trim()) {
-          return { valid: false, error: 'Customs Seal Verification Required: Secondary Customs Seal Number is mandatory.' };
+        if (!formData.containerUnloadedToggled) {
+          return { valid: false, error: 'Please mark Container Unloaded from Vehicle.' };
         }
         if (!formData.vehicleGateOutToggled) {
-          return { valid: false, error: 'Destination Completion: Please confirm vehicle gate out & offloading.' };
+          return { valid: false, error: 'Please mark Vehicle Gate Out.' };
         }
       }
     }
@@ -914,7 +902,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     if (effectiveCompleting) {
       const validation = validateStepStrict();
       if (!validation.valid) {
-        alert(validation.error);
+        setValidationError(validation.error || 'Please fill all required fields before finishing.');
         return;
       }
     }
@@ -954,7 +942,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     // Final step completion trigger (Destination Port Arrival -> Case Finish)
     if (
       (stepIndex === categoryWorkflow.totalSteps - 1 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL || (normCategory === 'Bonded Carrier' && (stepIndex === 6 || stepIndex === 7))) &&
-      (effectiveCompleting || ((formData.vehicleGateOutToggled || formData.outOfChargeCleared) && formData.secondaryCustomsSealNumber?.trim()))
+      (effectiveCompleting || (formData.destinationGateInToggled && formData.containerUnloadedToggled && formData.vehicleGateOutToggled) || formData.outOfChargeCleared)
     ) {
       finalStatus = CaseStatus.COMPLETED;
       isCompleted = true;
@@ -1335,52 +1323,42 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-slate-900 rounded-3xl overflow-hidden max-w-3xl w-full border border-white/15 shadow-2xl animate-fade-in max-h-[92vh] flex flex-col">
+      <div className="bg-slate-900 rounded-2xl overflow-hidden max-w-3xl w-full border border-white/15 shadow-2xl animate-fade-in max-h-[94vh] flex flex-col">
         {/* Header */}
-        <div className="p-5 border-b border-white/10 flex justify-between items-center bg-slate-950/70 shrink-0">
+        <div className="px-5 py-3.5 border-b border-white/10 flex justify-between items-center bg-slate-950/80 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-brand-500/20 text-brand-400 font-mono font-black flex items-center justify-center border border-brand-500/40 text-lg shadow-inner">
+            <div className="w-9 h-9 rounded-xl bg-brand-500/20 text-brand-400 font-mono font-bold flex items-center justify-center border border-brand-500/40 text-sm">
               {stepIndex + 1}
             </div>
             <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-brand-400 font-bold uppercase tracking-wider">
+              <div className="flex items-center gap-2 text-xs text-gray-400">
+                <span className="text-brand-400 font-semibold">
                   Step {stepIndex + 1} of {categoryWorkflow.totalSteps}
                 </span>
-                <span className="text-[10px] bg-brand-500/20 text-brand-300 border border-brand-500/30 px-2 py-0.5 rounded-full font-semibold">
-                  {targetCase.category}
-                </span>
-                {targetCase.subCategory && targetCase.subCategory !== 'Standard Container / General Cargo' && (
-                  <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-semibold">
-                    {targetCase.subCategory}
-                  </span>
-                )}
+                <span aria-hidden="true">·</span>
+                <span>{targetCase.category}</span>
                 {stepIndex < activeStepIdx && (
-                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-semibold">
-                    Completed
-                  </span>
-                )}
-                {stepIndex === activeStepIdx && (
-                  <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold animate-pulse">
-                    Active Stage
-                  </span>
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-emerald-400 font-semibold">Completed</span>
+                  </>
                 )}
               </div>
-              <h3 className="text-lg font-black text-white">{stepStatus}</h3>
+              <h3 className="text-base font-bold text-white leading-tight">{stepStatus}</h3>
             </div>
           </div>
 
           <button 
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-white p-2 rounded-xl hover:bg-white/10 transition-colors"
+            className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
         {/* Scrollable Content Body */}
-        <div className="p-5 space-y-6 overflow-y-auto custom-scrollbar flex-1 text-xs">
+        <div className="p-4 sm:p-5 space-y-3.5 overflow-y-auto custom-scrollbar flex-1 text-xs">
           {/* Read-Only Dossier Lock Banner */}
           {targetCase.status === CaseStatus.COMPLETED && (
             <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -2457,228 +2435,103 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
             </div>
           )}
 
-          {/* STEP 5: LOADING PORT PROCESSING — REDESIGNED 4-STAGE COMMAND DECK (STEP INDEX 4) */}
-          {(stepIndex === 4 || stepStatus === CaseStatus.LOADING_PORT_PROCESSING) && (
-            <div className="space-y-5">
-              {/* Top Loading Command Deck Banner & 4-Stage Visual Stepper */}
-              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-brand-950/30 border border-brand-500/30 shadow-xl space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3.5">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-brand-500/20 text-brand-300 border border-brand-500/30">
-                        Loading Port Command Center
-                      </span>
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                        Managed Exclusively by Loading Staff
-                      </span>
-                    </div>
-                    <h4 className="text-sm sm:text-base font-black text-white mt-1.5">
-                      Container Loading, Customs Seal, Loading Bill & Gate-Out Dispatch
-                    </h4>
-                  </div>
+          {/* STEP 5: LOADING PORT PROCESSING — SINGLE-PAGE COMPACT VIEW (STEP INDEX 4) */}
+          {(stepIndex === 4 || stepStatus === CaseStatus.LOADING_PORT_PROCESSING) && (() => {
+            const displayVehicleNo =
+              formData.assignedVehicleNo ||
+              targetCase.vehicleAssignment?.vehicleNo ||
+              targetCase.containers?.[0]?.vehicleNo ||
+              targetCase.vehicleNumber ||
+              '—';
+            const displayContainerNo =
+              (targetCase.containers && targetCase.containers.length > 0
+                ? targetCase.containers.map(c => c.number).filter(Boolean).join(', ')
+                : '') ||
+              targetCase.containerNumber ||
+              targetCase.extractedData?.containerNo ||
+              '—';
+            const displayImporterName =
+              (targetCase as any).importerName ||
+              targetCase.consignee ||
+              targetCase.extractedData?.consigneeName ||
+              targetCase.clientName ||
+              '—';
+            const displayClientName = targetCase.clientName || '—';
+            const recordedLoadingBillAmount = Number(
+              (targetCase.loadingBills && targetCase.loadingBills.length > 0
+                ? targetCase.loadingBills[targetCase.loadingBills.length - 1].totalAmount
+                : formData.loadingChargesAmount) || 0
+            );
 
-                  {/* Assigned Vehicle & Container Quick Pill */}
-                  <div className="bg-black/40 border border-white/10 rounded-2xl px-3.5 py-2 flex items-center gap-3 shrink-0">
-                    <Truck size={18} className="text-amber-400 shrink-0" />
-                    <div className="text-[11px]">
-                      <span className="text-gray-400 block">Vehicle / Container</span>
-                      <span className="font-mono font-bold text-white">
-                        {formData.assignedVehicleNo || targetCase.containers?.[0]?.vehicleNo || 'TBD'} • {targetCase.containers?.[0]?.number || 'CNTR'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 4-Stage Visual Progress Bar */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  {[
-                    {
-                      stage: 'Stage 1',
-                      title: 'Gate-In & Gate Pass',
-                      done: Boolean(formData.portGatePassUrl)
-                    },
-                    {
-                      stage: 'Stage 2',
-                      title: 'Weight & Customs Seal',
-                      done: Boolean(formData.customsSealNumber?.trim())
-                    },
-                    {
-                      stage: 'Stage 3',
-                      title: 'Loading Bill & Ledger',
-                      done: Boolean((targetCase.loadingBills && targetCase.loadingBills.length > 0) || Number(formData.loadingChargesAmount) > 0)
-                    },
-                    {
-                      stage: 'Stage 4',
-                      title: 'Gate-Out ➔ Transit',
-                      done: Boolean(formData.gateOutToggled)
-                    }
-                  ].map((item, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-2.5 rounded-2xl border transition-all flex items-center gap-2.5 ${
-                        item.done
-                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
-                          : 'bg-slate-900/80 border-white/10 text-gray-400'
-                      }`}
-                    >
-                      <div
-                        className={`w-6 h-6 rounded-xl font-mono font-black text-[11px] flex items-center justify-center shrink-0 ${
-                          item.done
-                            ? 'bg-emerald-500 text-slate-950'
-                            : 'bg-white/10 text-gray-300'
-                        }`}
-                      >
-                        {item.done ? '✓' : idx + 1}
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-[9px] uppercase tracking-wider font-bold block opacity-75">{item.stage}</span>
-                        <span className="text-[11px] font-bold text-white truncate block">{item.title}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* STAGE 1: PORT GATE-IN, DO VERIFICATION & PORT GATE PASS */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/60 border border-white/10 space-y-4">
-                <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-lg bg-brand-500/20 border border-brand-500/40 text-brand-300 font-mono font-black text-xs flex items-center justify-center">
-                      1
+            return (
+              <div className="space-y-3">
+                {/* 1. Top Strip: Vehicle Number, Container Number, Importer Name & Client Name */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-xl bg-slate-950/80 border border-white/10">
+                  <div className="min-w-0">
+                    <span className="text-[11px] text-gray-400 block">Vehicle Number</span>
+                    <span className="text-sm font-mono font-bold text-white truncate block tabular-nums">
+                      {displayVehicleNo}
                     </span>
-                    <div>
-                      <h5 className="font-bold text-white text-sm">Stage 1: Port Gate-In & Gate Pass Verification</h5>
-                      <p className="text-[11px] text-gray-400">Verify vehicle arrival at loading port and upload or scan Port Gate Pass document</p>
-                    </div>
                   </div>
-                  {formData.portGatePassUrl && (
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      ✓ Stage 1 Ready
+                  <div className="min-w-0">
+                    <span className="text-[11px] text-gray-400 block">Container Number</span>
+                    <span className="text-sm font-mono font-bold text-cyan-300 truncate block tabular-nums">
+                      {displayContainerNo}
                     </span>
-                  )}
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[11px] text-gray-400 block">Importer Name</span>
+                    <span className="text-xs font-semibold text-white truncate block" title={displayImporterName}>
+                      {displayImporterName}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[11px] text-gray-400 block">Client Name</span>
+                    <span className="text-xs font-semibold text-emerald-300 truncate block" title={displayClientName}>
+                      {displayClientName}
+                    </span>
+                  </div>
                 </div>
 
-                {/* Shipping Line DO section (When arranged by DPL) */}
-                {(formData.doDueChargesArrangedBy === 'DPL' || targetCase.serviceArrangements?.['delivery_order']?.arrangedBy === 'DPL') && (
-                  <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-white text-xs uppercase tracking-wider block">
-                        Delivery Order (DO) Verification
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                        Company (DPL) Arranged DO
-                      </span>
-                    </div>
-
-                    <WorkflowMultiUploader
-                      label="Delivery Order (DO) Document / Photo"
-                      sublabel="Upload or take photo of physical Delivery Order document issued by shipping line"
-                      urlField="doReceiptUrl"
-                      nameField="doReceiptName"
-                      allowCamera={true}
-                      compact={true}
-                      formData={formData}
-                      setFormData={setFormData}
-                      onPreview={setActivePdfPreview}
-                    />
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div>
-                        <label className="font-semibold text-gray-300 block mb-1 text-xs">DO Date</label>
-                        <input
-                          type="date"
-                          value={formData.doIssueDate || new Date().toISOString().split('T')[0]}
-                          onChange={(e) => setFormData({ ...formData, doIssueDate: e.target.value })}
-                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs"
-                        />
-                      </div>
-                      <div>
-                        <label className="font-semibold text-gray-300 block mb-1 text-xs">Shipping Line</label>
-                        <input
-                          type="text"
-                          value={formData.shippingLine || ''}
-                          onChange={(e) => setFormData({ ...formData, shippingLine: e.target.value })}
-                          placeholder="e.g. Maersk, MSC, Hapag-Lloyd"
-                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs font-medium"
-                        />
-                      </div>
-                      <div>
-                        <label className="font-semibold text-gray-300 block mb-1 text-xs">Shipping Agent</label>
-                        <input
-                          type="text"
-                          value={formData.shippingAgent || ''}
-                          onChange={(e) => setFormData({ ...formData, shippingAgent: e.target.value })}
-                          placeholder="e.g. Marine Services"
-                          className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs font-medium"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Driver ID Card (Front & Back) — Uploaded by Loading Staff at Loading Port */}
-                <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/25 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-white text-xs uppercase tracking-wider">
-                          Driver ID Card (CNIC Front & Back) — Loading Staff Mandatory Upload
-                        </span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                          Loading Staff Responsibility
-                        </span>
-                      </div>
-                      <span className="text-[11px] text-gray-300 block mt-0.5">
-                        Enter the Driver CNIC Number to automatically populate Driver Name and CNIC Front/Back copies if available in the driver backup database.
-                      </span>
-                    </div>
-                    {formData.driverCnicFrontUrl && formData.driverCnicBackUrl ? (
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                        ✓ Driver CNIC Front & Back Ready
-                      </span>
-                    ) : (
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                        Driver CNIC Front & Back Required
+                {/* 2. Driver Section: ID Card Number, Full Name, ID Card Front & Back Upload */}
+                <div className="p-3 rounded-xl bg-slate-950/60 border border-white/10 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white">Driver Details &amp; ID Card</span>
+                    {driverBackupNotice && (
+                      <span className="text-[11px] text-emerald-400 font-medium truncate max-w-xs">
+                        {driverBackupNotice}
                       </span>
                     )}
                   </div>
 
-                  {driverBackupNotice && (
-                    <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
-                      <CheckCircle2 size={14} className="shrink-0 text-emerald-400" />
-                      <span>{driverBackupNotice}</span>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <div>
-                      <label className="text-gray-300 text-xs font-semibold block mb-1">
-                        Driver CNIC Number * <span className="text-emerald-400 font-normal">(Auto-fills from Backup)</span>
-                      </label>
+                      <label className="text-gray-300 text-[11px] font-semibold block mb-1">Driver ID Card Number *</label>
                       <input
                         type="text"
+                        disabled={isReadOnly}
                         value={formData.driverCnic || ''}
                         onChange={(e) => handleDriverCnicChange(e.target.value)}
                         placeholder="e.g. 42101-1234567-1"
-                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white font-mono text-xs"
+                        className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-1.5 text-white font-mono text-xs tabular-nums"
                       />
                     </div>
                     <div>
-                      <label className="text-gray-300 text-xs font-semibold block mb-1">Driver Full Name *</label>
+                      <label className="text-gray-300 text-[11px] font-semibold block mb-1">Driver Full Name *</label>
                       <input
                         type="text"
+                        disabled={isReadOnly}
                         value={formData.driverName || ''}
                         onChange={(e) => setFormData({ ...formData, driverName: e.target.value })}
-                        placeholder="e.g. Muhammad Ramzan"
-                        className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white text-xs"
+                        placeholder="Driver Full Name"
+                        className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-1.5 text-white text-xs"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <WorkflowMultiUploader
-                      label="Driver CNIC Front Side (Loading Staff) *"
-                      sublabel="Upload or take document scan of Driver CNIC Front"
+                      label="Driver ID Card Front *"
                       urlField="driverCnicFrontUrl"
                       nameField="driverCnicFrontName"
                       required={true}
@@ -2686,13 +2539,13 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                       accept="image/*"
                       allowCamera={true}
                       compact={true}
+                      isReadOnly={isReadOnly}
                       formData={formData}
                       setFormData={setFormData}
                       onPreview={setActivePdfPreview}
                     />
                     <WorkflowMultiUploader
-                      label="Driver CNIC Back Side (Loading Staff) *"
-                      sublabel="Upload or take document scan of Driver CNIC Back"
+                      label="Driver ID Card Back *"
                       urlField="driverCnicBackUrl"
                       nameField="driverCnicBackName"
                       required={true}
@@ -2700,6 +2553,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                       accept="image/*"
                       allowCamera={true}
                       compact={true}
+                      isReadOnly={isReadOnly}
                       formData={formData}
                       setFormData={setFormData}
                       onPreview={setActivePdfPreview}
@@ -2707,209 +2561,56 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   </div>
                 </div>
 
-                <WorkflowMultiUploader
-                  label="Port Gate Pass *"
-                  sublabel="Upload or take photo of official loading port gate pass slip"
-                  urlField="portGatePassUrl"
-                  nameField="portGatePassName"
-                  allowCamera={true}
-                  compact={true}
-                  formData={formData}
-                  setFormData={setFormData}
-                  onPreview={setActivePdfPreview}
-                />
-              </div>
-
-              {/* STAGE 2: CONTAINER LOADING, TRACKER & CUSTOMS SEAL VERIFICATION */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/60 border border-white/10 space-y-4">
-                <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-lg bg-brand-500/20 border border-brand-500/40 text-brand-300 font-mono font-black text-xs flex items-center justify-center">
-                      2
-                    </span>
-                    <div>
-                      <h5 className="font-bold text-white text-sm">Stage 2: Container Loading, Weight & Customs Seal</h5>
-                      <p className="text-[11px] text-gray-400">Record weight/seal slips, GPS tracker status, and mandatory Customs Bullet Seal Number</p>
-                    </div>
-                  </div>
-                  {formData.customsSealNumber?.trim() && (
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      ✓ Seal Verified
-                    </span>
-                  )}
-                </div>
-
-                {/* Mandatory Customs Seal Number */}
-                <div className="p-4 rounded-2xl border border-amber-500/30 bg-slate-900/90 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-white font-bold text-xs block">Customs Container Seal Verification (Mandatory)</span>
-                      <span className="text-[11px] text-amber-400 font-medium">Enter Customs Bullet Seal Number</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-gray-300 text-xs font-semibold block mb-1">
-                      Customs Seal Number *
-                    </label>
-                    <input 
-                      type="text"
-                      value={formData.customsSealNumber || ''}
-                      onChange={(e) => setFormData({ ...formData, customsSealNumber: e.target.value })}
-                      placeholder="e.g. PK-KPT-89421"
-                      className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2.5 text-white font-mono font-bold uppercase text-xs focus:border-brand-400 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* 3. Document Uploads: Port Weight Slip, Seal Slip & Port Gate Pass */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-white/10">
                   <WorkflowMultiUploader
                     label="Port Weight Slip"
-                    sublabel="Official port weighbridge scale slip"
                     urlField="weightSlipUrl"
                     nameField="weightSlipName"
                     allowCamera={true}
                     compact={true}
+                    isReadOnly={isReadOnly}
                     formData={formData}
                     setFormData={setFormData}
                     onPreview={setActivePdfPreview}
                   />
-
                   <WorkflowMultiUploader
                     label="Seal Slip"
-                    sublabel="Customs or port seal verification slip"
                     urlField="sealSlipUrl"
                     nameField="sealSlipName"
                     allowCamera={true}
                     compact={true}
+                    isReadOnly={isReadOnly}
+                    formData={formData}
+                    setFormData={setFormData}
+                    onPreview={setActivePdfPreview}
+                  />
+                  <WorkflowMultiUploader
+                    label="Port Gate Pass *"
+                    urlField="portGatePassUrl"
+                    nameField="portGatePassName"
+                    required={true}
+                    allowCamera={true}
+                    compact={true}
+                    isReadOnly={isReadOnly}
                     formData={formData}
                     setFormData={setFormData}
                     onPreview={setActivePdfPreview}
                   />
                 </div>
 
-                {/* Tracker Device Quick Bar */}
-                <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/10 flex flex-wrap items-center justify-between gap-3">
+                {/* 4. Seal Number + Create Loading Bill */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-white/10 items-end">
                   <div>
-                    <span className="font-bold text-white text-xs block">Satellite GPS Tracker Installation</span>
-                    <span className="text-gray-400 text-[11px]">Confirm whether container tracker unit is mounted</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ 
-                        ...formData, 
-                        trackerStatus: formData.trackerStatus === 'Installed' ? 'Not Installed' : 'Installed' 
-                      })}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-                        formData.trackerStatus === 'Installed' 
-                          ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' 
-                          : 'bg-white/5 border-white/10 text-gray-400'
-                      }`}
-                    >
-                      {formData.trackerStatus === 'Installed' ? '✓ Tracker Installed' : 'Mark Tracker Installed'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* STAGE 3: LOADING BILL & FINANCIAL SETTLEMENT (ARRANGED BY CLIENT VS COMPANY) */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-amber-500/10 via-slate-950 to-emerald-500/10 border border-amber-500/30 space-y-4 shadow-lg">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono font-black text-xs flex items-center justify-center">
-                      3
-                    </span>
-                    <div>
-                      <h5 className="font-bold text-white text-sm">Stage 3: Loading Bill & Separate Ledger Settlement</h5>
-                      <p className="text-[11px] text-gray-300">
-                        Loading Staff prepares the itemized Loading Bill. Routes automatically to Client Expenses/Ledger or Company Invoice/Payables.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex rounded-xl bg-slate-900 p-1 border border-white/10 shrink-0">
-                    <button
-                      type="button"
+                    <label className="text-gray-300 text-[11px] font-semibold block mb-1">Seal Number *</label>
+                    <input
+                      type="text"
                       disabled={isReadOnly}
-                      onClick={() => setFormData({ ...formData, loadingChargesArrangedBy: 'Client' })}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                        formData.loadingChargesArrangedBy === 'Client'
-                          ? 'bg-sky-600 text-white shadow'
-                          : 'text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      Arranged by Client
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isReadOnly}
-                      onClick={() => setFormData({ ...formData, loadingChargesArrangedBy: 'DPL' })}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                        formData.loadingChargesArrangedBy === 'DPL'
-                          ? 'bg-emerald-600 text-white shadow'
-                          : 'text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      Arranged by Company (DPL)
-                    </button>
-                  </div>
-                </div>
-
-                {/* Routing Explanation Banner */}
-                <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
-                  formData.loadingChargesArrangedBy === 'DPL'
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
-                    : 'bg-sky-500/10 border-sky-500/30 text-sky-200'
-                }`}>
-                  <Receipt size={16} className="shrink-0 mt-0.5" />
-                  <div>
-                    {formData.loadingChargesArrangedBy === 'DPL' ? (
-                      <>
-                        <strong className="block text-emerald-300">Arranged by Company (DPL):</strong>
-                        Loading Bill charges are billed by Loading Staff to Company (recorded in <strong>Loading Staff ➔ Company Ledger</strong> & <strong>Company Payables</strong>, notifying Finance Manager) and automatically added to <strong>Company's Client Invoice</strong>.
-                      </>
-                    ) : (
-                      <>
-                        <strong className="block text-sky-300">Arranged by Client (Direct):</strong>
-                        Loading Bill is generated directly for <strong>{targetCase.clientName}</strong> with full itemized breakup. Added to <strong>Client Case Expenses</strong>, <strong>Loading Staff ➔ Client Ledger</strong>, and <strong>Client ➔ Loading Staff Ledger</strong> with instant notification to Client.
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Existing Loading Bills Breakdown Table if created */}
-                {targetCase.loadingBills && targetCase.loadingBills.length > 0 && (
-                  <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-white/10 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-amber-300">
-                        Generated Loading Bill ({targetCase.loadingBills[targetCase.loadingBills.length - 1].billNo})
-                      </span>
-                      <span className="text-xs font-mono font-black text-emerald-400">
-                        Total: PKR {Number(targetCase.loadingBills[targetCase.loadingBills.length - 1].totalAmount || 0).toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-black/40 p-2.5 rounded-xl border border-white/5">
-                      {(targetCase.loadingBills[targetCase.loadingBills.length - 1].items || []).map((it, idx) => (
-                        <div key={idx} className="flex flex-col">
-                          <span className="text-gray-400 truncate">{it.description}</span>
-                          <span className="text-white font-mono font-bold">PKR {Number(it.amount || 0).toLocaleString()}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
-                  <div className="text-[11px] text-gray-300">
-                    Current Recorded Loading Bill Amount:{' '}
-                    <strong className="text-amber-300 font-mono text-xs">
-                      PKR {Number(
-                        (targetCase.loadingBills && targetCase.loadingBills.length > 0
-                          ? targetCase.loadingBills[targetCase.loadingBills.length - 1].totalAmount
-                          : formData.loadingChargesAmount) || 0
-                      ).toLocaleString()}
-                    </strong>
+                      value={formData.customsSealNumber || ''}
+                      onChange={(e) => setFormData({ ...formData, customsSealNumber: e.target.value })}
+                      placeholder="Enter Seal Number"
+                      className="w-full bg-slate-800 border border-white/15 rounded-lg px-3 py-2 text-white font-mono font-bold uppercase text-xs focus:border-brand-400 focus:outline-none"
+                    />
                   </div>
 
                   <button
@@ -2919,61 +2620,55 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                       setBillModalType('LOADING');
                       setShowLoadingBillModal(true);
                     }}
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-40 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-95"
+                    className="w-full px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
                   >
                     <Receipt size={15} />
-                    <span>{targetCase.loadingBills && targetCase.loadingBills.length > 0 ? 'Update / View Loading Bill & Breakup' : 'Create Loading Bill (Full Breakup)'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* STAGE 4: VEHICLE GATE-OUT & AUTO-TRANSIT DISPATCH */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-slate-950 to-teal-950/50 border border-emerald-500/40 space-y-4 shadow-xl">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono font-black text-xs flex items-center justify-center">
-                      4
+                    <span>
+                      {recordedLoadingBillAmount > 0
+                        ? `Create / Update Loading Bill (PKR ${recordedLoadingBillAmount.toLocaleString()})`
+                        : 'Create Loading Bill'}
                     </span>
-                    <div>
-                      <h5 className="font-bold text-white text-sm">Stage 4: Vehicle Gate-Out & Transit Dispatch</h5>
-                      <p className="text-[11px] text-emerald-200/80">
-                        Marking Vehicle Gate-Out finishes Loading Staff's work, completes the Loading workflow, and automatically sends the case to In-Transit!
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={isReadOnly}
-                    onClick={() => setFormData({ ...formData, gateOutToggled: !formData.gateOutToggled })}
-                    className={`px-4 py-2 rounded-xl font-bold text-xs border transition-all shrink-0 ${
-                      formData.gateOutToggled
-                        ? 'bg-emerald-600 text-white border-emerald-400 shadow-lg shadow-emerald-600/30'
-                        : 'bg-slate-800 text-gray-300 border-white/15 hover:border-emerald-500/40'
-                    }`}
-                  >
-                    {formData.gateOutToggled ? '✓ Vehicle Gate-Out Marked' : 'Mark Vehicle Gate-Out'}
                   </button>
                 </div>
 
+                {/* 5. Bottom: Vehicle Gate Out Tick + Finish Button */}
                 {!isReadOnly && (
-                  <div className="pt-2 flex justify-end">
+                  <div className="p-3 rounded-xl bg-slate-950/80 border border-emerald-500/30 flex flex-wrap items-center justify-between gap-3">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(formData.gateOutToggled)}
+                        onChange={(e) => {
+                          setValidationError(null);
+                          setFormData({ ...formData, gateOutToggled: e.target.checked });
+                        }}
+                        className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
+                      />
+                      <span className="text-sm font-bold text-white">Vehicle Gate Out</span>
+                    </label>
+
                     <button
                       type="button"
+                      disabled={!formData.gateOutToggled}
                       onClick={() => {
-                        setFormData(prev => ({ ...prev, gateOutToggled: true }));
-                        setTimeout(() => handleSave(true, true), 30);
+                        const check = validateStepStrict();
+                        if (!check.valid) {
+                          setValidationError(check.error || 'Please complete all required fields before finishing.');
+                          return;
+                        }
+                        setValidationError(null);
+                        handleSave(true, true);
                       }}
-                      className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/30 transition-all active:scale-95"
+                      className="px-6 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center gap-1.5 transition-colors whitespace-nowrap"
                     >
-                      <CheckCircle2 size={16} />
-                      <span>Confirm Vehicle Gate-Out & Finish Loading ➔ Send to Transit</span>
+                      <CheckCircle2 size={15} />
+                      <span>Finish</span>
                     </button>
                   </div>
                 )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* STEP 6: IN TRANSIT & DESTINATION VEHICLE RECEPTION TRIGGER (STEP INDEX 5) */}
           {(stepIndex === 5 || stepStatus === CaseStatus.IN_TRANSIT) && (
@@ -3063,181 +2758,143 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
             </div>
           )}
 
-          {/* STEP 7: DESTINATION PORT ARRIVAL & UNLOADING — REDESIGNED 4-STAGE COMMAND DECK (STEP INDEX 6 / 7) */}
-          {(stepIndex === 6 || stepIndex === 7 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL) && (
-            <div className="space-y-5">
-              {/* Top Destination Command Deck Banner & 4-Stage Stepper */}
-              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/30 border border-emerald-500/30 shadow-xl space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3.5">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                        Destination Unloading Command Center
-                      </span>
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                        Managed Exclusively by Destination Staff
-                      </span>
-                    </div>
-                    <h4 className="text-sm sm:text-base font-black text-white mt-1.5">
-                      Vehicle Reception, Offloading, Destination Bill, Delivery Order (DO) & Case Finish
-                    </h4>
-                  </div>
+          {/* STEP 7: DESTINATION PORT ARRIVAL — SINGLE-PAGE COMPACT VIEW (STEP INDEX 6 / 7) */}
+          {(stepIndex === 6 || stepIndex === 7 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL) && (() => {
+            const displayVehicleNo =
+              formData.assignedVehicleNo ||
+              targetCase.vehicleAssignment?.vehicleNo ||
+              targetCase.containers?.[0]?.vehicleNo ||
+              targetCase.vehicleNumber ||
+              '—';
+            const displayContainerNo =
+              (targetCase.containers && targetCase.containers.length > 0
+                ? targetCase.containers.map(c => c.number).filter(Boolean).join(', ')
+                : '') ||
+              targetCase.containerNumber ||
+              targetCase.extractedData?.containerNo ||
+              '—';
+            const displayImporterName =
+              (targetCase as any).importerName ||
+              targetCase.consignee ||
+              targetCase.extractedData?.consigneeName ||
+              targetCase.clientName ||
+              '—';
+            const displayClientName = targetCase.clientName || '—';
+            const recordedDestBillAmount = Number(
+              (targetCase.destinationBills && targetCase.destinationBills.length > 0
+                ? targetCase.destinationBills[targetCase.destinationBills.length - 1].totalAmount
+                : formData.destinationChargesAmount) || 0
+            );
 
-                  <div className="bg-black/40 border border-white/10 rounded-2xl px-3.5 py-2 flex items-center gap-3 shrink-0">
-                    <Truck size={18} className="text-emerald-400 shrink-0" />
-                    <div className="text-[11px]">
-                      <span className="text-gray-400 block">Destination: {targetCase.pod || 'Dry Port'}</span>
-                      <span className="font-mono font-bold text-white">
-                        {formData.assignedVehicleNo || targetCase.containers?.[0]?.vehicleNo || 'TBD'} • {targetCase.containers?.[0]?.number || 'CNTR'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 4-Stage Visual Progress Bar */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  {[
-                    {
-                      stage: 'Stage 1',
-                      title: 'Vehicle Received (Gate-In)',
-                      done: Boolean(formData.destinationGateInToggled || formData.portGateArrivalPhotoUrl)
-                    },
-                    {
-                      stage: 'Stage 2',
-                      title: 'Seal & Unloading Slips',
-                      done: Boolean(formData.secondaryCustomsSealNumber?.trim())
-                    },
-                    {
-                      stage: 'Stage 3',
-                      title: 'Destination Bill & Ledger',
-                      done: Boolean((targetCase.destinationBills && targetCase.destinationBills.length > 0) || Number(formData.destinationChargesAmount) > 0)
-                    },
-                    {
-                      stage: 'Stage 4',
-                      title: 'Gate-Out, DO & Finish',
-                      done: Boolean(formData.vehicleGateOutToggled)
-                    }
-                  ].map((item, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-2.5 rounded-2xl border transition-all flex items-center gap-2.5 ${
-                        item.done
-                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
-                          : 'bg-slate-900/80 border-white/10 text-gray-400'
-                      }`}
-                    >
-                      <div
-                        className={`w-6 h-6 rounded-xl font-mono font-black text-[11px] flex items-center justify-center shrink-0 ${
-                          item.done
-                            ? 'bg-emerald-500 text-slate-950'
-                            : 'bg-white/10 text-gray-300'
-                        }`}
-                      >
-                        {item.done ? '✓' : idx + 1}
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-[9px] uppercase tracking-wider font-bold block opacity-75">{item.stage}</span>
-                        <span className="text-[11px] font-bold text-white truncate block">{item.title}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* STAGE 1: VEHICLE RECEPTION (COMPLETES TRANSIT & STARTS UNLOADING) */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/60 border border-white/10 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono font-black text-xs flex items-center justify-center">
-                      1
+            return (
+              <div className="space-y-3">
+                {/* Top Strip: Vehicle Number, Container Number, Importer Name & Client Name */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-xl bg-slate-950/80 border border-white/10">
+                  <div className="min-w-0">
+                    <span className="text-[11px] text-gray-400 block">Vehicle Number</span>
+                    <span className="text-sm font-mono font-bold text-white truncate block tabular-nums">
+                      {displayVehicleNo}
                     </span>
-                    <div>
-                      <h5 className="font-bold text-white text-sm">Stage 1: Receive Vehicle at Destination Dry Port</h5>
-                      <p className="text-[11px] text-gray-400">
-                        Confirming vehicle reception automatically completes Transit and activates Destination Unloading
-                      </p>
-                    </div>
                   </div>
+                  <div className="min-w-0">
+                    <span className="text-[11px] text-gray-400 block">Container Number</span>
+                    <span className="text-sm font-mono font-bold text-cyan-300 truncate block tabular-nums">
+                      {displayContainerNo}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[11px] text-gray-400 block">Importer Name</span>
+                    <span className="text-xs font-semibold text-white truncate block" title={displayImporterName}>
+                      {displayImporterName}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[11px] text-gray-400 block">Client Name</span>
+                    <span className="text-xs font-semibold text-emerald-300 truncate block" title={displayClientName}>
+                      {displayClientName}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 1. Three Status Actions: Mark Vehicle Received, Mark Container Unloaded from Vehicle, Mark Vehicle Gate Out */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <button
                     type="button"
                     disabled={isReadOnly}
                     onClick={() => {
+                      setValidationError(null);
                       const nextState = !formData.destinationGateInToggled;
                       setFormData({ ...formData, destinationGateInToggled: nextState });
                       if (nextState) {
                         handleDestinationArrivalPhotoUploaded();
                       }
                     }}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer shrink-0 ${
+                    className={`px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-2 ${
                       formData.destinationGateInToggled
-                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                        : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 shadow-md'
+                        ? 'bg-emerald-600/25 border-emerald-400 text-emerald-200'
+                        : 'bg-slate-950/70 border-white/15 text-gray-200 hover:border-emerald-500/40'
                     }`}
                   >
-                    {formData.destinationGateInToggled ? '✓ Vehicle Received (Gate-In)' : 'Mark Vehicle Received'}
+                    <Check size={14} className={formData.destinationGateInToggled ? 'text-emerald-300' : 'text-gray-500'} />
+                    <span>Mark Vehicle Received</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isReadOnly}
+                    onClick={() => {
+                      setValidationError(null);
+                      setFormData({ ...formData, containerUnloadedToggled: !formData.containerUnloadedToggled });
+                    }}
+                    className={`px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-2 ${
+                      formData.containerUnloadedToggled
+                        ? 'bg-emerald-600/25 border-emerald-400 text-emerald-200'
+                        : 'bg-slate-950/70 border-white/15 text-gray-200 hover:border-emerald-500/40'
+                    }`}
+                  >
+                    <Check size={14} className={formData.containerUnloadedToggled ? 'text-emerald-300' : 'text-gray-500'} />
+                    <span>Mark Container Unloaded from Vehicle</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isReadOnly}
+                    onClick={() => {
+                      setValidationError(null);
+                      setFormData({ ...formData, vehicleGateOutToggled: !formData.vehicleGateOutToggled });
+                    }}
+                    className={`px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-2 ${
+                      formData.vehicleGateOutToggled
+                        ? 'bg-emerald-600/25 border-emerald-400 text-emerald-200'
+                        : 'bg-slate-950/70 border-white/15 text-gray-200 hover:border-emerald-500/40'
+                    }`}
+                  >
+                    <Check size={14} className={formData.vehicleGateOutToggled ? 'text-emerald-300' : 'text-gray-500'} />
+                    <span>Mark Vehicle Gate Out</span>
                   </button>
                 </div>
-              </div>
 
-              {/* STAGE 2: DESTINATION CUSTOMS SEAL VERIFICATION & OFFLOADING DOCUMENTS */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/60 border border-white/10 space-y-4">
-                <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono font-black text-xs flex items-center justify-center">
-                      2
-                    </span>
-                    <div>
-                      <h5 className="font-bold text-white text-sm">Stage 2: Destination Customs Seal & Unloading Documents</h5>
-                      <p className="text-[11px] text-gray-400">Verify intact seal number before breaking and upload weighbridge, transport note & gate pass documents</p>
-                    </div>
-                  </div>
-                  {formData.secondaryCustomsSealNumber?.trim() && (
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      ✓ Seal Verified
-                    </span>
-                  )}
-                </div>
-
-                <div className="p-4 rounded-xl border border-amber-500/30 bg-slate-900/80 space-y-3">
-                  <div>
-                    <span className="text-white font-bold text-xs block">Destination Customs Seal Verification (Mandatory)</span>
-                    <span className="text-[11px] text-amber-400 font-medium">Enter Customs Seal Number verified at destination</span>
-                  </div>
-
-                  <div>
-                    <label className="text-gray-300 text-xs font-semibold block mb-1">
-                      Customs Seal Number (Mandatory) *
-                    </label>
-                    <input 
-                      type="text"
-                      value={formData.secondaryCustomsSealNumber || ''}
-                      onChange={(e) => setFormData({ ...formData, secondaryCustomsSealNumber: e.target.value })}
-                      placeholder="e.g. PK-DEST-89421"
-                      className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2.5 text-white font-mono font-bold uppercase text-xs focus:border-brand-400 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* 2. Document Uploads: Port Weight Slip, Transport Note, Dry Port Gate Pass & Delivery Order */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-white/10">
                   <WorkflowMultiUploader
-                    label="Destination Weight Slip"
-                    sublabel="Terminal weighbridge slip"
+                    label="Port Weight Slip"
                     urlField="destinationWeightSlipUrl"
                     nameField="destinationWeightSlipName"
                     allowCamera={true}
                     compact={true}
+                    isReadOnly={isReadOnly}
                     formData={formData}
                     setFormData={setFormData}
                     onPreview={setActivePdfPreview}
                   />
 
                   <WorkflowMultiUploader
-                    label="Signed Transport Note"
-                    sublabel="Endorsed delivery receipt"
+                    label="Transport Note"
                     urlField="finalSignedTransportNoteUrl"
                     nameField="finalSignedTransportNoteName"
                     allowCamera={true}
                     compact={true}
+                    isReadOnly={isReadOnly}
                     formData={formData}
                     setFormData={setFormData}
                     onPreview={setActivePdfPreview}
@@ -3245,256 +2902,76 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
                   <WorkflowMultiUploader
                     label="Dry Port Gate Pass"
-                    sublabel="Clearance / entry pass"
                     urlField="dryPortGatePassUrl"
                     nameField="dryPortGatePassName"
                     allowCamera={true}
                     compact={true}
+                    isReadOnly={isReadOnly}
+                    formData={formData}
+                    setFormData={setFormData}
+                    onPreview={setActivePdfPreview}
+                  />
+
+                  <WorkflowMultiUploader
+                    label="Delivery Order"
+                    urlField="destinationDoDocUrl"
+                    nameField="destinationDoDocName"
+                    allowCamera={true}
+                    compact={true}
+                    isReadOnly={isReadOnly}
                     formData={formData}
                     setFormData={setFormData}
                     onPreview={setActivePdfPreview}
                   />
                 </div>
-              </div>
 
-              {/* STAGE 3: DESTINATION UNLOADING BILL & SEPARATE LEDGER (ARRANGED BY CLIENT VS COMPANY) */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-amber-500/10 via-slate-950 to-emerald-500/10 border border-amber-500/30 space-y-4 shadow-lg">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono font-black text-xs flex items-center justify-center">
-                      3
-                    </span>
-                    <div>
-                      <h5 className="font-bold text-white text-sm">Stage 3: Destination Unloading Bill & Separate Ledger</h5>
-                      <p className="text-[11px] text-gray-300">
-                        Destination Staff generates the unloading bill (Arranged by Client or Arranged by Company) with separate financial ledgers.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex rounded-xl bg-slate-900 p-1 border border-white/10 shrink-0">
-                    <button
-                      type="button"
-                      disabled={isReadOnly}
-                      onClick={() => setFormData({ ...formData, destinationChargesArrangedBy: 'Client' })}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                        formData.destinationChargesArrangedBy === 'Client'
-                          ? 'bg-sky-600 text-white shadow'
-                          : 'text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      Arranged by Client
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isReadOnly}
-                      onClick={() => setFormData({ ...formData, destinationChargesArrangedBy: 'DPL' })}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                        formData.destinationChargesArrangedBy === 'DPL'
-                          ? 'bg-emerald-600 text-white shadow'
-                          : 'text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      Arranged by Company (DPL)
-                    </button>
-                  </div>
-                </div>
-
-                <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
-                  formData.destinationChargesArrangedBy === 'DPL'
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
-                    : 'bg-sky-500/10 border-sky-500/30 text-sky-200'
-                }`}>
-                  <Receipt size={16} className="shrink-0 mt-0.5" />
-                  <div>
-                    {formData.destinationChargesArrangedBy === 'DPL' ? (
-                      <>
-                        <strong className="block text-emerald-300">Arranged by Company (DPL):</strong>
-                        Destination Unloading Bill is billed to Company (recorded in <strong>Destination Staff ➔ Company Ledger</strong> & <strong>Company Payables</strong>, notifying Finance Manager) and automatically added to <strong>Company's Client Invoice</strong>.
-                      </>
-                    ) : (
-                      <>
-                        <strong className="block text-sky-300">Arranged by Client (Direct):</strong>
-                        Destination Unloading Bill is generated directly for <strong>{targetCase.clientName}</strong> with full itemized breakup. Added to <strong>Client Case Expenses</strong>, <strong>Destination Staff ➔ Client Ledger</strong>, and <strong>Client ➔ Destination Staff Ledger</strong> with notification to Client.
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Existing Destination Bills Breakdown if created */}
-                {targetCase.destinationBills && targetCase.destinationBills.length > 0 && (
-                  <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-white/10 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-amber-300">
-                        Generated Destination Bill ({targetCase.destinationBills[targetCase.destinationBills.length - 1].billNo})
-                      </span>
-                      <span className="text-xs font-mono font-black text-emerald-400">
-                        Total: PKR {Number(targetCase.destinationBills[targetCase.destinationBills.length - 1].totalAmount || 0).toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] bg-black/40 p-2.5 rounded-xl border border-white/5">
-                      {(targetCase.destinationBills[targetCase.destinationBills.length - 1].items || []).map((it, idx) => (
-                        <div key={idx} className="flex flex-col">
-                          <span className="text-gray-400 truncate">{it.description}</span>
-                          <span className="text-white font-mono font-bold">PKR {Number(it.amount || 0).toLocaleString()}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
-                  <div className="text-[11px] text-gray-300">
-                    Current Recorded Destination Bill Amount:{' '}
-                    <strong className="text-amber-300 font-mono text-xs">
-                      PKR {Number(
-                        (targetCase.destinationBills && targetCase.destinationBills.length > 0
-                          ? targetCase.destinationBills[targetCase.destinationBills.length - 1].totalAmount
-                          : formData.destinationChargesAmount) || 0
-                      ).toLocaleString()}
-                    </strong>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={isReadOnly}
-                    onClick={() => {
-                      setBillModalType('DESTINATION');
-                      setShowLoadingBillModal(true);
-                    }}
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-40 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-95"
-                  >
-                    <Receipt size={15} />
-                    <span>{targetCase.destinationBills && targetCase.destinationBills.length > 0 ? 'Update / View Destination Bill & Breakup' : 'Create Destination Unloading Bill'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* STAGE 4: VEHICLE GATE-OUT, DELIVERY ORDER (DO) PDF DOWNLOAD & CASE FINISH */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-slate-950 to-teal-950/50 border border-emerald-500/40 space-y-4 shadow-xl">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono font-black text-xs flex items-center justify-center">
-                      4
-                    </span>
-                    <div>
-                      <h5 className="font-bold text-white text-sm">Stage 4: Vehicle Gate-Out, Delivery Order (DO) & Case Finish</h5>
-                      <p className="text-[11px] text-emerald-200/80">
-                        Marking Vehicle Gate-Out immediately unlocks the Delivery Order (PDF) generator. Completing this workflow finishes & archives the case permanently.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={isReadOnly}
-                    onClick={() => setFormData({ ...formData, vehicleGateOutToggled: !formData.vehicleGateOutToggled })}
-                    className={`px-4 py-2 rounded-xl font-bold text-xs border transition-all shrink-0 ${
-                      formData.vehicleGateOutToggled
-                        ? 'bg-emerald-600 text-white border-emerald-400 shadow-lg shadow-emerald-600/30'
-                        : 'bg-slate-800 text-gray-300 border-white/15 hover:border-emerald-500/40'
-                    }`}
-                  >
-                    {formData.vehicleGateOutToggled ? '✓ Vehicle Gate Out Confirmed' : 'Mark Vehicle Gate Out'}
-                  </button>
-                </div>
-
-                {/* Delivery Order (DO) PDF Download Card — Appears immediately when Vehicle Gate-Out is marked */}
-                {(formData.vehicleGateOutToggled || isDestinationUnloadedAndGateOut(targetCase)) && (
-                  <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-400/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 flex items-center justify-center shrink-0">
-                        <FileCheck size={20} />
-                      </div>
-                      <div>
-                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300 block">
-                          Vehicle Gate-Out Verified • Delivery Order Ready
-                        </span>
-                        <h6 className="text-sm font-bold text-white">
-                          Official Destination Delivery Order (DO) PDF
-                        </h6>
-                        <p className="text-[11px] text-gray-300">
-                          Click to generate & download the official Delivery Order PDF and permanently archive it in Case Documents.
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const doRes = await downloadCustomsDeliveryOrderPdf({
-                          targetCase: {
-                            ...targetCase,
-                            workflowDetails: {
-                              ...(targetCase.workflowDetails || {}),
-                              [stepStatus]: { ...formData, vehicleGateOutToggled: true }
-                            }
-                          },
-                          officerName: formData.officer || 'Destination Staff'
-                        });
-                        if (doRes?.dataUrl) {
-                          const existingDocs = [...(targetCase.documents || [])];
-                          const doName = `Destination_Delivery_Order_${targetCase.caseNo}.pdf`;
-                          if (!existingDocs.some((d: any) => d.name === doName)) {
-                            existingDocs.push({
-                              id: `doc_dest_do_${Date.now()}`,
-                              name: doName,
-                              url: doRes.dataUrl,
-                              type: 'Destination Delivery Order (DO)',
-                              uploadedAt: new Date().toISOString()
-                            });
-                            onSaveCase({
-                              ...targetCase,
-                              documents: existingDocs
-                            });
-                          }
-                        }
-                      }}
-                      className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-emerald-500/30 transition-all active:scale-95 shrink-0"
-                    >
-                      <Download size={15} />
-                      <span>Generate & Download Delivery Order (PDF)</span>
-                    </button>
-                  </div>
-                )}
-
+                {/* 3. Create Dry Port Bill + Finish */}
                 {!isReadOnly && (
-                  <div className="pt-2 flex justify-end">
+                  <div className="p-3 rounded-xl bg-slate-950/80 border border-white/10 flex flex-wrap items-center justify-between gap-2.5">
                     <button
                       type="button"
+                      disabled={isReadOnly}
                       onClick={() => {
-                        setFormData(prev => ({ ...prev, vehicleGateOutToggled: true }));
-                        setTimeout(() => {
-                          const check = validateStepStrict();
-                          if (!check.valid) {
-                            setValidationError(check.error || 'Please verify Customs Seal Photo & Number and mark Vehicle Gate-Out.');
-                            return;
-                          }
-                          setValidationError(null);
-                          handleSave(true);
-                        }, 30);
+                        setBillModalType('DESTINATION');
+                        setShowLoadingBillModal(true);
                       }}
-                      className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/30 transition-all active:scale-95"
+                      className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-2 transition-colors whitespace-nowrap"
                     >
-                      <CheckCircle2 size={16} />
-                      <span>Complete Destination Workflow & Finish Case</span>
+                      <Receipt size={15} />
+                      <span>
+                        {recordedDestBillAmount > 0
+                          ? `Create / Update Dry Port Bill (PKR ${recordedDestBillAmount.toLocaleString()})`
+                          : 'Create Dry Port Bill'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={!formData.destinationGateInToggled || !formData.containerUnloadedToggled || !formData.vehicleGateOutToggled}
+                      onClick={() => {
+                        const check = validateStepStrict();
+                        if (!check.valid) {
+                          setValidationError(check.error || 'Please mark Vehicle Received, Container Unloaded, and Vehicle Gate Out.');
+                          return;
+                        }
+                        setValidationError(null);
+                        handleSave(true);
+                      }}
+                      className="px-6 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                    >
+                      <CheckCircle2 size={15} />
+                      <span>Finish</span>
                     </button>
                   </div>
                 )}
               </div>
-            </div>
-          )}
+            );
+          })()}
             </div>
           )}
 
-          {/* Live Transit Route Locations & Port Gate-Out / Unloading Duration History (All Categories) */}
-          {(stepIndex >= 4 ||
-            String(stepStatus).toLowerCase().includes('transit') ||
-            String(stepStatus).toLowerCase().includes('loading') ||
-            String(stepStatus).toLowerCase().includes('destination') ||
-            String(stepStatus).toLowerCase().includes('unload') ||
-            String(stepStatus).toLowerCase().includes('dispatch') ||
-            (targetCase.transitLocationsHistory && targetCase.transitLocationsHistory.length > 0) ||
-            Boolean(targetCase.loadingGateOutDuration) ||
-            Boolean(targetCase.destinationGateOutDuration)) && (
+          {/* Live Transit Route Locations History (Shown strictly on Transit step so Loading & Destination stay single-screen) */}
+          {(stepIndex === 5 || stepStatus === CaseStatus.IN_TRANSIT) && (
             <CaseTransitHistoryCard targetCase={targetCase} compact={true} />
           )}
 
@@ -3519,67 +2996,83 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         )}
 
         {/* Footer */}
-        <div className="p-4 border-t border-white/10 bg-slate-950/70 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
-          <div>
-            {(userRole === UserRole.UNLOADING_PORT_STAFF || userRole === UserRole.DESTINATION_PORT_STAFF || userRole === UserRole.ADMIN || userRole === UserRole.OPERATIONS_MANAGER) && (
-              isDestinationUnloadedAndGateOut(targetCase) ? (
+        {(() => {
+          const isSinglePagePortModal =
+            normCategory === 'Bonded Carrier' &&
+            (stepIndex === 4 ||
+              stepIndex === 6 ||
+              stepIndex === 7 ||
+              stepStatus === CaseStatus.LOADING_PORT_PROCESSING ||
+              stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL);
+          return (
+            <div className="px-4 py-3 border-t border-white/10 bg-slate-950/70 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+              <div>
+                {!isSinglePagePortModal &&
+                  (userRole === UserRole.UNLOADING_PORT_STAFF ||
+                    userRole === UserRole.DESTINATION_PORT_STAFF ||
+                    userRole === UserRole.ADMIN ||
+                    userRole === UserRole.OPERATIONS_MANAGER) &&
+                  (isDestinationUnloadedAndGateOut(targetCase) ? (
+                    <button
+                      type="button"
+                      onClick={() => downloadCustomsDeliveryOrderPdf({ targetCase })}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-1.5 active:scale-95"
+                      title="Download Official Customs Delivery Order (DO) PDF"
+                    >
+                      <Download size={15} />
+                      <span>Download Bonded Carrier DO (PDF)</span>
+                    </button>
+                  ) : null)}
+              </div>
+              <div className="flex items-center gap-2.5">
                 <button
                   type="button"
-                  onClick={() => downloadCustomsDeliveryOrderPdf({ targetCase })}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-1.5 active:scale-95"
-                  title="Download Official Customs Delivery Order (DO) PDF"
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
                 >
-                  <Download size={15} />
-                  <span>Download Bonded Carrier DO (PDF)</span>
-                </button>
-              ) : null
-            )}
-          </div>
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-            >
-              Close
-            </button>
-
-            {!isReadOnly && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setValidationError(null);
-                    handleSave(false);
-                  }}
-                  className="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 hover:border-amber-500/50 shadow transition-all flex items-center gap-1.5 active:scale-95"
-                  title="Save draft data without marking step completed"
-                >
-                  <Save size={14} className="text-amber-400" />
-                  <span>Incomplete Save</span>
+                  Close
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const check = validateStepStrict();
-                    if (!check.valid) {
-                      setValidationError(check.error || 'Please fill all required fields and upload all required documents.');
-                      return;
-                    }
-                    setValidationError(null);
-                    handleSave(true);
-                  }}
-                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 transition-all flex items-center gap-1.5 active:scale-95"
-                  title="Validate all fields & documents and mark step completed"
-                >
-                  <CheckCircle2 size={15} />
-                  <span>Completed</span>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+                {!isReadOnly && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setValidationError(null);
+                        handleSave(false);
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 hover:border-amber-500/50 shadow transition-all flex items-center gap-1.5 active:scale-95"
+                      title="Save draft data without marking step completed"
+                    >
+                      <Save size={14} className="text-amber-400" />
+                      <span>{isSinglePagePortModal ? 'Save' : 'Incomplete Save'}</span>
+                    </button>
+
+                    {!isSinglePagePortModal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const check = validateStepStrict();
+                          if (!check.valid) {
+                            setValidationError(check.error || 'Please fill all required fields and upload all required documents.');
+                            return;
+                          }
+                          setValidationError(null);
+                          handleSave(true);
+                        }}
+                        className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 transition-all flex items-center gap-1.5 active:scale-95"
+                        title="Validate all fields & documents and mark step completed"
+                      >
+                        <CheckCircle2 size={15} />
+                        <span>Completed</span>
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Vehicle Validation Popup Modal */}

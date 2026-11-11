@@ -1,4 +1,3 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import * as pdfjsLib from "pdfjs-dist";
 // @ts-ignore
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -115,53 +114,48 @@ export async function extractPdfPagesAndTextForOcr(
   return { pageImages, extractedText, numPages };
 }
 
-declare const __GEMINI_API_KEY__: string | undefined;
-
 // In-memory session cache for processed document data to guarantee zero data loss between re-renders/edits
 export const docDataCache = new Map<string, { base64: string; mimeType: string; name: string }>();
 
-// Helper to reliably retrieve API key in any runtime environment (Vite client define, window, or Node)
-export const getGeminiApiKey = (): string => {
+interface ServerGeminiRequest {
+  files?: { mimeType: string; base64: string }[];
+  extractedText?: string;
+  prompt: string;
+  responseMimeType?: 'application/json' | 'text/plain';
+  responseSchema?: any;
+  systemInstruction?: string;
+  timeoutMs?: number;
+}
+
+async function callServerGeminiExtract(req: ServerGeminiRequest): Promise<any> {
+  const timeoutMs = req.timeoutMs || 25000;
   try {
-    if (typeof __GEMINI_API_KEY__ !== 'undefined' && __GEMINI_API_KEY__ && typeof __GEMINI_API_KEY__ === 'string') {
-      const k = __GEMINI_API_KEY__.trim();
-      if (k) return k;
+    const fetchPromise = fetch('/api/extract-documents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        files: req.files || [],
+        extractedText: req.extractedText || '',
+        prompt: req.prompt,
+        responseMimeType: req.responseMimeType || 'application/json',
+        responseSchema: req.responseSchema,
+        systemInstruction: req.systemInstruction
+      })
+    });
+    const timeoutPromise = new Promise<Response | null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
+    const res = await Promise.race([fetchPromise, timeoutPromise]);
+    if (!res || !res.ok) return null;
+    const json = await res.json();
+    if (json && json.error) {
+      console.warn('Server Gemini OCR notice:', json.error);
+      return null;
     }
-  } catch (_) {}
-
-  try {
-    const k = process.env.GEMINI_API_KEY;
-    if (k && typeof k === 'string' && k.trim()) return k.trim();
-  } catch (_) {}
-
-  try {
-    const k2 = process.env.API_KEY;
-    if (k2 && typeof k2 === 'string' && k2.trim()) return k2.trim();
-  } catch (_) {}
-
-  try {
-    const w = typeof window !== 'undefined' ? (window as any) : null;
-    const wk = w?.__GEMINI_API_KEY__ || w?.process?.env?.GEMINI_API_KEY;
-    if (wk && typeof wk === 'string' && wk.trim()) return wk.trim();
-  } catch (_) {}
-
-  return '';
-};
-
-// Initialize the API client lazily and safely
-let aiClient: GoogleGenAI | null = null;
-export const getAIClient = (): GoogleGenAI | null => {
-  if (aiClient) return aiClient;
-  try {
-    const apiKey = getGeminiApiKey();
-    if (!apiKey) return null;
-    aiClient = new GoogleGenAI({ apiKey });
-    return aiClient;
+    return json;
   } catch (err) {
-    console.warn("GoogleGenAI client init notice:", err);
+    console.warn('Server Gemini request notice:', err);
     return null;
   }
-};
+}
 
 export const fileToBase64 = async (file?: File): Promise<string> => {
   if (!file) return '';
@@ -220,9 +214,8 @@ export const enhanceDocumentWithAI = async (file: File) => {
   try {
     const processed = await compressAndPrepareFile(file);
     const mimeType = processed.type || (processed.isImage ? 'image/jpeg' : 'application/pdf');
-    const ai = getAIClient();
 
-    if (!ai || !processed.base64) {
+    if (!processed.base64) {
       return {
         success: true,
         enhancedUrl: processed.dataUrl || URL.createObjectURL(file),
@@ -230,30 +223,17 @@ export const enhanceDocumentWithAI = async (file: File) => {
       };
     }
 
-    const apiCall = ai.models.generateContent({
-      model: 'gemini-flash-latest',
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType,
-              data: processed.base64
-            }
-          },
-          {
-            text: "Deeply analyze this international shipping document (even if dim, faint photocopy, or low resolution). Identify document type (Bill of Lading, Commercial Invoice, Packing List, Goods Declaration, DO, etc.), issuing shipping line (Maersk, MSC, CMA CGM, COSCO, OOCL, etc.), key identifiers (BL/Invoice/Container/GD), and legibility status in 1 clear English sentence."
-          }
-        ]
-      }
-    }).catch(() => null);
-
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000));
-    const response: any = await Promise.race([apiCall, timeoutPromise]);
+    const res = await callServerGeminiExtract({
+      files: [{ mimeType, base64: processed.base64 }],
+      prompt: "Deeply analyze this shipping or vehicle compliance document (even if dim, faint photocopy, or low resolution). Identify document type, issuing authority, key identifiers, and legibility status in 1 clear English sentence.",
+      responseMimeType: 'text/plain',
+      timeoutMs: 12000
+    });
 
     return {
       success: true,
       enhancedUrl: processed.dataUrl || URL.createObjectURL(file),
-      analysis: response?.text || "Document processed successfully."
+      analysis: res?.text || "Document processed successfully."
     };
   } catch (error: any) {
     console.warn("AI Enhancement warning:", error);
@@ -280,7 +260,6 @@ export const autoFillCaseData = async (
 ): Promise<any> => {
   try {
     if (!files || files.length === 0) return {};
-    const ai = getAIClient();
 
     const parts: any[] = [];
     const rawPdfSnippets: string[] = [];
@@ -1192,49 +1171,6 @@ Return ONLY valid JSON.`;
       console.warn("Server OCR route attempt note:", serverErr);
     }
 
-    // Step B: Direct client-side SDK extraction WITHOUT restrictive 82-property responseSchema
-    if (!ai) {
-      return normalizeParsedData(runHeuristicExtraction());
-    }
-
-    let response: any = null;
-    const modelsToTry = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
-
-    for (const model of modelsToTry) {
-      try {
-        const apiCall = ai.models.generateContent({
-          model,
-          contents: { parts },
-          config: {
-            responseMimeType: "application/json"
-          }
-        }).catch((apiErr) => {
-          console.warn(`Model ${model} attempt caught:`, apiErr);
-          return null;
-        });
-
-        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 45000));
-        response = await Promise.race([apiCall, timeoutPromise]);
-        if (response && response.text) break;
-      } catch (mErr) {
-        console.warn(`Model ${model} trial note:`, mErr);
-      }
-    }
-
-    if (response && response.text) {
-      try {
-        const raw = response.text.trim();
-        const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-        const parsed = JSON.parse(cleaned);
-        const norm = mergeWithHeuristic(normalizeParsedData(parsed));
-        if (norm.blNumber || norm.gdNo || norm.consigneeName || norm.invoiceNo || (norm.containers && norm.containers.length > 0)) {
-          return norm;
-        }
-      } catch (pe) {
-        console.warn("JSON parse fallback:", pe);
-      }
-    }
-
     return normalizeParsedData(runHeuristicExtraction());
   } catch (error) {
     console.warn("Auto-fill non-fatal error, falling back:", error);
@@ -1244,56 +1180,318 @@ Return ONLY valid JSON.`;
 
 export const autoFillVehicleData = async (file: File) => {
   try {
-    const ai = getAIClient();
-    if (!ai) return {};
-
     const processed = await compressAndPrepareFile(file);
     if (!processed.base64) return {};
 
-    const parts = [
-      {
-        inlineData: {
-          mimeType: processed.type || 'image/jpeg',
-          data: processed.base64
-        }
-      },
-      {
-        text: `Extract vehicle or driver information from this document (Registration Book, Driver License, or CNIC).
-               Return JSON with keys: registrationNumber, engineNo, chassisNo, type, transporter, driverName, driverCnic.
-               If a field is not found, leave as null or empty string.`
+    const mimeType = processed.type || (processed.isImage ? 'image/jpeg' : 'application/pdf');
+    const filesPayload: { mimeType: string; base64: string }[] = [];
+    let extractedText = '';
+
+    if (mimeType.includes('pdf') || file.name.toLowerCase().endsWith('.pdf')) {
+      const pdfRes = await extractPdfPagesAndTextForOcr(processed.base64, 4);
+      extractedText = pdfRes.extractedText;
+      if (pdfRes.pageImages.length > 0) {
+        filesPayload.push(...pdfRes.pageImages);
+      } else {
+        filesPayload.push({ mimeType: 'application/pdf', base64: processed.base64 });
       }
-    ];
+    } else {
+      filesPayload.push({ mimeType, base64: processed.base64 });
+    }
 
-    const apiCall = ai.models.generateContent({
-      model: 'gemini-flash-latest',
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            registrationNumber: { type: Type.STRING },
-            engineNo: { type: Type.STRING },
-            chassisNo: { type: Type.STRING },
-            type: { type: Type.STRING },
-            transporter: { type: Type.STRING },
-            driverName: { type: Type.STRING },
-            driverCnic: { type: Type.STRING },
-          }
-        }
-      }
-    }).catch(() => null);
+    const res = await callServerGeminiExtract({
+      files: filesPayload,
+      extractedText,
+      prompt: `Extract vehicle and owner/driver information from this Pakistani Vehicle Registration Book, Smart Card, Driver License, or CNIC.
+Return JSON with keys: registrationNumber, engineNo, chassisNo, make, model, mra, ownerName, ownerCnic, type, transporter, driverName, driverCnic.
+If a field is not found on the document, set it to empty string "".`,
+      timeoutMs: 18000
+    });
 
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000));
-    const response: any = await Promise.race([apiCall, timeoutPromise]);
-
-    if (response && response.text) {
-      return JSON.parse(response.text);
+    if (res && typeof res === 'object') {
+      return res;
     }
     return {};
   } catch (error) {
     console.warn("Auto-fill vehicle non-fatal error:", error);
     return {};
+  }
+};
+
+export interface ExpectedVehicleMatchFields {
+  registrationNumber?: string;
+  engineNo?: string;
+  chassisNo?: string;
+  ownerName?: string;
+  ownerCnic?: string;
+}
+
+export interface VehicleDocVerificationResult {
+  isVerified: boolean;
+  hasMismatch: boolean;
+  mismatches: string[];
+  matchedFields: string[];
+  summaryMessage: string;
+  extracted: {
+    documentTypeDetected?: 'REGISTRATION_BOOK' | 'OWNER_ID_CARD' | 'BOTH' | 'OTHER';
+    registrationNumber?: string;
+    engineNo?: string;
+    chassisNo?: string;
+    make?: string;
+    model?: string;
+    mra?: string;
+    tareWeight?: string;
+    ownerName?: string;
+    ownerFatherName?: string;
+    ownerCnic?: string;
+    ownerAddress?: string;
+  };
+}
+
+const normalizeVehicleSpecToken = (val?: string): string => {
+  if (!val) return '';
+  const trimmed = String(val).trim().toUpperCase();
+  if (!trimmed || trimmed === 'N/A' || trimmed === 'NA' || trimmed === 'NONE' || trimmed === '-' || trimmed === 'ENG-DEFAULT' || trimmed === 'CHS-DEFAULT') {
+    return '';
+  }
+  return trimmed.replace(/[^A-Z0-9]/g, '');
+};
+
+const normalizeCnicDigits = (val?: string): string => {
+  if (!val) return '';
+  const digits = String(val).replace(/[^0-9]/g, '');
+  if (digits.length < 7 || /^0+$/.test(digits)) return '';
+  return digits;
+};
+
+const doOwnerNamesConflict = (expectedName?: string, docName?: string): boolean => {
+  const cleanA = String(expectedName || '').trim().toUpperCase();
+  const cleanB = String(docName || '').trim().toUpperCase();
+  if (!cleanA || !cleanB) return false;
+  if (cleanA === 'N/A' || cleanB === 'N/A') return false;
+  const stopWords = new Set(['MR', 'MRS', 'MS', 'MUHAMMAD', 'MOHAMMAD', 'M', 'MD', 'HAJI', 'SYED', 'KHAN', 'SHAH', 'SON', 'OF', 'SO', 'PVT', 'LTD']);
+  const tokensA = cleanA.replace(/[^A-Z0-9 ]/g, ' ').split(/\s+/).filter(t => t.length >= 3 && !stopWords.has(t));
+  const tokensB = cleanB.replace(/[^A-Z0-9 ]/g, ' ').split(/\s+/).filter(t => t.length >= 3 && !stopWords.has(t));
+  if (tokensA.length === 0 || tokensB.length === 0) {
+    return cleanA.replace(/[^A-Z0-9]/g, '') !== cleanB.replace(/[^A-Z0-9]/g, '');
+  }
+  const hasOverlap = tokensA.some(ta => tokensB.some(tb => ta === tb || (ta.length >= 4 && tb.includes(ta)) || (tb.length >= 4 && ta.includes(tb))));
+  return !hasOverlap;
+};
+
+export const verifyVehicleComplianceDocumentWithAI = async (
+  input: File | { dataUrl: string; name?: string; type?: string },
+  docKind: 'REG_BOOK' | 'OWNER_ID',
+  expected: ExpectedVehicleMatchFields
+): Promise<VehicleDocVerificationResult> => {
+  try {
+    let b64 = '';
+    let mime = 'image/jpeg';
+    let fileName = docKind === 'REG_BOOK' ? 'reg_book' : 'owner_id';
+
+    if (input instanceof File) {
+      fileName = input.name || fileName;
+      const proc = await compressAndPrepareFile(input);
+      b64 = proc.base64;
+      mime = proc.type || (proc.isImage ? 'image/jpeg' : 'application/pdf');
+    } else if (input && input.dataUrl && input.dataUrl.includes(',')) {
+      fileName = input.name || fileName;
+      const parts = input.dataUrl.split(',');
+      b64 = parts[1];
+      const m = parts[0].match(/data:(.*?);/);
+      mime = m ? m[1] : (input.type || 'image/jpeg');
+    }
+
+    if (!b64) {
+      return {
+        isVerified: false,
+        hasMismatch: false,
+        mismatches: [],
+        matchedFields: [],
+        summaryMessage: 'Could not read document file for verification.',
+        extracted: {}
+      };
+    }
+
+    const filesPayload: { mimeType: string; base64: string }[] = [];
+    let extractedText = '';
+    const isPdf = mime.includes('pdf') || fileName.toLowerCase().endsWith('.pdf');
+
+    if (isPdf) {
+      const pdfRes = await extractPdfPagesAndTextForOcr(b64, 6);
+      extractedText = pdfRes.extractedText;
+      if (pdfRes.pageImages.length > 0) {
+        filesPayload.push(...pdfRes.pageImages);
+      } else {
+        filesPayload.push({ mimeType: 'application/pdf', base64: b64 });
+      }
+    } else {
+      let cleanB64 = b64;
+      if (mime.startsWith('image/')) {
+        try {
+          const prep = await preprocessDocumentForOcr(b64, {
+            enableDeskew: true,
+            enableIlluminationNormalization: true,
+            enableContrastEnhancement: true,
+            enableSharpening: true
+          });
+          if (prep.base64) cleanB64 = prep.base64;
+        } catch (_) {}
+      }
+      filesPayload.push({ mimeType: mime.startsWith('image/') ? mime : 'image/jpeg', base64: cleanB64 });
+    }
+
+    const prompt = `You are a strict Pakistan Excise & Taxation Motor Vehicle Registration Book and NADRA CNIC compliance verifier.
+Carefully read ALL pages/sides of the uploaded document and extract exact values printed on it.
+Never guess or invent values — only return characters clearly printed on the document.
+
+Return ONLY valid JSON with these exact keys:
+{
+  "documentTypeDetected": "REGISTRATION_BOOK" | "OWNER_ID_CARD" | "BOTH" | "OTHER",
+  "registrationNumber": "string (Vehicle Registration / Plate No. e.g. JU-5647, TMA-133, LS-6586, or empty string if not printed)",
+  "engineNo": "string (Engine Number printed on Registration Book/Smart Card, or empty string if not printed)",
+  "chassisNo": "string (Chassis / Frame Number printed on Registration Book/Smart Card, or empty string if not printed)",
+  "make": "string (Maker / Make e.g. HINO, NISSAN, BEDFORD, or empty string)",
+  "model": "string (Model / Year of Manufacture e.g. 1995, 2018, or empty string)",
+  "mra": "string (Registration Province / City / MRA e.g. KARACHI, BALOCHISTAN, LASBELA, QUETTA, SINDH, PUNJAB, or empty string)",
+  "tareWeight": "string (Unladen / Tare Weight e.g. 5100, 15000 KG, or empty string)",
+  "ownerName": "string (Registered Owner Name on Registration Book OR Full Name on NADRA CNIC / ID Card, or empty string)",
+  "ownerFatherName": "string (Father / Husband Name S/O on Registration Book or NADRA CNIC, or empty string)",
+  "ownerCnic": "string (13-digit CNIC / NIC number e.g. 42101-1234567-1, or empty string)",
+  "ownerAddress": "string (Residential / Permanent Address of Owner printed on Registration Book or NADRA CNIC in English, or empty string)"
+}`;
+
+    const aiRes = await callServerGeminiExtract({
+      files: filesPayload,
+      extractedText,
+      prompt,
+      timeoutMs: 25000
+    });
+
+    if (!aiRes || typeof aiRes !== 'object') {
+      return {
+        isVerified: false,
+        hasMismatch: false,
+        mismatches: [],
+        matchedFields: [],
+        summaryMessage: 'Document uploaded (AI verification service unavailable).',
+        extracted: {}
+      };
+    }
+
+    const extracted = {
+      documentTypeDetected: aiRes.documentTypeDetected || 'OTHER',
+      registrationNumber: String(aiRes.registrationNumber || '').trim().toUpperCase(),
+      engineNo: String(aiRes.engineNo || '').trim().toUpperCase(),
+      chassisNo: String(aiRes.chassisNo || '').trim().toUpperCase(),
+      make: String(aiRes.make || '').trim().toUpperCase(),
+      model: String(aiRes.model || '').trim(),
+      mra: String(aiRes.mra || '').trim().toUpperCase(),
+      tareWeight: String(aiRes.tareWeight || '').trim().toUpperCase(),
+      ownerName: String(aiRes.ownerName || '').trim(),
+      ownerFatherName: String(aiRes.ownerFatherName || '').trim(),
+      ownerCnic: String(aiRes.ownerCnic || '').trim(),
+      ownerAddress: String(aiRes.ownerAddress || '').trim()
+    };
+
+    const mismatches: string[] = [];
+    const matchedFields: string[] = [];
+
+    const expRegNorm = normalizeVehicleSpecToken(expected.registrationNumber);
+    const docRegNorm = normalizeVehicleSpecToken(extracted.registrationNumber);
+
+    const expEngNorm = normalizeVehicleSpecToken(expected.engineNo);
+    const docEngNorm = normalizeVehicleSpecToken(extracted.engineNo);
+
+    const expChsNorm = normalizeVehicleSpecToken(expected.chassisNo);
+    const docChsNorm = normalizeVehicleSpecToken(extracted.chassisNo);
+
+    const expCnicNorm = normalizeCnicDigits(expected.ownerCnic);
+    const docCnicNorm = normalizeCnicDigits(extracted.ownerCnic);
+
+    // 1. Check wrong document type uploaded to Registration Book slot
+    if (docKind === 'REG_BOOK' && extracted.documentTypeDetected === 'OWNER_ID_CARD' && !docRegNorm && !docEngNorm && !docChsNorm) {
+      mismatches.push('Uploaded file is an Owner ID Card (CNIC), not a Vehicle Registration Book (Registration No., Engine No., and Chassis No. are missing).');
+    }
+
+    // 2. Always cross-match Vehicle Registration No., Engine No., and Chassis No. whenever present on the uploaded document
+    if (docRegNorm && expRegNorm) {
+      if (docRegNorm !== expRegNorm) {
+        mismatches.push(`Vehicle Registration No. is different: Vehicle has "${expected.registrationNumber}" vs Document shows "${extracted.registrationNumber}"`);
+      } else {
+        matchedFields.push(`Vehicle No. (${extracted.registrationNumber})`);
+      }
+    } else if (docKind === 'REG_BOOK' && expRegNorm && !docRegNorm && extracted.documentTypeDetected !== 'OWNER_ID_CARD') {
+      // If it's an unrelated document with zero vehicle specs
+      if (!docEngNorm && !docChsNorm) {
+        mismatches.push('No Vehicle Registration No., Engine No., or Chassis No. could be found on the uploaded Registration Book.');
+      }
+    }
+
+    if (docEngNorm && expEngNorm) {
+      if (docEngNorm !== expEngNorm) {
+        mismatches.push(`Engine No. is different: Vehicle has "${expected.engineNo}" vs Document shows "${extracted.engineNo}"`);
+      } else {
+        matchedFields.push(`Engine No. (${extracted.engineNo})`);
+      }
+    }
+
+    if (docChsNorm && expChsNorm) {
+      if (docChsNorm !== expChsNorm) {
+        mismatches.push(`Chassis No. is different: Vehicle has "${expected.chassisNo}" vs Document shows "${extracted.chassisNo}"`);
+      } else {
+        matchedFields.push(`Chassis No. (${extracted.chassisNo})`);
+      }
+    }
+
+    // 3. Cross-match Owner CNIC and Owner Name (especially when uploading Owner ID Card or when Reg Book also lists Owner CNIC/Name)
+    if (docCnicNorm && expCnicNorm) {
+      if (docCnicNorm !== expCnicNorm) {
+        mismatches.push(`Owner CNIC / ID No. is different: Vehicle/Reg Book has "${expected.ownerCnic}" vs Uploaded Document shows "${extracted.ownerCnic}"`);
+      } else {
+        matchedFields.push(`Owner CNIC (${extracted.ownerCnic})`);
+      }
+    }
+
+    if (docKind === 'OWNER_ID' && extracted.ownerName && expected.ownerName) {
+      if (doOwnerNamesConflict(expected.ownerName, extracted.ownerName)) {
+        mismatches.push(`Owner Name is different: Vehicle/Reg Book has "${expected.ownerName}" vs Owner ID Card shows "${extracted.ownerName}"`);
+      } else {
+        matchedFields.push(`Owner Name (${extracted.ownerName})`);
+      }
+    }
+
+    if (docKind === 'OWNER_ID' && !docCnicNorm && !extracted.ownerName && !docRegNorm && !docEngNorm && !docChsNorm) {
+      mismatches.push('Uploaded Owner ID Card does not contain a readable CNIC number or Owner Name.');
+    }
+
+    const hasMismatch = mismatches.length > 0;
+    const isVerified = !hasMismatch && (matchedFields.length > 0 || Boolean(docRegNorm || docEngNorm || docChsNorm || docCnicNorm));
+
+    const summaryMessage = hasMismatch
+      ? `Document Detail Mismatch Detected: ${mismatches.join(' • ')}`
+      : matchedFields.length > 0
+      ? `AI Verified & Matched: ${matchedFields.join(', ')}`
+      : 'Document scanned and particulars extracted successfully.';
+
+    return {
+      isVerified,
+      hasMismatch,
+      mismatches,
+      matchedFields,
+      summaryMessage,
+      extracted
+    };
+  } catch (err) {
+    console.warn('Vehicle compliance doc AI verification error:', err);
+    return {
+      isVerified: false,
+      hasMismatch: false,
+      mismatches: [],
+      matchedFields: [],
+      summaryMessage: 'Document uploaded.',
+      extracted: {}
+    };
   }
 };
 
@@ -1486,20 +1684,11 @@ export const analyzeReceiptWithAI = async (
       };
     };
 
-    const ai = getAIClient();
-    if (!ai || !b64) {
+    if (!b64) {
       return runReceiptFallback(fileName);
     }
 
-    const parts = [
-      {
-        inlineData: {
-          mimeType: mime,
-          data: b64
-        }
-      },
-      {
-        text: `You are an elite accounting and customs OCR intelligence specialist for Docks (Pvt.) Ltd.
+    const receiptPrompt = `You are an elite accounting and customs OCR intelligence specialist for Docks (Pvt.) Ltd.
 Analyze this payment receipt, expense voucher, terminal cash slip, weighbridge slip, fuel memo, toll slip, or bank deposit advice.
 Even if the copy is dim, shadowy, skewed, or a low-ink photocopy, decipher the exact details.
 
@@ -1513,47 +1702,31 @@ Return JSON with these exact properties:
 - description: string (concise, professional explanation of the expense)
 - paymentMethod: string ("Cash", "Cheque", "Pay Order", "Online Transfer", "Credit Card")
 - confidence: number (0.0 to 1.0)
-- taxAmount: number (sales tax or withholding tax if itemized, otherwise 0)`
-      }
-    ];
+- taxAmount: number (sales tax or withholding tax if itemized, otherwise 0)`;
 
-    const apiCall = ai.models.generateContent({
-      model: 'gemini-flash-latest',
-      contents: parts,
-      config: {
-        responseMimeType: "application/json"
-      }
-    }).catch((err) => {
-      console.warn("Receipt AI API notice:", err);
-      return null;
+    const data = await callServerGeminiExtract({
+      files: [{ mimeType: mime, base64: b64 }],
+      prompt: receiptPrompt,
+      timeoutMs: 14000
     });
 
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 14000));
-    const response: any = await Promise.race([apiCall, timeoutPromise]);
-
-    if (response && response.text) {
-      try {
-        const raw = response.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-        const data = JSON.parse(raw);
-        const amt = typeof data.amount === 'number' ? data.amount : (parseFloat(String(data.amount || '').replace(/[^0-9.]/g, '')) || 0);
-        return {
-          success: amt > 0,
-          amount: amt,
-          formattedAmount: `${data.currency || 'PKR'} ${amt.toLocaleString()}`,
-          currency: data.currency || 'PKR',
-          date: data.date || todayStr,
-          payee: data.payee || 'Port / Logistics Vendor',
-          voucherNo: data.voucherNo || '',
-          category: data.category || 'Terminal Handling',
-          description: data.description || `${data.payee || 'Vendor'} Payment Voucher`,
-          paymentMethod: data.paymentMethod || 'Cash',
-          confidence: data.confidence || 0.95,
-          taxAmount: data.taxAmount || 0,
-          rawSummary: `${data.payee || 'Vendor'} - ${data.currency || 'PKR'} ${amt}`
-        };
-      } catch (pe) {
-        console.warn("JSON parse fallback for receipt:", pe);
-      }
+    if (data && typeof data === 'object' && !data.error) {
+      const amt = typeof data.amount === 'number' ? data.amount : (parseFloat(String(data.amount || '').replace(/[^0-9.]/g, '')) || 0);
+      return {
+        success: amt > 0,
+        amount: amt,
+        formattedAmount: `${data.currency || 'PKR'} ${amt.toLocaleString()}`,
+        currency: data.currency || 'PKR',
+        date: data.date || todayStr,
+        payee: data.payee || 'Port / Logistics Vendor',
+        voucherNo: data.voucherNo || '',
+        category: data.category || 'Terminal Handling',
+        description: data.description || `${data.payee || 'Vendor'} Payment Voucher`,
+        paymentMethod: data.paymentMethod || 'Cash',
+        confidence: data.confidence || 0.95,
+        taxAmount: data.taxAmount || 0,
+        rawSummary: `${data.payee || 'Vendor'} - ${data.currency || 'PKR'} ${amt}`
+      };
     }
 
     return runReceiptFallback(fileName);
@@ -1572,17 +1745,6 @@ Return JSON with these exact properties:
       confidence: 0.5
     };
   }
-};
-
-export const createChatSession = () => {
-  const ai = getAIClient();
-  if (!ai) return null;
-  return ai.chats.create({
-    model: 'gemini-flash-latest',
-    config: {
-      systemInstruction: "You are Docks AI, the elite logistics assistant for Docks (Pvt.) Ltd. You specialize in Pakistani logistics (KICT, SAPT, PQA, Custom Clearance, GD, TP Filing). Assist with email drafting, explaining procedures, and answering shipping queries.",
-    }
-  });
 };
 
 export interface AnalyzedCompanyDocResult {
@@ -1640,15 +1802,12 @@ export const analyzeCompanyDocumentWithAI = async (
   else if (cleanLower.includes('bank') || cleanLower.includes('statement') || cleanLower.includes('hbl') || cleanLower.includes('mcb') || cleanLower.includes('meezan')) heuristic.category = 'Banks';
   else if (cleanLower.includes('asset') || cleanLower.includes('property') || cleanLower.includes('vehicle') || cleanLower.includes('title deed')) heuristic.category = 'Assets';
 
-  // 2. Try Gemini OCR extraction if dataUrl is provided
+  // 2. Server-side Gemini OCR extraction if dataUrl is provided
   try {
-    const ai = getAIClient();
-    if (ai && file.dataUrl && file.dataUrl.includes('base64,')) {
-      const parts: any[] = [];
+    if (file.dataUrl && file.dataUrl.includes('base64,')) {
       let base64Data = file.dataUrl.split('base64,')[1];
       const mimeType = file.type || (file.dataUrl.includes('application/pdf') ? 'application/pdf' : 'image/jpeg');
 
-      // Preprocess image document for optimal OCR extraction
       if (!mimeType.includes('pdf') && base64Data) {
         try {
           const prep = await preprocessDocumentForOcr(base64Data, {
@@ -1664,17 +1823,9 @@ export const analyzeCompanyDocumentWithAI = async (
         } catch (_) {}
       }
 
-      if (base64Data) {
-        parts.push({
-          inlineData: {
-            data: base64Data,
-            mimeType: mimeType.includes('pdf') ? 'application/pdf' : 'image/jpeg'
-          }
-        });
-      }
-
-      parts.push({
-        text: `You are an elite corporate legal document OCR analyst for Docks (Pvt.) Ltd, a Pakistani shipping and logistics company.
+      const parsed = await callServerGeminiExtract({
+        files: base64Data ? [{ mimeType: mimeType.includes('pdf') ? 'application/pdf' : 'image/jpeg', base64: base64Data }] : [],
+        prompt: `You are an elite corporate legal document OCR analyst for Docks (Pvt.) Ltd, a Pakistani shipping and logistics company.
 Analyze this official company document or letter and extract the key fields into JSON.
 
 Categories must strictly be one of:
@@ -1695,25 +1846,11 @@ Extract these exact properties:
 - hearingRequired: boolean (true if this is a show-cause notice, summons, petition, or requires personal hearing / appearance before a court, collector, commissioner, or tribunal)
 - hearingDate: string (YYYY-MM-DD if a hearing date is explicitly scheduled, otherwise empty)
 - hearingTime: string (e.g. "11:00 AM" if hearing time is specified, otherwise empty)
-- unreadFieldsNote: string (mention any fields that were faded, torn, stamped over, or couldn't be definitively determined so the human operator can verify)`
+- unreadFieldsNote: string (mention any fields that were faded, torn, stamped over, or couldn't be definitively determined so the human operator can verify)`,
+        timeoutMs: 15000
       });
 
-      const apiCall = ai.models.generateContent({
-        model: 'gemini-flash-latest',
-        contents: parts,
-        config: {
-          responseMimeType: "application/json"
-        }
-      }).catch((err) => {
-        console.warn("Company doc AI extraction catch:", err);
-        return null;
-      });
-
-      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 15000));
-      const response: any = await Promise.race([apiCall, timeoutPromise]);
-
-      if (response && response.text) {
-        const parsed = JSON.parse(response.text);
+      if (parsed && typeof parsed === 'object') {
         return {
           title: parsed.title || heuristic.title,
           category: parsed.category || heuristic.category,

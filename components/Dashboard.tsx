@@ -20,6 +20,12 @@ import {
 } from '../services/stationAnalytics';
 import { exportTableToExcel } from '../services/excelExportService';
 import { getCategoryArrangements, getArrangementCharges } from '../services/categoryTariffService';
+import { 
+  isClientPortalApprovalPending, 
+  isDocumentationProcessingCase, 
+  isLoadingPortProcessingCase, 
+  isInTransitCase 
+} from '../services/workflowConfig';
 
 // Data Generator based on real cases per date
 const generateGraphData = (startStr: string, endStr: string, casesList: Case[] = []) => {
@@ -254,10 +260,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
   }, [liveLogs, liveCases, liveFinances, activityRoleFilter, activitySearchQuery]);
 
   // Compute Live Metrics from real Firestore data
-  const casePendingApproval = liveCases.filter(c => c.status === CaseStatus.SHIPPING_LINE_DO).length;
-  const loadingPortProcessing = liveCases.filter(c => c.status === CaseStatus.LOADING_PORT_PROCESSING).length;
-  const inTransitCases = liveCases.filter(c => c.status === CaseStatus.IN_TRANSIT).length;
-  const completedCases = liveCases.filter(c => c.status === CaseStatus.COMPLETED).length;
+  // Case Approval Pending strictly counts ONLY Client Portal registrations awaiting office approval
+  const casePendingApproval = liveCases.filter(isClientPortalApprovalPending).length;
+  // Documentation Processing covers Workflow Steps 1-4: Shipping Line DO, TP Filing, Excise Payment, Vehicle Assignment
+  const documentationProcessing = liveCases.filter(isDocumentationProcessingCase).length;
+  const loadingPortProcessing = liveCases.filter(isLoadingPortProcessingCase).length;
+  const inTransitCases = liveCases.filter(isInTransitCase).length;
 
   const vehiclesExpiringSoon = liveVehicles.filter(v => v.status === 'EXPIRE_SOON').length;
   const vehiclesExpired = liveVehicles.filter(v => v.status === 'EXPIRED').length;
@@ -554,10 +562,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
         <div className="glass-card rounded-2xl p-5 hover:bg-white/5 transition-colors">
           <SectionHeader title="Case Overview" icon={CheckCircle} />
           <div className="space-y-1">
-            <StatusRow label="Case Approval Pending" count={casePendingApproval} color="text-brand-accent" onClick={() => onNavigate('cases', { status: CaseStatus.SHIPPING_LINE_DO })} />
+            <StatusRow label="Case Approval Pending" count={casePendingApproval} color="text-brand-accent" onClick={() => onNavigate('cases', { status: 'CASE_APPROVAL_PENDING' })} />
+            <StatusRow label="Documentation Processing" count={documentationProcessing} color="text-cyan-400" onClick={() => onNavigate('cases', { status: 'DOCUMENTATION_PROCESSING' })} />
             <StatusRow label="Loading Port Processing" count={loadingPortProcessing} color="text-yellow-400" onClick={() => onNavigate('cases', { status: CaseStatus.LOADING_PORT_PROCESSING })} />
             <StatusRow label="In Transit" count={inTransitCases} color="text-blue-400" onClick={() => onNavigate('cases', { status: CaseStatus.IN_TRANSIT })} />
-            <StatusRow label="Completed" count={completedCases} color="text-green-400" onClick={() => onNavigate('cases', { status: CaseStatus.COMPLETED })} />
           </div>
         </div>
 
@@ -638,15 +646,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
               <SectionHeader title="Operational Action Radar" icon={Activity} />
             </div>
 
-            {liveCases.filter(c => c.approvalStatus === 'PENDING').length > 0 && (
+            {casePendingApproval > 0 && (
               <div 
-                onClick={() => onNavigate('cases', {})}
+                onClick={() => onNavigate('cases', { status: 'CASE_APPROVAL_PENDING' })}
                 className="mb-4 p-3 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-between cursor-pointer hover:bg-amber-500/25 transition-all text-xs text-amber-300 shadow-lg shadow-amber-500/5"
               >
                 <div className="flex items-center gap-2.5">
                   <AlertTriangle size={18} className="text-amber-400 shrink-0" />
                   <div>
-                    <strong className="text-white font-bold">{liveCases.filter(c => c.approvalStatus === 'PENDING').length}</strong> Client Case(s) awaiting approval
+                    <strong className="text-white font-bold">{casePendingApproval}</strong> Client Case(s) awaiting approval
                     <p className="text-[10px] text-amber-400/80">Case Management authorization required to dispatch</p>
                   </div>
                 </div>
