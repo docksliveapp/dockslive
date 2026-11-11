@@ -7,6 +7,8 @@ import {
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import { preprocessDocumentForOcr, OcrPreprocessingResult } from '../services/fileUtils';
+import { resolveStoredDocumentDataUrl } from '../services/documentStorage';
+import { downloadFile } from '../services/geminiService';
 
 export type SupportedPreviewFormat = 'docx' | 'pdf' | 'xlsx' | 'image' | 'jpg' | 'jpeg' | 'png' | 'auto';
 
@@ -150,9 +152,15 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
             console.warn('Docx object pack fallback:', e);
           }
         } else if (typeof file === 'string') {
-          if (file.startsWith('data:')) {
+          const resolvedString = file.startsWith('chunk://')
+            ? ((await resolveStoredDocumentDataUrl({ url: file, name: filename })) || '')
+            : file;
+          if (!resolvedString) {
+            throw new Error('Could not load document chunks from cloud storage.');
+          }
+          if (resolvedString.startsWith('data:')) {
             if (detectedFormat === 'pdf' || detectedFormat === 'docx' || detectedFormat === 'xlsx') {
-              const base64Data = file.split(',')[1] || '';
+              const base64Data = resolvedString.split(',')[1] || '';
               const binaryString = atob(base64Data);
               const bytes = new Uint8Array(binaryString.length);
               for (let i = 0; i < binaryString.length; i++) {
@@ -164,19 +172,19 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
                 url = URL.createObjectURL(pdfBlob);
                 createdBlobUrl = url;
               } else {
-                url = file;
+                url = resolvedString;
               }
             } else {
-              url = file;
+              url = resolvedString;
             }
-          } else if (file.startsWith('blob:') || file.startsWith('http://') || file.startsWith('https://')) {
-            url = file;
+          } else if (resolvedString.startsWith('blob:') || resolvedString.startsWith('http://') || resolvedString.startsWith('https://')) {
+            url = resolvedString;
             if (detectedFormat === 'docx' || detectedFormat === 'xlsx') {
-              const res = await fetch(file);
+              const res = await fetch(resolvedString);
               if (!res.ok) throw new Error('Could not fetch document content for preview');
               arrayBuffer = await res.arrayBuffer();
             }
-          } else if (file.length > 100 && !file.includes(' ') && !file.startsWith('/')) {
+          } else if (resolvedString.length > 100 && !resolvedString.includes(' ') && !resolvedString.startsWith('/')) {
             // Raw base64 string
             const mime = detectedFormat === 'docx' 
               ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -185,9 +193,9 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
               : detectedFormat === 'pdf'
               ? 'application/pdf'
               : 'image/jpeg';
-            url = `data:${mime};base64,${file}`;
+            url = `data:${mime};base64,${resolvedString}`;
             if (detectedFormat === 'docx' || detectedFormat === 'xlsx') {
-              const binaryString = atob(file);
+              const binaryString = atob(resolvedString);
               const bytes = new Uint8Array(binaryString.length);
               for (let i = 0; i < binaryString.length; i++) {
                 bytes[i] = binaryString.charCodeAt(i);
@@ -195,7 +203,7 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
               arrayBuffer = bytes.buffer;
             }
           } else {
-            url = file;
+            url = resolvedString;
           }
         }
 
@@ -292,15 +300,10 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
     }
     const downloadTarget = (activeImageViewMode === 'binarized' && binarizedPreviewUrl) ? binarizedPreviewUrl : previewUrl;
     if (!downloadTarget) return;
-    const a = document.createElement('a');
-    a.href = downloadTarget;
     const downloadName = activeImageViewMode === 'binarized'
       ? `binarized_${filename || 'document.jpg'}`
       : (filename || `document.${detectedFormat}`);
-    a.download = downloadName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    downloadFile(downloadTarget, downloadName);
   };
 
   const handlePrint = () => {

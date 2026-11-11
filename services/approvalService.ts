@@ -56,7 +56,7 @@ export async function submitCaseActionApproval(params: {
 
   const isExternal = isExternalRequesterRole(params.requestedByRole);
   const approvalStage: 'MANAGER_REVIEW' | 'ADMIN_FINAL' = isExternal ? 'MANAGER_REVIEW' : 'ADMIN_FINAL';
-  const targetRole = isExternal ? 'OPERATIONS_MANAGER,VEHICLE_MANAGER' : 'ADMIN';
+  const targetRole = isExternal ? 'OPERATIONS_MANAGER,DOCUMENTATION_MANAGER' : 'ADMIN';
 
   const approvalData: AppNotification['approvalData'] = {
     entityType: 'case',
@@ -80,9 +80,9 @@ export async function submitCaseActionApproval(params: {
       ? `[Step 1/2 Manager Review] Case ${actionLabel} Request: ${caseNo}`
       : `Case ${actionLabel} Request: ${caseNo}`,
     description: isExternal
-      ? `${params.requestedBy} (${params.requestedByRole}) requested ${actionLabel.toLowerCase()} for Case ${caseNo}. Step 1: Operation / Vehicle Manager must review & approve before forwarding to Admin. Reason: "${params.reason}"`
-      : `${params.requestedBy} (${params.requestedByRole || 'Operations / Vehicle Manager'}) requested Admin approval to ${params.actionType} Case ${caseNo}. Reason: "${params.reason}"`,
-    details: `Entity: Case ${caseNo}\nClient: ${params.caseItem.clientName || 'N/A'}\nAction: ${params.actionType} (${actionLabel})\nApproval Stage: ${isExternal ? 'Step 1 (Operations / Vehicle Manager Review)' : 'Final Admin Approval'}\nRequester: ${params.requestedBy} (${params.requestedByRole || 'Staff'})\nReason: ${params.reason}${params.proposedChanges ? '\nProposed Changes: ' + JSON.stringify(params.proposedChanges, null, 2) : ''}`,
+      ? `${params.requestedBy} (${params.requestedByRole}) requested ${actionLabel.toLowerCase()} for Case ${caseNo}. Step 1: Operations / Documentation Manager must review & approve before forwarding to Admin. Reason: "${params.reason}"`
+      : `${params.requestedBy} (${params.requestedByRole || 'Operations / Documentation Manager'}) requested Admin approval to ${params.actionType} Case ${caseNo}. Reason: "${params.reason}"`,
+    details: `Entity: Case ${caseNo}\nClient: ${params.caseItem.clientName || 'N/A'}\nAction: ${params.actionType} (${actionLabel})\nApproval Stage: ${isExternal ? 'Step 1 (Operations / Documentation Manager Review)' : 'Final Admin Approval'}\nRequester: ${params.requestedBy} (${params.requestedByRole || 'Staff'})\nReason: ${params.reason}${params.proposedChanges ? '\nProposed Changes: ' + JSON.stringify(params.proposedChanges, null, 2) : ''}`,
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     type: 'ACTION',
     notificationSubType: params.actionType === 'DELETE' 
@@ -150,7 +150,7 @@ export async function submitVehicleActionApproval(params: {
 
   const isExternal = isExternalRequesterRole(params.requestedByRole);
   const approvalStage: 'MANAGER_REVIEW' | 'ADMIN_FINAL' = isExternal ? 'MANAGER_REVIEW' : 'ADMIN_FINAL';
-  const targetRole = isExternal ? 'VEHICLE_MANAGER,OPERATIONS_MANAGER' : 'ADMIN';
+  const targetRole = isExternal ? 'DOCUMENTATION_MANAGER,OPERATIONS_MANAGER' : 'ADMIN';
 
   const approvalData: AppNotification['approvalData'] = {
     entityType: 'vehicle',
@@ -300,7 +300,7 @@ export async function approveActionRequest(notification: AppNotification): Promi
   // =========================================================================
   if ((entityType === 'case' || entityType === 'vehicle') && approvalStage === 'MANAGER_REVIEW') {
     const actionLabel = actionType === 'DELETE' ? 'Deletion' : actionType === 'CANCEL' ? 'Cancellation' : 'Modification / Edit';
-    const managerRoleLabel = entityType === 'case' ? 'Operations Manager' : 'Vehicle Manager';
+    const managerRoleLabel = entityType === 'case' ? 'Operations Manager' : 'Documentation Manager';
     const origSender = originalRequester || requestedBy || (entityType === 'case' ? 'Client' : 'Transporter');
     const origRole = originalRequesterRole || requestedByRole || (entityType === 'case' ? 'CLIENT' : 'TRANSPORTER');
 
@@ -375,7 +375,7 @@ export async function approveActionRequest(notification: AppNotification): Promi
         originalRequester: origSender,
         originalRequesterRole: origRole,
         requestedBy: `${managerRoleLabel} (on behalf of ${origSender})`,
-        requestedByRole: entityType === 'case' ? 'OPERATIONS_MANAGER' : 'VEHICLE_MANAGER'
+        requestedByRole: entityType === 'case' ? 'OPERATIONS_MANAGER' : 'DOCUMENTATION_MANAGER'
       }
     };
 
@@ -436,7 +436,7 @@ export async function approveActionRequest(notification: AppNotification): Promi
       type: 'INFO',
       notificationSubType: 'GENERAL',
       status: 'PENDING',
-      targetRole: 'OPERATIONS_MANAGER,VEHICLE_MANAGER,CLIENT,TRANSPORTER',
+      targetRole: 'OPERATIONS_MANAGER,DOCUMENTATION_MANAGER,CLIENT,TRANSPORTER',
       targetClientName: originalRequester || requestedBy,
       category: 'CASE',
       targetView: 'cases'
@@ -498,7 +498,7 @@ export async function approveActionRequest(notification: AppNotification): Promi
       type: 'INFO',
       notificationSubType: 'GENERAL',
       status: 'PENDING',
-      targetRole: 'VEHICLE_MANAGER,OPERATIONS_MANAGER,TRANSPORTER',
+      targetRole: 'DOCUMENTATION_MANAGER,OPERATIONS_MANAGER,TRANSPORTER',
       targetClientName: originalRequester || requestedBy,
       category: 'TRANSPORTER',
       targetView: 'vehicles'
@@ -878,7 +878,7 @@ export async function rejectActionRequest(notification: AppNotification, rejectR
 
   const { entityType, entityId, actionType, entityName, originalRequester, requestedBy, approvalStage } = notification.approvalData;
   const rejectedByWho = approvalStage === 'MANAGER_REVIEW'
-    ? (entityType === 'case' ? 'Operations Manager' : 'Vehicle Manager')
+    ? (entityType === 'case' ? 'Operations Manager' : 'Documentation Manager')
     : 'Administrator';
 
   if (entityType === 'case') {
@@ -901,7 +901,7 @@ export async function rejectActionRequest(notification: AppNotification, rejectR
       type: 'ALERT',
       notificationSubType: 'GENERAL',
       status: 'PENDING',
-      targetRole: 'OPERATIONS_MANAGER,VEHICLE_MANAGER,CLIENT,TRANSPORTER',
+      targetRole: 'OPERATIONS_MANAGER,DOCUMENTATION_MANAGER,CLIENT,TRANSPORTER',
       targetClientName: originalRequester || requestedBy,
       category: 'CASE',
       targetView: 'cases'
@@ -925,7 +925,7 @@ export async function rejectActionRequest(notification: AppNotification, rejectR
       type: 'ALERT',
       notificationSubType: 'GENERAL',
       status: 'PENDING',
-      targetRole: 'VEHICLE_MANAGER,OPERATIONS_MANAGER,TRANSPORTER',
+      targetRole: 'DOCUMENTATION_MANAGER,OPERATIONS_MANAGER,TRANSPORTER',
       targetClientName: originalRequester || requestedBy,
       category: 'TRANSPORTER',
       targetView: 'vehicles'

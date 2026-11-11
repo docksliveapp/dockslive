@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useBranding } from '../services/brandingService';
+import { useBranding, useTransparentLogo } from '../services/brandingService';
 import { useActiveCompany, isUploadedLogo } from '../services/companyService';
 
 interface LogoProps {
@@ -8,7 +8,7 @@ interface LogoProps {
   customSrc?: string | null;
 }
 
-const Logo: React.FC<LogoProps> = ({ className = "h-14 sm:h-16 w-auto", variant = 'full', customSrc }) => {
+const Logo: React.FC<LogoProps> = ({ className = "h-14 sm:h-16 w-auto", customSrc }) => {
   const { customLogo: globalLogo, companyName } = useBranding();
   const { activeCompany } = useActiveCompany();
   const [imgError, setImgError] = useState(false);
@@ -18,13 +18,14 @@ const Logo: React.FC<LogoProps> = ({ className = "h-14 sm:h-16 w-auto", variant 
     : (globalLogo || activeCompany?.logo || '');
 
   const candidateLogo = isUploadedLogo(rawCandidate) ? rawCandidate : null;
+  const cleanLogo = useTransparentLogo(candidateLogo) || candidateLogo;
 
-  if (candidateLogo && !imgError) {
+  if (cleanLogo && !imgError) {
     return (
       <img 
-        src={candidateLogo} 
+        src={cleanLogo} 
         alt={companyName || activeCompany?.name || "Company Logo"} 
-        className={`${className} object-contain select-none transition-all duration-300 drop-shadow-sm`}
+        className={`${className} bg-transparent object-contain select-none transition-all duration-300 drop-shadow-sm`}
         onError={() => setImgError(true)}
       />
     );

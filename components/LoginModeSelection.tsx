@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { useParentGroup, isUploadedLogo } from '../services/companyService';
+import { useTransparentLogo } from '../services/brandingService';
 import { safeAppStorage } from '../services/storage';
 import { authenticateDatabaseUser } from '../services/dbService';
 import { NewRegistrationModal } from './NewRegistrationModal';
@@ -42,6 +43,8 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
   onSelectMode
 }) => {
   const { parentGroup } = useParentGroup();
+  const rawParentLogo = parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? parentGroup.logo : null;
+  const cleanParentLogo = useTransparentLogo(rawParentLogo);
 
   // Credentials Form State
   const [identifier, setIdentifier] = useState('');
@@ -155,9 +158,14 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
         targetView = 'vendor_portal';
       } else if (userRoles.includes(UserRole.FINANCE_MANAGER)) {
         targetView = 'finance';
-      } else if (userRoles.includes(UserRole.VEHICLE_MANAGER) || userRole === UserRole.TRANSPORTER) {
+      } else if (userRole === UserRole.TRANSPORTER) {
         targetView = 'vehicles';
-      } else if (userRoles.includes(UserRole.OPERATIONS_MANAGER) || userRoles.includes(UserRole.OFFICE_STAFF)) {
+      } else if (
+        userRoles.includes(UserRole.DOCUMENTATION_MANAGER) ||
+        userRoles.includes(UserRole.VEHICLE_MANAGER) ||
+        userRoles.includes(UserRole.OPERATIONS_MANAGER) ||
+        userRoles.includes(UserRole.OFFICE_STAFF)
+      ) {
         targetView = 'cases';
       } else if (lastLocationRole === userRole && lastLocationView) {
         targetView = lastLocationView;
@@ -219,12 +227,12 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
       <div className="min-h-full w-full max-w-[430px] mx-auto flex flex-col justify-center items-center py-4 sm:py-8 relative z-10">
         {/* Prominent Corporate Logo Area placed closely above Sign In Card (Uploaded Logo Only; empty if none uploaded) */}
         <div className="w-full flex flex-col items-center text-center mb-4 sm:mb-5 animate-fade-in">
-          <div className="inline-flex items-center justify-center min-h-[3.5rem] transform hover:scale-[1.03] transition-transform duration-300">
-            {parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? (
+          <div className="inline-flex items-center justify-center min-h-[3.5rem] bg-transparent transform hover:scale-[1.03] transition-transform duration-300">
+            {(cleanParentLogo || rawParentLogo) ? (
               <img 
-                src={parentGroup.logo} 
-                alt={parentGroup.name || "MAK Group of Companies"} 
-                className="w-40 sm:w-48 md:w-52 h-40 sm:h-48 md:h-52 max-h-40 sm:max-h-48 md:max-h-52 object-contain drop-shadow-[0_12px_32px_rgba(15,23,42,0.16)] select-none" 
+                src={cleanParentLogo || rawParentLogo || ''} 
+                alt={parentGroup?.name || "MAK Group of Companies"} 
+                className="w-40 sm:w-48 md:w-52 h-40 sm:h-48 md:h-52 max-h-40 sm:max-h-48 md:max-h-52 bg-transparent object-contain drop-shadow-[0_12px_32px_rgba(15,23,42,0.16)] select-none" 
               />
             ) : null}
           </div>

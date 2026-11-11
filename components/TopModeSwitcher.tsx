@@ -76,11 +76,11 @@ export const APP_MODES: ModeOption[] = [
   },
   {
     id: 'recruiter',
-    name: 'Fleet & HR Portal',
-    role: UserRole.VEHICLE_MANAGER,
-    targetView: 'vehicles',
-    description: 'Fleet carriers, driver validation and vehicle dispatch',
-    badge: 'FLEET',
+    name: 'Documentation Portal',
+    role: UserRole.DOCUMENTATION_MANAGER,
+    targetView: 'cases',
+    description: 'DO, TP Filing, Excise, Vehicle Assignment, Fleet & Company Docs',
+    badge: 'DOCS',
     icon: UserPlus,
     accentColor: 'text-slate-200',
     activeBg: 'bg-slate-800/90',
@@ -127,7 +127,7 @@ export const TopModeSwitcher: React.FC<TopModeSwitcherProps> = ({
     (currentRole === UserRole.CLIENT ? APP_MODES[2] : 
      currentRole === UserRole.FINANCE_MANAGER ? APP_MODES[1] :
      currentRole === UserRole.OPERATIONS_MANAGER ? APP_MODES[3] :
-     currentRole === UserRole.VEHICLE_MANAGER ? APP_MODES[4] :
+     (currentRole === UserRole.DOCUMENTATION_MANAGER || currentRole === UserRole.VEHICLE_MANAGER) ? APP_MODES[4] :
      APP_MODES[0]);
 
   // Click outside to close

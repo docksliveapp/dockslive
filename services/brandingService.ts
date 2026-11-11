@@ -244,6 +244,200 @@ export function subscribeToBranding(onUpdate: (branding: CompanyBranding) => voi
 }
 
 /**
+ * Removes opaque white or light-grey rectangular/square corner backgrounds around circular/irregular logos
+ * using a 4-corner BFS flood fill, preserving all interior white/pearl details inside the emblem border.
+ */
+function stripLogoSquareBackgroundFromCanvas(ctx: CanvasRenderingContext2D, width: number, height: number): boolean {
+  if (width < 8 || height < 8) return false;
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const data = imgData.data;
+
+  // Check if corners are already transparent
+  const cornerCoords = [
+    [0, 0],
+    [width - 1, 0],
+    [0, height - 1],
+    [width - 1, height - 1],
+  ];
+  let opaqueUniformCorners = 0;
+  let refR = 0, refG = 0, refB = 0;
+
+  for (const [cx, cy] of cornerCoords) {
+    const idx = (cy * width + cx) * 4;
+    const r = data[idx];
+    const g = data[idx + 1];
+    const b = data[idx + 2];
+    const a = data[idx + 3];
+    const maxC = Math.max(r, g, b);
+    const minC = Math.min(r, g, b);
+    const brightness = (r + g + b) / 3;
+    // Detect white or light-grey neutral square background in corners
+    if (a > 200 && brightness >= 180 && (maxC - minC) <= 30) {
+      opaqueUniformCorners++;
+      refR += r;
+      refG += g;
+      refB += b;
+    }
+  }
+
+  if (opaqueUniformCorners < 3) {
+    return false;
+  }
+
+  refR /= opaqueUniformCorners;
+  refG /= opaqueUniformCorners;
+  refB /= opaqueUniformCorners;
+
+  const total = width * height;
+  const visited = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  let head = 0;
+  let tail = 0;
+
+  const isBgPixel = (pIdx: number): boolean => {
+    const i = pIdx * 4;
+    const a = data[i + 3];
+    if (a <= 12) return true;
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const maxC = Math.max(r, g, b);
+    const minC = Math.min(r, g, b);
+    if ((maxC - minC) > 32) return false;
+    const brightness = (r + g + b) / 3;
+    if (brightness < 182) return false;
+    const dist = Math.abs(r - refR) + Math.abs(g - refG) + Math.abs(b - refB);
+    return dist <= 95 || brightness >= 235;
+  };
+
+  // Seed flood-fill from perimeter pixels matching the corner background
+  const tryEnqueue = (x: number, y: number) => {
+    const pIdx = y * width + x;
+    if (visited[pIdx]) return;
+    if (isBgPixel(pIdx)) {
+      visited[pIdx] = 1;
+      queue[tail++] = pIdx;
+    }
+  };
+
+  for (let x = 0; x < width; x++) {
+    tryEnqueue(x, 0);
+    tryEnqueue(x, height - 1);
+  }
+  for (let y = 0; y < height; y++) {
+    tryEnqueue(0, y);
+    tryEnqueue(width - 1, y);
+  }
+
+  while (head < tail) {
+    const curr = queue[head++];
+    const cx = curr % width;
+    const cy = (curr - cx) / width;
+    data[curr * 4 + 3] = 0;
+
+    if (cx > 0) tryEnqueue(cx - 1, cy);
+    if (cx + 1 < width) tryEnqueue(cx + 1, cy);
+    if (cy > 0) tryEnqueue(cx, cy - 1);
+    if (cy + 1 < height) tryEnqueue(cx, cy + 1);
+  }
+
+  // Soft 1px edge anti-aliasing along boundary between removed exterior background and emblem rim
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const pIdx = y * width + x;
+      if (visited[pIdx]) continue;
+      let removedNeighbors = 0;
+      if (visited[pIdx - 1]) removedNeighbors++;
+      if (visited[pIdx + 1]) removedNeighbors++;
+      if (visited[pIdx - width]) removedNeighbors++;
+      if (visited[pIdx + width]) removedNeighbors++;
+      if (removedNeighbors > 0) {
+        const aIdx = pIdx * 4 + 3;
+        data[aIdx] = Math.round(data[aIdx] * (1 - removedNeighbors * 0.14));
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  return true;
+}
+
+const transparentLogoCache = new Map<string, string>();
+
+export function stripLogoSquareBackground(src: string): Promise<string> {
+  if (!src || typeof document === 'undefined') return Promise.resolve(src);
+  if (src.startsWith('data:image/svg+xml') || src.endsWith('.svg')) return Promise.resolve(src);
+  const cached = transparentLogoCache.get(src);
+  if (cached) return Promise.resolve(cached);
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const width = img.naturalWidth || img.width;
+        const height = img.naturalHeight || img.height;
+        if (!width || !height) {
+          transparentLogoCache.set(src, src);
+          resolve(src);
+          return;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          transparentLogoCache.set(src, src);
+          resolve(src);
+          return;
+        }
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        const modified = stripLogoSquareBackgroundFromCanvas(ctx, width, height);
+        const out = modified ? canvas.toDataURL('image/png') : src;
+        transparentLogoCache.set(src, out);
+        resolve(out);
+      } catch (_) {
+        transparentLogoCache.set(src, src);
+        resolve(src);
+      }
+    };
+    img.onerror = () => {
+      resolve(src);
+    };
+    img.src = src;
+  });
+}
+
+export function useTransparentLogo(logoSrc?: string | null): string | null {
+  const [cleanSrc, setCleanSrc] = useState<string | null>(() => {
+    if (!logoSrc) return null;
+    return transparentLogoCache.get(logoSrc) || null;
+  });
+
+  useEffect(() => {
+    if (!logoSrc) {
+      setCleanSrc(null);
+      return;
+    }
+    const cached = transparentLogoCache.get(logoSrc);
+    if (cached) {
+      setCleanSrc(cached);
+      return;
+    }
+    let active = true;
+    stripLogoSquareBackground(logoSrc).then((cleaned) => {
+      if (active) setCleanSrc(cleaned);
+    });
+    return () => {
+      active = false;
+    };
+  }, [logoSrc]);
+
+  return cleanSrc;
+}
+
+/**
  * Compresses and scales an image to ensure it fits comfortably in Firestore document and localStorage.
  */
 export async function optimizeLogoImage(file: File, maxWidth = 800, maxHeight = 400): Promise<string> {
@@ -286,9 +480,11 @@ export async function optimizeLogoImage(file: File, maxWidth = 800, maxHeight = 
 
         ctx.clearRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
+        stripLogoSquareBackgroundFromCanvas(ctx, width, height);
 
         // Export as PNG to preserve transparent backgrounds
         const optimized = canvas.toDataURL('image/png', 0.95);
+        transparentLogoCache.set(optimized, optimized);
         resolve(optimized);
       };
       img.onerror = reject;

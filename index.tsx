@@ -5,7 +5,7 @@ import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 
 // Global Build Version - Auto-invalidates stale caches on every version upgrade
-const APP_BUILD_VERSION = '2026.11.11-luxury-pearl-v18';
+const APP_BUILD_VERSION = '2026.11.19-luxury-pearl-v19';
 
 try {
   const prevBuildVersion = localStorage.getItem('dpl_app_build_version');
@@ -13,7 +13,7 @@ try {
   if (typeof caches !== 'undefined') {
     caches.keys().then((names) => {
       names.forEach((name) => {
-        if (prevBuildVersion !== APP_BUILD_VERSION || (!name.includes('v2026-18'))) {
+        if (prevBuildVersion !== APP_BUILD_VERSION || (!name.includes('v2026-19'))) {
           caches.delete(name).catch(() => {});
         }
       });

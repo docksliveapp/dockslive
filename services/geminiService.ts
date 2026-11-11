@@ -170,6 +170,34 @@ export const fileToBase64 = async (file?: File): Promise<string> => {
 
 export const downloadFile = (url: string, filename: string) => {
   try {
+    if (!url) return;
+    if (url.startsWith('data:')) {
+      const commaIdx = url.indexOf(',');
+      if (commaIdx !== -1) {
+        const header = url.slice(0, commaIdx);
+        const base64 = url.slice(commaIdx + 1);
+        const mimeMatch = header.match(/^data:([^;]+)/i);
+        const mimeType = mimeMatch ? mimeMatch[1] : (filename.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+        const binaryStr = atob(base64);
+        const len = binaryStr.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: mimeType });
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => {
+          try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+        }, 30000);
+        return;
+      }
+    }
     const link = document.createElement('a');
     link.href = url;
     link.download = filename;

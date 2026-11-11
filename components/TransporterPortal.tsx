@@ -333,7 +333,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     await sendAppNotification({
       title: `Vehicle Broadcast Ready: ${selectedVehicleForReady.registrationNumber}`,
       description: `${selectedTransporterName} marked vehicle ${selectedVehicleForReady.registrationNumber} ready for loading at ${readyForm.currentCity}. Est. Rent: PKR ${(parseFloat(readyForm.estimatedRent) || 150000).toLocaleString()}`,
-      targetRole: UserRole.VEHICLE_MANAGER,
+      targetRole: UserRole.DOCUMENTATION_MANAGER,
       targetView: 'vehicles',
       targetFilter: { vehicleNo: selectedVehicleForReady.registrationNumber },
       type: 'INFO',
@@ -388,7 +388,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     await sendAppNotification({
       title: `New Vehicle Registration: ${req.vehicleNo}`,
       description: `${selectedTransporterName} submitted vehicle ${req.vehicleNo} (${newRegForm.make}) with driver ${newRegForm.driverName || 'N/A'} for inspection & clearance.`,
-      targetRole: 'VEHICLE_MANAGER, OPERATIONS_MANAGER, ADMIN',
+      targetRole: 'DOCUMENTATION_MANAGER, OPERATIONS_MANAGER, ADMIN',
       targetView: 'vehicles',
       targetFilter: { vehicleNo: req.vehicleNo },
       type: 'ACTION',
@@ -415,7 +415,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
       registrationBookDoc: '',
       fitnessDoc: ''
     });
-    alert("New Vehicle Registration request submitted successfully! Your Vehicle Manager has received this request for document verification and approval.");
+    alert("New Vehicle Registration request submitted successfully! Documentation Manager has received this request for document verification and approval.");
   };
 
   // Submit Renewal Request
@@ -441,7 +441,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     await sendAppNotification({
       title: `Vehicle Renewal Request: ${req.vehicleNo}`,
       description: `${selectedTransporterName} submitted a renewal request for vehicle ${req.vehicleNo}. Reason: ${renewalForm.reason || 'Bonded Route Renewal'}`,
-      targetRole: 'VEHICLE_MANAGER, OPERATIONS_MANAGER, ADMIN',
+      targetRole: 'DOCUMENTATION_MANAGER, OPERATIONS_MANAGER, ADMIN',
       targetView: 'vehicles',
       targetFilter: { vehicleNo: req.vehicleNo },
       type: 'ACTION',
@@ -455,7 +455,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
 
     setShowRenewalModal(false);
     setSelectedVehicleForRenewal(null);
-    alert(`Renewal request for ${req.vehicleNo} sent to Vehicle Manager for verification!`);
+    alert(`Renewal request for ${req.vehicleNo} sent to Documentation Manager for verification!`);
   };
 
   // Submit Cancellation Request
@@ -480,7 +480,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     await sendAppNotification({
       title: `Vehicle Cancellation Request: ${req.vehicleNo}`,
       description: `${selectedTransporterName} requested cancellation for vehicle ${req.vehicleNo}. Reason: ${cancelReason}`,
-      targetRole: 'VEHICLE_MANAGER, OPERATIONS_MANAGER, ADMIN',
+      targetRole: 'DOCUMENTATION_MANAGER, OPERATIONS_MANAGER, ADMIN',
       targetView: 'vehicles',
       targetFilter: { vehicleNo: req.vehicleNo },
       type: 'ACTION',
@@ -495,7 +495,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
     setShowCancelModal(false);
     setSelectedVehicleForCancel(null);
     setCancelReason('');
-    alert(`Vehicle cancellation request for ${req.vehicleNo} submitted to Vehicle Manager.`);
+    alert(`Vehicle cancellation request for ${req.vehicleNo} submitted to Documentation Manager.`);
   };
 
   // Approve Vehicle Assignment & Update Driver Details
@@ -845,7 +845,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
               <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 space-y-2">
                 <h4 className="text-xs font-bold text-amber-300 flex items-center gap-2">
                   <Clock size={16} className="animate-spin" />
-                  <span>Requests Pending Approval from Vehicle Manager:</span>
+                  <span>Requests Pending Approval from Documentation Manager:</span>
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                   {transporterRequests.filter(r => r.status === 'PENDING').map((req, idx) => (
@@ -1296,7 +1296,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
                   <span>Assigned Shipments & Container Dispatches</span>
                 </h2>
                 <p className="text-xs text-gray-400 mt-1">
-                  Cases allocated to your vehicles by Vehicle Manager or Operations Manager. Review and update driver details.
+                  Cases allocated to your vehicles by Documentation Manager or Operations Manager. Review and update driver details.
                 </p>
               </div>
             </div>
@@ -1635,7 +1635,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
                   <span>Request New Vehicle Registration</span>
                 </h3>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Submit vehicle and driver documentation to Vehicle Manager for inspection & clearance
+                  Submit vehicle and driver documentation to Documentation Manager for inspection &amp; clearance
                 </p>
               </div>
               <button 

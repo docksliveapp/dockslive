@@ -714,9 +714,22 @@ export function getStepArrangedBy(targetCase: any, stepId: string, stepIndex: nu
 export function getStepTargetRole(category: string | undefined, stepId: string, stepIndex: number, targetCase?: any): UserRole {
   const s = (stepId || '').toLowerCase();
 
-  // 1. Vehicle / Fleet allocation & Transport dispatch -> Managed by Operations Manager (or Client if arranged by Client)
+  // If step is explicitly arranged by Client
+  if (targetCase && getStepArrangedBy(targetCase, stepId, stepIndex) === 'Client') {
+    return UserRole.CLIENT;
+  }
+
+  // 1. Documentation Processing Workflows (Shipping Line DO, TP Filing, Excise Payment, Vehicle Assignment) -> Managed by Documentation Manager
   if (
+    stepId === CaseStatus.SHIPPING_LINE_DO ||
+    stepId === CaseStatus.TP_FILING ||
+    stepId === CaseStatus.EXCISE_PAYMENT ||
     stepId === CaseStatus.VEHICLE_ASSIGNMENT ||
+    s.includes('shipping line do') ||
+    s.includes('delivery order') ||
+    s.includes('tp filing') ||
+    s.includes('transit permit') ||
+    s.includes('excise') ||
     s.includes('vehicle') ||
     s.includes('transport') ||
     s.includes('fleet') ||
@@ -724,15 +737,7 @@ export function getStepTargetRole(category: string | undefined, stepId: string, 
     s.includes('trailer') ||
     s.includes('driver')
   ) {
-    if (targetCase && getStepArrangedBy(targetCase, stepId, stepIndex) === 'Client') {
-      return UserRole.CLIENT;
-    }
-    return UserRole.OPERATIONS_MANAGER;
-  }
-
-  // If step is explicitly arranged by Client
-  if (targetCase && getStepArrangedBy(targetCase, stepId, stepIndex) === 'Client') {
-    return UserRole.CLIENT;
+    return UserRole.DOCUMENTATION_MANAGER;
   }
 
   // 2. Loading Port Processing / Stuffing / Wharfage / Port Gate Out
@@ -747,16 +752,16 @@ export function getStepTargetRole(category: string | undefined, stepId: string, 
 
   // 4. In Transit / GPS Monitoring / Emergency route exception
   if (s.includes('transit') || s.includes('highway')) {
-    return UserRole.OPERATIONS_MANAGER;
+    return UserRole.DOCUMENTATION_MANAGER;
   }
 
   // 5. Billing / Invoicing / Settlement
-  if (s.includes('settlement') || s.includes('billing') || s.includes('invoice') || s.includes('payment')) {
+  if (s.includes('settlement') || s.includes('billing') || s.includes('invoice')) {
     return UserRole.FINANCE_MANAGER;
   }
 
-  // 6. All Company-arranged operational steps (DO, TP Filing, Excise, Booking, etc.) are managed by Operations Manager
-  return UserRole.OPERATIONS_MANAGER;
+  // 6. Other documentation & operational steps -> Documentation Manager
+  return UserRole.DOCUMENTATION_MANAGER;
 }
 
 /**

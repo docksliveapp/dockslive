@@ -20,7 +20,7 @@ import { CompletedCaseDossier } from './CompletedCaseDossier';
 import { CaseTransitHistoryCard } from './CaseTransitHistoryCard';
 import { VirtualizedList, VirtualizedTable } from './VirtualizedList';
 import { submitCaseActionApproval } from '../services/approvalService';
-import { saveDocumentToIndexedDB, getDocumentFromIndexedDB } from '../services/documentStorage';
+import { saveDocumentToIndexedDB, getDocumentFromIndexedDB, resolveStoredDocumentDataUrl, getCachedDocumentSync } from '../services/documentStorage';
 
 /**
  * Auto-approving internal management roles:
@@ -597,7 +597,11 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   }, [propUserRoles, effectiveRole]);
 
   const hasAdminRole = effectiveRoles.includes(UserRole.ADMIN);
-  const hasOpsRole = hasAdminRole || effectiveRoles.includes(UserRole.OPERATIONS_MANAGER);
+  const hasOpsRole =
+    hasAdminRole ||
+    effectiveRoles.includes(UserRole.OPERATIONS_MANAGER) ||
+    effectiveRoles.includes(UserRole.DOCUMENTATION_MANAGER) ||
+    effectiveRoles.includes(UserRole.VEHICLE_MANAGER);
   const hasFinanceRole = hasAdminRole || effectiveRoles.includes(UserRole.FINANCE_MANAGER);
   const hasLoadingRole = hasAdminRole || effectiveRoles.includes(UserRole.LOADING_PORT_STAFF);
   const hasUnloadingRole = hasAdminRole || effectiveRoles.includes(UserRole.UNLOADING_PORT_STAFF) || effectiveRoles.includes(UserRole.DESTINATION_PORT_STAFF);
@@ -965,14 +969,15 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
   /**
    * Resilient Document Data Resolver:
-   * Retrieves data URL from memory cache, IndexedDB, or blob object.
+   * Retrieves exact original PDF/image binary from memory cache, IndexedDB, or Firestore Cloud Chunks.
+   * Never substitutes a fake 1-page summary sheet.
    */
   const resolveDocumentUrl = async (doc: any, caseItem?: Case | null): Promise<string> => {
     if (!doc) return '';
-    if (doc.url && (doc.url.startsWith('data:') || doc.url.startsWith('blob:') || doc.url.startsWith('http'))) {
+    if (doc.url && (doc.url.startsWith('data:') || doc.url.startsWith('blob:') || doc.url.startsWith('http://') || doc.url.startsWith('https://'))) {
       return doc.url;
     }
-    if (doc.dataUrl && (doc.dataUrl.startsWith('data:') || doc.dataUrl.startsWith('blob:') || doc.dataUrl.startsWith('http'))) {
+    if (doc.dataUrl && (doc.dataUrl.startsWith('data:') || doc.dataUrl.startsWith('blob:') || doc.dataUrl.startsWith('http://') || doc.dataUrl.startsWith('https://'))) {
       return doc.dataUrl;
     }
     const docName = doc.name || 'document';
@@ -981,25 +986,21 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       return `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}`;
     }
     const cNo = caseItem?.caseNo || selectedCase?.caseNo;
-    const searchKeys = [
-      cNo ? `${cNo}_${docName}` : null,
-      docName,
-      doc.id || null,
-      cNo && doc.id ? `${cNo}_${doc.id}` : null
-    ].filter(Boolean) as string[];
-
-    for (const key of searchKeys) {
-      try {
-        const idbData = await getDocumentFromIndexedDB(key);
-        if (idbData) {
-          if (idbData.startsWith('data:')) {
-            const parts = idbData.split(',');
-            const mime = parts[0]?.split(';')[0]?.replace('data:', '') || 'application/pdf';
-            docDataCache.set(docName, { base64: parts[1] || '', mimeType: mime, name: docName });
-          }
-          return idbData;
+    const storedDataUrl = await resolveStoredDocumentDataUrl({
+      url: doc.url || doc.dataUrl || null,
+      id: doc.id || null,
+      name: docName,
+      caseNo: cNo || null
+    });
+    if (storedDataUrl) {
+      if (storedDataUrl.startsWith('data:')) {
+        const commaIdx = storedDataUrl.indexOf(',');
+        if (commaIdx !== -1) {
+          const mime = storedDataUrl.slice(0, commaIdx).split(';')[0]?.replace('data:', '') || 'application/pdf';
+          docDataCache.set(docName, { base64: storedDataUrl.slice(commaIdx + 1), mimeType: mime, name: docName });
         }
-      } catch (_) {}
+      }
+      return storedDataUrl;
     }
 
     if (doc instanceof File || doc instanceof Blob) {
@@ -1008,36 +1009,18 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       } catch (_) {}
     }
 
-    try {
-      const docPdf = new jsPDF();
-      docPdf.setFillColor(15, 23, 42);
-      docPdf.rect(0, 0, 210, 297, 'F');
-      docPdf.setTextColor(245, 158, 11);
-      docPdf.setFontSize(16);
-      docPdf.text('MAK GROUP OF COMPANIES', 105, 25, { align: 'center' });
-      docPdf.setTextColor(255, 255, 255);
-      docPdf.setFontSize(11);
-      docPdf.text('Official Shipping Dossier Document', 105, 34, { align: 'center' });
-      docPdf.setFontSize(10);
-      docPdf.setTextColor(200, 200, 200);
-      if (cNo) docPdf.text(`Case No: #${cNo}`, 20, 50);
-      docPdf.text(`Document Name: ${docName}`, 20, 58);
-      docPdf.text(`Category: ${doc.docCategory || doc.type || 'Customs Paperwork'}`, 20, 66);
-      docPdf.text(`Client: ${caseItem?.clientName || 'Consignment Client'}`, 20, 74);
-      docPdf.text(`Verified: ${new Date().toLocaleDateString()}`, 20, 82);
-      return docPdf.output('datauristring');
-    } catch (_) {
-      return '';
-    }
+    return '';
   };
 
   const handlePreviewAttachedDoc = async (doc: any, caseItem?: Case | null) => {
     const docName = doc?.name || 'document.pdf';
+    setDraftToast(`Loading ${docName}...`);
     const resolved = await resolveDocumentUrl(doc, caseItem);
     if (!resolved) {
-      alert("Document data is currently unavailable.");
+      setDraftToast(`⚠ Original file for "${docName}" was not stored in cloud before update — please re-upload it in Edit Case.`);
       return;
     }
+    setDraftToast('');
     const isPdf = docName.toLowerCase().endsWith('.pdf') || resolved.startsWith('data:application/pdf') || Boolean(doc?.type && doc.type.includes('pdf'));
     if (isPdf) {
       setDirectDownloadUrl(resolved);
@@ -1050,13 +1033,14 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
   const handleDownloadAttachedDoc = async (doc: any, caseItem?: Case | null) => {
     const docName = doc?.name || `Document_${Date.now()}.pdf`;
+    setDraftToast(`Preparing ${docName}...`);
     const resolved = await resolveDocumentUrl(doc, caseItem);
     if (!resolved) {
-      alert("Unable to download document data.");
+      setDraftToast(`⚠ Original file for "${docName}" was not stored in cloud before update — please re-upload it in Edit Case.`);
       return;
     }
     downloadFile(resolved, docName.includes('.') ? docName : `${docName}.pdf`);
-    setDraftToast(`✓ Downloading ${docName}...`);
+    setDraftToast(`✓ Downloaded ${docName}`);
   };
 
   const handleOpenDocInNewTab = async (doc: any, caseItem?: Case | null) => {
@@ -2808,18 +2792,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
           setTimeout(async () => {
             try {
               const docName = doc.name || `Document_${caseNo}_${i + 1}`;
-              let url = doc.url;
-              if ((!url || !url.startsWith('data:')) && docDataCache.get(docName)?.base64) {
-                const cached = docDataCache.get(docName)!;
-                url = `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}`;
-              }
-              if (!url) {
-                const idbData = await getDocumentFromIndexedDB(`${caseNo}_${docName}`) || await getDocumentFromIndexedDB(docName);
-                if (idbData) url = idbData;
-              }
-              if (!url && doc instanceof File) {
-                try { url = URL.createObjectURL(doc); } catch (_) {}
-              }
+              const url = await resolveDocumentUrl(doc, c);
               if (url) {
                 downloadFile(url, docName.includes('.') ? docName : `${docName}.pdf`);
               }
@@ -3010,79 +2983,30 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                       try { docUrl = URL.createObjectURL(doc); } catch (_) {}
                     }
 
-                    const resolveActiveDocUrl = async (): Promise<string> => {
-                      if (docUrl && (docUrl.startsWith('data:') || docUrl.startsWith('http'))) {
-                        return docUrl;
-                      }
-                      const cached = docDataCache.get(docName) || docDataCache.get(doc.name);
-                      if (cached?.base64) {
-                        return `data:${cached.mimeType || 'application/pdf'};base64,${cached.base64}`;
-                      }
-                      const idbData = await getDocumentFromIndexedDB(`${c.caseNo}_${docName}`) || await getDocumentFromIndexedDB(docName) || (doc.id ? await getDocumentFromIndexedDB(doc.id) : null);
-                      if (idbData) return idbData;
-                      return docUrl || '';
-                    };
-
                     const handlePreview = async () => {
-                      let activeUrl = await resolveActiveDocUrl();
+                      const activeUrl = await resolveDocumentUrl(doc, c);
                       if (!activeUrl) {
-                        try {
-                          const docPdf = new jsPDF();
-                          docPdf.setFillColor(15, 23, 42);
-                          docPdf.rect(0, 0, 210, 297, 'F');
-                          docPdf.setTextColor(245, 158, 11);
-                          docPdf.setFontSize(16);
-                          docPdf.text('MAK GROUP OF COMPANIES', 105, 25, { align: 'center' });
-                          docPdf.setTextColor(255, 255, 255);
-                          docPdf.setFontSize(11);
-                          docPdf.text('Case Dossier Attached Document', 105, 34, { align: 'center' });
-                          docPdf.setFontSize(10);
-                          docPdf.setTextColor(200, 200, 200);
-                          docPdf.text(`Case No: #${c.caseNo}`, 20, 50);
-                          docPdf.text(`File: ${docName}`, 20, 58);
-                          docPdf.text(`Category: ${docCategory}`, 20, 66);
-                          docPdf.text(`Client: ${c.clientName || 'N/A'}`, 20, 74);
-                          docPdf.text(`Routing: ${c.pol || 'N/A'} -> ${c.pod || 'N/A'}`, 20, 82);
-                          activeUrl = docPdf.output('datauristring');
-                        } catch (_) {}
+                        setDraftToast(`⚠ Original file for "${docName}" was not stored in cloud before update.`);
+                        return;
                       }
-                      if (activeUrl) {
-                        const isPdf = docName.toLowerCase().endsWith('.pdf') || activeUrl.startsWith('data:application/pdf');
-                        if (isPdf) {
-                          setDirectDownloadUrl(activeUrl);
-                          setDirectDownloadFilename(docName.endsWith('.pdf') ? docName : `${docName}.pdf`);
-                          setIsPdfViewerOpen(true);
-                        } else {
-                          setLightboxImage(activeUrl);
-                        }
+                      const isPdf = docName.toLowerCase().endsWith('.pdf') || activeUrl.startsWith('data:application/pdf');
+                      if (isPdf) {
+                        setDirectDownloadUrl(activeUrl);
+                        setDirectDownloadFilename(docName.endsWith('.pdf') ? docName : `${docName}.pdf`);
+                        setIsPdfViewerOpen(true);
+                      } else {
+                        setLightboxImage(activeUrl);
                       }
                     };
 
                     const handleDownload = async () => {
-                      let activeUrl = await resolveActiveDocUrl();
+                      const activeUrl = await resolveDocumentUrl(doc, c);
                       if (!activeUrl) {
-                        try {
-                          const docPdf = new jsPDF();
-                          docPdf.setFillColor(15, 23, 42);
-                          docPdf.rect(0, 0, 210, 297, 'F');
-                          docPdf.setTextColor(245, 158, 11);
-                          docPdf.setFontSize(16);
-                          docPdf.text('MAK GROUP OF COMPANIES', 105, 25, { align: 'center' });
-                          docPdf.setTextColor(255, 255, 255);
-                          docPdf.setFontSize(11);
-                          docPdf.text('Case Dossier Attached Document', 105, 34, { align: 'center' });
-                          docPdf.setFontSize(10);
-                          docPdf.setTextColor(200, 200, 200);
-                          docPdf.text(`Case No: #${c.caseNo}`, 20, 50);
-                          docPdf.text(`File: ${docName}`, 20, 58);
-                          docPdf.text(`Category: ${docCategory}`, 20, 66);
-                          docPdf.text(`Client: ${c.clientName || 'N/A'}`, 20, 74);
-                          activeUrl = docPdf.output('datauristring');
-                        } catch (_) {}
+                        setDraftToast(`⚠ Original file for "${docName}" was not stored in cloud before update.`);
+                        return;
                       }
-                      if (activeUrl) {
-                        downloadFile(activeUrl, docName.includes('.') ? docName : `${docName}.pdf`);
-                      }
+                      downloadFile(activeUrl, docName.includes('.') ? docName : `${docName}.pdf`);
+                      setDraftToast(`✓ Downloaded ${docName}`);
                     };
 
                     return (
@@ -4208,11 +4132,20 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       );
     }
 
-    // Helper to get image source from File or MockDocument
+    // Helper to get synchronous preview source from direct Data URL or memory cache
     const getDocSource = (doc: any) => {
       if (!doc) return '';
-      if (doc.url) {
+      if (doc.url && (doc.url.startsWith('data:') || doc.url.startsWith('blob:') || doc.url.startsWith('http://') || doc.url.startsWith('https://'))) {
         return doc.url;
+      }
+      if (doc.url && doc.url.startsWith('chunk://')) {
+        const memSync = getCachedDocumentSync(doc.url);
+        if (memSync) return memSync;
+      }
+      if (doc.name) {
+        const cNo = targetCase?.caseNo;
+        const memSync = (cNo ? getCachedDocumentSync(`${cNo}_${doc.name}`) : null) || getCachedDocumentSync(doc.name);
+        if (memSync) return memSync;
       }
       try {
         if (doc instanceof File || doc instanceof Blob || doc instanceof MediaSource) {

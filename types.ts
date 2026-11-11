@@ -7,6 +7,7 @@ export enum UserRole {
   LOADING_PORT_STAFF = 'LOADING_PORT_STAFF',
   UNLOADING_PORT_STAFF = 'UNLOADING_PORT_STAFF',
   DESTINATION_PORT_STAFF = 'DESTINATION_PORT_STAFF',
+  DOCUMENTATION_MANAGER = 'DOCUMENTATION_MANAGER',
   VEHICLE_MANAGER = 'VEHICLE_MANAGER',
   OFFICE_STAFF = 'OFFICE_STAFF',
   CLIENT = 'CLIENT',
@@ -497,6 +498,7 @@ export interface CaseStepDetail {
   taxRenewalDate?: string;
   taxExpiryDate?: string;
   driverName?: string;
+  driverContact?: string;
   driverCnic?: string;
   driverCnicFrontUrl?: string;
   driverCnicFrontName?: string;

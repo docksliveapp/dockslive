@@ -192,7 +192,7 @@ export const DriverLocationPortal: React.FC<DriverLocationPortalProps> = ({
         status: 'PENDING',
         actionLabel: 'View Vehicle Location',
         priority: 'HIGH',
-        targetRole: 'TRANSPORTER,VEHICLE_MANAGER',
+        targetRole: 'TRANSPORTER,DOCUMENTATION_MANAGER',
         targetClientName: vehTransporter,
         category: 'TRANSPORTER',
         targetView: 'vehicles',

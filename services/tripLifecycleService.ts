@@ -558,7 +558,7 @@ export async function expireDriverTripCredentialsForCase(
           status: 'PENDING',
           actionLabel: 'View Fleet & Drivers',
           priority: 'MEDIUM',
-          targetRole: 'TRANSPORTER,VEHICLE_MANAGER',
+          targetRole: 'TRANSPORTER,DOCUMENTATION_MANAGER',
           targetClientName: veh.transporterName,
           category: 'TRANSPORTER',
           targetView: 'vehicles',

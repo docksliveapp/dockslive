@@ -27,6 +27,8 @@ import { dedupeAndMergeVehicles, normalizeVehiclePlate, getDeterministicVehicleI
 import { getActiveCompanyId, subscribeToActiveCompany, CompanyId, PARENT_GROUP, GROUP_COMPANIES } from './companyService';
 import { 
   saveDocumentToIndexedDB, 
+  saveDocumentToCloudChunks,
+  sanitizeCloudDocKey,
   backupCasesToIndexedDB, 
   backupVehiclesToIndexedDB, 
   restoreCasesFromIndexedDB, 
@@ -86,13 +88,77 @@ function sanitizeForFirestore(obj: any): any {
     if (val !== undefined) {
       // Guard against large base64 dataUrls (>150KB) that cause Firestore 1MB document rejection
       if (typeof val === 'string' && val.startsWith('data:') && val.length > 150000) {
-        clean[key] = ''; // Kept safely in IndexedDB and safeAppStorage
+        clean[key] = ''; // Offloaded prior via offloadLargeDataUrlsToCloudChunks -> chunk://...
       } else {
         clean[key] = sanitizeForFirestore(val);
       }
     }
   }
   return clean;
+}
+
+/**
+ * Recursively walks an object BEFORE Firestore write, uploads any >140KB data: URL
+ * to Firestore `document_chunks` + IndexedDB, and replaces it with `chunk://<docKey>`
+ * so multi-megabyte PDFs and high-res scans sync seamlessly across all devices.
+ */
+async function offloadLargeDataUrlsToCloudChunks(
+  obj: any,
+  contextPrefix: string,
+  caseNo?: string
+): Promise<any> {
+  if (obj === null || obj === undefined || typeof obj !== 'object') return obj;
+  if (obj instanceof Date || obj instanceof File || obj instanceof Blob) return obj;
+
+  if (Array.isArray(obj)) {
+    const out = await Promise.all(
+      obj.map((item, idx) =>
+        offloadLargeDataUrlsToCloudChunks(item, `${contextPrefix}_${idx}`, caseNo)
+      )
+    );
+    return out;
+  }
+
+  const clone: Record<string, any> = {};
+  const objNameHint = typeof obj.name === 'string' && obj.name ? obj.name : (typeof obj.fileName === 'string' && obj.fileName ? obj.fileName : '');
+  const objIdHint = typeof obj.id === 'string' && obj.id ? obj.id : '';
+  const objTypeHint = typeof obj.type === 'string' && obj.type ? obj.type : (typeof obj.fileType === 'string' && obj.fileType ? obj.fileType : 'application/pdf');
+  const objSizeHint = typeof obj.size === 'number' ? obj.size : (typeof obj.fileSize === 'number' ? obj.fileSize : 0);
+
+  for (const key of Object.keys(obj)) {
+    if (FORBIDDEN_OBJECT_KEYS.has(key)) continue;
+    const val = obj[key];
+    if (typeof val === 'string' && val.startsWith('data:') && val.length > 140000) {
+      const logicalKey = sanitizeCloudDocKey(
+        caseNo && objNameHint
+          ? `${caseNo}_${objNameHint}`
+          : objIdHint
+            ? `${contextPrefix}_${objIdHint}`
+            : objNameHint
+              ? `${contextPrefix}_${objNameHint}`
+              : `${contextPrefix}_${key}`
+      );
+      try {
+        const chunkUri = await saveDocumentToCloudChunks({
+          docKey: logicalKey,
+          name: objNameHint || key,
+          mimeType: objTypeHint,
+          size: objSizeHint || val.length,
+          caseNo,
+          dataUrl: val
+        });
+        clone[key] = chunkUri || '';
+      } catch (err) {
+        console.warn('Cloud chunk offload warning:', err);
+        clone[key] = '';
+      }
+    } else if (val && typeof val === 'object') {
+      clone[key] = await offloadLargeDataUrlsToCloudChunks(val, `${contextPrefix}_${key}`, caseNo);
+    } else {
+      clone[key] = val;
+    }
+  }
+  return clone;
 }
 
 // CASES
@@ -129,8 +195,8 @@ export function subscribeToCases(
       if (!existing) return fc;
 
       const existingHasBase64 = existing.documents?.some((d: any) => d?.url && String(d.url).startsWith('data:'));
-      const firestoreHasBase64 = fc.documents?.some((d: any) => d?.url && String(d.url).startsWith('data:'));
-      const bestDocs = (!firestoreHasBase64 && existingHasBase64 && (existing.documents?.length || 0) >= (fc.documents?.length || 0))
+      const firestoreHasDataOrChunk = fc.documents?.some((d: any) => d?.url && (String(d.url).startsWith('data:') || String(d.url).startsWith('chunk://')));
+      const bestDocs = (!firestoreHasDataOrChunk && existingHasBase64 && (existing.documents?.length || 0) >= (fc.documents?.length || 0))
         ? existing.documents
         : (fc.documents || []);
 
@@ -526,15 +592,20 @@ export async function saveCaseToFirestore(newCase: Case): Promise<void> {
   // 2. Backup full case in IndexedDB & local storage
   backupCasesToIndexedDB([newCase]).catch(() => {});
 
-  // 3. Write to Firestore with sanitized payload (no >150KB base64 strings to avoid 1MB reject)
+  // 3. Offload >140KB PDFs/scans to Firestore document_chunks, then write case payload
   try {
-    const payload = sanitizeForFirestore({
-      ...newCase,
-      companyId: newCase.companyId || activeCompany,
-      id: docId,
-      createdBy: auth.currentUser?.uid || 'guest',
-      updatedAt: new Date().toISOString()
-    });
+    const cloudReadyCase = await offloadLargeDataUrlsToCloudChunks(
+      {
+        ...newCase,
+        companyId: newCase.companyId || activeCompany,
+        id: docId,
+        createdBy: auth.currentUser?.uid || 'guest',
+        updatedAt: new Date().toISOString()
+      },
+      `case_${newCase.caseNo || docId}`,
+      newCase.caseNo
+    );
+    const payload = sanitizeForFirestore(cloudReadyCase);
     await setDoc(doc(db, path, docId), payload);
     const savedCaseObj = { ...newCase, id: docId };
     dispatchCaseLifecycleNotifications(savedCaseObj, null, true);
@@ -555,11 +626,31 @@ export async function updateCaseInFirestore(caseItem: Case): Promise<void> {
   } catch (_) {}
 
   try {
-    const payload = sanitizeForFirestore({
-      ...caseItem,
-      companyId: caseItem.companyId || activeCompany,
-      updatedAt: new Date().toISOString()
-    });
+    if (caseItem.documents && Array.isArray(caseItem.documents)) {
+      for (const d of caseItem.documents as any[]) {
+        if (d?.url && String(d.url).startsWith('data:')) {
+          saveDocumentToIndexedDB({
+            key: `${caseItem.caseNo}_${d.name}`,
+            id: d.id,
+            name: d.name,
+            type: d.type || 'application/pdf',
+            size: d.size || 0,
+            dataUrl: d.url,
+            caseNo: caseItem.caseNo
+          }).catch(() => {});
+        }
+      }
+    }
+    const cloudReadyCase = await offloadLargeDataUrlsToCloudChunks(
+      {
+        ...caseItem,
+        companyId: caseItem.companyId || activeCompany,
+        updatedAt: new Date().toISOString()
+      },
+      `case_${caseItem.caseNo || docId}`,
+      caseItem.caseNo
+    );
+    const payload = sanitizeForFirestore(cloudReadyCase);
     await setDoc(doc(db, path, docId), payload, { merge: true });
     const mergedCase = prevCase ? { ...prevCase, ...caseItem } : caseItem;
     dispatchCaseLifecycleNotifications(mergedCase, prevCase, false);
@@ -1426,7 +1517,7 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
           status: 'PENDING',
           actionLabel: 'View Vehicle',
           priority: 'MEDIUM',
-          targetRole: 'ADMIN,TRANSPORTER,VEHICLE_MANAGER',
+          targetRole: 'ADMIN,TRANSPORTER,DOCUMENTATION_MANAGER',
           targetClientName: transporterTarget,
           category: 'TRANSPORTER',
           targetView: 'vehicles',
@@ -1456,7 +1547,7 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
           status: 'PENDING',
           actionLabel: 'View NOC & Status',
           priority: 'HIGH',
-          targetRole: 'ADMIN,TRANSPORTER,VEHICLE_MANAGER',
+          targetRole: 'ADMIN,TRANSPORTER,DOCUMENTATION_MANAGER',
           targetClientName: transporterTarget,
           category: 'TRANSPORTER',
           targetView: 'vehicles',
@@ -1490,7 +1581,7 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
           status: 'PENDING',
           actionLabel: 'View Renewal Details',
           priority: 'MEDIUM',
-          targetRole: 'ADMIN,TRANSPORTER,VEHICLE_MANAGER',
+          targetRole: 'ADMIN,TRANSPORTER,DOCUMENTATION_MANAGER',
           targetClientName: transporterTarget,
           category: 'TRANSPORTER',
           targetView: 'vehicles',
@@ -1519,7 +1610,7 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
         status: 'PENDING',
         actionLabel: 'View Live Location',
         priority: 'MEDIUM',
-        targetRole: 'ADMIN,TRANSPORTER,VEHICLE_MANAGER',
+        targetRole: 'ADMIN,TRANSPORTER,DOCUMENTATION_MANAGER',
         targetClientName: transporterTarget,
         category: 'TRANSPORTER',
         targetView: 'vehicles',
@@ -1540,7 +1631,7 @@ function dispatchTransporterVehicleNotifications(vehicle: Vehicle, prevVehicle?:
         status: 'PENDING',
         actionLabel: 'Locate Vehicle',
         priority: 'HIGH',
-        targetRole: 'TRANSPORTER,VEHICLE_MANAGER,ADMIN',
+        targetRole: 'TRANSPORTER,DOCUMENTATION_MANAGER,ADMIN',
         targetClientName: transporterTarget,
         category: 'TRANSPORTER',
         targetView: 'vehicles',
@@ -1587,13 +1678,17 @@ export async function saveVehicleToFirestore(vehicle: Vehicle, skipNotification 
   const docId = String(resolvedVehicle.id || Date.now());
   backupVehiclesToIndexedDB([resolvedVehicle]).catch(() => {});
   try {
-    const payload = sanitizeForFirestore({
-      ...resolvedVehicle,
-      companyId: (resolvedVehicle as any).companyId || resolvedVehicle.operatingCompany || activeCompany,
-      id: Number(docId),
-      createdBy: auth.currentUser?.uid || 'guest',
-      updatedAt: new Date().toISOString()
-    });
+    const cloudReadyVeh = await offloadLargeDataUrlsToCloudChunks(
+      {
+        ...resolvedVehicle,
+        companyId: (resolvedVehicle as any).companyId || resolvedVehicle.operatingCompany || activeCompany,
+        id: Number(docId),
+        createdBy: auth.currentUser?.uid || 'guest',
+        updatedAt: new Date().toISOString()
+      },
+      `veh_${normPlate || docId}`
+    );
+    const payload = sanitizeForFirestore(cloudReadyVeh);
     await setDoc(doc(db, path, docId), payload);
     if (!skipNotification) {
       dispatchTransporterVehicleNotifications({ ...resolvedVehicle, id: Number(docId) }, null, true);
@@ -1675,11 +1770,15 @@ export async function updateVehicleInFirestore(vehicle: Vehicle): Promise<void> 
 
   const docId = String(updatedVeh.id);
   try {
-    const payload = sanitizeForFirestore({ 
-      ...updatedVeh, 
-      companyId: (updatedVeh as any).companyId || updatedVeh.operatingCompany || activeCompany,
-      updatedAt: new Date().toISOString() 
-    });
+    const cloudReadyVeh = await offloadLargeDataUrlsToCloudChunks(
+      {
+        ...updatedVeh,
+        companyId: (updatedVeh as any).companyId || updatedVeh.operatingCompany || activeCompany,
+        updatedAt: new Date().toISOString()
+      },
+      `veh_${normalizeVehiclePlate(updatedVeh.registrationNumber) || docId}`
+    );
+    const payload = sanitizeForFirestore(cloudReadyVeh);
     await setDoc(doc(db, path, docId), payload, { merge: true });
     const mergedVehicle = prevVehicle ? { ...prevVehicle, ...updatedVeh } : updatedVeh;
     dispatchTransporterVehicleNotifications(mergedVehicle, prevVehicle, false);
@@ -2851,7 +2950,7 @@ export const DEFAULT_DATABASE_USERS: AppUser[] = [
   { id: 1, userId: 'Arbabkhanboby', password: 'Behzadmk@123', name: 'Arbab Khan Boby (System Administrator)', role: UserRole.ADMIN, roles: [UserRole.ADMIN, UserRole.OPERATIONS_MANAGER, UserRole.CASE_MANAGER, UserRole.FINANCE_MANAGER], designation: 'Main Group Administrator', contact: '0300-1234567', email: 'arbabkhanboby@makgroup.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: true, allowedCompanies: ['docks', 'muhib', 'vantage', 'truckit'], baseSalary: 0 },
   { id: 2, userId: 'finance', password: 'dpl01234', name: 'Finance Manager', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER], designation: 'Finance Manager', contact: '0333-5554444', email: 'finance@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage'], baseSalary: 0 },
   { id: 3, userId: 'casemanager', password: 'dpl01234', name: 'Operations Manager', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER], designation: 'Operations Manager', contact: '0321-9876543', email: 'casemanager@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'], baseSalary: 0 },
-  { id: 4, userId: 'vehiclemanager', password: 'dpl01234', name: 'Vehicles Manager', role: UserRole.VEHICLE_MANAGER, roles: [UserRole.VEHICLE_MANAGER], designation: 'Fleet & Vehicle Manager', contact: '0301-2233445', email: 'transport@docks.com', status: 'ACTIVE', isGlobalAdmin: false, allowedCompanies: ['truckit', 'docks'], baseSalary: 0 },
+  { id: 4, userId: 'docmanager', password: 'dpl01234', name: 'Documentation Manager', role: UserRole.DOCUMENTATION_MANAGER, roles: [UserRole.DOCUMENTATION_MANAGER], designation: 'Documentation & Fleet Manager', contact: '0301-2233445', email: 'docs@docks.com', status: 'ACTIVE', isGlobalAdmin: false, allowedCompanies: ['truckit', 'docks'], baseSalary: 0 },
   { id: 5, userId: 'officestaff', password: 'dpl01234', name: 'Office Staff', role: UserRole.OFFICE_STAFF, roles: [UserRole.OFFICE_STAFF], designation: 'Office Staff Coordinator', contact: '0312-7788990', email: 'office@docks.com', status: 'ACTIVE', isGlobalAdmin: false, allowedCompanies: ['docks'], baseSalary: 0 },
   { id: 6, userId: 'transporter', password: 'dpl01234', name: 'Transporter Portal', role: UserRole.TRANSPORTER, roles: [UserRole.TRANSPORTER], designation: 'Goods Transporter / Fleet Partner', contact: '0300-8889999', email: 'transporter@docks.com', status: 'ACTIVE', baseSalary: 0 },
   { id: 7, userId: 'client', password: 'dpl01234', name: 'Client Portal', role: UserRole.CLIENT, roles: [UserRole.CLIENT], designation: 'Corporate Importer / Client', contact: '021-111-222-333', email: 'client@docks.com', status: 'ACTIVE', clientName: 'Al-Khaleej Importers & Shipping Lines', baseSalary: 0 },
@@ -2864,10 +2963,10 @@ export const DEFAULT_DATABASE_USERS: AppUser[] = [
   { id: 12, userId: 'unloadingstaff', password: 'dpl01234', name: 'Unloading Port Staff', role: UserRole.UNLOADING_PORT_STAFF, roles: [UserRole.UNLOADING_PORT_STAFF], designation: 'Unloading Port Clearance Staff', contact: '0300-1122334', email: 'unloading@docks.com', status: 'ACTIVE', isGlobalAdmin: false, allowedCompanies: ['docks'], baseSalary: 0 },
   // Company Admin example: Single Company Admin (e.g. Docks only)
   { id: 13, userId: 'admin_docks', password: 'dpl01234', name: 'Docks Company Admin', role: UserRole.ADMIN, roles: [UserRole.ADMIN], designation: 'Docks Admin (Single Company)', contact: '0300-9988776', email: 'admindocks@docks.com', status: 'ACTIVE', isAdmin: true, isGlobalAdmin: false, allowedCompanies: ['docks'], baseSalary: 0 },
-  // Multi-role example: Operations + Vehicle Management
-  { id: 14, userId: 'ops_fleet', password: 'dpl01234', name: 'Operations & Fleet Coordinator', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER, UserRole.VEHICLE_MANAGER], designation: 'Ops & Fleet Manager', contact: '0300-4433221', email: 'opsfleet@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'], baseSalary: 0 },
-  // Multi-role example: Finance + Vehicle Management
-  { id: 15, userId: 'fin_fleet', password: 'dpl01234', name: 'Finance & Transport Billing', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER, UserRole.VEHICLE_MANAGER], designation: 'Finance & Vehicle Manager', contact: '0300-5544332', email: 'finfleet@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'], baseSalary: 0 }
+  // Multi-role example: Operations + Documentation Management
+  { id: 14, userId: 'ops_fleet', password: 'dpl01234', name: 'Operations & Documentation Coordinator', role: UserRole.OPERATIONS_MANAGER, roles: [UserRole.OPERATIONS_MANAGER, UserRole.DOCUMENTATION_MANAGER], designation: 'Ops & Documentation Manager', contact: '0300-4433221', email: 'opsfleet@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'], baseSalary: 0 },
+  // Multi-role example: Finance + Documentation Management
+  { id: 15, userId: 'fin_fleet', password: 'dpl01234', name: 'Finance & Documentation Billing', role: UserRole.FINANCE_MANAGER, roles: [UserRole.FINANCE_MANAGER, UserRole.DOCUMENTATION_MANAGER], designation: 'Finance & Documentation Manager', contact: '0300-5544332', email: 'finfleet@docks.com', status: 'ACTIVE', isAdmin: false, isGlobalAdmin: false, allowedCompanies: ['docks', 'truckit'], baseSalary: 0 }
 ];
 
 let hasSeededInitialUsers = false;
@@ -2962,8 +3061,14 @@ export function subscribeToUsers(
             updateDoc(doc(db, path, docSnap.id), { baseSalary: 0 }).catch(() => {});
           }
           const uniqueNumId = parseNumericDocId(data.id, docSnap.id, idx++);
+          const normalizedPrimaryRole = data.role === UserRole.VEHICLE_MANAGER ? UserRole.DOCUMENTATION_MANAGER : data.role;
+          const normalizedRoles = Array.isArray(data.roles)
+            ? Array.from(new Set(data.roles.map((r: any) => (r === UserRole.VEHICLE_MANAGER ? UserRole.DOCUMENTATION_MANAGER : r))))
+            : undefined;
           rawList.push({
             ...data,
+            role: normalizedPrimaryRole,
+            ...(normalizedRoles ? { roles: normalizedRoles } : {}),
             baseSalary: isAdminOrDefaultPlaceholder ? 0 : data.baseSalary,
             id: uniqueNumId,
             _docId: docSnap.id
@@ -5264,12 +5369,26 @@ export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocume
   const docId = documentItem.id || `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const activeCompany = getActiveCompanyId();
   try {
-    const payload = sanitizeForFirestore({
-      ...documentItem,
-      companyId: documentItem.companyId || activeCompany,
-      id: docId,
-      updatedAt: new Date().toISOString()
-    });
+    if (documentItem.fileUrl && documentItem.fileUrl.startsWith('data:')) {
+      saveDocumentToIndexedDB({
+        key: docId,
+        id: docId,
+        name: documentItem.fileName || documentItem.title || docId,
+        type: documentItem.fileType || 'application/pdf',
+        size: documentItem.fileSize || documentItem.fileUrl.length,
+        dataUrl: documentItem.fileUrl
+      }).catch(() => {});
+    }
+    const cloudReadyDoc = await offloadLargeDataUrlsToCloudChunks(
+      {
+        ...documentItem,
+        companyId: documentItem.companyId || activeCompany,
+        id: docId,
+        updatedAt: new Date().toISOString()
+      },
+      `compdoc_${docId}`
+    );
+    const payload = sanitizeForFirestore(cloudReadyDoc);
     await setDoc(doc(db, path, docId), payload, { merge: true });
 
     // Rule 7 & 8: Notify Admin immediately if Hearing Notice or Document Expired / Expiring Soon

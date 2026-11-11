@@ -402,20 +402,20 @@ export function checkVehicleWorkflowReadiness(
     );
   }
   if (!hasRegistrationBook) {
-    missingItems.push('Vehicle Registration Book is not uploaded (Uploaded by Vehicle Manager)');
+    missingItems.push('Vehicle Registration Book is not uploaded (Managed by Documentation Manager)');
   }
   if (!hasOwnerIdCard) {
-    missingItems.push('Vehicle Owner ID Card (CNIC) is not uploaded (Uploaded by Vehicle Manager)');
+    missingItems.push('Vehicle Owner ID Card (CNIC) is not uploaded (Managed by Documentation Manager)');
   }
   if (requireBothDriverSides) {
     if (!driverFrontPresent) {
-      missingItems.push('Driver ID Card (CNIC Front) is required (Uploaded by Loading Staff)');
+      missingItems.push('Driver ID Card (CNIC Front) is required (Step 4 Vehicle Assignment — Documentation Manager)');
     }
     if (!driverBackPresent) {
-      missingItems.push('Driver ID Card (CNIC Back) is required (Uploaded by Loading Staff)');
+      missingItems.push('Driver ID Card (CNIC Back) is required (Step 4 Vehicle Assignment — Documentation Manager)');
     }
   } else if (!hasDriverIdCard) {
-    missingItems.push('Driver ID Card (CNIC) is not uploaded (Uploaded by Loading Staff)');
+    missingItems.push('Driver ID Card (CNIC) is not uploaded (Step 4 Vehicle Assignment — Documentation Manager)');
   }
 
   const ready = missingItems.length === 0;

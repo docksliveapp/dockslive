@@ -321,7 +321,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     const updatedReq: TransporterRequest = {
       ...req,
       status: 'APPROVED',
-      reviewedBy: 'Vehicle Manager',
+      reviewedBy: 'Documentation Manager',
       reviewedAt: new Date().toISOString()
     };
     await updateTransporterRequestInFirestore(updatedReq);
@@ -329,7 +329,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     // Dispatch real-time notification to Transporter & Admin
     await sendAppNotification({
       title: `Vehicle Request APPROVED: ${req.vehicleNo}`,
-      description: `Your ${req.type.replace('_', ' ').toLowerCase()} request for vehicle ${req.vehicleNo} has been verified and approved by Vehicle Management.`,
+      description: `Your ${req.type.replace('_', ' ').toLowerCase()} request for vehicle ${req.vehicleNo} has been verified and approved by Documentation Manager.`,
       targetRole: UserRole.TRANSPORTER,
       targetClientName: req.transporterName,
       targetView: 'vehicles',
@@ -337,8 +337,8 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       type: 'INFO',
       notificationSubType: 'GENERAL',
       actionLabel: 'View Vehicle',
-      performedBy: 'Vehicle Manager',
-      performedByRole: 'VEHICLE_MANAGER',
+      performedBy: 'Documentation Manager',
+      performedByRole: 'DOCUMENTATION_MANAGER',
       category: 'TRANSPORTER'
     });
 
@@ -349,7 +349,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     const updatedReq: TransporterRequest = {
       ...req,
       status: 'REJECTED',
-      reviewedBy: 'Vehicle Manager',
+      reviewedBy: 'Documentation Manager',
       reviewedAt: new Date().toISOString()
     };
     await updateTransporterRequestInFirestore(updatedReq);
@@ -357,7 +357,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     // Dispatch real-time notification to Transporter & Admin
     await sendAppNotification({
       title: `Vehicle Request Declined: ${req.vehicleNo}`,
-      description: `Your ${req.type.replace('_', ' ').toLowerCase()} request for vehicle ${req.vehicleNo} was declined by Vehicle Management. Please contact transport desk for details.`,
+      description: `Your ${req.type.replace('_', ' ').toLowerCase()} request for vehicle ${req.vehicleNo} was declined by Documentation Manager. Please contact documentation desk for details.`,
       targetRole: UserRole.TRANSPORTER,
       targetClientName: req.transporterName,
       targetView: 'vehicles',
@@ -365,8 +365,8 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       type: 'ALERT',
       notificationSubType: 'GENERAL',
       actionLabel: 'Check Status',
-      performedBy: 'Vehicle Manager',
-      performedByRole: 'VEHICLE_MANAGER',
+      performedBy: 'Documentation Manager',
+      performedByRole: 'DOCUMENTATION_MANAGER',
       category: 'TRANSPORTER'
     });
 
@@ -389,7 +389,10 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   }, [propUserRoles, effectiveRole]);
 
   const hasAdminRole = effectiveRoles.includes(UserRole.ADMIN);
-  const hasVehicleMgrRole = hasAdminRole || effectiveRoles.includes(UserRole.VEHICLE_MANAGER) || effectiveRoles.includes(UserRole.LOADING_PORT_STAFF);
+  const hasVehicleMgrRole =
+    hasAdminRole ||
+    effectiveRoles.includes(UserRole.DOCUMENTATION_MANAGER) ||
+    effectiveRoles.includes(UserRole.VEHICLE_MANAGER);
 
   // Approval request state for vehicle actions (delete, cancel, edit)
   const [showVehicleApprovalModal, setShowVehicleApprovalModal] = useState(false);
@@ -2452,7 +2455,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       {/* Content Area */}
       {activeTab === 'vehicles' && renderVehiclesSection()}
       {activeTab === 'transporters' && renderTransportersSection()}
-      {activeTab === 'ready_vehicles' && <AvailableVehiclesView userRole="VEHICLE_MANAGER" />}
+      {activeTab === 'ready_vehicles' && <AvailableVehiclesView userRole="DOCUMENTATION_MANAGER" />}
 
       {/* Add Transporter Modal */}
       {showAddTransporter && (

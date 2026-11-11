@@ -246,6 +246,21 @@
         "updatedAt": { "type": "string", "description": "ISO timestamp of last auto-save", "maxLength": 50 }
       },
       "required": ["userKey", "module", "updatedAt"]
+    },
+    "DocumentChunk": {
+      "title": "DocumentChunk",
+      "description": "Chunked Base64 slice of uploaded multi-page PDF or high-resolution document scan",
+      "type": "object",
+      "properties": {
+        "docKey": { "type": "string", "description": "Logical document identifier", "maxLength": 140 },
+        "chunkIndex": { "type": "number", "description": "Zero-based chunk index" },
+        "totalChunks": { "type": "number", "description": "Total chunk count for reassembly" },
+        "data": { "type": "string", "description": "Chunk slice of Data URL string", "maxLength": 750000 },
+        "name": { "type": "string", "description": "Original file name", "maxLength": 200 },
+        "mimeType": { "type": "string", "description": "Original MIME type", "maxLength": 100 },
+        "updatedAt": { "type": "string", "description": "Upload timestamp", "maxLength": 50 }
+      },
+      "required": ["docKey", "chunkIndex", "totalChunks", "data"]
     }
   },
   "firestore": {
@@ -332,6 +347,10 @@
     "/work_drafts/{draftId}": {
       "schema": "UserWorkDraft",
       "description": "Cloud-synced user work drafts for session and disconnection recovery"
+    },
+    "/document_chunks/{chunkId}": {
+      "schema": "DocumentChunk",
+      "description": "Cloud-synced binary chunks for multi-megabyte PDFs and document attachments"
     }
   }
 }

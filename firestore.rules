@@ -217,6 +217,13 @@ service cloud.firestore {
       allow delete: if isValidDocId(draftId);
     }
 
+    // Cloud Chunked Binary Attachments (Multi-page PDFs & High-Res Scans >150KB)
+    match /document_chunks/{chunkId} {
+      allow read: if true;
+      allow create, update: if isValidDocId(chunkId) && isValidPayload();
+      allow delete: if isValidDocId(chunkId);
+    }
+
     // Admin Authorizations
     match /admins/{adminId} {
       allow read: if true;

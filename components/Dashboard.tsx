@@ -240,7 +240,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
 
       if (activityRoleFilter !== 'ALL') {
         if (activityRoleFilter === 'TRANSPORTER' && !itemRole.includes('TRANSPORTER')) return false;
-        if (activityRoleFilter === 'VEHICLE_MANAGER' && !itemRole.includes('VEHICLE') && !itemRole.includes('FLEET') && !itemRole.includes('TRANSPORT')) return false;
+        if (activityRoleFilter === 'DOCUMENTATION_MANAGER' && !itemRole.includes('DOCUMENTATION') && !itemRole.includes('VEHICLE') && !itemRole.includes('FLEET') && !itemRole.includes('TRANSPORT')) return false;
         if (activityRoleFilter === 'LOADING_PORT_STAFF' && !itemRole.includes('LOADING')) return false;
         if (activityRoleFilter === 'DESTINATION_PORT_STAFF' && !itemRole.includes('DESTINATION') && !itemRole.includes('UNLOADING')) return false;
         if (activityRoleFilter === 'FINANCE' && !itemRole.includes('FINANCE')) return false;
@@ -748,7 +748,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, targetCompanyId }) =>
           <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
             {[
               { id: 'ALL', label: 'All Roles', Icon: Layers },
-              { id: 'VEHICLE_MANAGER', label: 'Fleet & Vehicles', Icon: Truck },
+              { id: 'DOCUMENTATION_MANAGER', label: 'Documentation & Fleet', Icon: Truck },
               { id: 'TRANSPORTER', label: 'Transporters', Icon: Truck },
               { id: 'LOADING_PORT_STAFF', label: 'Port Loading', Icon: Anchor },
               { id: 'DESTINATION_PORT_STAFF', label: 'Destination', Icon: MapPin },

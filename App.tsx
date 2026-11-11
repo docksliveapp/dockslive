@@ -254,23 +254,29 @@ const App: React.FC = () => {
     }
   }, [showSplash, isReplaySplashOnly]);
 
-  // Role State (Preserved across app switching and backgrounding)
+  // Role State (Preserved across app switching and backgrounding; legacy VEHICLE_MANAGER normalized to DOCUMENTATION_MANAGER)
   const [currentRole, setCurrentRole] = useState<UserRole>(() => {
-    const saved = safeAppStorage.getItem('dpl_user_role');
-    return (saved as UserRole) || UserRole.ADMIN;
+    const saved = safeAppStorage.getItem('dpl_user_role') as UserRole;
+    if (saved === UserRole.VEHICLE_MANAGER) return UserRole.DOCUMENTATION_MANAGER;
+    return saved || UserRole.ADMIN;
   });
   const [currentRoles, setCurrentRoles] = useState<UserRole[]>(() => {
     const saved = safeAppStorage.getItem('dpl_user_roles');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return Array.from(new Set(parsed.map((r: UserRole) =>
+            r === UserRole.VEHICLE_MANAGER ? UserRole.DOCUMENTATION_MANAGER : r
+          )));
+        }
       } catch (e) {
         console.warn("Could not parse saved roles:", e);
       }
     }
     const single = safeAppStorage.getItem('dpl_user_role') as UserRole;
-    return single ? [single] : [UserRole.ADMIN];
+    const normalizedSingle = single === UserRole.VEHICLE_MANAGER ? UserRole.DOCUMENTATION_MANAGER : single;
+    return normalizedSingle ? [normalizedSingle] : [UserRole.ADMIN];
   });
   const [currentDesignation, setCurrentDesignation] = useState<string>(() => {
     return safeAppStorage.getItem('dpl_user_designation') || '';
@@ -497,17 +503,27 @@ const App: React.FC = () => {
 
     const items: Array<{ id: string; label: string; icon: any }> = [];
 
-    const hasCasesAccess = currentRoles.includes(UserRole.OPERATIONS_MANAGER) || 
-                           currentRoles.includes(UserRole.VEHICLE_MANAGER) ||
+    const isDocManager =
+      currentRole === UserRole.DOCUMENTATION_MANAGER ||
+      currentRole === UserRole.VEHICLE_MANAGER ||
+      currentRoles.includes(UserRole.DOCUMENTATION_MANAGER) ||
+      currentRoles.includes(UserRole.VEHICLE_MANAGER);
+
+    const hasCasesAccess = isDocManager ||
+                           currentRoles.includes(UserRole.OPERATIONS_MANAGER) || 
+                           currentRoles.includes(UserRole.CASE_MANAGER) ||
                            currentRoles.includes(UserRole.LOADING_PORT_STAFF) || 
                            currentRoles.includes(UserRole.UNLOADING_PORT_STAFF) ||
                            currentRoles.includes(UserRole.DESTINATION_PORT_STAFF) ||
                            currentRoles.includes(UserRole.OFFICE_STAFF);
+    const hasCompanyDocsAccess = isDocManager;
     const hasFinanceAccess = currentRoles.includes(UserRole.FINANCE_MANAGER);
-    const hasVehiclesAccess = currentRoles.includes(UserRole.VEHICLE_MANAGER) || currentRoles.includes(UserRole.LOADING_PORT_STAFF);
+    const hasVehiclesAccess = isDocManager;
 
     if (hasCasesAccess) {
       items.push({ id: 'cases', label: 'Case Management', icon: FolderKanban });
+    }
+    if (hasCompanyDocsAccess) {
       items.push({ id: 'company_documents', label: 'Company Documents', icon: FolderArchive });
     }
     if (hasFinanceAccess) {
@@ -711,7 +727,27 @@ const App: React.FC = () => {
 
     switch(activeView) {
       case 'dashboard': return <Dashboard onNavigate={handleNavigate} />;
-      case 'company_documents': return <CompanyDocuments />;
+      case 'company_documents': {
+        const canAccessCompanyDocs =
+          currentRoles.includes(UserRole.ADMIN) ||
+          currentRole === UserRole.ADMIN ||
+          currentRoles.includes(UserRole.DOCUMENTATION_MANAGER) ||
+          currentRole === UserRole.DOCUMENTATION_MANAGER ||
+          currentRoles.includes(UserRole.VEHICLE_MANAGER) ||
+          currentRole === UserRole.VEHICLE_MANAGER;
+        if (!canAccessCompanyDocs) {
+          return (
+            <div className="p-8 text-center bg-slate-900/60 rounded-2xl border border-white/10 m-6 max-w-lg mx-auto">
+              <ShieldAlert className="w-12 h-12 text-amber-400 mx-auto mb-3" />
+              <h3 className="text-lg font-bold text-white mb-1">Access Restricted</h3>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                Company Documents management and uploads are restricted to Documentation Managers and Administrators.
+              </p>
+            </div>
+          );
+        }
+        return <CompanyDocuments />;
+      }
       case 'cases': return <CaseManagement initialFilter={navigationFilter} clearFilter={() => setNavigationFilter(null)} onActionComplete={handleActionComplete} customLogo={customLogo} userRole={currentRole} userRoles={currentRoles} currentClientName={currentClientName} />;
       case 'drive': return <GoogleDriveManager />;
       case 'finance': {
@@ -733,10 +769,10 @@ const App: React.FC = () => {
         const canAccessVehicles =
           currentRoles.includes(UserRole.ADMIN) ||
           currentRole === UserRole.ADMIN ||
+          currentRoles.includes(UserRole.DOCUMENTATION_MANAGER) ||
+          currentRole === UserRole.DOCUMENTATION_MANAGER ||
           currentRoles.includes(UserRole.VEHICLE_MANAGER) ||
           currentRole === UserRole.VEHICLE_MANAGER ||
-          currentRoles.includes(UserRole.LOADING_PORT_STAFF) ||
-          (currentRole as any) === UserRole.LOADING_PORT_STAFF ||
           (currentRole as any) === UserRole.TRANSPORTER;
         if (!canAccessVehicles) {
           return (
@@ -744,7 +780,7 @@ const App: React.FC = () => {
               <ShieldAlert className="w-12 h-12 text-rose-400 mx-auto mb-3" />
               <h3 className="text-lg font-bold text-white mb-1">Access Restricted</h3>
               <p className="text-xs text-gray-400 leading-relaxed">
-                Fleet management is restricted to Vehicle Managers, Loading Port Staff, and Administrators.
+                Fleet &amp; Vehicle management is handled by Documentation Managers and Administrators.
               </p>
             </div>
           );
@@ -1404,10 +1440,10 @@ const App: React.FC = () => {
               title={`${activeCompany.name} (Click to switch company)`}
             >
               {getCompanyLogoUrl(activeCompany.id) ? (
-                <img 
-                  src={getCompanyLogoUrl(activeCompany.id)} 
-                  alt={activeCompany.name} 
-                  className="h-8 sm:h-11 md:h-14 w-auto max-w-[120px] xs:max-w-[150px] sm:max-w-[220px] md:max-w-[320px] object-contain drop-shadow group-hover:scale-105 transition-transform duration-200" 
+                <Logo
+                  variant="full"
+                  customSrc={getCompanyLogoUrl(activeCompany.id)}
+                  className="h-8 sm:h-11 md:h-14 w-auto max-w-[120px] xs:max-w-[150px] sm:max-w-[220px] md:max-w-[320px] object-contain drop-shadow group-hover:scale-105 transition-transform duration-200"
                 />
               ) : null}
             </button>

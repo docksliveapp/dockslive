@@ -45,12 +45,12 @@ export const SYSTEM_ROLE_DEFINITIONS: RoleDefinition[] = [
     badge: 'FINANCE'
   },
   {
-    id: UserRole.VEHICLE_MANAGER,
-    name: 'Vehicle / Fleet Manager',
-    shortLabel: 'Vehicle Manager',
-    description: 'Vehicles, drivers & fleet',
+    id: UserRole.DOCUMENTATION_MANAGER,
+    name: 'Documentation Manager',
+    shortLabel: 'Documentation Manager',
+    description: 'DO, TP, Excise, Vehicle Assignment, Fleet & Company Docs',
     defaultScope: 'All units',
-    badge: 'FLEET'
+    badge: 'DOCS'
   },
   {
     id: UserRole.LOADING_PORT_STAFF,
@@ -125,22 +125,27 @@ export const AdminRolesAndPrivilegesTable: React.FC<AdminRolesAndPrivilegesTable
   onRolesChange,
   readOnly = false
 }) => {
+  const normalizedAssignedRoles: UserRole[] = assignedRoles.map(r =>
+    r === UserRole.VEHICLE_MANAGER ? UserRole.DOCUMENTATION_MANAGER : r
+  );
+
   const handleToggleRole = (roleId: UserRole) => {
     if (readOnly) return;
-    const isAssigned = assignedRoles.includes(roleId);
+    const baseRoles = Array.from(new Set(normalizedAssignedRoles));
+    const isAssigned = baseRoles.includes(roleId);
     let newRoles: UserRole[];
 
     if (isAssigned) {
-      newRoles = assignedRoles.filter(r => r !== roleId);
+      newRoles = baseRoles.filter(r => r !== roleId);
     } else {
-      newRoles = [...assignedRoles, roleId];
+      newRoles = [...baseRoles, roleId];
     }
 
     const primaryRole = newRoles[0] || UserRole.OPERATIONS_MANAGER;
     onRolesChange(newRoles, primaryRole);
   };
 
-  const assignedCount = assignedRoles.length;
+  const assignedCount = Array.from(new Set(normalizedAssignedRoles)).length;
 
   return (
     <div className="w-full bg-slate-950/70 border border-white/15 rounded-2xl p-3.5 sm:p-4 space-y-3 font-sans">
@@ -192,7 +197,7 @@ export const AdminRolesAndPrivilegesTable: React.FC<AdminRolesAndPrivilegesTable
       {/* Compact Grid of Small Tickable Role Checkboxes */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {SYSTEM_ROLE_DEFINITIONS.map((roleDef) => {
-          const isChecked = assignedRoles.includes(roleDef.id);
+          const isChecked = normalizedAssignedRoles.includes(roleDef.id);
           return (
             <button
               key={roleDef.id}

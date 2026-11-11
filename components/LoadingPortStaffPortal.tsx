@@ -490,31 +490,7 @@ export const LoadingPortStaffPortal: React.FC<LoadingPortStaffPortalProps> = ({
               </span>
             </button>
 
-            {/* 3. Fleet & Vehicles (Assign / Update) */}
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('vehicles');
-                setMobileMenuOpen(false);
-              }}
-              className={`w-full flex items-center justify-between px-3.5 py-3 rounded-2xl font-bold text-xs transition-all ${
-                activeTab === 'vehicles'
-                  ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-black'
-                  : 'text-gray-300 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Truck size={17} />
-                <span>Fleet & Vehicles</span>
-              </div>
-              <span className={`px-2 py-0.5 text-[10px] rounded-full font-mono font-bold ${
-                activeTab === 'vehicles' ? 'bg-black/20 text-slate-950' : 'bg-cyan-500/20 text-cyan-300'
-              }`}>
-                Update
-              </span>
-            </button>
-
-            {/* 4. Finance */}
+            {/* 3. Finance */}
             <button
               type="button"
               onClick={() => {

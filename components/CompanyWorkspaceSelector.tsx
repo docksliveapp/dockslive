@@ -33,6 +33,7 @@ import {
   getCompanyLogoUrl
 } from '../services/companyService';
 import { UserRole } from '../types';
+import { useTransparentLogo } from '../services/brandingService';
 import { safeAppStorage } from '../services/storage';
 import { GroupAdminManagementModal, AdminSettingsTab } from './GroupAdminManagementModal';
 import { ThemeToggleSwitch, useAppTheme } from './ThemeToggleSwitch';
@@ -81,12 +82,12 @@ export const PORTAL_OPTIONS: PortalOption[] = [
     description: 'Treasury, Customer Ledger, Billing & Port Accounts'
   },
   {
-    id: 'vehicle_manager',
-    name: 'Fleet & Vehicle Portal',
-    role: UserRole.VEHICLE_MANAGER,
-    targetView: 'vehicles',
-    badge: 'FLEET',
-    description: 'Carrier Fleet, Drivers & Vehicle Tracking'
+    id: 'documentation_manager',
+    name: 'Documentation Manager Portal',
+    role: UserRole.DOCUMENTATION_MANAGER,
+    targetView: 'cases',
+    badge: 'DOCS MGR',
+    description: 'DO, TP Filing, Excise, Vehicle Assignment, Fleet & Company Docs'
   },
   {
     id: 'loading_port_staff',
@@ -172,6 +173,8 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 }) => {
   const { companyId: currentActiveId } = useActiveCompany();
   const { parentGroup } = useParentGroup();
+  const rawParentLogo = parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? parentGroup.logo : null;
+  const cleanParentLogo = useTransparentLogo(rawParentLogo);
   const [isAdminManagementOpen, setIsAdminManagementOpen] = useState(false);
   const [adminInitialTab, setAdminInitialTab] = useState<AdminSettingsTab>('users');
   const [, setBrandingVersion] = useState(0);
@@ -181,7 +184,7 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
     if (currentRole === UserRole.OPERATIONS_MANAGER) return 'operations_manager';
     if (currentRole === UserRole.CASE_MANAGER) return 'case_manager';
     if (currentRole === UserRole.FINANCE_MANAGER) return 'finance_manager';
-    if (currentRole === UserRole.VEHICLE_MANAGER) return 'vehicle_manager';
+    if (currentRole === UserRole.DOCUMENTATION_MANAGER || currentRole === UserRole.VEHICLE_MANAGER) return 'documentation_manager';
     if (currentRole === UserRole.LOADING_PORT_STAFF) return 'loading_port_staff';
     if (currentRole === UserRole.DESTINATION_PORT_STAFF) return 'destination_port_staff';
     if (currentRole === UserRole.CLIENT) return 'client';
@@ -531,12 +534,12 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 
       {/* 2. CENTER CONGLOMERATE HEADER */}
       <div className="text-center mb-4 sm:mb-6 shrink-0 px-2">
-        <div className="inline-flex items-center justify-center min-h-[2rem] mb-2 transform hover:scale-105 transition-transform duration-300">
-          {parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? (
+        <div className="inline-flex items-center justify-center min-h-[2rem] mb-2 bg-transparent transform hover:scale-105 transition-transform duration-300">
+          {(cleanParentLogo || rawParentLogo) ? (
             <img 
-              src={parentGroup.logo} 
+              src={cleanParentLogo || rawParentLogo || ''} 
               alt={parentGroup.name} 
-              className="h-20 sm:h-28 w-auto max-w-[240px] sm:max-w-[400px] object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.22)]" 
+              className="h-20 sm:h-28 w-auto max-w-[240px] sm:max-w-[400px] bg-transparent object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.22)]" 
             />
           ) : null}
         </div>
