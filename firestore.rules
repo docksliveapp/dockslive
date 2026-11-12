@@ -231,6 +231,20 @@ service cloud.firestore {
       allow delete: if isValidDocId(deviceId);
     }
 
+    // Monthly Ledger Email Dispatch Logs
+    match /monthly_ledger_emails/{emailId} {
+      allow read: if true;
+      allow create, update: if isValidDocId(emailId) && isValidPayload();
+      allow delete: if isValidDocId(emailId);
+    }
+
+    // Company-Scoped Finance Payroll Salary Staff (Non-Software Office Staff)
+    match /salary_staff/{staffId} {
+      allow read: if true;
+      allow create, update: if isValidDocId(staffId) && isValidPayload();
+      allow delete: if isValidDocId(staffId);
+    }
+
     // Admin Authorizations
     match /admins/{adminId} {
       allow read: if true;

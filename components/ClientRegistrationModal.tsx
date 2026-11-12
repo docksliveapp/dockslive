@@ -13,7 +13,12 @@ import {
   getChargeCaseCategory,
   isKnownCaseCategory
 } from '../services/categoryTariffService';
-import { saveClientToFirestore, saveUserToFirestore } from '../services/dbService';
+import {
+  saveClientToFirestore,
+  saveUserToFirestore,
+  DEFAULT_USER_PASSWORD,
+  generateUniqueUsernameFromFullName
+} from '../services/dbService';
 import { compressAndPrepareFile } from '../services/fileUtils';
 
 export const CASE_CATEGORIES_LIST = [
@@ -81,8 +86,10 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
   // Optional Portal Login Credentials
   const [loginEnabled, setLoginEnabled] = useState(false);
   const [userId, setUserId] = useState('');
-  const [password, setPassword] = useState('');
+  const [isCustomUserIdEdited, setIsCustomUserIdEdited] = useState(false);
+  const [password, setPassword] = useState(DEFAULT_USER_PASSWORD);
   const [roles, setRoles] = useState<UserRole[]>([UserRole.CLIENT]);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   // Secondary Modal: Add Charge Picker
   const [showChargePicker, setShowChargePicker] = useState(false);
@@ -144,10 +151,18 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
         };
       });
       setChargesList(normalizedCharges);
-      setLoginEnabled(Boolean(initialClient.loginEnabled));
-      setUserId(initialClient.userId || `CLT-${Date.now().toString().slice(-4)}`);
-      setPassword(initialClient.password || 'client123');
-      setRoles(initialClient.roles && initialClient.roles.length > 0 ? initialClient.roles : [initialClient.role || UserRole.CLIENT]);
+      setLoginEnabled(Boolean(initialClient.loginEnabled ?? true));
+      setUserId(
+        initialClient.userId ||
+          generateUniqueUsernameFromFullName(initialClient.name || '', undefined, {
+            id: initialClient.id,
+            currentUserId: initialClient.userId
+          })
+      );
+      setIsCustomUserIdEdited(Boolean(initialClient.userId));
+      setPassword(initialClient.password || DEFAULT_USER_PASSWORD);
+      setRoles(initialClient.roles && initialClient.roles.length > 0 ? [initialClient.roles[0]] : [initialClient.role || UserRole.CLIENT]);
+      setValidationError(null);
     } else {
       // Fresh client creation
       setName('');
@@ -185,9 +200,11 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
       setChargesList([]);
 
       setLoginEnabled(true);
-      setUserId(`CLT-${Math.floor(1000 + Math.random() * 9000)}`);
-      setPassword(`DPL@${Math.floor(100 + Math.random() * 900)}`);
+      setUserId('');
+      setIsCustomUserIdEdited(false);
+      setPassword(DEFAULT_USER_PASSWORD);
       setRoles([UserRole.CLIENT]);
+      setValidationError(null);
     }
   }, [isOpen, initialClient, defaultCategory]);
 
@@ -402,7 +419,7 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
   // Save client and tariff
   const handleSave = async () => {
     if (!name.trim()) {
-      alert('Please enter Client / Company Title');
+      setValidationError('Please enter Client / Company Title before saving.');
       return;
     }
 
@@ -415,12 +432,21 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
       if (missingCat !== normSelectedCategory) {
         setSelectedCategory(missingCat);
       }
-      alert(`Please enter an amount (PKR) for the selected default charge "${chargeMissingAmount.description}" under category "${missingCat}" before saving (default charges cannot be saved with Nil / 0 amount).`);
+      setValidationError(`Please enter an amount (PKR) for the selected default charge "${chargeMissingAmount.description}" under category "${missingCat}" before saving.`);
       return;
     }
+    setValidationError(null);
 
     const clientId = initialClient?.id || `client_${Date.now()}`;
     const trimmedName = name.trim();
+    const resolvedUserId =
+      userId.trim() ||
+      generateUniqueUsernameFromFullName(
+        trimmedName,
+        undefined,
+        initialClient ? { id: initialClient.id, currentUserId: initialClient.userId } : undefined
+      );
+    const resolvedPassword = password.trim() || DEFAULT_USER_PASSWORD;
 
     // Only save charges that have a description and valid user-entered amount > 0
     const validDefaultCharges: ClientDefaultCharge[] = chargesList
@@ -466,9 +492,9 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
       defaultCharges: validDefaultCharges,
       loginEnabled: loginEnabled,
       role: roles[0] || UserRole.CLIENT,
-      roles: roles.length > 0 ? roles : [UserRole.CLIENT],
-      userId: userId || `CLT-${Math.floor(1000 + Math.random() * 9000)}`,
-      password: password || `DPL@${Math.floor(100 + Math.random() * 900)}`,
+      roles: roles.length > 0 ? [roles[0]] : [UserRole.CLIENT],
+      userId: resolvedUserId,
+      password: resolvedPassword,
       createdAt: initialClient?.createdAt || new Date().toISOString()
     };
 
@@ -624,13 +650,20 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
             </div>
           )}
           
+          {validationError && (
+            <div className="p-3.5 rounded-xl bg-red-500/15 border border-red-500/35 text-red-200 text-xs flex items-center gap-2">
+              <AlertCircle size={15} className="shrink-0 text-red-400" />
+              <span>{validationError}</span>
+            </div>
+          )}
+
           {/* ========================================================================= */}
           {/* SECTION 1: CLIENT / COMPANY DETAILS & DOCUMENTS */}
           {/* ========================================================================= */}
           <div className="space-y-4 bg-slate-950/60 p-5 rounded-xl border border-white/10">
             <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider border-b border-white/10 pb-2.5">
               <User size={15} />
-              <span>1. Client Details & KYC Documents</span>
+              <span>1. Client Details &amp; KYC Documents</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -642,7 +675,13 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
                   type="text"
                   placeholder="e.g. Al-Madina Logistics & Trading Co."
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    const nextVal = e.target.value;
+                    setName(nextVal);
+                    if (!initialClient && !isClientView && !isCustomUserIdEdited) {
+                      setUserId(generateUniqueUsernameFromFullName(nextVal));
+                    }
+                  }}
                   disabled={isClientView}
                   readOnly={isClientView}
                   className={`w-full h-10 rounded-xl px-3.5 outline-none text-sm border transition-all ${
@@ -1217,25 +1256,66 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs text-slate-300 block mb-1.5 font-semibold">Assigned User ID (Login Username)</label>
+                <label className="text-xs text-slate-300 block mb-1.5 font-semibold flex items-center justify-between">
+                  <span>Assigned User ID (Login Username)</span>
+                  {!isClientView && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCustomUserIdEdited(false);
+                        setUserId(
+                          generateUniqueUsernameFromFullName(
+                            name,
+                            undefined,
+                            initialClient ? { id: initialClient.id, currentUserId: initialClient.userId } : undefined
+                          )
+                        );
+                      }}
+                      className="text-xs text-amber-400 hover:text-amber-300 underline font-normal cursor-pointer"
+                    >
+                      Auto from Name
+                    </button>
+                  )}
+                </label>
                 <input 
                   type="text"
                   value={userId}
-                  readOnly
-                  disabled
-                  className="w-full h-10 rounded-xl px-3.5 text-sm font-mono font-bold text-amber-300 bg-slate-900 border border-white/10 cursor-not-allowed"
+                  placeholder="Auto-generated from Company Name"
+                  readOnly={isClientView}
+                  disabled={isClientView}
+                  onChange={(e) => {
+                    if (!isClientView) {
+                      setIsCustomUserIdEdited(true);
+                      setUserId(e.target.value);
+                    }
+                  }}
+                  className={`w-full h-10 rounded-xl px-3.5 text-sm font-mono font-bold bg-slate-900 border outline-none ${
+                    isClientView
+                      ? 'text-amber-300 border-white/10 cursor-not-allowed'
+                      : 'text-amber-300 border-white/15 focus:border-amber-400'
+                  }`}
                 />
               </div>
               <div>
                 <label className="text-xs text-slate-200 block mb-1.5 font-semibold flex items-center justify-between">
                   <span>Portal Password</span>
-                  <span className="text-xs text-emerald-400 font-normal">Editable</span>
+                  {!isClientView ? (
+                    <button
+                      type="button"
+                      onClick={() => setPassword(DEFAULT_USER_PASSWORD)}
+                      className="text-xs text-emerald-400 hover:text-emerald-300 underline font-normal cursor-pointer"
+                    >
+                      Reset ({DEFAULT_USER_PASSWORD})
+                    </button>
+                  ) : (
+                    <span className="text-xs text-emerald-400 font-normal">Editable</span>
+                  )}
                 </label>
                 <input 
                   type="text"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter new password"
+                  placeholder={`Default: ${DEFAULT_USER_PASSWORD}`}
                   className="w-full h-10 rounded-xl px-3.5 text-sm font-mono font-semibold text-white bg-slate-900 border border-white/15 focus:border-amber-400 outline-none"
                 />
               </div>

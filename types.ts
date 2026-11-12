@@ -1563,3 +1563,21 @@ export const DEFAULT_COMPANY_DOCUMENT_CATEGORIES: string[] = [
   'Assets'
 ];
 
+export interface SalaryStaffMember {
+  id: string;
+  companyId: string;
+  companyName?: string;
+  name: string;
+  fatherName: string;
+  designation: string;
+  primaryContact: string;
+  residentialContact?: string;
+  residentialAddress?: string;
+  totalSalary: number;
+  photoUrl?: string;
+  cnicFrontUrl?: string;
+  cnicBackUrl?: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  createdAt: string;
+  updatedAt?: string;
+}

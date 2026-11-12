@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { 
   X, DollarSign, Calendar, Plus, Printer, CheckCircle, Clock, 
   ArrowUpRight, ArrowDownLeft, Receipt, Trash2, Filter, AlertCircle, 
-  Briefcase, Coffee, ShieldCheck, FileText, User
+  Briefcase, Coffee, ShieldCheck, FileText, User, Download
 } from 'lucide-react';
 import { AppUser, StaffLedgerEntry } from '../types';
 import { saveStaffLedgerEntryToFirestore, deleteStaffLedgerEntryFromFirestore } from '../services/dbService';
@@ -45,8 +45,10 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
   const [isSettled, setIsSettled] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Receipt preview
+  // Receipt preview & inline feedback states
   const [previewReceiptUrl, setPreviewReceiptUrl] = useState<string | null>(null);
+  const [entryError, setEntryError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -100,6 +102,7 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
 
   // Open add transaction modal
   const handleOpenAdd = () => {
+    setEntryError(null);
     setEntryDate(todayStr);
     setEntryAmount('');
     setEntryNotes('');
@@ -130,14 +133,15 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
   const handleSaveTransaction = async () => {
     const numAmount = Number(entryAmount);
     if (!numAmount || numAmount <= 0) {
-      alert('Please enter a valid amount greater than 0');
+      setEntryError('Please enter a valid amount greater than 0.');
       return;
     }
     if (!entryDescription.trim()) {
-      alert('Please enter a description for this entry');
+      setEntryError('Please enter a description for this entry.');
       return;
     }
 
+    setEntryError(null);
     setIsSubmitting(true);
     try {
       const isDebit = entryDirection === 'DEBIT';
@@ -163,7 +167,7 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
       setShowAddEntryModal(false);
     } catch (err) {
       console.error('Failed to save staff ledger entry:', err);
-      alert('Could not save ledger entry. Please try again.');
+      setEntryError('Could not save ledger entry. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -171,9 +175,9 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
 
   // Delete an entry
   const handleDeleteEntry = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this ledger transaction?')) return;
     try {
       await deleteStaffLedgerEntryFromFirestore(id);
+      setConfirmDeleteId(null);
     } catch (err) {
       console.warn('Failed to delete staff ledger entry:', err);
     }
@@ -183,42 +187,96 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
     window.print();
   };
 
+  const handleDownloadLedgerCSV = () => {
+    const esc = (val: unknown) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+    const ledgerLabel =
+      ledgerType === 'SALARY'
+        ? 'Salary_and_Loans_Ledger'
+        : ledgerType === 'CONTAINER_CHARGES'
+        ? 'Container_Charges_Ledger'
+        : 'Daily_Routine_Ledger';
+
+    const lines: string[] = [
+      ['Staff Name', staffUser.name || '-', 'Username / ID', staffUser.userId || `EMP-${staffUser.id}`].map(esc).join(','),
+      ['Role', staffUser.role || 'Staff', 'Base Salary (PKR)', Number(staffUser.baseSalary || 0)].map(esc).join(','),
+      ['Ledger Type', ledgerLabel.replace(/_/g, ' '), 'Period', `${fromDate || 'Start'} to ${toDate || 'Present'}`].map(esc).join(','),
+      '',
+      ['S.No', 'Date', 'Category', 'Description', 'Notes', 'Debit (PKR)', 'Credit (PKR)', 'Running Balance (PKR)'].map(esc).join(',')
+    ];
+
+    computedRows.forEach((row, index) => {
+      lines.push(
+        [
+          index + 1,
+          row.date || '',
+          row.category || (ledgerType === 'SALARY' ? 'Salary' : 'Petty Cash'),
+          row.description || '',
+          row.notes || '',
+          Number(row.debit || 0),
+          Number(row.credit || 0),
+          Number(row.runningBalance || 0)
+        ].map(esc).join(',')
+      );
+    });
+
+    lines.push('');
+    lines.push(['', '', '', 'TOTAL SUMMARY', '', totalDebit, totalCredit, netBalance].map(esc).join(','));
+
+    const csvContent = '\uFEFF' + lines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeStaffName = (staffUser.name || 'Staff').replace(/[^a-zA-Z0-9_-]/g, '_');
+    link.href = url;
+    link.download = `${safeStaffName}_${ledgerLabel}_${fromDate}_to_${toDate}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return createPortal(
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+    <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[10020] flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
       <div className="glass-card rounded-2xl w-full max-w-5xl border border-white/15 shadow-2xl bg-slate-900/98 my-auto max-h-[calc(100dvh-1rem)] sm:max-h-[92dvh] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-white/10 flex justify-between items-center bg-slate-950/80 rounded-t-2xl shrink-0">
+        <div className="p-4 sm:p-5 border-b border-white/10 flex flex-wrap justify-between items-center gap-3 bg-slate-950/80 rounded-t-2xl shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-brand-400 shrink-0">
               <User size={20} />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-base sm:text-lg font-bold text-white">
                   {staffUser.name}
                 </h3>
-                <span className="text-xs bg-brand-500/20 text-brand-300 border border-brand-500/30 px-2 py-0.5 rounded-full font-mono">
-                  {staffUser.role || 'Staff Member'}
-                </span>
-                <span className="text-xs text-gray-400 font-mono">
-                  ID: {staffUser.userId || `EMP-${staffUser.id}`}
+                <span className="text-xs text-brand-300 font-mono">
+                  {staffUser.role || 'Staff Member'} · ID: {staffUser.userId || `EMP-${staffUser.id}`}
                 </span>
               </div>
               <p className="text-xs text-gray-400 mt-0.5">
-                Staff Financial Ledgers: Dual tracking for Payroll/Salary and Daily Routine Petty Cash
+                Staff Financial Ledgers: Payroll/Salary, Daily Routine Petty Cash &amp; Container Charges
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
+              type="button"
+              onClick={handleDownloadLedgerCSV}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+            >
+              <Download size={14} /> Download Ledger
+            </button>
+            <button
+              type="button"
               onClick={handlePrint}
-              className="bg-white/10 hover:bg-white/15 text-gray-300 px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5"
+              className="bg-white/10 hover:bg-white/15 text-gray-300 px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
               <Printer size={14} /> Print Statement
             </button>
             <button 
+              type="button"
               onClick={onClose}
-              className="text-gray-400 hover:text-white p-2 rounded-xl hover:bg-white/10 transition"
+              className="text-gray-400 hover:text-white p-2 rounded-xl hover:bg-white/10 transition cursor-pointer"
             >
               <X size={20} />
             </button>
@@ -436,14 +494,33 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
                         )}
                       </td>
                       <td className="p-3 text-center whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteEntry(row.id)}
-                          className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-500/10 transition"
-                          title="Delete entry"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        {confirmDeleteId === row.id ? (
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteEntry(row.id)}
+                              className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white text-[10px] font-semibold"
+                            >
+                              Delete
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="px-1.5 py-0.5 rounded bg-white/10 text-gray-300 text-[10px]"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(row.id)}
+                            className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-500/10 transition"
+                            title="Delete entry"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -472,7 +549,7 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
       {/* SECONDARY MODAL: ADD TRANSACTION */}
       {/* ========================================================================= */}
       {showAddEntryModal && (
-        <div className="fixed inset-0 bg-black/90 z-60 flex items-start justify-center pt-3 sm:pt-6 pb-6 px-3 overflow-y-auto animate-in fade-in duration-150">
+        <div className="fixed inset-0 bg-black/90 z-[10030] flex items-start justify-center pt-3 sm:pt-6 pb-6 px-3 overflow-y-auto animate-in fade-in duration-150">
           <div className="glass-card rounded-2xl w-full max-w-lg border border-white/20 p-5 space-y-4 bg-slate-900 shadow-2xl mb-6">
             <div className="flex justify-between items-center border-b border-white/10 pb-3">
               <h4 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
@@ -482,12 +559,20 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
                 </span>
               </h4>
               <button 
+                type="button"
                 onClick={() => setShowAddEntryModal(false)} 
                 className="text-gray-400 hover:text-white p-1 rounded-lg"
               >
                 <X size={18} />
               </button>
             </div>
+
+            {entryError && (
+              <div className="p-2.5 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{entryError}</span>
+              </div>
+            )}
 
             <div className="space-y-3.5 text-xs">
               {/* Type Direction Selector */}
@@ -636,7 +721,7 @@ export const StaffLedgerModal: React.FC<StaffLedgerModalProps> = ({
 
       {/* Quick Receipt Viewer */}
       {previewReceiptUrl && (
-        <div className="fixed inset-0 bg-black/95 z-[10010] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+        <div className="fixed inset-0 bg-black/95 z-[10040] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <div className="glass-card rounded-2xl w-full max-w-xl border border-white/20 p-4 space-y-3 bg-slate-900 flex flex-col max-h-[90vh] my-auto">
             <div className="flex justify-between items-center border-b border-white/10 pb-2">
               <h4 className="text-sm font-bold text-white">Attached Bill / Receipt</h4>

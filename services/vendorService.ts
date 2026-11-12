@@ -6,6 +6,7 @@ import { collection, doc, setDoc, onSnapshot, getDocs } from 'firebase/firestore
 const VENDORS_STORAGE_KEY = 'dpl_vendors_list';
 
 export const VENDOR_CATEGORIES = [
+  'Destination Port Staff (Per Container)',
   'Drinking Water Charges',
   'Electric Bill',
   'Gas Cylinder Refill',

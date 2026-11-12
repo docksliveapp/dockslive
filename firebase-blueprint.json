@@ -281,6 +281,30 @@
         "updatedAt": { "type": "string", "description": "ISO timestamp of token sync", "maxLength": 50 }
       },
       "required": ["token", "enabled", "updatedAt"]
+    },
+    "SalaryStaff": {
+      "title": "SalaryStaff",
+      "description": "Non-software office payroll staff member registered inside Finance Management for a specific company",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique salary staff member ID", "maxLength": 120 },
+        "companyId": { "type": "string", "description": "Owning company workspace ID where staff was added", "maxLength": 40 },
+        "companyName": { "type": "string", "description": "Owning company display name", "maxLength": 150 },
+        "name": { "type": "string", "description": "Full name of staff member", "maxLength": 120 },
+        "fatherName": { "type": "string", "description": "Father name of staff member", "maxLength": 120 },
+        "designation": { "type": "string", "description": "Job designation of staff member", "maxLength": 100 },
+        "primaryContact": { "type": "string", "description": "Primary phone contact number", "maxLength": 40 },
+        "residentialContact": { "type": "string", "description": "Residential phone contact number", "maxLength": 40 },
+        "residentialAddress": { "type": "string", "description": "Residential address", "maxLength": 300 },
+        "totalSalary": { "type": "number", "description": "Total monthly salary in PKR" },
+        "photoUrl": { "type": "string", "description": "Staff profile photo Data URL or link", "maxLength": 750000 },
+        "cnicFrontUrl": { "type": "string", "description": "ID card front copy Data URL or link", "maxLength": 750000 },
+        "cnicBackUrl": { "type": "string", "description": "ID card back copy Data URL or link", "maxLength": 750000 },
+        "status": { "type": "string", "description": "ACTIVE or INACTIVE payroll status", "maxLength": 20 },
+        "createdAt": { "type": "string", "description": "ISO timestamp of registration", "maxLength": 50 },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update", "maxLength": 50 }
+      },
+      "required": ["id", "companyId", "name", "totalSalary", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -375,6 +399,10 @@
     "/fcm_devices/{deviceId}": {
       "schema": "FcmDevice",
       "description": "Registered FCM Web Push device subscriptions across mobile PWA and desktop browsers"
+    },
+    "/salary_staff/{staffId}": {
+      "schema": "SalaryStaff",
+      "description": "Company-scoped non-login office payroll staff managed in Finance Management"
     }
   }
 }

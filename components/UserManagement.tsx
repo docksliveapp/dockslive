@@ -1,39 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { 
-  Users, UserPlus, Briefcase, Truck, Edit, Trash2, Key, Save, X, CheckCircle, 
-  AlertTriangle, Eye, FileText, CreditCard, ChevronRight, Calendar, DollarSign, 
-  Clock, Plus, Shield, Phone, MapPin, Building, Percent, Upload, Check, 
-  Receipt, ArrowUpRight, ArrowDownLeft, LayoutGrid, List, Search, Mail, ChevronLeft,
-  Coffee, ShieldCheck, MapPinned, Lock, Unlock, Compass, Download, Crown
+import {
+  Users, UserPlus, Briefcase, Truck, Edit, Trash2, Key, Save, X, CheckCircle,
+  AlertTriangle, ChevronRight, Clock, Plus, Phone, MapPin, Building, Check,
+  LayoutGrid, List, Search, MapPinned, Lock, Unlock, Crown
 } from 'lucide-react';
-import { 
-  AppUser, UserRole, Case, FinanceEntry, Client, DestinationStaff, StaffLedgerEntry 
+import {
+  AppUser, UserRole, Client, DestinationStaff
 } from '../types';
 import { safeAppStorage } from '../services/storage';
-import { compressAndPrepareFile } from '../services/fileUtils';
-import { 
-  saveUserToFirestore, 
-  deleteUserFromFirestore, 
-  subscribeToUsers, 
-  subscribeToClients, 
-  saveClientToFirestore, 
+import {
+  saveUserToFirestore,
+  deleteUserFromFirestore,
+  subscribeToUsers,
+  subscribeToClients,
   updateClientInFirestore,
   deleteClientFromFirestore,
-  subscribeToDestinationStaff, 
-  deleteDestinationStaffFromFirestore, 
-  subscribeToStaffLedgers, 
-  subscribeToCases, 
-  subscribeToFinances, 
+  subscribeToDestinationStaff,
+  deleteDestinationStaffFromFirestore,
   DEFAULT_DATABASE_USERS,
-  syncMonthlyStaffSalariesToPayables,
-  syncDestinationStaffContainerCharges
+  DEFAULT_USER_PASSWORD,
+  generateUniqueUsernameFromFullName
 } from '../services/dbService';
+import { saveVendor } from '../services/vendorService';
 
 import { ClientRegistrationModal } from './ClientRegistrationModal';
-import { StaffLedgerModal } from './StaffLedgerModal';
-import { ClientLedgerModal } from './ClientLedgerModal';
-import { DestinationStaffModal, COMMON_STATIONS } from './DestinationStaffModal';
+import { DestinationStaffModal } from './DestinationStaffModal';
 import { AdminRolesAndPrivilegesTable } from './AdminRolesAndPrivilegesTable';
 import { useActiveCompany } from '../services/companyService';
 
@@ -67,18 +59,12 @@ const UserManagement: React.FC = () => {
   const [destinationStaffList, setDestinationStaffList] = useState<DestinationStaff[]>(() => {
     return safeAppStorage.getJSON<DestinationStaff[]>('dpl_destination_staff', []);
   });
-  const [staffLedgerEntries, setStaffLedgerEntries] = useState<StaffLedgerEntry[]>([]);
-  const [casesList, setCasesList] = useState<Case[]>([]);
-  const [financesList, setFinancesList] = useState<FinanceEntry[]>([]);
 
   // Subscribe to real-time collections
   useEffect(() => {
     const unsubUsers = subscribeToUsers((data) => {
       if (data && data.length > 0) {
         setUsers(data);
-        if (data.some(u => Number(u.defaultPerContainerCharge) > 0)) {
-          syncDestinationStaffContainerCharges({ users: data }).catch(() => {});
-        }
       }
     });
 
@@ -90,32 +76,15 @@ const UserManagement: React.FC = () => {
       setDestinationStaffList(data || []);
     });
 
-    const unsubLedgers = subscribeToStaffLedgers((data) => {
-      setStaffLedgerEntries(data || []);
-    });
-
-    const unsubCases = subscribeToCases((data) => {
-      setCasesList(data || []);
-    });
-
-    const unsubFinances = subscribeToFinances((data) => {
-      setFinancesList(data || []);
-    });
-
     return () => {
       unsubUsers();
       unsubClients();
       unsubDest();
-      unsubLedgers();
-      unsubCases();
-      unsubFinances();
     };
   }, []);
 
-  // Search & View Mode
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
-    return typeof window !== 'undefined' && window.innerWidth < 768 ? 'cards' : 'table';
-  });
+  // Search & View Mode (Default to clean sequential single-row table)
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals Flow
@@ -124,14 +93,13 @@ const UserManagement: React.FC = () => {
   const [selectedOnboardingRole, setSelectedOnboardingRole] = useState<'STAFF' | 'TRANSPORTER' | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<number | string | null>(null);
+  const [isCustomUserIdEdited, setIsCustomUserIdEdited] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [modalActionFeedback, setModalActionFeedback] = useState<string | null>(null);
 
-  // Client modals
+  // Client modal
   const [showClientModal, setShowClientModal] = useState(false);
   const [clientToEdit, setClientToEdit] = useState<Client | null>(null);
-  const [ledgerClient, setLedgerClient] = useState<Client | null>(null);
-
-  // Staff ledger modal
-  const [selectedStaffUser, setSelectedStaffUser] = useState<AppUser | null>(null);
 
   // Destination staff modal
   const [showDestinationModal, setShowDestinationModal] = useState(false);
@@ -146,41 +114,21 @@ const UserManagement: React.FC = () => {
     userLoginId?: string;
   } | null>(null);
 
-  // Form State for Staff & Transporter/Broker
+  // Streamlined Form State for Software Login Users & Transporters
   const [formData, setFormData] = useState({
     name: '',
-    email: '',
     contact: '',
     role: '' as UserRole | '',
     roles: [] as UserRole[],
-    designation: '',
-    assignedStation: '',
-    defaultPerContainerCharge: 0,
     generatedId: '',
-    generatedPass: '',
-    profilePicture: '',
-    fatherName: '',
-    residentialAddress: '',
-    secondaryPhone: '',
-    secondaryPhoneRelation: '',
-    cnicFront: '',
-    cnicBack: '',
-    baseSalary: 50000,
-    allowanceMobile: 2000,
-    allowanceFuel: 5000,
-    allowanceInternet: 2000,
-    loansAdvances: 0,
+    generatedPass: DEFAULT_USER_PASSWORD,
     // Company Rights & Role Scopes
     allowedCompanies: ['docks'] as string[],
     allCompaniesAccess: false as boolean,
     isGlobalAdmin: false as boolean,
     // Transporter/Broker fields
     representativeName: '',
-    fleetSize: 1,
-    containerCompatibility: ['20ft', '40ft'] as string[],
     preferredRoutes: 'Karachi - Lahore - Peshawar',
-    ntn: '',
-    officeAddress: '',
     whatsappNumber: '',
     status: 'ACTIVE' as 'ACTIVE' | 'SUSPENDED'
   });
@@ -194,7 +142,7 @@ const UserManagement: React.FC = () => {
     }
     if (activeTab === 'destinations') {
       if (destSubTab === 'users') {
-        handleSelectRoleType('STAFF', [UserRole.UNLOADING_PORT_STAFF]);
+        handleSelectRoleType('STAFF', [UserRole.DESTINATION_PORT_STAFF]);
       } else {
         setDestinationStaffToEdit(null);
         setShowDestinationModal(true);
@@ -205,7 +153,6 @@ const UserManagement: React.FC = () => {
       handleSelectRoleType('TRANSPORTER');
       return;
     }
-    // Default office
     handleSelectRoleType('STAFF');
   };
 
@@ -214,58 +161,41 @@ const UserManagement: React.FC = () => {
     setShowRoleSelectorModal(false);
     setIsEditing(false);
     setEditingId(null);
+    setIsCustomUserIdEdited(false);
+    setFormError(null);
+    setModalActionFeedback(null);
 
-    const prefix = roleType === 'TRANSPORTER' ? 'TRP-' : 'EMP-';
-    const existingIds = users
-      .map(u => u.userId)
-      .filter(id => id && id.startsWith(prefix))
-      .map(id => parseInt(id!.split('-')[1]) || 0);
-    const nextNum = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
-    const generatedId = `${prefix}${nextNum.toString().padStart(4, '0')}`;
-    const generatedPass = Math.random().toString(36).slice(-8).toUpperCase();
-
-    const finalRoles = defaultRolesOverride || (roleType === 'TRANSPORTER' ? [UserRole.TRANSPORTER] : [UserRole.OFFICE_STAFF]);
+    const finalRoles =
+      defaultRolesOverride ||
+      (roleType === 'TRANSPORTER' ? [UserRole.TRANSPORTER] : [UserRole.OPERATIONS_MANAGER]);
     const finalRole = finalRoles[0];
 
     setFormData({
       name: '',
-      email: '',
       contact: '',
       role: finalRole,
       roles: finalRoles,
-      designation: roleType === 'STAFF' && defaultRolesOverride?.includes(UserRole.UNLOADING_PORT_STAFF) ? 'Destination Representative' : '',
-      assignedStation: defaultRolesOverride?.includes(UserRole.UNLOADING_PORT_STAFF) ? 'Lahore Dry Port (Prem Nagar)' : '',
-      defaultPerContainerCharge: 0,
-      generatedId,
-      generatedPass,
-      profilePicture: '',
-      fatherName: '',
-      residentialAddress: '',
-      secondaryPhone: '',
-      secondaryPhoneRelation: '',
-      cnicFront: '',
-      cnicBack: '',
-      baseSalary: 50000,
-      allowanceMobile: 2000,
-      allowanceFuel: 5000,
-      allowanceInternet: 2000,
-      loansAdvances: 0,
+      generatedId: '',
+      generatedPass: DEFAULT_USER_PASSWORD,
       allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage'],
       allCompaniesAccess: true,
       isGlobalAdmin: false,
       representativeName: '',
-      fleetSize: 1,
-      containerCompatibility: ['20ft', '40ft'],
       preferredRoutes: 'Karachi - Lahore - Peshawar',
-      ntn: '',
-      officeAddress: '',
       whatsappNumber: '',
       status: 'ACTIVE'
     });
 
     if (roleType === 'TRANSPORTER') setActiveTab('transporters');
-    else if (defaultRolesOverride?.includes(UserRole.UNLOADING_PORT_STAFF)) setActiveTab('destinations');
-    else setActiveTab('office');
+    else if (
+      defaultRolesOverride?.includes(UserRole.DESTINATION_PORT_STAFF) ||
+      defaultRolesOverride?.includes(UserRole.UNLOADING_PORT_STAFF) ||
+      defaultRolesOverride?.includes(UserRole.LOADING_PORT_STAFF)
+    ) {
+      setActiveTab('destinations');
+    } else {
+      setActiveTab('office');
+    }
 
     setShowModal(true);
   };
@@ -275,177 +205,164 @@ const UserManagement: React.FC = () => {
     const roleType = isTransporter ? 'TRANSPORTER' : 'STAFF';
     setSelectedOnboardingRole(roleType);
 
-    const userRoles = (user.roles && user.roles.length > 0) ? user.roles : (user.role ? [user.role] : [UserRole.OPERATIONS_MANAGER]);
-    const userAllowed = user.allowedCompanies && user.allowedCompanies.length > 0 ? user.allowedCompanies : [activeCompany?.id || 'docks'];
+    const rawRoles =
+      user.roles && user.roles.length > 0
+        ? user.roles.filter((r) => r !== UserRole.OFFICE_STAFF)
+        : user.role && user.role !== UserRole.OFFICE_STAFF
+        ? [user.role]
+        : [UserRole.OPERATIONS_MANAGER];
+    const userRoles = rawRoles.length > 0 ? rawRoles : [UserRole.OPERATIONS_MANAGER];
+
+    const userAllowed =
+      user.allowedCompanies && user.allowedCompanies.length > 0
+        ? user.allowedCompanies
+        : [activeCompany?.id || 'docks'];
     const isAllComp = Boolean(user.isGlobalAdmin || userAllowed.length === 4);
 
     setFormData({
-      name: user.name,
-      email: user.email,
-      contact: user.contact,
-      role: user.role,
+      name: user.name || '',
+      contact: user.contact || '',
+      role: userRoles[0],
       roles: userRoles,
-      designation: user.designation || '',
-      assignedStation: user.assignedStation || '',
-      defaultPerContainerCharge: Number(user.defaultPerContainerCharge) || 0,
-      generatedId: user.userId || '',
-      generatedPass: user.password || '',
-      profilePicture: user.profilePicture || '',
-      fatherName: user.fatherName || '',
-      residentialAddress: user.residentialAddress || '',
-      secondaryPhone: user.secondaryPhone || '',
-      secondaryPhoneRelation: user.secondaryPhoneRelation || '',
-      cnicFront: user.cnicFront || '',
-      cnicBack: user.cnicBack || '',
-      baseSalary: user.baseSalary || 50000,
-      allowanceMobile: user.allowances?.mobile || 0,
-      allowanceFuel: user.allowances?.fuel || 0,
-      allowanceInternet: user.allowances?.internet || 0,
-      loansAdvances: user.loansAdvances || 0,
+      generatedId:
+        user.userId ||
+        generateUniqueUsernameFromFullName(user.name || '', users, {
+          id: user.id,
+          currentUserId: user.userId
+        }),
+      generatedPass: user.password || DEFAULT_USER_PASSWORD,
       allowedCompanies: userAllowed,
       allCompaniesAccess: isAllComp,
       isGlobalAdmin: Boolean(user.isGlobalAdmin),
       representativeName: (user as any).representativeName || '',
-      fleetSize: (user as any).fleetSize || 1,
-      containerCompatibility: (user as any).containerCompatibility || ['20ft', '40ft'],
       preferredRoutes: (user as any).preferredRoutes || 'Karachi - Lahore - Peshawar',
-      ntn: (user as any).ntn || '',
-      officeAddress: (user as any).officeAddress || '',
       whatsappNumber: (user as any).whatsappNumber || '',
       status: (user.status as any) === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE'
     });
 
+    setIsCustomUserIdEdited(Boolean(user.userId));
+    setFormError(null);
+    setModalActionFeedback(null);
     setIsEditing(true);
     setEditingId(user.id);
     setShowModal(true);
   };
 
+  const handleFullNameInputChange = (nextName: string) => {
+    setFormData((prev) => {
+      const shouldAutoUpdateId = !isEditing && !isCustomUserIdEdited;
+      const autoId = shouldAutoUpdateId
+        ? generateUniqueUsernameFromFullName(nextName, users)
+        : prev.generatedId;
+      return {
+        ...prev,
+        name: nextName,
+        generatedId: autoId
+      };
+    });
+  };
+
   const handleSaveUser = async () => {
     if (!formData.name.trim()) {
-      alert("Please enter the name / company name.");
+      setFormError('Please enter Full Name before saving.');
       return;
     }
+    setFormError(null);
 
-    const assignedRoles = (formData.roles && formData.roles.length > 0)
-      ? formData.roles 
-      : (selectedOnboardingRole === 'TRANSPORTER' ? [UserRole.TRANSPORTER] : [formData.role || UserRole.OPERATIONS_MANAGER]);
-    const primaryRole = assignedRoles[0] || (selectedOnboardingRole === 'TRANSPORTER' ? UserRole.TRANSPORTER : UserRole.OPERATIONS_MANAGER);
+    const assignedRoles =
+      formData.roles && formData.roles.length > 0
+        ? formData.roles
+        : selectedOnboardingRole === 'TRANSPORTER'
+        ? [UserRole.TRANSPORTER]
+        : [formData.role || UserRole.OPERATIONS_MANAGER];
+    const primaryRole =
+      assignedRoles[0] ||
+      (selectedOnboardingRole === 'TRANSPORTER' ? UserRole.TRANSPORTER : UserRole.OPERATIONS_MANAGER);
 
     const effectiveAllowedCompanies = formData.allCompaniesAccess
       ? ['docks', 'truckit', 'muhib', 'vantage']
-      : (formData.allowedCompanies.length > 0 ? formData.allowedCompanies : [activeCompany?.id || 'docks']);
+      : formData.allowedCompanies.length > 0
+      ? formData.allowedCompanies
+      : [activeCompany?.id || 'docks'];
 
     const effectiveIsGlobal = assignedRoles.includes(UserRole.ADMIN) && formData.isGlobalAdmin;
 
-    if (isEditing && editingId) {
-      const existingUser = users.find(u => String(u.id) === String(editingId));
-      const updatedUser: AppUser = {
-        ...(existingUser || {}),
-        id: Number(editingId) || Date.now(),
-        ...((existingUser as any)?._docId ? { _docId: (existingUser as any)._docId } : {}),
-        name: formData.name.trim(),
-        email: formData.email.trim(),
-        contact: formData.contact.trim(),
-        role: primaryRole as UserRole,
-        roles: assignedRoles as UserRole[],
-        designation: formData.designation.trim(),
-        assignedStation: formData.assignedStation || undefined,
-        defaultPerContainerCharge: Number(formData.defaultPerContainerCharge) || 0,
-        status: formData.status || 'ACTIVE',
-        isSuspended: formData.status === 'SUSPENDED',
-        isAdmin: assignedRoles.includes(UserRole.ADMIN),
-        isGlobalAdmin: effectiveIsGlobal,
-        allowedCompanies: effectiveAllowedCompanies,
-        userId: formData.generatedId.trim(),
-        password: formData.generatedPass.trim(),
-        profilePicture: formData.profilePicture,
-        fatherName: formData.fatherName,
-        residentialAddress: formData.residentialAddress,
-        secondaryPhone: formData.secondaryPhone,
-        secondaryPhoneRelation: formData.secondaryPhoneRelation,
-        cnicFront: formData.cnicFront,
-        cnicBack: formData.cnicBack,
-        baseSalary: formData.baseSalary,
-        allowances: {
-          fuel: formData.allowanceFuel,
-          mobile: formData.allowanceMobile,
-          internet: formData.allowanceInternet
-        },
-        loansAdvances: formData.loansAdvances,
-        ...((selectedOnboardingRole === 'TRANSPORTER') ? {
-          representativeName: formData.representativeName,
-          fleetSize: formData.fleetSize,
-          containerCompatibility: formData.containerCompatibility,
-          preferredRoutes: formData.preferredRoutes,
-          ntn: formData.ntn,
-          officeAddress: formData.officeAddress,
-          whatsappNumber: formData.whatsappNumber
-        } : {})
-      } as any;
+    const existingUser =
+      isEditing && editingId ? users.find((u) => String(u.id) === String(editingId)) : undefined;
 
-      const nextUsers = users.map(u => String(u.id) === String(editingId) ? updatedUser : u);
-      setUsers(nextUsers);
-      try {
-        await saveUserToFirestore(updatedUser);
-        if (Number(updatedUser.defaultPerContainerCharge) > 0) {
-          syncDestinationStaffContainerCharges({ users: nextUsers, cases: casesList, destinationStaff: destinationStaffList }).catch(() => {});
-        }
-      } catch (err) {
-        console.warn("Notice: User saved locally", err);
-      }
-    } else {
-      const newUser: AppUser = {
-        id: Date.now(),
-        name: formData.name.trim(),
-        email: formData.email.trim(),
-        contact: formData.contact.trim(),
-        role: primaryRole as UserRole,
-        roles: assignedRoles as UserRole[],
-        designation: formData.designation.trim(),
-        assignedStation: formData.assignedStation || undefined,
-        defaultPerContainerCharge: Number(formData.defaultPerContainerCharge) || 0,
-        status: formData.status || 'ACTIVE',
-        isSuspended: formData.status === 'SUSPENDED',
-        isAdmin: assignedRoles.includes(UserRole.ADMIN),
-        isGlobalAdmin: effectiveIsGlobal,
-        allowedCompanies: effectiveAllowedCompanies,
-        userId: formData.generatedId.trim(),
-        password: formData.generatedPass.trim(),
-        profilePicture: formData.profilePicture,
-        fatherName: formData.fatherName,
-        residentialAddress: formData.residentialAddress,
-        secondaryPhone: formData.secondaryPhone,
-        secondaryPhoneRelation: formData.secondaryPhoneRelation,
-        cnicFront: formData.cnicFront,
-        cnicBack: formData.cnicBack,
-        baseSalary: formData.baseSalary,
-        allowances: {
-          fuel: formData.allowanceFuel,
-          mobile: formData.allowanceMobile,
-          internet: formData.allowanceInternet
-        },
-        loansAdvances: formData.loansAdvances,
-        ...((selectedOnboardingRole === 'TRANSPORTER') ? {
-          representativeName: formData.representativeName,
-          fleetSize: formData.fleetSize,
-          containerCompatibility: formData.containerCompatibility,
-          preferredRoutes: formData.preferredRoutes,
-          ntn: formData.ntn,
-          officeAddress: formData.officeAddress,
-          whatsappNumber: formData.whatsappNumber
-        } : {})
-      } as any;
+    const resolvedUserId =
+      formData.generatedId.trim() ||
+      generateUniqueUsernameFromFullName(
+        formData.name.trim(),
+        users,
+        isEditing && editingId
+          ? { id: editingId, currentUserId: existingUser?.userId }
+          : undefined
+      );
+    const resolvedPassword = formData.generatedPass.trim() || DEFAULT_USER_PASSWORD;
 
-      const nextUsers = [...users, newUser];
-      setUsers(nextUsers);
-      try {
-        await saveUserToFirestore(newUser);
-        if (Number(newUser.defaultPerContainerCharge) > 0) {
-          await syncDestinationStaffContainerCharges({ users: nextUsers, cases: casesList, destinationStaff: destinationStaffList });
-        }
-      } catch (err) {
-        console.warn("Notice: User saved locally", err);
+    const savedRecordId = isEditing && editingId ? Number(editingId) || Date.now() : Date.now();
+
+    const userPayload: AppUser = {
+      ...(existingUser || {}),
+      id: savedRecordId,
+      ...((existingUser as any)?._docId ? { _docId: (existingUser as any)._docId } : {}),
+      name: formData.name.trim(),
+      email: existingUser?.email || '',
+      contact: formData.contact.trim(),
+      role: primaryRole as UserRole,
+      roles: assignedRoles as UserRole[],
+      designation: '',
+      status: formData.status || 'ACTIVE',
+      isSuspended: formData.status === 'SUSPENDED',
+      isAdmin: assignedRoles.includes(UserRole.ADMIN),
+      isGlobalAdmin: effectiveIsGlobal,
+      allowedCompanies: effectiveAllowedCompanies,
+      userId: resolvedUserId,
+      password: resolvedPassword,
+      baseSalary: 0,
+      defaultPerContainerCharge: 0,
+      ...(selectedOnboardingRole === 'TRANSPORTER'
+        ? {
+            representativeName: formData.representativeName,
+            preferredRoutes: formData.preferredRoutes,
+            whatsappNumber: formData.whatsappNumber
+          }
+        : {})
+    } as any;
+
+    const nextUsers =
+      isEditing && editingId
+        ? users.map((u) => (String(u.id) === String(editingId) ? userPayload : u))
+        : [...users, userPayload];
+
+    setUsers(nextUsers);
+    try {
+      await saveUserToFirestore(userPayload);
+
+      // If Destination Staff or Vendor role is assigned, register them as a Vendor in Finance Management
+      if (
+        assignedRoles.includes(UserRole.DESTINATION_PORT_STAFF) ||
+        assignedRoles.includes(UserRole.UNLOADING_PORT_STAFF) ||
+        assignedRoles.includes(UserRole.VENDOR)
+      ) {
+        await saveVendor({
+          id: `VND-USR-${savedRecordId}`,
+          name: formData.name.trim(),
+          companyTitle: assignedRoles.includes(UserRole.VENDOR)
+            ? 'Registered Portal Vendor'
+            : 'Destination Port Staff (Per Container)',
+          contactNumber: formData.contact.trim() || 'N/A',
+          address: 'Managed via Finance Management',
+          category: assignedRoles.includes(UserRole.VENDOR)
+            ? 'Miscellaneous Payments'
+            : 'Destination Port Staff (Per Container)',
+          isRecurring: false,
+          createdAt: new Date().toISOString()
+        });
       }
+    } catch (err) {
+      console.warn('Notice: User saved locally', err);
     }
 
     setShowModal(false);
@@ -456,109 +373,214 @@ const UserManagement: React.FC = () => {
 
     try {
       if (deleteTarget.type === 'USER') {
-        setUsers(prev => prev.filter(u => {
-          if (deleteTarget.docId && (u as any)._docId) {
-            return String((u as any)._docId) !== String(deleteTarget.docId);
-          }
-          if (deleteTarget.userLoginId && u.userId) {
-            return u.userId.toLowerCase() !== deleteTarget.userLoginId.toLowerCase();
-          }
-          return String(u.id) !== String(deleteTarget.id);
-        }));
+        setUsers((prev) =>
+          prev.filter((u) => {
+            if (deleteTarget.docId && (u as any)._docId) {
+              return String((u as any)._docId) !== String(deleteTarget.docId);
+            }
+            if (deleteTarget.userLoginId && u.userId) {
+              return u.userId.toLowerCase() !== deleteTarget.userLoginId.toLowerCase();
+            }
+            return String(u.id) !== String(deleteTarget.id);
+          })
+        );
+        if (isEditing && String(editingId) === String(deleteTarget.id)) {
+          setShowModal(false);
+          setIsEditing(false);
+          setEditingId(null);
+        }
         await deleteUserFromFirestore(deleteTarget.id, deleteTarget.docId, deleteTarget.userLoginId);
       } else if (deleteTarget.type === 'CLIENT') {
-        setClientsList(prev => prev.filter(c => (c.id || c.name) !== deleteTarget.id));
+        setClientsList((prev) => prev.filter((c) => (c.id || c.name) !== deleteTarget.id));
         await deleteClientFromFirestore(String(deleteTarget.id));
       } else if (deleteTarget.type === 'DESTINATION') {
-        setDestinationStaffList(prev => prev.filter(d => d.id !== deleteTarget.id));
+        setDestinationStaffList((prev) => prev.filter((d) => d.id !== deleteTarget.id));
         await deleteDestinationStaffFromFirestore(String(deleteTarget.id));
       }
     } catch (err) {
-      console.warn("Notice deleting target:", err);
+      console.warn('Notice deleting target:', err);
     } finally {
       setDeleteTarget(null);
     }
   };
 
-  const handleToggleSuspendUser = async (user: AppUser) => {
-    const isSuspended = user.status === 'SUSPENDED';
-    const newStatus = isSuspended ? 'ACTIVE' : 'SUSPENDED';
-    const promptMsg = isSuspended
-      ? `Reactivate account for ${user.name} (${user.userId})?\n\nThey will be allowed to log into the system again.`
-      : `Suspend account for ${user.name} (${user.userId})?\n\nThey will NOT be allowed to log into the portal. The ID and all data will remain safely preserved in the database.`;
+  const handleQuickSuspendToggleInModal = async () => {
+    const nextStatus: 'ACTIVE' | 'SUSPENDED' = formData.status === 'SUSPENDED' ? 'ACTIVE' : 'SUSPENDED';
+    setFormData((prev) => ({ ...prev, status: nextStatus }));
 
-    if (!confirm(promptMsg)) return;
-
-    const updatedUser: AppUser = {
-      ...user,
-      status: newStatus
-    };
-
-    setUsers(prev => prev.map(u => String(u.id) === String(user.id) ? updatedUser : u));
-    try {
-      await saveUserToFirestore(updatedUser);
-    } catch (err) {
-      console.warn("Notice updating user suspend status:", err);
-    }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, fieldName: 'profilePicture' | 'cnicFront' | 'cnicBack') => {
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        const processed = await compressAndPrepareFile(file);
-        if (processed.dataUrl) {
-          setFormData(prev => ({ ...prev, [fieldName]: processed.dataUrl }));
+    if (isEditing && editingId) {
+      const targetUser = users.find((u) => String(u.id) === String(editingId));
+      if (targetUser) {
+        const updatedUser: AppUser = {
+          ...targetUser,
+          status: nextStatus,
+          isSuspended: nextStatus === 'SUSPENDED'
+        } as AppUser;
+        setUsers((prev) => prev.map((u) => (String(u.id) === String(editingId) ? updatedUser : u)));
+        try {
+          await saveUserToFirestore(updatedUser);
+        } catch (err) {
+          console.warn('Notice updating user suspend status:', err);
         }
-      } catch (err) {
-        console.warn("File processing notice:", err);
-      } finally {
-        e.target.value = '';
       }
     }
+
+    setModalActionFeedback(
+      nextStatus === 'SUSPENDED'
+        ? 'Account ID suspended — portal login access is now blocked.'
+        : 'Account ID reactivated — portal login access is now active.'
+    );
   };
+
+  const formatRoleLabel = (r: UserRole | string, isGlobalAdmin?: boolean): string => {
+    if (!r) return 'Manager';
+    if (r === UserRole.ADMIN) return isGlobalAdmin ? 'Group Admin' : 'Company Admin';
+    if (r === UserRole.DESTINATION_PORT_STAFF) return 'Destination Staff';
+    if (r === UserRole.UNLOADING_PORT_STAFF) return 'Unloading Staff';
+    if (r === UserRole.LOADING_PORT_STAFF) return 'Loading Port Staff';
+    return String(r)
+      .replace(/_/g, ' ')
+      .toLowerCase()
+      .replace(/\b\w/g, (ch) => ch.toUpperCase());
+  };
+
+  const formatUserSingleLineRole = (user: AppUser): string => {
+    const roleList =
+      user.roles && user.roles.length > 0
+        ? user.roles
+        : user.role
+        ? [user.role]
+        : [UserRole.OPERATIONS_MANAGER];
+    const primary = roleList.includes(UserRole.ADMIN) ? UserRole.ADMIN : roleList[0];
+    const baseLabel = formatRoleLabel(primary, user.isGlobalAdmin);
+    return roleList.length > 1 ? `${baseLabel} (+${roleList.length - 1})` : baseLabel;
+  };
+
+  const formatUserAllRolesTitle = (user: AppUser): string => {
+    const roleList =
+      user.roles && user.roles.length > 0
+        ? user.roles
+        : user.role
+        ? [user.role]
+        : [UserRole.OPERATIONS_MANAGER];
+    return roleList.map((r) => formatRoleLabel(r, user.isGlobalAdmin)).join(', ');
+  };
+
+  const renderSingleRowUsersTable = (userList: AppUser[], keyPrefix: string) => (
+    <div className="glass-card rounded-2xl overflow-hidden border border-white/10 shadow-xl">
+      <div
+        className="overflow-x-auto custom-scrollbar custom-scrollbar-x"
+        style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
+      >
+        <table className="w-full text-left text-xs sm:text-sm text-gray-200 min-w-[780px]">
+          <thead className="bg-white/5 text-xs font-semibold text-gray-400 border-b border-white/10">
+            <tr>
+              <th className="py-3 px-3.5 whitespace-nowrap w-14">S.No</th>
+              <th className="py-3 px-3.5 whitespace-nowrap">Name</th>
+              <th className="py-3 px-3.5 whitespace-nowrap">Role</th>
+              <th className="py-3 px-3.5 whitespace-nowrap">Username</th>
+              <th className="py-3 px-3.5 whitespace-nowrap">Password</th>
+              <th className="py-3 px-3.5 whitespace-nowrap">Status</th>
+              <th className="py-3 px-3.5 whitespace-nowrap text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {userList.map((user, idx) => {
+              const isSuspended = user.status === 'SUSPENDED';
+              return (
+                <tr
+                  key={`${keyPrefix}_${user.id || idx}_${idx}`}
+                  className="hover:bg-white/5 transition-colors h-11"
+                >
+                  <td className="py-2.5 px-3.5 font-mono tabular-nums text-gray-400 whitespace-nowrap">
+                    {idx + 1}
+                  </td>
+                  <td
+                    className="py-2.5 px-3.5 font-semibold text-white whitespace-nowrap max-w-[240px] truncate"
+                    title={user.name}
+                  >
+                    {user.name || '-'}
+                  </td>
+                  <td
+                    className="py-2.5 px-3.5 text-gray-200 whitespace-nowrap max-w-[220px] truncate"
+                    title={formatUserAllRolesTitle(user)}
+                  >
+                    {formatUserSingleLineRole(user)}
+                  </td>
+                  <td className="py-2.5 px-3.5 font-mono tabular-nums text-brand-400 font-medium whitespace-nowrap">
+                    {user.userId || '-'}
+                  </td>
+                  <td className="py-2.5 px-3.5 font-mono tabular-nums text-gray-200 whitespace-nowrap">
+                    {user.password || '-'}
+                  </td>
+                  <td className="py-2.5 px-3.5 whitespace-nowrap">
+                    <span
+                      className={`text-xs font-semibold inline-flex items-center gap-1 whitespace-nowrap ${
+                        isSuspended ? 'text-amber-400' : 'text-emerald-400'
+                      }`}
+                    >
+                      {isSuspended && <Lock size={12} className="shrink-0" />}
+                      <span>{isSuspended ? 'Suspended' : 'Active'}</span>
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => handleEditUser(user)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      <Edit size={13} />
+                      <span>Edit</span>
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   // User Scope & Authority: Check whether current logged-in session is a Group Super Admin or Company Admin
   const isCurrentUserGlobalAdmin = safeAppStorage.getItem('dpl_is_global_admin') === 'true';
   const [showAllGroupStaff, setShowAllGroupStaff] = useState(true);
 
-  // Helper to test if a user has access / belongs to the active company
   const userBelongsToCompany = (u: AppUser, targetCompanyId: string) => {
     if (u.isGlobalAdmin) return true;
     if (u.allowedCompanies && Array.isArray(u.allowedCompanies) && u.allowedCompanies.length > 0) {
       return u.allowedCompanies.includes(targetCompanyId) || u.allowedCompanies.includes('all');
     }
-    return true; // Default fallback
+    return true;
   };
 
-  // Filter staff users (office vs transporters)
-  // Company Admin strictly sees only users belonging to their active company.
-  // Group Super Admin sees active company by default, with optional toggle to view all group personnel.
-  const baseOfficeUsers = users.filter(u => u.role !== UserRole.CLIENT && u.role !== UserRole.TRANSPORTER);
-  const officeUsers = (isCurrentUserGlobalAdmin && showAllGroupStaff)
-    ? baseOfficeUsers
-    : baseOfficeUsers.filter(u => userBelongsToCompany(u, activeCompany.id));
+  const baseOfficeUsers = users.filter(
+    (u) => u.role !== UserRole.CLIENT && u.role !== UserRole.TRANSPORTER
+  );
+  const officeUsers =
+    isCurrentUserGlobalAdmin && showAllGroupStaff
+      ? baseOfficeUsers
+      : baseOfficeUsers.filter((u) => userBelongsToCompany(u, activeCompany.id));
 
-  const transporterUsers = users.filter(u => u.role === UserRole.TRANSPORTER);
+  const transporterUsers = users.filter((u) => u.role === UserRole.TRANSPORTER);
 
-  // Search filtering
   const q = searchQuery.toLowerCase().trim();
 
-  const filteredOfficeUsers = officeUsers.filter(u => {
+  const filteredOfficeUsers = officeUsers.filter((u) => {
     if (!q) return true;
     return (
       (u.name && u.name.toLowerCase().includes(q)) ||
       (u.userId && u.userId.toLowerCase().includes(q)) ||
-      (u.role && u.role.toLowerCase().includes(q)) ||
-      (u.contact && u.contact.toLowerCase().includes(q))
+      (u.role && u.role.toLowerCase().includes(q))
     );
   });
 
-  const filteredClients = clientsList.filter(c => {
+  const filteredClients = clientsList.filter((c) => {
     if (!q) return true;
     return (
       (c.name && c.name.toLowerCase().includes(q)) ||
       (c.ownerName && c.ownerName.toLowerCase().includes(q)) ||
+      (c.userId && c.userId.toLowerCase().includes(q)) ||
       (c.mobileNumber && c.mobileNumber.toLowerCase().includes(q)) ||
       (c.contact && c.contact.toLowerCase().includes(q)) ||
       (c.defaultCaseCategory && c.defaultCaseCategory.toLowerCase().includes(q)) ||
@@ -566,7 +588,7 @@ const UserManagement: React.FC = () => {
     );
   });
 
-  const filteredTransporters = transporterUsers.filter(u => {
+  const filteredTransporters = transporterUsers.filter((u) => {
     if (!q) return true;
     return (
       (u.name && u.name.toLowerCase().includes(q)) ||
@@ -575,7 +597,7 @@ const UserManagement: React.FC = () => {
     );
   });
 
-  const filteredDestinationStaff = destinationStaffList.filter(d => {
+  const filteredDestinationStaff = destinationStaffList.filter((d) => {
     if (!q) return true;
     return (
       (d.name && d.name.toLowerCase().includes(q)) ||
@@ -585,27 +607,27 @@ const UserManagement: React.FC = () => {
     );
   });
 
-  const baseDestinationUsers = users.filter(u => 
-    u.role === UserRole.LOADING_PORT_STAFF ||
-    u.role === UserRole.UNLOADING_PORT_STAFF || 
-    u.role === UserRole.DESTINATION_PORT_STAFF ||
-    (u.roles && (
-      u.roles.includes(UserRole.LOADING_PORT_STAFF) ||
-      u.roles.includes(UserRole.UNLOADING_PORT_STAFF) || 
-      u.roles.includes(UserRole.DESTINATION_PORT_STAFF)
-    ))
+  const baseDestinationUsers = users.filter(
+    (u) =>
+      u.role === UserRole.LOADING_PORT_STAFF ||
+      u.role === UserRole.UNLOADING_PORT_STAFF ||
+      u.role === UserRole.DESTINATION_PORT_STAFF ||
+      (u.roles &&
+        (u.roles.includes(UserRole.LOADING_PORT_STAFF) ||
+          u.roles.includes(UserRole.UNLOADING_PORT_STAFF) ||
+          u.roles.includes(UserRole.DESTINATION_PORT_STAFF)))
   );
 
-  const destinationUsers = (isCurrentUserGlobalAdmin && showAllGroupStaff)
-    ? baseDestinationUsers
-    : baseDestinationUsers.filter(u => userBelongsToCompany(u, activeCompany.id));
+  const destinationUsers =
+    isCurrentUserGlobalAdmin && showAllGroupStaff
+      ? baseDestinationUsers
+      : baseDestinationUsers.filter((u) => userBelongsToCompany(u, activeCompany.id));
 
-  const filteredDestinationUsers = destinationUsers.filter(u => {
+  const filteredDestinationUsers = destinationUsers.filter((u) => {
     if (!q) return true;
     return (
       (u.name && u.name.toLowerCase().includes(q)) ||
-      (u.userId && u.userId.toLowerCase().includes(q)) ||
-      (u.contact && u.contact.toLowerCase().includes(q))
+      (u.userId && u.userId.toLowerCase().includes(q))
     );
   });
 
@@ -623,88 +645,106 @@ const UserManagement: React.FC = () => {
         <div>
           <div className="flex items-center gap-2.5 flex-wrap">
             <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2 drop-shadow-md">
-              <Users className="text-brand-400" /> {activeCompany.legalTitle || activeCompany.name} • Staff &amp; Entity Directory
+              <Users className="text-brand-400" /> {activeCompany.legalTitle || activeCompany.name} · Portal Users &amp; Entity Directory
             </h2>
             {isCurrentUserGlobalAdmin ? (
-              <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-300 text-[11px] font-bold flex items-center gap-1 shadow-sm">
+              <span className="px-2.5 py-0.5 rounded-lg bg-purple-500/20 border border-purple-500/40 text-purple-300 text-[11px] font-bold flex items-center gap-1 shadow-sm">
                 <Crown size={12} /> Main Group Super Admin
               </span>
             ) : (
-              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-bold flex items-center gap-1 shadow-sm">
+              <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-bold flex items-center gap-1 shadow-sm">
                 <Building size={12} /> Company Administrator
               </span>
             )}
           </div>
           <p className="text-xs text-gray-400 mt-1">
-            {isCurrentUserGlobalAdmin 
-              ? `You have master group-wide access across all 4 subsidiaries. Currently focused on ${activeCompany.name}.`
-              : `Managing personnel and entities strictly within ${activeCompany.legalTitle || activeCompany.name}. Other subsidiaries are restricted.`}
+            Software User IDs &amp; Portal Access. Non-login Office Salary Staff &amp; financial ledgers are managed in Finance Management.
           </p>
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto">
-          {/* Group Super Admin view scope toggle */}
           {isCurrentUserGlobalAdmin && (
             <button
               type="button"
               onClick={() => setShowAllGroupStaff(!showAllGroupStaff)}
-              className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 shadow-sm ${
+              className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 shadow-sm whitespace-nowrap shrink-0 cursor-pointer ${
                 showAllGroupStaff
                   ? 'bg-purple-600/30 border-purple-400 text-purple-200'
                   : 'bg-white/5 border-white/10 text-gray-300 hover:text-white'
               }`}
-              title="Toggle between active company personnel and all 4 group companies personnel"
+              title="Toggle between active company users and all 4 group companies users"
             >
               <Crown size={13} className="text-purple-400" />
               <span>{showAllGroupStaff ? 'All 4 Companies View' : `${activeCompany.shortName || activeCompany.name} Only`}</span>
             </button>
           )}
 
-          <button 
+          <button
+            type="button"
             onClick={handleOpenAdd}
-            className="flex-1 sm:flex-initial bg-brand-600 hover:bg-brand-500 text-white px-4 sm:px-5 py-2 rounded-xl flex items-center justify-center gap-2 text-xs sm:text-sm font-semibold shadow-lg shadow-brand-600/30 transition-all hover:scale-102 active:scale-95"
+            className="flex-1 sm:flex-initial bg-brand-600 hover:bg-brand-500 text-white px-4 sm:px-5 py-2 rounded-xl flex items-center justify-center gap-2 text-xs sm:text-sm font-semibold shadow-lg shadow-brand-600/30 transition-all whitespace-nowrap cursor-pointer"
           >
-            <UserPlus size={17} /> 
+            <UserPlus size={17} />
             <span>
-              {activeTab === 'clients' ? 'Register New Client' : activeTab === 'destinations' ? (destSubTab === 'users' ? 'Create Destination User' : 'Add Destination Representative') : activeTab === 'transporters' ? 'Add Transporter / Broker' : 'Create User / Staff ID'}
+              {activeTab === 'clients'
+                ? 'Register New Client'
+                : activeTab === 'destinations'
+                ? destSubTab === 'users'
+                  ? 'Create Destination User ID'
+                  : 'Add Destination Representative'
+                : activeTab === 'transporters'
+                ? 'Add Transporter / Broker'
+                : 'Create User ID'}
             </span>
           </button>
         </div>
       </div>
 
-      {/* Primary 4 Tabs - Compact Wrap with Zero Horizontal Scroll */}
+      {/* Primary 4 Tabs */}
       <div className="flex flex-wrap gap-2 sm:gap-3 border-b border-white/10 pb-2">
         <button
+          type="button"
           onClick={() => setActiveTab('office')}
-          className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap text-xs sm:text-sm font-semibold shrink-0 ${
-            activeTab === 'office' ? 'bg-brand-600/20 text-brand-300 border border-brand-500/40 shadow-md' : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
+          className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap text-xs sm:text-sm font-semibold shrink-0 cursor-pointer ${
+            activeTab === 'office'
+              ? 'bg-brand-600/20 text-brand-300 border border-brand-500/40 shadow-md'
+              : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
           }`}
         >
-          <Briefcase size={16} /> Office Staff ({officeUsers.length})
+          <Briefcase size={16} /> System Users ({officeUsers.length})
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('clients')}
-          className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap text-xs sm:text-sm font-semibold shrink-0 ${
-            activeTab === 'clients' ? 'bg-brand-600/20 text-brand-300 border border-brand-500/40 shadow-md' : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
+          className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap text-xs sm:text-sm font-semibold shrink-0 cursor-pointer ${
+            activeTab === 'clients'
+              ? 'bg-brand-600/20 text-brand-300 border border-brand-500/40 shadow-md'
+              : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
           }`}
         >
           <Building size={16} /> Clients ({clientsList.length})
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('transporters')}
-          className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap text-xs sm:text-sm font-semibold shrink-0 ${
-            activeTab === 'transporters' ? 'bg-brand-600/20 text-brand-300 border border-brand-500/40 shadow-md' : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
+          className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap text-xs sm:text-sm font-semibold shrink-0 cursor-pointer ${
+            activeTab === 'transporters'
+              ? 'bg-brand-600/20 text-brand-300 border border-brand-500/40 shadow-md'
+              : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
           }`}
         >
           <Truck size={16} /> Transporters / Brokers ({transporterUsers.length})
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('destinations')}
-          className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap text-xs sm:text-sm font-semibold shrink-0 ${
-            activeTab === 'destinations' ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40 shadow-md' : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
+          className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl transition-all whitespace-nowrap text-xs sm:text-sm font-semibold shrink-0 cursor-pointer ${
+            activeTab === 'destinations'
+              ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40 shadow-md'
+              : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
           }`}
         >
           <MapPin size={16} /> Destinations Staff ({destinationStaffList.length + destinationUsers.length})
@@ -718,11 +758,15 @@ const UserManagement: React.FC = () => {
           <input
             type="text"
             placeholder={
-              activeTab === 'office' ? "Search office staff by name, ID, role, phone..." :
-              activeTab === 'clients' ? "Search clients by company, owner, category, NTN..." :
-              activeTab === 'transporters' ? "Search transporters / brokers by fleet name, ID..." :
-              destSubTab === 'users' ? "Search destination staff login accounts by name, ID..." :
-              "Search destination representatives by name, station, role..."
+              activeTab === 'office'
+                ? 'Search system users by name, username, role...'
+                : activeTab === 'clients'
+                ? 'Search clients by company, owner, username, NTN...'
+                : activeTab === 'transporters'
+                ? 'Search transporters / brokers by fleet name, username...'
+                : destSubTab === 'users'
+                ? 'Search destination staff login accounts by name, username...'
+                : 'Search destination representatives by name, station, role...'
             }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -730,6 +774,7 @@ const UserManagement: React.FC = () => {
           />
           {searchQuery && (
             <button
+              type="button"
               onClick={() => setSearchQuery('')}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs p-1"
             >
@@ -739,7 +784,7 @@ const UserManagement: React.FC = () => {
         </div>
 
         <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
-          <span className="text-xs text-gray-400 px-1 font-mono">
+          <span className="text-xs text-gray-400 px-1 font-mono tabular-nums">
             {getActiveCount()} {getActiveCount() === 1 ? 'record' : 'records'}
           </span>
 
@@ -747,9 +792,9 @@ const UserManagement: React.FC = () => {
             <button
               type="button"
               onClick={() => setViewMode('cards')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                viewMode === 'cards' 
-                  ? 'bg-brand-600 text-white shadow-md' 
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                viewMode === 'cards'
+                  ? 'bg-brand-600 text-white shadow-md'
                   : 'text-gray-400 hover:text-white hover:bg-white/5'
               }`}
             >
@@ -759,9 +804,9 @@ const UserManagement: React.FC = () => {
             <button
               type="button"
               onClick={() => setViewMode('table')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                viewMode === 'table' 
-                  ? 'bg-brand-600 text-white shadow-md' 
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                viewMode === 'table'
+                  ? 'bg-brand-600 text-white shadow-md'
                   : 'text-gray-400 hover:text-white hover:bg-white/5'
               }`}
             >
@@ -773,338 +818,143 @@ const UserManagement: React.FC = () => {
       </div>
 
       {/* ========================================================================= */}
-      {/* 1. OFFICE STAFF TAB */}
+      {/* 1. SYSTEM USERS TAB */}
       {/* ========================================================================= */}
-      {activeTab === 'office' && (
-        filteredOfficeUsers.length === 0 ? (
+      {activeTab === 'office' &&
+        (filteredOfficeUsers.length === 0 ? (
           <div className="glass-card rounded-2xl p-8 text-center border border-white/10 text-gray-400 space-y-2">
             <Users size={32} className="mx-auto text-gray-500 mb-2" />
-            <p className="text-sm font-semibold text-white">No office staff found</p>
-            <p className="text-xs text-gray-500">Click &quot;Create User / Staff ID&quot; to onboard an employee.</p>
+            <p className="text-sm font-semibold text-white">No system users found</p>
+            <p className="text-xs text-gray-500">Click &quot;Create User ID&quot; to assign portal login access.</p>
           </div>
         ) : viewMode === 'cards' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {filteredOfficeUsers.map((user, idx) => (
-              <div 
-                key={`user_card_${user.id || idx}_${idx}`} 
+              <div
+                key={`user_card_${user.id || idx}_${idx}`}
                 className="glass-card rounded-2xl p-4 border border-white/10 hover:border-brand-500/30 transition-all shadow-lg space-y-3 relative overflow-hidden group"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-11 h-11 rounded-xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-sm font-bold text-white shadow-lg overflow-hidden shrink-0">
-                      {Boolean(user.profilePicture && user.profilePicture.trim()) ? (
-                        <img src={user.profilePicture} alt={user.name} className="w-full h-full object-cover" />
-                      ) : (
-                        user.name.charAt(0)
-                      )}
+                    <div className="w-10 h-10 rounded-xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-sm font-bold text-white shrink-0">
+                      {(user.name || 'U').charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0">
                       <h4 className="font-bold text-white text-sm truncate">{user.name}</h4>
-                      {user.designation && (
-                        <p className="text-[11px] text-amber-300/90 font-medium truncate">{user.designation}</p>
-                      )}
-                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                        <span className="text-[11px] font-mono font-semibold text-brand-400 bg-brand-500/10 px-1.5 py-0.5 rounded border border-brand-500/20">
-                          {user.userId || `EMP-${user.id}`}
-                        </span>
-                        {(user.roles && user.roles.length > 0 ? user.roles : [user.role]).map(r => (
-                          <span key={r} className={`rounded px-1.5 py-0.5 text-[10px] font-medium border truncate ${
-                            r === UserRole.ADMIN 
-                              ? (user.isGlobalAdmin ? 'bg-purple-500/25 text-purple-200 border-purple-500/40' : 'bg-amber-500/20 text-amber-300 border-amber-500/40')
-                              : 'bg-white/10 border-white/10 text-gray-200'
-                          }`}>
-                            {r === UserRole.ADMIN 
-                              ? (user.isGlobalAdmin ? '👑 Group Admin' : '🏢 Company Admin') 
-                              : r.replace(/_/g, ' ')}
-                          </span>
-                        ))}
-                        {/* Company Scope Badge */}
-                        <span className="rounded px-1.5 py-0.5 text-[10px] font-mono border bg-slate-950/70 border-white/15 text-amber-300 flex items-center gap-1">
-                          <Building size={10} />
-                          {user.isGlobalAdmin || user.allowedCompanies?.length === 4
-                            ? 'All 4 Companies'
-                            : (user.allowedCompanies && user.allowedCompanies.length > 0)
-                              ? user.allowedCompanies.map(c => c.toUpperCase()).join(', ')
-                              : 'Single Company'}
-                        </span>
-                      </div>
+                      <p className="text-xs text-gray-400 truncate mt-0.5">{formatUserSingleLineRole(user)}</p>
                     </div>
                   </div>
-                  <span className={`text-[11px] font-bold flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-full border ${
-                    user.status === 'SUSPENDED'
-                      ? 'text-amber-400 bg-amber-500/15 border-amber-500/30'
-                      : 'text-green-400 bg-green-500/10 border-green-500/20'
-                  }`}>
-                    {user.status === 'SUSPENDED' ? (
-                      <Lock size={10} className="text-amber-400" />
-                    ) : (
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_6px_currentColor]"></span>
-                    )} {user.status || 'ACTIVE'}
+                  <span
+                    className={`text-xs font-semibold flex items-center gap-1 shrink-0 ${
+                      user.status === 'SUSPENDED' ? 'text-amber-400' : 'text-emerald-400'
+                    }`}
+                  >
+                    {user.status === 'SUSPENDED' && <Lock size={11} />}
+                    <span>{user.status === 'SUSPENDED' ? 'Suspended' : 'Active'}</span>
                   </span>
                 </div>
 
-                {user.fatherName && (
-                  <div className="text-xs text-gray-400 flex items-center gap-1.5 px-0.5">
-                    <span className="text-gray-500 font-medium">S/O:</span>
-                    <span className="text-gray-200 font-medium">{user.fatherName}</span>
-                  </div>
-                )}
-
-                <div className="bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-xs">
+                <div className="bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-xs font-mono">
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-400 flex items-center gap-1.5">
-                      <Phone size={13} className="text-brand-400 shrink-0" /> Contact:
-                    </span>
-                    <a href={`tel:${user.contact}`} className="font-mono text-white hover:text-brand-300 font-semibold transition">
-                      {user.contact || 'N/A'}
-                    </a>
+                    <span className="text-gray-400 font-sans">Username:</span>
+                    <span className="text-brand-400 font-semibold">{user.userId || '-'}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-400 flex items-center gap-1.5">
-                      <CreditCard size={13} className="text-emerald-400 shrink-0" /> Base Salary:
-                    </span>
-                    <span className="font-mono text-emerald-300 font-bold">
-                      {Number(user.baseSalary || 0) > 0 ? `PKR ${Number(user.baseSalary).toLocaleString()}` : '-'}
+                    <span className="text-gray-400 font-sans">Password:</span>
+                    <span className="text-gray-200">{user.password || '-'}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                    <span className="text-gray-400 font-sans">Scope:</span>
+                    <span className="text-amber-300 text-[11px]">
+                      {user.isGlobalAdmin || user.allowedCompanies?.length === 4
+                        ? 'All 4 Companies'
+                        : user.allowedCompanies && user.allowedCompanies.length > 0
+                        ? user.allowedCompanies.map((c) => c.toUpperCase()).join(', ')
+                        : 'Single Company'}
                     </span>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/5">
                   <button
-                    onClick={() => setSelectedStaffUser(user)}
-                    className="flex-1 text-emerald-300 hover:text-emerald-200 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 transition-all text-xs flex items-center justify-center gap-1.5 font-semibold"
-                    title="View Salary & Daily Routine Ledgers"
+                    type="button"
+                    onClick={() => handleEditUser(user)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
                   >
-                    <CreditCard size={14} /> Dual Ledgers
+                    <Edit size={14} />
+                    <span>Edit</span>
                   </button>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button 
-                      onClick={() => handleToggleSuspendUser(user)}
-                      className={`p-2 rounded-xl transition-colors ${
-                        user.status === 'SUSPENDED'
-                          ? 'text-amber-400 hover:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30'
-                          : 'text-gray-400 hover:text-amber-400 bg-white/5 hover:bg-white/10'
-                      }`}
-                      title={user.status === 'SUSPENDED' ? 'Reactivate / Unsuspend User Account' : 'Suspend User (Block Login)'}
-                    >
-                      {user.status === 'SUSPENDED' ? <Unlock size={14} /> : <Lock size={14} />}
-                    </button>
-                    <button 
-                      onClick={() => handleEditUser(user)}
-                      className="text-gray-300 hover:text-white p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
-                      title="Edit Staff User ID & Role"
-                    >
-                      <Edit size={14} />
-                    </button>
-                    {Number(user.id) !== 1 && (user.userId || '').toLowerCase() !== 'arbabkhanboby' && (
-                      <button 
-                        onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name, docId: (user as any)._docId, userLoginId: user.userId })}
-                        className="text-gray-400 hover:text-red-400 p-2 rounded-xl bg-white/5 hover:bg-red-500/10 transition-colors"
-                        title="Delete Staff"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <div className="glass-card rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
-            <div className="overflow-x-auto custom-scrollbar custom-scrollbar-x" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}>
-              <table className="w-full text-left text-sm text-gray-300 min-w-[750px]">
-                <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/10">
-                  <tr>
-                    <th className="p-4">Staff Details</th>
-                    <th className="p-4">Role & Duties</th>
-                    <th className="p-4">Contact Info</th>
-                    <th className="p-4">Base Monthly Salary</th>
-                    <th className="p-4">Status</th>
-                    <th className="p-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {filteredOfficeUsers.map((user, idx) => (
-                    <tr key={`user_row_${user.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
-                      <td className="p-4 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-sm font-bold text-white shadow-lg overflow-hidden shrink-0">
-                          {Boolean(user.profilePicture && user.profilePicture.trim()) ? (
-                            <img src={user.profilePicture} alt={user.name} className="w-full h-full object-cover" />
-                          ) : (
-                            user.name.charAt(0)
-                          )}
-                        </div>
-                        <div>
-                          <span className="font-bold text-white block">{user.name}</span>
-                          {user.designation && (
-                            <span className="text-[11px] text-amber-300 block">{user.designation}</span>
-                          )}
-                          <span className="text-xs font-mono text-brand-400">{user.userId || `EMP-${user.id}`}</span>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex flex-wrap gap-1">
-                          {(user.roles && user.roles.length > 0 ? user.roles : [user.role]).map(r => (
-                            <span key={r} className={`rounded-md px-2 py-0.5 text-[11px] font-medium inline-block border ${
-                              r === UserRole.ADMIN
-                                ? (user.isGlobalAdmin ? 'bg-purple-500/25 text-purple-200 border-purple-500/40' : 'bg-amber-500/20 text-amber-300 border-amber-500/40')
-                                : 'bg-white/10 border-white/10 text-gray-200'
-                            }`}>
-                              {r === UserRole.ADMIN 
-                                ? (user.isGlobalAdmin ? '👑 Group Admin' : '🏢 Company Admin') 
-                                : r.replace(/_/g, ' ')}
-                            </span>
-                          ))}
-                          <span className="rounded-md px-1.5 py-0.5 text-[10px] font-mono border bg-slate-900 border-white/10 text-amber-300 inline-block">
-                            {user.isGlobalAdmin || user.allowedCompanies?.length === 4 
-                              ? 'All 4 Companies' 
-                              : (user.allowedCompanies && user.allowedCompanies.length > 0)
-                                ? user.allowedCompanies.map(c => c.toUpperCase()).join(', ')
-                                : 'Assigned Company'}
-                          </span>
-                        </div>
-                        {user.fatherName && (
-                          <p className="text-[11px] text-gray-400 mt-1">S/O: {user.fatherName}</p>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        <p className="text-white font-mono text-xs">{user.contact}</p>
-                        <p className="text-[11px] text-gray-400 truncate max-w-[180px]">{user.email}</p>
-                      </td>
-                      <td className="p-4">
-                        <span className="font-mono text-emerald-400 font-semibold text-xs">
-                          {Number(user.baseSalary || 0) > 0 ? `PKR ${Number(user.baseSalary).toLocaleString()}` : '-'}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span className={`text-xs font-bold flex items-center gap-1.5 px-2 py-0.5 rounded-full border w-fit ${
-                          user.status === 'SUSPENDED'
-                            ? 'text-amber-400 bg-amber-500/15 border-amber-500/30'
-                            : 'text-green-400 bg-green-500/10 border-green-500/20'
-                        }`}>
-                          {user.status === 'SUSPENDED' ? (
-                            <Lock size={11} className="text-amber-400" />
-                          ) : (
-                            <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_currentColor]"></span>
-                          )} {user.status || 'ACTIVE'}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => setSelectedStaffUser(user)}
-                            className="text-emerald-400 hover:text-emerald-300 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors text-xs flex items-center gap-1 font-semibold"
-                            title="View Salary & Daily Routine Ledgers"
-                          >
-                            <CreditCard size={14} /> Dual Ledgers
-                          </button>
-                          <button 
-                            onClick={() => handleToggleSuspendUser(user)}
-                            className={`p-1.5 rounded-lg transition-colors ${
-                              user.status === 'SUSPENDED'
-                                ? 'text-amber-400 hover:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30'
-                                : 'text-gray-400 hover:text-amber-400 bg-white/5 hover:bg-white/10'
-                            }`}
-                            title={user.status === 'SUSPENDED' ? 'Reactivate / Unsuspend User (Allow Login)' : 'Suspend User (Block Login)'}
-                          >
-                            {user.status === 'SUSPENDED' ? <Unlock size={15} /> : <Lock size={15} />}
-                          </button>
-                          <button 
-                            onClick={() => handleEditUser(user)}
-                            className="text-gray-300 hover:text-white p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-                            title="Edit User ID & Role"
-                          >
-                            <Edit size={15} />
-                          </button>
-                          {Number(user.id) !== 1 && (user.userId || '').toLowerCase() !== 'arbabkhanboby' && (
-                            <button 
-                              onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name, docId: (user as any)._docId, userLoginId: user.userId })}
-                              className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 transition-colors"
-                              title="Delete User"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )
-      )}
+          renderSingleRowUsersTable(filteredOfficeUsers, 'user_row')
+        ))}
 
       {/* ========================================================================= */}
       {/* 2. CLIENTS TAB */}
       {/* ========================================================================= */}
-      {activeTab === 'clients' && (
-        filteredClients.length === 0 ? (
+      {activeTab === 'clients' &&
+        (filteredClients.length === 0 ? (
           <div className="glass-card rounded-2xl p-8 text-center border border-white/10 text-gray-400 space-y-2">
             <Building size={32} className="mx-auto text-gray-500 mb-2" />
             <p className="text-sm font-semibold text-white">No registered clients found</p>
-            <p className="text-xs text-gray-500">Click &quot;Register New Client&quot; to onboard a client company with automatic tariffs.</p>
+            <p className="text-xs text-gray-500">
+              Click &quot;Register New Client&quot; to onboard a client company with automatic tariffs.
+            </p>
           </div>
         ) : viewMode === 'cards' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {filteredClients.map((client, idx) => (
-              <div 
-                key={`clt_card_${client.id || client.name || idx}_${idx}`} 
+              <div
+                key={`clt_card_${client.id || client.name || idx}_${idx}`}
                 className="glass-card rounded-2xl p-4 border border-white/10 hover:border-emerald-500/30 transition-all shadow-lg space-y-3 relative overflow-hidden group"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-11 h-11 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-sm font-bold text-emerald-400 shadow-lg shrink-0">
-                      <Building size={20} />
+                    <div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-sm font-bold text-emerald-400 shrink-0">
+                      <Building size={18} />
                     </div>
                     <div className="min-w-0">
                       <h4 className="font-bold text-white text-sm truncate">{client.name}</h4>
-                      <p className="text-xs text-gray-400 truncate">{client.ownerName || client.contact || 'Owner N/A'}</p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {client.ownerName || client.contact || 'Owner N/A'}
+                      </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {(client as any).status === 'PENDING_APPROVAL' ? (
-                      <span className="text-[10px] bg-amber-500/20 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded-full font-bold animate-pulse flex items-center gap-1">
-                        <Clock size={10} /> Pending Approval
-                      </span>
-                    ) : (
-                      <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-medium">
-                        {client.defaultCaseCategory || 'Bonded Carrier'}
-                      </span>
-                    )}
-                  </div>
+                  {(client as any).status === 'PENDING_APPROVAL' ? (
+                    <span className="text-[11px] text-amber-300 font-semibold flex items-center gap-1 shrink-0">
+                      <Clock size={12} /> Pending
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-emerald-300 font-medium shrink-0">
+                      {client.defaultCaseCategory || 'Bonded Carrier'}
+                    </span>
+                  )}
                 </div>
 
                 <div className="bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1 text-xs">
                   <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Username:</span>
+                    <span className="text-brand-400 font-mono font-semibold">{client.userId || '-'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Password:</span>
+                    <span className="text-gray-200 font-mono">{client.password || '-'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
                     <span className="text-gray-400">Phone:</span>
-                    <a href={`tel:${client.mobileNumber || client.phone}`} className="text-white font-mono font-medium hover:text-brand-300">
+                    <a
+                      href={`tel:${client.mobileNumber || client.phone}`}
+                      className="text-white font-mono font-medium hover:text-brand-300"
+                    >
                       {client.mobileNumber || client.phone || client.contact || 'N/A'}
                     </a>
                   </div>
-                  {client.whatsappNumber && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-gray-400">WhatsApp:</span>
-                      <span className="text-emerald-300 font-mono text-[11px]">{client.whatsappNumber}</span>
-                    </div>
-                  )}
-                  {client.ntn && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-gray-400">NTN / STRN:</span>
-                      <span className="text-gray-300 font-mono text-[11px]">{client.ntn}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between pt-1 border-t border-white/5 text-[11px]">
-                    <span className="text-gray-400">Default Tariff Items:</span>
-                    <span className="text-amber-400 font-mono font-bold">
-                      {(client.defaultCharges || []).length} items
-                    </span>
-                  </div>
                 </div>
 
-                <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/5">
                   {(client as any).status === 'PENDING_APPROVAL' && (
                     <button
                       type="button"
@@ -1114,34 +964,33 @@ const UserManagement: React.FC = () => {
                           loginEnabled: true,
                           status: 'ACTIVE' as any
                         });
-                        setClientsList(prev => prev.map(c => c.id === client.id ? { ...c, loginEnabled: true, status: 'ACTIVE' as any } : c));
+                        setClientsList((prev) =>
+                          prev.map((c) =>
+                            c.id === client.id ? { ...c, loginEnabled: true, status: 'ACTIVE' as any } : c
+                          )
+                        );
                       }}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 shadow-md shadow-emerald-600/30 transition active:scale-95"
-                      title="Approve Client Account and Activate Portal Login"
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 transition cursor-pointer"
                     >
                       <Check size={14} /> Approve
                     </button>
                   )}
                   <button
-                    onClick={() => setLedgerClient(client)}
-                    className="flex-1 text-emerald-300 hover:text-emerald-200 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 transition-all text-xs flex items-center justify-center gap-1.5 font-semibold"
-                    title="Check Financial Ledger Statement"
-                  >
-                    <FileText size={14} /> Check Ledger
-                  </button>
-                  <button
+                    type="button"
                     onClick={() => {
                       setClientToEdit(client);
                       setShowClientModal(true);
                     }}
-                    className="text-brand-300 hover:text-white px-2.5 py-1.5 rounded-xl bg-brand-500/15 hover:bg-brand-500/25 border border-brand-500/30 transition-all text-xs flex items-center gap-1 font-medium"
-                    title="Edit Profile & Default Tariff Setup"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition-colors cursor-pointer"
                   >
-                    <Edit size={14} /> Tariff
+                    <Edit size={14} /> Edit
                   </button>
-                  <button 
-                    onClick={() => setDeleteTarget({ type: 'CLIENT', id: client.id || client.name, name: client.name })}
-                    className="text-gray-400 hover:text-red-400 p-2 rounded-xl bg-white/5 hover:bg-red-500/10 transition-colors"
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDeleteTarget({ type: 'CLIENT', id: client.id || client.name, name: client.name })
+                    }
+                    className="text-gray-400 hover:text-red-400 p-2 rounded-xl bg-white/5 hover:bg-red-500/10 transition-colors cursor-pointer"
                     title="Delete Client"
                   >
                     <Trash2 size={14} />
@@ -1151,298 +1000,189 @@ const UserManagement: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="glass-card rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
-            <div className="overflow-x-auto custom-scrollbar custom-scrollbar-x" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}>
-              <table className="w-full text-left text-sm text-gray-300 min-w-[750px]">
-                <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/10">
+          <div className="glass-card rounded-2xl overflow-hidden border border-white/10 shadow-xl">
+            <div
+              className="overflow-x-auto custom-scrollbar custom-scrollbar-x"
+              style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
+            >
+              <table className="w-full text-left text-xs sm:text-sm text-gray-200 min-w-[820px]">
+                <thead className="bg-white/5 text-xs font-semibold text-gray-400 border-b border-white/10">
                   <tr>
-                    <th className="p-4">Client Company</th>
-                    <th className="p-4">Owner & Contact</th>
-                    <th className="p-4">Default Category</th>
-                    <th className="p-4">NTN / Tax ID</th>
-                    <th className="p-4">Default Tariff Heads</th>
-                    <th className="p-4 text-right">Actions</th>
+                    <th className="py-3 px-3.5 whitespace-nowrap w-14">S.No</th>
+                    <th className="py-3 px-3.5 whitespace-nowrap">Client Company</th>
+                    <th className="py-3 px-3.5 whitespace-nowrap">Category</th>
+                    <th className="py-3 px-3.5 whitespace-nowrap">Username</th>
+                    <th className="py-3 px-3.5 whitespace-nowrap">Password</th>
+                    <th className="py-3 px-3.5 whitespace-nowrap">Status</th>
+                    <th className="py-3 px-3.5 whitespace-nowrap text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {filteredClients.map((client, idx) => (
-                    <tr key={`clt_row_${client.id || client.name || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold shrink-0">
-                            <Building size={18} />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-white block">{client.name}</span>
-                              {(client as any).status === 'PENDING_APPROVAL' && (
-                                <span className="text-[10px] bg-amber-500/20 border border-amber-500/30 text-amber-300 px-2 py-0.2 rounded-full font-bold animate-pulse">
-                                  Pending Approval
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-[11px] text-gray-400">{client.officeAddress || 'Address N/A'}</span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <p className="text-white font-medium text-xs">{client.ownerName || client.contact || 'N/A'}</p>
-                        <p className="text-[11px] text-gray-400 font-mono">{client.mobileNumber || client.phone || 'N/A'}</p>
-                      </td>
-                      <td className="p-4">
-                        <span className="bg-brand-500/10 border border-brand-500/20 text-brand-300 px-2.5 py-1 rounded-md text-xs font-medium">
+                  {filteredClients.map((client, idx) => {
+                    const isPending = (client as any).status === 'PENDING_APPROVAL';
+                    return (
+                      <tr
+                        key={`clt_row_${client.id || client.name || idx}_${idx}`}
+                        className="hover:bg-white/5 transition-colors h-11"
+                      >
+                        <td className="py-2.5 px-3.5 font-mono tabular-nums text-gray-400 whitespace-nowrap">
+                          {idx + 1}
+                        </td>
+                        <td className="py-2.5 px-3.5 font-semibold text-white whitespace-nowrap max-w-[240px] truncate">
+                          {client.name}
+                        </td>
+                        <td className="py-2.5 px-3.5 text-gray-300 whitespace-nowrap">
                           {client.defaultCaseCategory || 'Bonded Carrier'}
-                        </span>
-                      </td>
-                      <td className="p-4 font-mono text-xs text-gray-300">
-                        {client.ntn || 'N/A'}
-                      </td>
-                      <td className="p-4 font-mono text-xs text-amber-400 font-semibold">
-                        {(client.defaultCharges || []).length} billing heads
-                      </td>
-                      <td className="p-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {(client as any).status === 'PENDING_APPROVAL' && (
+                        </td>
+                        <td className="py-2.5 px-3.5 font-mono tabular-nums text-brand-400 font-medium whitespace-nowrap">
+                          {client.userId || '-'}
+                        </td>
+                        <td className="py-2.5 px-3.5 font-mono tabular-nums text-gray-200 whitespace-nowrap">
+                          {client.password || '-'}
+                        </td>
+                        <td className="py-2.5 px-3.5 whitespace-nowrap">
+                          <span
+                            className={`text-xs font-semibold ${
+                              isPending ? 'text-amber-400' : 'text-emerald-400'
+                            }`}
+                          >
+                            {isPending ? 'Pending Approval' : 'Active'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center justify-end gap-1.5">
+                            {isPending && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await updateClientInFirestore({
+                                    id: client.id,
+                                    loginEnabled: true,
+                                    status: 'ACTIVE' as any
+                                  });
+                                  setClientsList((prev) =>
+                                    prev.map((c) =>
+                                      c.id === client.id
+                                        ? { ...c, loginEnabled: true, status: 'ACTIVE' as any }
+                                        : c
+                                    )
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                              >
+                                <Check size={13} /> Approve
+                              </button>
+                            )}
                             <button
                               type="button"
-                              onClick={async () => {
-                                await updateClientInFirestore({
-                                  id: client.id,
-                                  loginEnabled: true,
-                                  status: 'ACTIVE' as any
-                                });
-                                setClientsList(prev => prev.map(c => c.id === client.id ? { ...c, loginEnabled: true, status: 'ACTIVE' as any } : c));
+                              onClick={() => {
+                                setClientToEdit(client);
+                                setShowClientModal(true);
                               }}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 shadow-md shadow-emerald-600/30 transition active:scale-95"
-                              title="Approve Client Account"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition-colors cursor-pointer"
                             >
-                              <Check size={13} /> Approve
+                              <Edit size={13} /> Edit
                             </button>
-                          )}
-                          <button
-                            onClick={() => setLedgerClient(client)}
-                            className="text-emerald-400 hover:text-emerald-300 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors text-xs flex items-center gap-1 font-semibold"
-                            title="Check Financial Ledger Statement"
-                          >
-                            <FileText size={14} /> Ledger
-                          </button>
-                          <button
-                            onClick={() => {
-                              setClientToEdit(client);
-                              setShowClientModal(true);
-                            }}
-                            className="text-brand-300 hover:text-white px-2 py-1 rounded-lg bg-brand-500/10 hover:bg-brand-500/20 transition-colors text-xs flex items-center gap-1 font-medium"
-                            title="Edit Profile & Tariff"
-                          >
-                            <Edit size={14} /> Edit
-                          </button>
-                          <button 
-                            onClick={() => setDeleteTarget({ type: 'CLIENT', id: client.id || client.name, name: client.name })}
-                            className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 transition-colors"
-                            title="Delete Client"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
-        )
-      )}
+        ))}
 
       {/* ========================================================================= */}
-      {/* 3. TRANSPORTERS / BROKERS TAB (Renamed as requested) */}
+      {/* 3. TRANSPORTERS / BROKERS TAB */}
       {/* ========================================================================= */}
-      {activeTab === 'transporters' && (
-        filteredTransporters.length === 0 ? (
+      {activeTab === 'transporters' &&
+        (filteredTransporters.length === 0 ? (
           <div className="glass-card rounded-2xl p-8 text-center border border-white/10 text-gray-400 space-y-2">
             <Truck size={32} className="mx-auto text-gray-500 mb-2" />
             <p className="text-sm font-semibold text-white">No transporters / brokers found</p>
-            <p className="text-xs text-gray-500">Click &quot;Add Transporter / Broker&quot; to onboard transport fleet partners.</p>
+            <p className="text-xs text-gray-500">
+              Click &quot;Add Transporter / Broker&quot; to onboard transport fleet partners.
+            </p>
           </div>
         ) : viewMode === 'cards' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {filteredTransporters.map((trans, idx) => (
-              <div 
-                key={`trans_card_${trans.id || idx}_${idx}`} 
+              <div
+                key={`trans_card_${trans.id || idx}_${idx}`}
                 className="glass-card rounded-2xl p-4 border border-white/10 hover:border-amber-500/30 transition-all shadow-lg space-y-3 relative overflow-hidden group"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-11 h-11 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-sm font-bold text-amber-400 shadow-lg shrink-0">
-                      <Truck size={20} />
+                    <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-sm font-bold text-amber-400 shrink-0">
+                      <Truck size={18} />
                     </div>
                     <div className="min-w-0">
                       <h4 className="font-bold text-white text-sm truncate">{trans.name}</h4>
-                      <p className="text-xs text-gray-400 font-mono">{trans.userId || 'N/A'} • Transporter/Broker</p>
+                      <p className="text-xs text-gray-400 font-mono truncate">
+                        {trans.userId || '-'} · Transporter
+                      </p>
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <span className="text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-medium">
-                      Fleet Partner
-                    </span>
-                    <span className={`text-[10px] font-bold flex items-center gap-1 px-2 py-0.5 rounded-full border ${
-                      trans.status === 'SUSPENDED'
-                        ? 'text-amber-400 bg-amber-500/15 border-amber-500/30'
-                        : 'text-green-400 bg-green-500/10 border-green-500/20'
-                    }`}>
-                      {trans.status === 'SUSPENDED' ? <Lock size={9} /> : <span className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_6px_currentColor]"></span>}
-                      {trans.status || 'ACTIVE'}
-                    </span>
-                  </div>
+                  <span
+                    className={`text-xs font-semibold flex items-center gap-1 shrink-0 ${
+                      trans.status === 'SUSPENDED' ? 'text-amber-400' : 'text-emerald-400'
+                    }`}
+                  >
+                    {trans.status === 'SUSPENDED' && <Lock size={11} />}
+                    <span>{trans.status === 'SUSPENDED' ? 'Suspended' : 'Active'}</span>
+                  </span>
                 </div>
 
-                <div className="bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1 text-xs">
+                <div className="bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1 text-xs font-mono">
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-400">Contact:</span>
-                    <a href={`tel:${trans.contact}`} className="text-white font-mono font-medium hover:text-amber-300">
-                      {trans.contact || 'N/A'}
-                    </a>
+                    <span className="text-gray-400 font-sans">Username:</span>
+                    <span className="text-amber-300 font-semibold">{trans.userId || '-'}</span>
                   </div>
-                  {(trans as any).preferredRoutes && (
-                    <div className="flex items-start justify-between gap-2 pt-1 border-t border-white/5">
-                      <span className="text-gray-400 shrink-0">Routes:</span>
-                      <span className="text-gray-300 text-right text-[11px] truncate max-w-[200px]">
-                        {(trans as any).preferredRoutes}
-                      </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400 font-sans">Password:</span>
+                    <span className="text-gray-200">{trans.password || '-'}</span>
+                  </div>
+                  {trans.contact && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400 font-sans">Contact:</span>
+                      <a href={`tel:${trans.contact}`} className="text-white hover:text-amber-300">
+                        {trans.contact}
+                      </a>
                     </div>
                   )}
                 </div>
 
-                <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
-                  <span className="text-[11px] text-gray-400">
-                    Portal ID: <strong className="text-amber-300 font-mono">{trans.userId || 'TRP-N/A'}</strong>
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <button 
-                      onClick={() => handleToggleSuspendUser(trans)}
-                      className={`p-1.5 rounded-xl transition-colors ${
-                        trans.status === 'SUSPENDED'
-                          ? 'text-amber-400 hover:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30'
-                          : 'text-gray-400 hover:text-amber-400 bg-white/5 hover:bg-white/10'
-                      }`}
-                      title={trans.status === 'SUSPENDED' ? 'Reactivate / Unsuspend Transporter Account' : 'Suspend Transporter (Block Login)'}
-                    >
-                      {trans.status === 'SUSPENDED' ? <Unlock size={14} /> : <Lock size={14} />}
-                    </button>
-                    <button 
-                      onClick={() => handleEditUser(trans)}
-                      className="text-gray-300 hover:text-white p-1.5 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
-                      title="Edit Transporter / Broker"
-                    >
-                      <Edit size={14} />
-                    </button>
-                    <button 
-                      onClick={() => setDeleteTarget({ type: 'USER', id: trans.id, name: trans.name, docId: (trans as any)._docId, userLoginId: trans.userId })}
-                      className="text-gray-400 hover:text-red-400 p-1.5 rounded-xl bg-white/5 hover:bg-red-500/10 transition-colors"
-                      title="Delete Transporter / Broker"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => handleEditUser(trans)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer"
+                  >
+                    <Edit size={14} />
+                    <span>Edit</span>
+                  </button>
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <div className="glass-card rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
-            <div className="overflow-x-auto custom-scrollbar custom-scrollbar-x" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}>
-              <table className="w-full text-left text-sm text-gray-300 min-w-[750px]">
-                <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/10">
-                  <tr>
-                    <th className="p-4">Transporter / Broker Name</th>
-                    <th className="p-4">Contact Phone</th>
-                    <th className="p-4">Portal ID</th>
-                    <th className="p-4">Preferred Transit Routes</th>
-                    <th className="p-4">Status</th>
-                    <th className="p-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {filteredTransporters.map((trans, idx) => (
-                    <tr key={`trans_row_${trans.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
-                      <td className="p-4 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold shrink-0">
-                          <Truck size={18} />
-                        </div>
-                        <div>
-                          <span className="font-bold text-white block">{trans.name}</span>
-                          <span className="text-[11px] text-gray-400">Transporter / Broker Entity</span>
-                        </div>
-                      </td>
-                      <td className="p-4 font-mono text-xs text-white">
-                        {trans.contact}
-                      </td>
-                      <td className="p-4 font-mono text-xs text-amber-400 font-semibold">
-                        {trans.userId || 'TRP-N/A'}
-                      </td>
-                      <td className="p-4 text-xs text-gray-300">
-                        {(trans as any).preferredRoutes || 'Standard Transit Routes'}
-                      </td>
-                      <td className="p-4">
-                        <span className={`text-xs font-bold flex items-center gap-1.5 px-2 py-0.5 rounded-full border w-fit ${
-                          trans.status === 'SUSPENDED'
-                            ? 'text-amber-400 bg-amber-500/15 border-amber-500/30'
-                            : 'text-green-400 bg-green-500/10 border-green-500/20'
-                        }`}>
-                          {trans.status === 'SUSPENDED' ? <Lock size={11} className="text-amber-400" /> : <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_currentColor]"></span>}
-                          {trans.status || 'ACTIVE'}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button 
-                            onClick={() => handleToggleSuspendUser(trans)}
-                            className={`p-1.5 rounded-lg transition-colors ${
-                              trans.status === 'SUSPENDED'
-                                ? 'text-amber-400 hover:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30'
-                                : 'text-gray-400 hover:text-amber-400 bg-white/5 hover:bg-white/10'
-                            }`}
-                            title={trans.status === 'SUSPENDED' ? 'Reactivate / Unsuspend Transporter (Allow Login)' : 'Suspend Transporter (Block Login)'}
-                          >
-                            {trans.status === 'SUSPENDED' ? <Unlock size={15} /> : <Lock size={15} />}
-                          </button>
-                          <button 
-                            onClick={() => handleEditUser(trans)}
-                            className="text-gray-300 hover:text-white p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-                            title="Edit Transporter / Broker"
-                          >
-                            <Edit size={15} />
-                          </button>
-                          <button 
-                            onClick={() => setDeleteTarget({ type: 'USER', id: trans.id, name: trans.name, docId: (trans as any)._docId, userLoginId: trans.userId })}
-                            className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 transition-colors"
-                            title="Delete Transporter / Broker"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )
-      )}
+          renderSingleRowUsersTable(filteredTransporters, 'trans_row')
+        ))}
 
       {/* ========================================================================= */}
-      {/* 4. DESTINATIONS STAFF TAB (New Tab as requested) */}
+      {/* 4. DESTINATIONS STAFF TAB */}
       {/* ========================================================================= */}
       {activeTab === 'destinations' && (
         <div className="space-y-4">
-          {/* Destination Sub-Tabs */}
           <div className="flex bg-white/5 p-1 rounded-xl border border-white/5 self-start w-fit">
             <button
+              type="button"
               onClick={() => setDestSubTab('agents')}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
                 destSubTab === 'agents'
-                  ? 'bg-amber-600 text-white shadow-md font-bold animate-pulse-glow'
+                  ? 'bg-amber-600 text-white shadow-md font-bold'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -1450,10 +1190,11 @@ const UserManagement: React.FC = () => {
               <span>Field Representatives ({filteredDestinationStaff.length})</span>
             </button>
             <button
+              type="button"
               onClick={() => setDestSubTab('users')}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
                 destSubTab === 'users'
-                  ? 'bg-amber-600 text-white shadow-md font-bold animate-pulse-glow'
+                  ? 'bg-amber-600 text-white shadow-md font-bold'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -1466,16 +1207,19 @@ const UserManagement: React.FC = () => {
             filteredDestinationStaff.length === 0 ? (
               <div className="glass-card rounded-2xl p-8 text-center border border-white/10 text-gray-400 space-y-2">
                 <MapPin size={32} className="mx-auto text-amber-500 mb-2" />
-                <p className="text-sm font-semibold text-white">No destination staff representatives registered</p>
+                <p className="text-sm font-semibold text-white">
+                  No destination staff representatives registered
+                </p>
                 <p className="text-xs text-gray-500">
-                  Stationed representatives handle loading, unloading, seals inspection and customs clearance at ports (Karachi, Port Qasim) and borders (Torkham, Chaman).
+                  Destination representatives are automatically added as Vendors in Finance Management.
                 </p>
                 <button
+                  type="button"
                   onClick={() => {
                     setDestinationStaffToEdit(null);
                     setShowDestinationModal(true);
                   }}
-                  className="mt-3 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-4 py-2 rounded-xl inline-flex items-center gap-1.5 transition"
+                  className="mt-3 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-4 py-2 rounded-xl inline-flex items-center gap-1.5 transition cursor-pointer"
                 >
                   <Plus size={14} /> Add First Destination Representative
                 </button>
@@ -1483,30 +1227,26 @@ const UserManagement: React.FC = () => {
             ) : viewMode === 'cards' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
                 {filteredDestinationStaff.map((staff, idx) => (
-                  <div 
-                    key={`dst_card_${staff.id || idx}_${idx}`} 
+                  <div
+                    key={`dst_card_${staff.id || idx}_${idx}`}
                     className="glass-card rounded-2xl p-4 border border-white/10 hover:border-amber-500/30 transition-all shadow-lg space-y-3 relative overflow-hidden group"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-11 h-11 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-sm font-bold text-amber-400 shadow-lg shrink-0">
-                          <MapPin size={20} />
+                        <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-sm font-bold text-amber-400 shrink-0">
+                          <MapPin size={18} />
                         </div>
                         <div className="min-w-0">
                           <h4 className="font-bold text-white text-sm truncate">{staff.name}</h4>
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
-                              {staff.role}
-                            </span>
-                          </div>
+                          <p className="text-xs text-amber-300 truncate">{staff.role}</p>
                         </div>
                       </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                        staff.status === 'ACTIVE' 
-                          ? 'bg-green-500/10 text-green-400 border border-green-500/20' 
-                          : 'bg-gray-500/10 text-gray-400 border border-gray-500/20'
-                      }`}>
-                        {staff.status === 'ACTIVE' ? 'Active Duty' : 'On Leave'}
+                      <span
+                        className={`text-xs font-semibold ${
+                          staff.status === 'ACTIVE' ? 'text-emerald-400' : 'text-gray-400'
+                        }`}
+                      >
+                        {staff.status === 'ACTIVE' ? 'Active' : 'Inactive'}
                       </span>
                     </div>
 
@@ -1518,46 +1258,39 @@ const UserManagement: React.FC = () => {
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-400">Phone:</span>
-                        <a href={`tel:${staff.phone}`} className="text-white font-mono font-medium hover:text-amber-300">
-                          {staff.phone}
-                        </a>
-                      </div>
-                      {staff.cnic && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-gray-400">CNIC:</span>
-                          <span className="text-gray-300 font-mono text-[11px]">{staff.cnic}</span>
-                        </div>
-                      )}
-                      <div className="flex items-center justify-between pt-1 border-t border-white/5 text-[11px]">
-                        <span className="text-gray-400">Compensation:</span>
-                        <span className="text-emerald-400 font-mono font-bold">
-                          PKR {(staff.baseRate || 0).toLocaleString()} / {staff.paymentType === 'PER_CASE_COMMISSION' ? 'case' : staff.paymentType === 'DAILY_RATE' ? 'day' : 'month'}
+                        <span className="text-gray-400">Username:</span>
+                        <span className="text-brand-400 font-mono font-semibold">
+                          {staff.userId || '-'}
                         </span>
                       </div>
+                      {staff.phone && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-400">Phone:</span>
+                          <a href={`tel:${staff.phone}`} className="text-white font-mono">
+                            {staff.phone}
+                          </a>
+                        </div>
+                      )}
                     </div>
 
-                    {staff.notes && (
-                      <p className="text-[11px] text-gray-400 line-clamp-1 italic px-1">
-                        &quot;{staff.notes}&quot;
-                      </p>
-                    )}
-
                     <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-white/5">
-                      <button 
+                      <button
+                        type="button"
                         onClick={() => {
                           setDestinationStaffToEdit(staff);
                           setShowDestinationModal(true);
                         }}
-                        className="text-gray-300 hover:text-white p-1.5 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
-                        title="Edit Destination Representative"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition-colors cursor-pointer"
                       >
-                        <Edit size={14} />
+                        <Edit size={13} /> Edit
                       </button>
-                      <button 
-                        onClick={() => setDeleteTarget({ type: 'DESTINATION', id: staff.id, name: staff.name })}
-                        className="text-gray-400 hover:text-red-400 p-1.5 rounded-xl bg-white/5 hover:bg-red-500/10 transition-colors"
-                        title="Delete Staff"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDeleteTarget({ type: 'DESTINATION', id: staff.id, name: staff.name })
+                        }
+                        className="text-gray-400 hover:text-red-400 p-1.5 rounded-xl bg-white/5 hover:bg-red-500/10 transition-colors cursor-pointer"
+                        title="Delete Representative"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -1566,75 +1299,64 @@ const UserManagement: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <div className="glass-card rounded-2xl overflow-hidden border border-white/10 shadow-2xl animate-in fade-in duration-200">
-                <div className="overflow-x-auto custom-scrollbar custom-scrollbar-x" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}>
-                  <table className="w-full text-left text-sm text-gray-300 min-w-[750px]">
-                    <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/10">
+              <div className="glass-card rounded-2xl overflow-hidden border border-white/10 shadow-xl">
+                <div
+                  className="overflow-x-auto custom-scrollbar custom-scrollbar-x"
+                  style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
+                >
+                  <table className="w-full text-left text-xs sm:text-sm text-gray-200 min-w-[780px]">
+                    <thead className="bg-white/5 text-xs font-semibold text-gray-400 border-b border-white/10">
                       <tr>
-                        <th className="p-4">Representative Name</th>
-                        <th className="p-4">Station Location</th>
-                        <th className="p-4">Operational Role</th>
-                        <th className="p-4">Primary Contact</th>
-                        <th className="p-4">Compensation Terms</th>
-                        <th className="p-4">Duty Status</th>
-                        <th className="p-4 text-right">Actions</th>
+                        <th className="py-3 px-3.5 whitespace-nowrap w-14">S.No</th>
+                        <th className="py-3 px-3.5 whitespace-nowrap">Name</th>
+                        <th className="py-3 px-3.5 whitespace-nowrap">Station</th>
+                        <th className="py-3 px-3.5 whitespace-nowrap">Username</th>
+                        <th className="py-3 px-3.5 whitespace-nowrap">Password</th>
+                        <th className="py-3 px-3.5 whitespace-nowrap">Status</th>
+                        <th className="py-3 px-3.5 whitespace-nowrap text-right">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {filteredDestinationStaff.map((staff, idx) => (
-                        <tr key={`dst_row_${staff.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
-                          <td className="p-4 flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold shrink-0">
-                              <MapPin size={18} />
-                            </div>
-                            <div>
-                              <span className="font-bold text-white block">{staff.name}</span>
-                              <span className="text-[11px] text-gray-400">{staff.cnic || 'CNIC not recorded'}</span>
-                            </div>
+                        <tr
+                          key={`dst_row_${staff.id || idx}_${idx}`}
+                          className="hover:bg-white/5 transition-colors h-11"
+                        >
+                          <td className="py-2.5 px-3.5 font-mono tabular-nums text-gray-400 whitespace-nowrap">
+                            {idx + 1}
                           </td>
-                          <td className="p-4">
-                            <span className="bg-white/5 border border-white/10 rounded-md px-2.5 py-1 text-xs text-white font-medium inline-flex items-center gap-1.5">
-                              <MapPinned size={12} className="text-amber-400" /> {staff.station}
+                          <td className="py-2.5 px-3.5 font-semibold text-white whitespace-nowrap">
+                            {staff.name}
+                          </td>
+                          <td className="py-2.5 px-3.5 text-gray-300 whitespace-nowrap">
+                            {staff.station}
+                          </td>
+                          <td className="py-2.5 px-3.5 font-mono tabular-nums text-brand-400 font-medium whitespace-nowrap">
+                            {staff.userId || '-'}
+                          </td>
+                          <td className="py-2.5 px-3.5 font-mono tabular-nums text-gray-200 whitespace-nowrap">
+                            {staff.password || '-'}
+                          </td>
+                          <td className="py-2.5 px-3.5 whitespace-nowrap">
+                            <span
+                              className={`text-xs font-semibold ${
+                                staff.status === 'ACTIVE' ? 'text-emerald-400' : 'text-gray-400'
+                              }`}
+                            >
+                              {staff.status === 'ACTIVE' ? 'Active' : 'Inactive'}
                             </span>
                           </td>
-                          <td className="p-4 text-xs font-medium text-gray-200">
-                            {staff.role}
-                          </td>
-                          <td className="p-4 font-mono text-xs text-white">
-                            {staff.phone}
-                          </td>
-                          <td className="p-4 font-mono text-xs text-emerald-400 font-semibold">
-                            PKR {(staff.baseRate || 0).toLocaleString()} ({staff.paymentType === 'PER_CASE_COMMISSION' ? 'per case' : staff.paymentType === 'DAILY_RATE' ? 'daily' : 'monthly'})
-                          </td>
-                          <td className="p-4">
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                              staff.status === 'ACTIVE' 
-                                ? 'text-green-400 bg-green-500/10 border border-green-500/20' 
-                                : 'text-gray-400 bg-gray-500/10 border border-gray-500/20'
-                            }`}>
-                              {staff.status === 'ACTIVE' ? 'Active Duty' : 'On Leave'}
-                            </span>
-                          </td>
-                          <td className="p-4 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button 
-                                onClick={() => {
-                                  setDestinationStaffToEdit(staff);
-                                  setShowDestinationModal(true);
-                                }}
-                                className="text-gray-300 hover:text-white p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-                                title="Edit Profile"
-                              >
-                                <Edit size={15} />
-                              </button>
-                              <button 
-                                onClick={() => setDeleteTarget({ type: 'DESTINATION', id: staff.id, name: staff.name })}
-                                className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 transition-colors"
-                                title="Delete Staff"
-                              >
-                                <Trash2 size={15} />
-                              </button>
-                            </div>
+                          <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDestinationStaffToEdit(staff);
+                                setShowDestinationModal(true);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition-colors cursor-pointer"
+                            >
+                              <Edit size={13} /> Edit
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -1643,228 +1365,68 @@ const UserManagement: React.FC = () => {
                 </div>
               </div>
             )
-          ) : (
-            filteredDestinationUsers.length === 0 ? (
-              <div className="glass-card rounded-2xl p-8 text-center border border-white/10 text-gray-400 space-y-2 animate-in fade-in duration-200">
-                <Users size={32} className="mx-auto text-amber-500 mb-2" />
-                <p className="text-sm font-semibold text-white">No destination staff login accounts registered</p>
-                <p className="text-xs text-gray-500">
-                  Create a login-enabled employee user account with the Destination Staff role to see them here.
-                </p>
-                <button
-                  onClick={() => handleSelectRoleType('STAFF', [UserRole.UNLOADING_PORT_STAFF])}
-                  className="mt-3 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-4 py-2 rounded-xl inline-flex items-center gap-1.5 transition animate-all"
+          ) : filteredDestinationUsers.length === 0 ? (
+            <div className="glass-card rounded-2xl p-8 text-center border border-white/10 text-gray-400 space-y-2">
+              <Users size={32} className="mx-auto text-amber-500 mb-2" />
+              <p className="text-sm font-semibold text-white">
+                No destination staff login accounts registered
+              </p>
+              <button
+                type="button"
+                onClick={() => handleSelectRoleType('STAFF', [UserRole.DESTINATION_PORT_STAFF])}
+                className="mt-3 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-4 py-2 rounded-xl inline-flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Plus size={14} /> Create First Destination Staff User ID
+              </button>
+            </div>
+          ) : viewMode === 'cards' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {filteredDestinationUsers.map((user, idx) => (
+                <div
+                  key={`dusr_card_${user.id || idx}_${idx}`}
+                  className="glass-card rounded-2xl p-4 border border-white/10 hover:border-amber-500/30 transition-all shadow-lg space-y-3 relative overflow-hidden group"
                 >
-                  <Plus size={14} /> Create First Destination Staff User
-                </button>
-              </div>
-            ) : viewMode === 'cards' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 animate-in fade-in duration-200">
-                {filteredDestinationUsers.map((user, idx) => (
-                  <div 
-                    key={`dusr_card_${user.id || idx}_${idx}`} 
-                    className="glass-card rounded-2xl p-4 border border-white/10 hover:border-amber-500/30 transition-all shadow-lg space-y-3 relative overflow-hidden group"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-11 h-11 rounded-xl bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-sm font-bold text-amber-400 shadow-lg overflow-hidden shrink-0">
-                          {Boolean(user.profilePicture && user.profilePicture.trim()) ? (
-                            <img src={user.profilePicture} alt={user.name} className="w-full h-full object-cover" />
-                          ) : (
-                            user.name.charAt(0)
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <h4 className="font-bold text-white text-sm truncate">{user.name}</h4>
-                          {user.designation && (
-                            <p className="text-[11px] text-amber-300/90 font-medium truncate">{user.designation}</p>
-                          )}
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                            <span className="text-[11px] font-mono font-semibold text-brand-400 bg-brand-500/10 px-1.5 py-0.5 rounded border border-brand-500/20">
-                              {user.userId || `EMP-${user.id}`}
-                            </span>
-                            {(user.roles && user.roles.length > 0 ? user.roles : [user.role]).map(r => (
-                              <span key={r} className="rounded px-1.5 py-0.5 text-[10px] font-medium border truncate bg-teal-500/15 text-teal-300 border-teal-500/30">
-                                {r === UserRole.UNLOADING_PORT_STAFF ? 'Destination Staff' : r.replace(/_/g, ' ')}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                      <span className={`text-[11px] font-bold flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-full border ${
-                        user.status === 'SUSPENDED'
-                          ? 'text-amber-400 bg-amber-500/15 border-amber-500/30'
-                          : 'text-green-400 bg-green-500/10 border-green-500/20'
-                      }`}>
-                        {user.status === 'SUSPENDED' ? (
-                          <Lock size={10} className="text-amber-400" />
-                        ) : (
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_6px_currentColor]"></span>
-                        )} {user.status || 'ACTIVE'}
-                      </span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h4 className="font-bold text-white text-sm truncate">{user.name}</h4>
+                      <p className="text-xs text-amber-300 truncate mt-0.5">
+                        {formatUserSingleLineRole(user)}
+                      </p>
                     </div>
+                    <span
+                      className={`text-xs font-semibold ${
+                        user.status === 'SUSPENDED' ? 'text-amber-400' : 'text-emerald-400'
+                      }`}
+                    >
+                      {user.status === 'SUSPENDED' ? 'Suspended' : 'Active'}
+                    </span>
+                  </div>
 
-                    <div className="bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-xs font-mono">
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-400 font-sans">Contact:</span>
-                        <a href={`tel:${user.contact}`} className="text-white hover:text-amber-300">{user.contact}</a>
-                      </div>
-                      {user.email && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-gray-400 font-sans">Email:</span>
-                          <span className="text-gray-300 truncate max-w-[150px]">{user.email}</span>
-                        </div>
-                      )}
-                      <div className="flex items-center justify-between pt-1.5 border-t border-white/5">
-                        <span className="text-gray-400 font-sans">Password:</span>
-                        <span className="text-amber-400 font-bold">{user.password || '••••••••'}</span>
-                      </div>
+                  <div className="bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1 text-xs font-mono">
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400 font-sans">Username:</span>
+                      <span className="text-brand-400 font-semibold">{user.userId || '-'}</span>
                     </div>
-
-                    <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-white/5">
-                      <button
-                        onClick={() => setSelectedStaffUser(user)}
-                        className="text-emerald-400 hover:text-emerald-300 px-2.5 py-1 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors text-[11px] flex items-center gap-1 font-semibold"
-                        title="View Salary & Daily Routine Ledgers"
-                      >
-                        <CreditCard size={12} /> Ledgers
-                      </button>
-                      <button 
-                        onClick={() => handleToggleSuspendUser(user)}
-                        className={`p-1.5 rounded-xl transition-colors ${
-                          user.status === 'SUSPENDED'
-                            ? 'text-amber-400 hover:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30'
-                            : 'text-gray-400 hover:text-amber-400 bg-white/5 hover:bg-white/10'
-                        }`}
-                        title={user.status === 'SUSPENDED' ? 'Reactivate / Unsuspend User Account' : 'Suspend User ID (Block Login)'}
-                      >
-                        {user.status === 'SUSPENDED' ? <Unlock size={13} /> : <Lock size={13} />}
-                      </button>
-                      <button 
-                        onClick={() => handleEditUser(user)}
-                        className="text-gray-300 hover:text-white p-1.5 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
-                        title="Edit User ID & Role"
-                      >
-                        <Edit size={13} />
-                      </button>
-                      <button 
-                        onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name, docId: (user as any)._docId, userLoginId: user.userId })}
-                        className="text-gray-400 hover:text-red-400 p-1.5 rounded-xl bg-white/5 hover:bg-red-500/10 transition-colors"
-                        title="Delete Staff"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400 font-sans">Password:</span>
+                      <span className="text-gray-200">{user.password || '-'}</span>
                     </div>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="glass-card rounded-2xl overflow-hidden border border-white/10 shadow-2xl animate-in fade-in duration-200">
-                <div className="overflow-x-auto custom-scrollbar custom-scrollbar-x" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}>
-                  <table className="w-full text-left text-sm text-gray-300 min-w-[750px]">
-                    <thead className="bg-white/5 uppercase text-xs font-semibold text-gray-400 border-b border-white/10">
-                      <tr>
-                        <th className="p-4">Staff Member Name</th>
-                        <th className="p-4">Assigned Roles</th>
-                        <th className="p-4">Primary Contact / Credentials</th>
-                        <th className="p-4">Salary Base</th>
-                        <th className="p-4">Status</th>
-                        <th className="p-4 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5">
-                      {filteredDestinationUsers.map((user, idx) => (
-                        <tr key={`dusr_row_${user.id || idx}_${idx}`} className="hover:bg-white/5 transition-colors">
-                          <td className="p-4 flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-amber-600/20 border border-amber-500/30 flex items-center justify-center text-sm font-bold text-amber-400 shadow-lg overflow-hidden shrink-0">
-                              {Boolean(user.profilePicture && user.profilePicture.trim()) ? (
-                                <img src={user.profilePicture} alt={user.name} className="w-full h-full object-cover" />
-                              ) : (
-                                user.name.charAt(0)
-                              )}
-                            </div>
-                            <div>
-                              <span className="font-bold text-white block">{user.name}</span>
-                              {user.designation && (
-                                <span className="text-[11px] text-amber-300 block">{user.designation}</span>
-                              )}
-                              <span className="text-xs font-mono text-brand-400">{user.userId || `EMP-${user.id}`}</span>
-                            </div>
-                          </td>
-                          <td className="p-4">
-                            <div className="flex flex-wrap gap-1">
-                              {(user.roles && user.roles.length > 0 ? user.roles : [user.role]).map(r => (
-                                <span key={r} className="rounded-md px-2 py-0.5 text-[11px] font-medium inline-block border bg-teal-500/15 text-teal-300 border-teal-500/30 font-medium">
-                                  {r === UserRole.UNLOADING_PORT_STAFF ? 'Destination Staff' : r.replace(/_/g, ' ')}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                          <td className="p-4 font-mono text-xs">
-                            <div className="text-white">Phone: {user.contact}</div>
-                            <div className="text-gray-400 text-[11px]">Pass: {user.password || '••••••••'}</div>
-                          </td>
-                          <td className="p-4">
-                            <span className="font-mono text-emerald-400 font-semibold text-xs">
-                              {Number(user.baseSalary || 0) > 0 ? `PKR ${Number(user.baseSalary).toLocaleString()}` : '-'}
-                            </span>
-                          </td>
-                          <td className="p-4">
-                            <span className={`text-xs font-bold flex items-center gap-1.5 px-2 py-0.5 rounded-full border w-fit ${
-                              user.status === 'SUSPENDED'
-                                ? 'text-amber-400 bg-amber-500/15 border-amber-500/30'
-                                : 'text-green-400 bg-green-500/10 border-green-500/20'
-                            }`}>
-                              {user.status === 'SUSPENDED' ? (
-                                <Lock size={11} className="text-amber-400" />
-                              ) : (
-                                <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_currentColor]"></span>
-                              )} {user.status || 'ACTIVE'}
-                            </span>
-                          </td>
-                          <td className="p-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => setSelectedStaffUser(user)}
-                                className="text-emerald-400 hover:text-emerald-300 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors text-xs flex items-center gap-1 font-semibold"
-                                title="View Salary & Daily Routine Ledgers"
-                              >
-                                <CreditCard size={14} /> Dual Ledgers
-                              </button>
-                              <button 
-                                onClick={() => handleToggleSuspendUser(user)}
-                                className={`p-1.5 rounded-lg transition-colors ${
-                                  user.status === 'SUSPENDED'
-                                    ? 'text-amber-400 hover:text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30'
-                                    : 'text-gray-400 hover:text-amber-400 bg-white/5 hover:bg-white/10'
-                                }`}
-                                title={user.status === 'SUSPENDED' ? 'Reactivate / Unsuspend User Account' : 'Suspend User (Block Login)'}
-                              >
-                                {user.status === 'SUSPENDED' ? <Unlock size={15} /> : <Lock size={15} />}
-                              </button>
-                              <button 
-                                onClick={() => handleEditUser(user)}
-                                className="text-gray-300 hover:text-white p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-                                title="Edit User ID & Role"
-                              >
-                                <Edit size={15} />
-                              </button>
-                              <button 
-                                onClick={() => setDeleteTarget({ type: 'USER', id: user.id, name: user.name, docId: (user as any)._docId, userLoginId: user.userId })}
-                                className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg bg-white/5 hover:bg-red-500/10 transition-colors"
-                                title="Delete Staff"
-                              >
-                                <Trash2 size={15} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+
+                  <div className="flex items-center justify-end pt-2 border-t border-white/5">
+                    <button
+                      type="button"
+                      onClick={() => handleEditUser(user)}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      <Edit size={14} /> Edit
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )
+              ))}
+            </div>
+          ) : (
+            renderSingleRowUsersTable(filteredDestinationUsers, 'dusr_row')
           )}
         </div>
       )}
@@ -1872,203 +1434,291 @@ const UserManagement: React.FC = () => {
       {/* ========================================================================= */}
       {/* ONBOARDING ROLE SELECTOR MODAL */}
       {/* ========================================================================= */}
-      {showRoleSelectorModal && createPortal(
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-[9999] p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
-          <div className="glass-card p-6 sm:p-8 rounded-3xl w-full max-w-xl border border-white/15 shadow-2xl space-y-5 bg-slate-900 my-auto">
-            <div className="flex justify-between items-center border-b border-white/10 pb-3">
-              <div>
-                <span className="text-[10px] font-mono uppercase tracking-widest text-brand-400 font-bold">Directory Setup</span>
-                <h3 className="text-lg sm:text-xl font-bold text-white mt-0.5">Select User Category to Add</h3>
+      {showRoleSelectorModal &&
+        createPortal(
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-[9999] p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+            <div className="glass-card p-6 sm:p-8 rounded-3xl w-full max-w-xl border border-white/15 shadow-2xl space-y-5 bg-slate-900 my-auto">
+              <div className="flex justify-between items-center border-b border-white/10 pb-3">
+                <div>
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-brand-400 font-bold">
+                    Directory Setup
+                  </span>
+                  <h3 className="text-lg sm:text-xl font-bold text-white mt-0.5">
+                    Select User Category to Add
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRoleSelectorModal(false)}
+                  className="text-gray-400 hover:text-white p-1 rounded-full bg-white/5"
+                >
+                  <X size={18} />
+                </button>
               </div>
-              <button onClick={() => setShowRoleSelectorModal(false)} className="text-gray-400 hover:text-white p-1 rounded-full bg-white/5">
-                <X size={18} />
-              </button>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleSelectRoleType('STAFF')}
+                  className="group p-4 rounded-2xl bg-white/5 border border-white/10 hover:border-brand-500/50 hover:bg-brand-500/10 transition-all text-left flex flex-col justify-between shadow-lg cursor-pointer"
+                >
+                  <div className="space-y-2">
+                    <div className="w-10 h-10 rounded-xl bg-brand-500/20 text-brand-400 flex items-center justify-center">
+                      <Briefcase size={20} />
+                    </div>
+                    <h4 className="text-sm font-bold text-white">System User / Manager ID</h4>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      Admin, Operations, Case, Finance &amp; Documentation Managers.
+                    </p>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-brand-300 font-semibold">
+                    <span>Create User ID</span>
+                    <ChevronRight size={14} />
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectRoleType('TRANSPORTER')}
+                  className="group p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20 hover:border-amber-500/50 hover:bg-amber-500/15 transition-all text-left flex flex-col justify-between shadow-lg cursor-pointer"
+                >
+                  <div className="space-y-2">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                      <Truck size={20} />
+                    </div>
+                    <h4 className="text-sm font-bold text-white">Transporter / Broker</h4>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      Fleet Partners, Goods Transport Agencies &amp; Transit Brokers.
+                    </p>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-amber-300 font-semibold">
+                    <span>Add Transporter / Broker</span>
+                    <ChevronRight size={14} />
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectRoleType('STAFF', [UserRole.LOADING_PORT_STAFF])}
+                  className="group p-4 rounded-2xl bg-cyan-500/5 border border-cyan-500/20 hover:border-cyan-500/50 hover:bg-cyan-500/15 transition-all text-left flex flex-col justify-between shadow-lg cursor-pointer"
+                >
+                  <div className="space-y-2">
+                    <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
+                      <MapPinned size={20} />
+                    </div>
+                    <h4 className="text-sm font-bold text-white">Port &amp; Terminal Staff</h4>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      Loading Port Staff, Destination Staff &amp; Unloading Staff.
+                    </p>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-cyan-300 font-semibold">
+                    <span>Setup Port Staff User</span>
+                    <ChevronRight size={14} />
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRoleSelectorModal(false);
+                    setClientToEdit(null);
+                    setShowClientModal(true);
+                  }}
+                  className="group p-4 rounded-2xl bg-purple-500/5 border border-purple-500/20 hover:border-purple-500/50 hover:bg-purple-500/15 transition-all text-left flex flex-col justify-between shadow-lg cursor-pointer"
+                >
+                  <div className="space-y-2">
+                    <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
+                      <Building size={20} />
+                    </div>
+                    <h4 className="text-sm font-bold text-white">Corporate Client / Importer</h4>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      Consignees, Importers &amp; Shipping Lines with dedicated portal credentials.
+                    </p>
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-purple-300 font-semibold">
+                    <span>Register Client / Importer</span>
+                    <ChevronRight size={14} />
+                  </div>
+                </button>
+              </div>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-2">
-              <button
-                type="button"
-                onClick={() => handleSelectRoleType('STAFF')}
-                className="group p-4 rounded-2xl bg-white/5 border border-white/10 hover:border-brand-500/50 hover:bg-brand-500/10 transition-all text-left flex flex-col justify-between hover:scale-102 shadow-lg"
-              >
-                <div className="space-y-2">
-                  <div className="w-10 h-10 rounded-xl bg-brand-500/20 text-brand-400 flex items-center justify-center">
-                    <Briefcase size={20} />
-                  </div>
-                  <h4 className="text-sm font-bold text-white">Office Staff & Management</h4>
-                  <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Executives, Operations, Finance, Case Managers, Clerks & Office Staff.
-                  </p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-brand-300 font-semibold">
-                  <span>Create Staff Profile</span>
-                  <ChevronRight size={14} />
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectRoleType('TRANSPORTER')}
-                className="group p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20 hover:border-amber-500/50 hover:bg-amber-500/15 transition-all text-left flex flex-col justify-between hover:scale-102 shadow-lg"
-              >
-                <div className="space-y-2">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
-                    <Truck size={20} />
-                  </div>
-                  <h4 className="text-sm font-bold text-white">Transporter / Broker</h4>
-                  <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Fleet Partners, Goods Transport Agencies, Truck Owners & Transit Brokers.
-                  </p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-amber-300 font-semibold">
-                  <span>Add Transporter / Broker</span>
-                  <ChevronRight size={14} />
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectRoleType('STAFF', [UserRole.LOADING_PORT_STAFF, UserRole.DESTINATION_PORT_STAFF])}
-                className="group p-4 rounded-2xl bg-cyan-500/5 border border-cyan-500/20 hover:border-cyan-500/50 hover:bg-cyan-500/15 transition-all text-left flex flex-col justify-between hover:scale-102 shadow-lg"
-              >
-                <div className="space-y-2">
-                  <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
-                    <MapPinned size={20} />
-                  </div>
-                  <h4 className="text-sm font-bold text-white">Port & Terminal Staff</h4>
-                  <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Customs Inspectors, Wharfage Officers, Border Agents & Terminal Staff.
-                  </p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-cyan-300 font-semibold">
-                  <span>Setup Port Staff User</span>
-                  <ChevronRight size={14} />
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setShowRoleSelectorModal(false);
-                  setClientToEdit(null);
-                  setShowClientModal(true);
-                }}
-                className="group p-4 rounded-2xl bg-purple-500/5 border border-purple-500/20 hover:border-purple-500/50 hover:bg-purple-500/15 transition-all text-left flex flex-col justify-between hover:scale-102 shadow-lg"
-              >
-                <div className="space-y-2">
-                  <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
-                    <Building size={20} />
-                  </div>
-                  <h4 className="text-sm font-bold text-white">Corporate Client / Importer</h4>
-                  <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Consignees, Importers & Shipping Lines with dedicated portal credentials.
-                  </p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between text-xs text-purple-300 font-semibold">
-                  <span>Register Client / Importer</span>
-                  <ChevronRight size={14} />
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        )}
 
       {/* ========================================================================= */}
-      {/* STAFF & TRANSPORTER FORM MODAL */}
+      {/* STREAMLINED USER ID & TRANSPORTER FORM MODAL */}
       {/* ========================================================================= */}
-      {showModal && createPortal(
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-[9999] p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
-          <div className="glass-card rounded-3xl w-full max-w-4xl border border-white/15 shadow-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[92dvh] my-auto flex flex-col bg-slate-900 overflow-hidden">
-            <div className="flex justify-between items-center p-4 sm:p-5 border-b border-white/10 bg-slate-900/95 shrink-0 sticky top-0 z-10">
-              <div>
-                <span className="text-[10px] font-mono uppercase tracking-widest text-brand-400 font-bold">
-                  {selectedOnboardingRole === 'TRANSPORTER' ? 'Transporter / Broker Setup' : 'Staff Employee Profile'}
-                </span>
-                <h3 className="text-base sm:text-lg font-bold text-white">
-                  {isEditing ? 'Edit Profile' : 'Register New'} {selectedOnboardingRole === 'TRANSPORTER' ? 'Transporter / Broker' : 'Office Staff'}
-                </h3>
+      {showModal &&
+        createPortal(
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-[9999] p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+            <div className="glass-card rounded-3xl w-full max-w-3xl border border-white/15 shadow-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[92dvh] my-auto flex flex-col bg-slate-900 overflow-hidden">
+              <div className="flex justify-between items-center p-4 sm:p-5 border-b border-white/10 bg-slate-900/95 shrink-0 sticky top-0 z-10">
+                <div>
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-brand-400 font-bold">
+                    {selectedOnboardingRole === 'TRANSPORTER'
+                      ? 'Transporter / Broker Portal ID'
+                      : 'System User Portal ID'}
+                  </span>
+                  <h3 className="text-base sm:text-lg font-bold text-white">
+                    {isEditing ? 'Edit User Account' : 'Create New'}{' '}
+                    {selectedOnboardingRole === 'TRANSPORTER' ? 'Transporter / Broker' : 'User ID'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="text-gray-300 hover:text-white p-2 rounded-xl bg-white/10 hover:bg-white/20 transition-colors cursor-pointer shrink-0"
+                  title="Close"
+                >
+                  <X size={18} />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className="text-gray-300 hover:text-white p-2 rounded-xl bg-white/10 hover:bg-white/20 transition-colors cursor-pointer shrink-0"
-                title="Close"
-              >
-                <X size={18} />
-              </button>
-            </div>
 
-            {/* Scrollable Form Body */}
-            <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0 space-y-4 overscroll-contain">
+              {/* Scrollable Form Body */}
+              <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0 space-y-4 overscroll-contain">
+                {formError && (
+                  <div className="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                    <AlertTriangle size={15} className="shrink-0" />
+                    <span>{formError}</span>
+                  </div>
+                )}
 
-            {/* Form Body */}
-            {selectedOnboardingRole === 'STAFF' ? (
-              <div className="space-y-4 text-xs">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div>
-                    <label className="text-gray-300 font-medium block mb-1">Full Name *</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. Kamran Akmal"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
-                    />
+                {modalActionFeedback && (
+                  <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle size={15} className="shrink-0" />
+                      <span>{modalActionFeedback}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setModalActionFeedback(null)}
+                      className="text-gray-400 hover:text-white p-0.5"
+                    >
+                      <X size={13} />
+                    </button>
                   </div>
-                  <div>
-                    <label className="text-gray-300 font-medium block mb-1">Father&apos;s Name</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. Muhammad Akmal"
-                      value={formData.fatherName}
-                      onChange={(e) => setFormData({ ...formData, fatherName: e.target.value })}
-                      className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-gray-300 font-medium block mb-1">Designation (Custom Title)</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. Senior Operations Executive / Port Dispatcher"
-                      value={formData.designation}
-                      onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
-                      className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-gray-300 font-medium block mb-1">Primary Phone *</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. 0300-1234567"
-                      value={formData.contact}
-                      onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
-                      className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
-                    />
-                  </div>
+                )}
 
-                  {/* Admin Roles & Privileges Assignment Table (Google Workspace Admin Console Style) */}
-                  <div className="sm:col-span-2">
+                {/* Edit Account Actions (Suspend / Delete ID) */}
+                {isEditing &&
+                  editingId &&
+                  (() => {
+                    const currentEditedUser =
+                      users.find((u) => String(u.id) === String(editingId)) ||
+                      ({
+                        id: Number(editingId),
+                        name: formData.name,
+                        userId: formData.generatedId,
+                        password: formData.generatedPass,
+                        role: (formData.role || UserRole.OPERATIONS_MANAGER) as UserRole,
+                        roles: formData.roles,
+                        status: formData.status
+                      } as AppUser);
+
+                    const isProtectedRoot =
+                      Number(editingId) === 1 ||
+                      (formData.generatedId || '').toLowerCase() === 'arbabkhanboby';
+                    const isCurrentlySuspended = formData.status === 'SUSPENDED';
+
+                    return (
+                      <div className="p-3.5 sm:p-4 rounded-2xl bg-white/5 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-white block">
+                            Account Status &amp; ID Controls
+                          </span>
+                          <span className="text-[11px] text-gray-400 block mt-0.5">
+                            Username:{' '}
+                            <strong className="font-mono text-brand-400">
+                              {formData.generatedId || '-'}
+                            </strong>{' '}
+                            · Status:{' '}
+                            <strong
+                              className={
+                                isCurrentlySuspended ? 'text-amber-400' : 'text-emerald-400'
+                              }
+                            >
+                              {isCurrentlySuspended ? 'Suspended' : 'Active'}
+                            </strong>
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleQuickSuspendToggleInModal}
+                            className={`px-3 py-1.5 rounded-xl text-white text-xs font-semibold flex items-center gap-1.5 transition whitespace-nowrap cursor-pointer ${
+                              isCurrentlySuspended
+                                ? 'bg-green-600 hover:bg-green-500'
+                                : 'bg-amber-600 hover:bg-amber-500'
+                            }`}
+                          >
+                            {isCurrentlySuspended ? <Unlock size={14} /> : <Lock size={14} />}
+                            <span>{isCurrentlySuspended ? 'Reactivate ID' : 'Suspend ID'}</span>
+                          </button>
+
+                          {!isProtectedRoot && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDeleteTarget({
+                                  type: 'USER',
+                                  id: currentEditedUser.id,
+                                  name: formData.name || currentEditedUser.name,
+                                  docId: (currentEditedUser as any)._docId,
+                                  userLoginId: formData.generatedId || currentEditedUser.userId
+                                })
+                              }
+                              className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold flex items-center gap-1.5 transition whitespace-nowrap cursor-pointer"
+                            >
+                              <Trash2 size={14} />
+                              <span>Delete ID</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                {/* Form Body */}
+                {selectedOnboardingRole === 'STAFF' ? (
+                  <div className="space-y-4 text-xs">
+                    {/* Full Name Only (Father Name, Designation, Primary Phone, Address, Salary, Per-Container Charges & Document Checklist Removed) */}
+                    <div>
+                      <label className="text-gray-200 font-semibold block mb-1.5">
+                        Full Name <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Muhammad Ali"
+                        value={formData.name}
+                        onChange={(e) => handleFullNameInputChange(e.target.value)}
+                        className="w-full bg-black/40 border border-white/15 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-brand-500"
+                        autoFocus={!isEditing}
+                      />
+                    </div>
+
+                    {/* System Role Selection Table */}
                     <AdminRolesAndPrivilegesTable
                       assignedRoles={formData.roles}
                       userName={formData.name || 'this user'}
                       allowedCompanies={formData.allowedCompanies}
                       isGlobalAdmin={formData.isGlobalAdmin}
                       onRolesChange={(newRoles, primaryRole) => {
-                        setFormData(prev => ({
+                        setFormData((prev) => ({
                           ...prev,
                           roles: newRoles,
                           role: primaryRole,
-                          isGlobalAdmin: newRoles.includes(UserRole.ADMIN) ? prev.isGlobalAdmin : false
+                          isGlobalAdmin: newRoles.includes(UserRole.ADMIN)
+                            ? prev.isGlobalAdmin
+                            : false
                         }));
                       }}
                     />
-                  </div>
 
-                    {/* Admin Level Selection (Only when Administrator role is active) */}
+                    {/* Admin Level Selection (Only when Admin role is active) */}
                     {formData.roles.includes(UserRole.ADMIN) && (
-                      <div className="sm:col-span-2 p-3 rounded-xl bg-purple-950/40 border border-purple-500/40 space-y-2">
+                      <div className="p-3 rounded-xl bg-purple-950/40 border border-purple-500/40 space-y-2">
                         <div className="flex items-center justify-between">
                           <label className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
                             <Crown size={14} className="text-purple-400" />
@@ -2088,7 +1738,7 @@ const UserManagement: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => {
-                                setFormData(prev => ({
+                                setFormData((prev) => ({
                                   ...prev,
                                   isGlobalAdmin: true,
                                   allCompaniesAccess: true,
@@ -2101,23 +1751,36 @@ const UserManagement: React.FC = () => {
                                   : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'
                               }`}
                             >
-                              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${formData.isGlobalAdmin ? 'bg-purple-500 border-purple-300 text-white' : 'border-white/25 bg-black/40'}`}>
+                              <div
+                                className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
+                                  formData.isGlobalAdmin
+                                    ? 'bg-purple-500 border-purple-300 text-white'
+                                    : 'border-white/25 bg-black/40'
+                                }`}
+                              >
                                 {formData.isGlobalAdmin && <Check size={11} strokeWidth={3} />}
                               </div>
                               <div>
-                                <span className="text-xs font-bold block text-purple-200">Main Group Admin (All 4 Companies)</span>
-                                <span className="text-[10px] text-gray-300 block">Full access across all 4 group companies</span>
+                                <span className="text-xs font-bold block text-purple-200">
+                                  Main Group Admin (All 4 Companies)
+                                </span>
+                                <span className="text-[10px] text-gray-300 block">
+                                  Full access across all 4 group companies
+                                </span>
                               </div>
                             </button>
 
                             <button
                               type="button"
                               onClick={() => {
-                                setFormData(prev => ({
+                                setFormData((prev) => ({
                                   ...prev,
                                   isGlobalAdmin: false,
                                   allCompaniesAccess: false,
-                                  allowedCompanies: prev.allowedCompanies.length > 0 ? prev.allowedCompanies : [activeCompany?.id || 'docks']
+                                  allowedCompanies:
+                                    prev.allowedCompanies.length > 0
+                                      ? prev.allowedCompanies
+                                      : [activeCompany?.id || 'docks']
                                 }));
                               }}
                               className={`p-2.5 rounded-xl border text-left transition-all flex items-center gap-2.5 cursor-pointer ${
@@ -2126,12 +1789,22 @@ const UserManagement: React.FC = () => {
                                   : 'bg-black/40 border-white/10 text-gray-400 hover:text-white'
                               }`}
                             >
-                              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${!formData.isGlobalAdmin ? 'bg-amber-500 border-amber-300 text-slate-950' : 'border-white/25 bg-black/40'}`}>
+                              <div
+                                className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
+                                  !formData.isGlobalAdmin
+                                    ? 'bg-amber-500 border-amber-300 text-slate-950'
+                                    : 'border-white/25 bg-black/40'
+                                }`}
+                              >
                                 {!formData.isGlobalAdmin && <Check size={11} strokeWidth={3} />}
                               </div>
                               <div>
-                                <span className="text-xs font-bold block text-amber-200">Company Admin ({activeCompany.name} Only)</span>
-                                <span className="text-[10px] text-gray-300 block">Strictly for selected company scope</span>
+                                <span className="text-xs font-bold block text-amber-200">
+                                  Company Admin ({activeCompany.name} Only)
+                                </span>
+                                <span className="text-[10px] text-gray-300 block">
+                                  Strictly for selected company scope
+                                </span>
                               </div>
                             </button>
                           </div>
@@ -2139,19 +1812,19 @@ const UserManagement: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Company Access Rights & Subsidiary Scope (Compact Tick-Box Grid) */}
-                    <div className="sm:col-span-2 p-3.5 rounded-2xl bg-slate-950/70 border border-white/15 space-y-2.5">
+                    {/* Company Access Scope (Tick 1 or All 4 Companies) */}
+                    <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-white/15 space-y-2.5">
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2">
                         <div className="flex items-center gap-2">
                           <Building size={15} className="text-amber-400 shrink-0" />
                           <div>
                             <label className="text-xs font-bold text-white block leading-tight">
-                              Company Access Scope (Tick Companies for this ID)
+                              Company Access Scope (Tick 1 or All 4 Companies)
                             </label>
                             <p className="text-[10px] text-gray-400">
                               {!isCurrentUserGlobalAdmin
                                 ? `Active for ${activeCompany.name}`
-                                : 'Tick the companies this user ID can access'}
+                                : 'Tick any single company or all 4 companies for this User ID'}
                             </p>
                           </div>
                         </div>
@@ -2161,7 +1834,7 @@ const UserManagement: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => {
-                                setFormData(prev => ({
+                                setFormData((prev) => ({
                                   ...prev,
                                   allCompaniesAccess: true,
                                   allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage']
@@ -2175,7 +1848,7 @@ const UserManagement: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => {
-                                setFormData(prev => ({
+                                setFormData((prev) => ({
                                   ...prev,
                                   allCompaniesAccess: false,
                                   allowedCompanies: [activeCompany?.id || 'docks']
@@ -2191,10 +1864,9 @@ const UserManagement: React.FC = () => {
 
                       {!isCurrentUserGlobalAdmin ? (
                         <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                            <span className="text-xs font-bold text-white">{activeCompany.legalTitle || activeCompany.name}</span>
-                          </div>
+                          <span className="text-xs font-bold text-white">
+                            {activeCompany.legalTitle || activeCompany.name}
+                          </span>
                           <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
                             Active Scope
                           </span>
@@ -2206,20 +1878,22 @@ const UserManagement: React.FC = () => {
                             { id: 'truckit', name: 'Truckit (Pvt.) Ltd.', sub: 'Fleet Haulage' },
                             { id: 'muhib', name: 'Muhib International', sub: 'Transit Trade' },
                             { id: 'vantage', name: 'Vantage Shipping', sub: 'Marine Ops' }
-                          ].map(comp => {
-                            const isChecked = formData.allCompaniesAccess || formData.allowedCompanies.includes(comp.id);
+                          ].map((comp) => {
+                            const isChecked =
+                              formData.allCompaniesAccess ||
+                              formData.allowedCompanies.includes(comp.id);
                             return (
                               <button
                                 key={comp.id}
                                 type="button"
                                 onClick={() => {
-                                  setFormData(prev => {
+                                  setFormData((prev) => {
                                     const currentList = prev.allCompaniesAccess
                                       ? ['docks', 'truckit', 'muhib', 'vantage']
                                       : [...prev.allowedCompanies];
                                     let nextList: string[];
                                     if (currentList.includes(comp.id)) {
-                                      nextList = currentList.filter(c => c !== comp.id);
+                                      nextList = currentList.filter((c) => c !== comp.id);
                                       if (nextList.length === 0) nextList = [comp.id];
                                     } else {
                                       nextList = [...currentList, comp.id];
@@ -2237,12 +1911,22 @@ const UserManagement: React.FC = () => {
                                     : 'bg-white/[0.03] border-white/10 text-gray-400 hover:bg-white/[0.07] hover:text-white'
                                 }`}
                               >
-                                <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${isChecked ? 'bg-amber-500 border-amber-300 text-slate-950' : 'bg-black/40 border-white/25'}`}>
+                                <div
+                                  className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
+                                    isChecked
+                                      ? 'bg-amber-500 border-amber-300 text-slate-950'
+                                      : 'bg-black/40 border-white/25'
+                                  }`}
+                                >
                                   {isChecked && <Check size={11} strokeWidth={3} />}
                                 </div>
                                 <div className="min-w-0">
-                                  <span className="text-[11px] font-bold block truncate leading-tight">{comp.name}</span>
-                                  <span className="text-[9px] text-gray-400 block truncate">{comp.sub}</span>
+                                  <span className="text-[11px] font-bold block truncate leading-tight">
+                                    {comp.name}
+                                  </span>
+                                  <span className="text-[9px] text-gray-400 block truncate">
+                                    {comp.sub}
+                                  </span>
                                 </div>
                               </button>
                             );
@@ -2251,442 +1935,326 @@ const UserManagement: React.FC = () => {
                       )}
                     </div>
 
-                  <div className="sm:col-span-2">
-                    <label className="text-gray-300 font-medium block mb-1">Residential Address</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. House #12, Street 4, Sector 11-B, North Karachi"
-                      value={formData.residentialAddress}
-                      onChange={(e) => setFormData({ ...formData, residentialAddress: e.target.value })}
-                      className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
-                    />
-                  </div>
-                </div>
-
-                {/* Salary & Allowances */}
-                <div className="bg-white/5 p-3.5 rounded-xl border border-white/10 space-y-2.5">
-                  <h4 className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
-                    <DollarSign size={14} className="text-emerald-400" />
-                    Salary, Allowances & Advance Terms
-                  </h4>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                    <div>
-                      <label className="text-gray-400 block mb-1">Base Salary (PKR)</label>
-                      <input 
-                        type="number"
-                        value={formData.baseSalary}
-                        onChange={(e) => setFormData({ ...formData, baseSalary: Number(e.target.value) || 0 })}
-                        className="w-full bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-gray-400 block mb-1">Fuel Allowance</label>
-                      <input 
-                        type="number"
-                        value={formData.allowanceFuel}
-                        onChange={(e) => setFormData({ ...formData, allowanceFuel: Number(e.target.value) || 0 })}
-                        className="w-full bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-gray-400 block mb-1">Mobile Allowance</label>
-                      <input 
-                        type="number"
-                        value={formData.allowanceMobile}
-                        onChange={(e) => setFormData({ ...formData, allowanceMobile: Number(e.target.value) || 0 })}
-                        className="w-full bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-gray-400 block mb-1">Initial Advance</label>
-                      <input 
-                        type="number"
-                        value={formData.loansAdvances}
-                        onChange={(e) => setFormData({ ...formData, loansAdvances: Number(e.target.value) || 0 })}
-                        className="w-full bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-amber-400 font-mono text-xs outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Destination / Border Staff Default Per-Container Charges */}
-                  <div className="pt-2.5 mt-2 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="text-cyan-300 font-semibold block mb-1">
-                        By Default Per Container Charges (PKR) — Destination Staff
-                      </label>
-                      <input 
-                        type="number"
-                        placeholder="e.g. 5000 per assigned container"
-                        value={formData.defaultPerContainerCharge}
-                        onChange={(e) => setFormData({ ...formData, defaultPerContainerCharge: Number(e.target.value) || 0 })}
-                        className="w-full bg-cyan-950/30 border border-cyan-500/30 rounded-lg px-2.5 py-1.5 text-cyan-200 font-mono text-xs outline-none focus:border-cyan-400"
-                      />
-                      <span className="text-[10px] text-gray-400 block mt-0.5">
-                        Auto-posts to Destination Staff Ledger per container assigned (payable to Karachi Head Office).
-                      </span>
-                    </div>
-                    <div>
-                      <label className="text-gray-300 font-medium block mb-1">
-                        Assigned Destination Station / Dry Port
-                      </label>
-                      <input 
-                        type="text"
-                        placeholder="e.g. Torkham Border, Chaman, Sost, Lahore Dry Port"
-                        value={formData.assignedStation}
-                        onChange={(e) => setFormData({ ...formData, assignedStation: e.target.value })}
-                        className="w-full bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-white text-xs outline-none focus:border-brand-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* User ID & Password Assignment */}
-                <div className="bg-white/5 p-3.5 rounded-xl border border-white/10 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
-                      <Key size={14} className="text-brand-400" />
-                      Login Credentials (Optional / Assign as needed)
-                    </h4>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newPass = Math.random().toString(36).slice(-8).toUpperCase();
-                        setFormData(prev => ({ ...prev, generatedPass: newPass }));
-                      }}
-                      className="text-[11px] text-brand-400 hover:text-brand-300 font-mono underline"
-                    >
-                      Generate New Password
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono">
-                    <div>
-                      <label className="text-gray-400 text-[10px] block mb-0.5">User ID:</label>
-                      <input 
-                        type="text"
-                        value={formData.generatedId}
-                        onChange={(e) => setFormData({ ...formData, generatedId: e.target.value })}
-                        className="w-full bg-black/40 border border-white/15 rounded-lg p-1.5 text-brand-400 text-xs font-bold outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-gray-400 text-[10px] block mb-0.5">Password:</label>
-                      <input 
-                        type="text"
-                        value={formData.generatedPass}
-                        onChange={(e) => setFormData({ ...formData, generatedPass: e.target.value })}
-                        className="w-full bg-black/40 border border-white/15 rounded-lg p-1.5 text-white text-xs font-bold outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Account Login Status (Active vs Suspended) */}
-                  <div className="pt-2.5 mt-1 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <span className="text-gray-300 text-xs font-semibold block">Account Status & Login Access</span>
-                      <span className="text-[10px] text-gray-400">
-                        {formData.status === 'SUSPENDED' 
-                          ? 'Suspended (Blocked): User cannot log in. Data remains preserved safely.' 
-                          : 'Active: Employee can log in and execute operations.'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setFormData(prev => ({ ...prev, status: 'ACTIVE' }))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                          formData.status !== 'SUSPENDED'
-                            ? 'bg-green-500/20 text-green-300 border border-green-500/40 shadow-sm'
-                            : 'bg-white/5 text-gray-400 hover:text-white border border-white/10'
-                        }`}
-                      >
-                        <Check size={12} /> Active
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setFormData(prev => ({ ...prev, status: 'SUSPENDED' }))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                          formData.status === 'SUSPENDED'
-                            ? 'bg-amber-500/25 text-amber-300 border border-amber-500/50 shadow-sm'
-                            : 'bg-white/5 text-gray-400 hover:text-amber-300 border border-white/10'
-                        }`}
-                      >
-                        <Lock size={12} /> Suspend (Block Login)
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* Transporter / Broker Form */
-              <div className="space-y-4 text-xs">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  <div>
-                    <label className="text-gray-300 font-medium block mb-1">Transporter / Broker Entity Name *</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. Swift Goods Transport & Brokerage"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-gray-300 font-medium block mb-1">Representative Name</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. Haji Nisar Ahmed"
-                      value={formData.representativeName}
-                      onChange={(e) => setFormData({ ...formData, representativeName: e.target.value })}
-                      className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-gray-300 font-medium block mb-1">Primary Mobile Phone *</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. 0300-9988776"
-                      value={formData.contact}
-                      onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
-                      className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-gray-300 font-medium block mb-1">WhatsApp Contact</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. 0300-9988776"
-                      value={formData.whatsappNumber}
-                      onChange={(e) => setFormData({ ...formData, whatsappNumber: e.target.value })}
-                      className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-gray-300 font-medium block mb-1">Transit Routes & Operations</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. Karachi Port to Lahore NLC, Karachi to Peshawar / Torkham"
-                      value={formData.preferredRoutes}
-                      onChange={(e) => setFormData({ ...formData, preferredRoutes: e.target.value })}
-                      className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
-                    />
-                  </div>
-
-                  {/* Role Checkboxes for Transporter ID */}
-                  <div className="sm:col-span-2">
-                    <AdminRolesAndPrivilegesTable
-                      assignedRoles={formData.roles}
-                      userName={formData.name || 'this transporter'}
-                      allowedCompanies={formData.allowedCompanies}
-                      isGlobalAdmin={formData.isGlobalAdmin}
-                      onRolesChange={(newRoles, primaryRole) => {
-                        setFormData(prev => ({
-                          ...prev,
-                          roles: newRoles,
-                          role: primaryRole
-                        }));
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* Transporter User ID & Password */}
-                <div className="bg-white/5 p-3.5 rounded-xl border border-white/10 space-y-2">
-                  <h4 className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
-                    <Key size={14} className="text-amber-400" />
-                    Transporter / Broker Portal Login
-                  </h4>
-                  <div className="grid grid-cols-2 gap-3 font-mono">
-                    <div>
-                      <span className="text-gray-400 text-[10px] block mb-0.5">User ID:</span>
-                      <input 
-                        type="text"
-                        value={formData.generatedId}
-                        onChange={(e) => setFormData({ ...formData, generatedId: e.target.value })}
-                        className="w-full bg-black/40 border border-white/15 rounded-lg p-1.5 text-amber-400 text-xs font-bold outline-none"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-gray-400 text-[10px] block mb-0.5">Password:</span>
-                      <input 
-                        type="text"
-                        value={formData.generatedPass}
-                        onChange={(e) => setFormData({ ...formData, generatedPass: e.target.value })}
-                        className="w-full bg-black/40 border border-white/15 rounded-lg p-1.5 text-white text-xs font-bold outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Account Login Status (Active vs Suspended) */}
-                  <div className="pt-2.5 mt-1 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div>
-                      <span className="text-gray-300 text-xs font-semibold block">Portal Login Status</span>
-                      <span className="text-[10px] text-gray-400">
-                        {formData.status === 'SUSPENDED' 
-                          ? 'Suspended (Blocked): Transporter / Broker login blocked. Profile preserved in DB.' 
-                          : 'Active: Transporter / Broker can log into portal.'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setFormData(prev => ({ ...prev, status: 'ACTIVE' }))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                          formData.status !== 'SUSPENDED'
-                            ? 'bg-green-500/20 text-green-300 border border-green-500/40 shadow-sm'
-                            : 'bg-white/5 text-gray-400 hover:text-white border border-white/10'
-                        }`}
-                      >
-                        <Check size={12} /> Active
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setFormData(prev => ({ ...prev, status: 'SUSPENDED' }))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                          formData.status === 'SUSPENDED'
-                            ? 'bg-amber-500/25 text-amber-300 border border-amber-500/50 shadow-sm'
-                            : 'bg-white/5 text-gray-400 hover:text-amber-300 border border-white/10'
-                        }`}
-                      >
-                        <Lock size={12} /> Suspend (Block Login)
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Unified Document Attachments Section (SRS compliance for file uploads / downloads / camera captures) */}
-            <div className="mt-5 p-4 bg-white/5 border border-white/10 rounded-2xl space-y-3.5">
-              <h4 className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
-                <FileText size={14} className="text-brand-400" />
-                Document Attachments & Verification Checklist
-              </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* File Upload Inputs */}
-                <div className="space-y-1">
-                  <span className="text-gray-300 text-[11px] font-medium block">Profile Photo</span>
-                  <label className="flex flex-col items-center justify-center p-2 border border-dashed border-white/20 hover:border-brand-500 rounded-xl cursor-pointer bg-black/30 hover:bg-black/50 transition text-center">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'profilePicture')}
-                    />
-                    <Upload size={14} className="text-gray-400 mb-0.5" />
-                    <span className="text-[10px] text-gray-300 font-semibold truncate max-w-full">
-                      {formData.profilePicture ? 'Replace Photo' : 'Upload Photo'}
-                    </span>
-                  </label>
-                </div>
-
-                <div className="space-y-1">
-                  <span className="text-gray-300 text-[11px] font-medium block">CNIC Front / ID Copy</span>
-                  <label className="flex flex-col items-center justify-center p-2 border border-dashed border-white/20 hover:border-brand-500 rounded-xl cursor-pointer bg-black/30 hover:bg-black/50 transition text-center">
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'cnicFront')}
-                    />
-                    <Upload size={14} className="text-gray-400 mb-0.5" />
-                    <span className="text-[10px] text-gray-300 font-semibold truncate max-w-full">
-                      {formData.cnicFront ? 'Replace Front' : 'Upload Front'}
-                    </span>
-                  </label>
-                </div>
-
-                <div className="space-y-1">
-                  <span className="text-gray-300 text-[11px] font-medium block">CNIC Back / Reg Document</span>
-                  <label className="flex flex-col items-center justify-center p-2 border border-dashed border-white/20 hover:border-brand-500 rounded-xl cursor-pointer bg-black/30 hover:bg-black/50 transition text-center">
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'cnicBack')}
-                    />
-                    <Upload size={14} className="text-gray-400 mb-0.5" />
-                    <span className="text-[10px] text-gray-300 font-semibold truncate max-w-full">
-                      {formData.cnicBack ? 'Replace Back / Doc' : 'Upload Back / Doc'}
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Uploaded Files Summary List with Download Option */}
-              {((formData.profilePicture) || (formData.cnicFront) || (formData.cnicBack)) && (
-                <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1.5 animate-in fade-in">
-                  <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
-                    <Download size={11} className="text-emerald-400" />
-                    Uploaded Files Ledger (Click Download to Save)
-                  </h5>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {[
-                      { label: 'Profile Photo', url: formData.profilePicture, name: 'Profile_Photo' },
-                      { label: 'CNIC Front / ID Copy', url: formData.cnicFront, name: 'CNIC_Front' },
-                      { label: 'CNIC Back / Reg Document', url: formData.cnicBack, name: 'CNIC_Back' }
-                    ].filter(f => f.url).map((file, fIdx) => (
-                      <div key={fIdx} className="flex items-center justify-between text-xs p-1.5 rounded bg-black/20 border border-white/5 hover:border-white/10 transition-colors">
-                        <span className="text-gray-200 font-medium truncate max-w-[120px]">{file.label}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const link = document.createElement('a');
-                            link.href = file.url!;
-                            const ext = file.url!.startsWith('data:application/pdf') ? '.pdf' : '.jpg';
-                            link.download = `${file.name}${ext}`;
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                          }}
-                          className="text-brand-400 hover:text-brand-300 font-bold hover:underline flex items-center gap-1 bg-brand-500/10 border border-brand-500/20 px-2 py-0.5 rounded text-[10px]"
-                        >
-                          <Download size={11} /> Download
-                        </button>
+                    {/* User ID & Password Assignment */}
+                    <div className="bg-white/5 p-3.5 rounded-2xl border border-white/10 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h4 className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+                          <Key size={14} className="text-brand-400" />
+                          Login Credentials (Auto-Generated · Admin Editable)
+                        </h4>
+                        <div className="flex items-center gap-3 text-[11px] font-mono">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCustomUserIdEdited(false);
+                              const existingUser =
+                                isEditing && editingId
+                                  ? users.find((u) => String(u.id) === String(editingId))
+                                  : undefined;
+                              setFormData((prev) => ({
+                                ...prev,
+                                generatedId: generateUniqueUsernameFromFullName(
+                                  prev.name,
+                                  users,
+                                  isEditing && editingId
+                                    ? { id: editingId, currentUserId: existingUser?.userId }
+                                    : undefined
+                                )
+                              }));
+                            }}
+                            className="text-brand-400 hover:text-brand-300 underline cursor-pointer"
+                          >
+                            Auto ID from Full Name
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                generatedPass: DEFAULT_USER_PASSWORD
+                              }))
+                            }
+                            className="text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+                          >
+                            Default ({DEFAULT_USER_PASSWORD})
+                          </button>
+                        </div>
                       </div>
-                    ))}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono">
+                        <div>
+                          <label className="text-gray-400 text-[10px] block mb-1">
+                            User ID (FullName without spaces, +01/02 if duplicate):
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.generatedId}
+                            placeholder="Auto-generated from Full Name"
+                            onChange={(e) => {
+                              setIsCustomUserIdEdited(true);
+                              setFormData({ ...formData, generatedId: e.target.value });
+                            }}
+                            className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-brand-400 text-xs font-bold outline-none focus:border-brand-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-gray-400 text-[10px] block mb-1">
+                            Password (Default {DEFAULT_USER_PASSWORD}):
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.generatedPass}
+                            onChange={(e) =>
+                              setFormData({ ...formData, generatedPass: e.target.value })
+                            }
+                            className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white text-xs font-bold outline-none focus:border-brand-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Account Login Status */}
+                      <div className="pt-2.5 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <span className="text-gray-300 text-xs font-semibold block">
+                            Account Login Status
+                          </span>
+                          <span className="text-[10px] text-gray-400">
+                            {formData.status === 'SUSPENDED'
+                              ? 'Suspended: Portal login is blocked.'
+                              : 'Active: User can sign in with User ID and Password.'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setFormData((prev) => ({ ...prev, status: 'ACTIVE' }))}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                              formData.status !== 'SUSPENDED'
+                                ? 'bg-green-500/20 text-green-300 border border-green-500/40 shadow-sm'
+                                : 'bg-white/5 text-gray-400 hover:text-white border border-white/10'
+                            }`}
+                          >
+                            <Check size={12} /> Active
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormData((prev) => ({ ...prev, status: 'SUSPENDED' }))
+                            }
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                              formData.status === 'SUSPENDED'
+                                ? 'bg-amber-500/25 text-amber-300 border border-amber-500/50 shadow-sm'
+                                : 'bg-white/5 text-gray-400 hover:text-amber-300 border border-white/10'
+                            }`}
+                          >
+                            <Lock size={12} /> Suspend
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                ) : (
+                  /* Transporter / Broker Form */
+                  <div className="space-y-4 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div className="sm:col-span-2">
+                        <label className="text-gray-200 font-semibold block mb-1">
+                          Full Name / Transporter Entity Name <span className="text-red-400">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Swift Goods Transport"
+                          value={formData.name}
+                          onChange={(e) => handleFullNameInputChange(e.target.value)}
+                          className="w-full bg-black/40 border border-white/15 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-brand-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-gray-300 font-medium block mb-1">
+                          Representative Name
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Haji Nisar Ahmed"
+                          value={formData.representativeName}
+                          onChange={(e) =>
+                            setFormData({ ...formData, representativeName: e.target.value })
+                          }
+                          className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-gray-300 font-medium block mb-1">
+                          Mobile / WhatsApp Contact
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 0300-9988776"
+                          value={formData.contact}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              contact: e.target.value,
+                              whatsappNumber: e.target.value
+                            })
+                          }
+                          className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="text-gray-300 font-medium block mb-1">
+                          Transit Routes &amp; Operations
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Karachi Port to Lahore NLC, Karachi to Peshawar / Torkham"
+                          value={formData.preferredRoutes}
+                          onChange={(e) =>
+                            setFormData({ ...formData, preferredRoutes: e.target.value })
+                          }
+                          className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white outline-none focus:border-brand-500"
+                        />
+                      </div>
 
-            </div>
+                      <div className="sm:col-span-2">
+                        <AdminRolesAndPrivilegesTable
+                          assignedRoles={formData.roles}
+                          userName={formData.name || 'this transporter'}
+                          allowedCompanies={formData.allowedCompanies}
+                          isGlobalAdmin={formData.isGlobalAdmin}
+                          onRolesChange={(newRoles, primaryRole) => {
+                            setFormData((prev) => ({
+                              ...prev,
+                              roles: newRoles,
+                              role: primaryRole
+                            }));
+                          }}
+                        />
+                      </div>
+                    </div>
 
-            {/* Sticky Actions Footer */}
-            <div className="flex justify-end gap-3 p-3.5 sm:p-4 border-t border-white/10 bg-slate-900/95 backdrop-blur-md shrink-0">
-              <button 
-                type="button"
-                onClick={() => setShowModal(false)}
-                className="px-4 py-2 text-xs text-gray-400 hover:text-white transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button 
-                type="button"
-                onClick={handleSaveUser}
-                className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl shadow-lg shadow-brand-600/30 flex items-center gap-2 text-xs font-semibold transition-all hover:scale-102 cursor-pointer"
-              >
-                <Save size={15} /> {isEditing ? 'Update Profile' : 'Save & Onboard'}
-              </button>
+                    {/* Transporter User ID & Password */}
+                    <div className="bg-white/5 p-3.5 rounded-2xl border border-white/10 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h4 className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+                          <Key size={14} className="text-amber-400" />
+                          Transporter Portal Login (Admin Editable)
+                        </h4>
+                        <div className="flex items-center gap-3 text-[11px] font-mono">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCustomUserIdEdited(false);
+                              setFormData((prev) => ({
+                                ...prev,
+                                generatedId: generateUniqueUsernameFromFullName(prev.name, users)
+                              }));
+                            }}
+                            className="text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                          >
+                            Auto ID from Name
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                generatedPass: DEFAULT_USER_PASSWORD
+                              }))
+                            }
+                            className="text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+                          >
+                            Default ({DEFAULT_USER_PASSWORD})
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono">
+                        <div>
+                          <span className="text-gray-400 text-[10px] block mb-1">User ID:</span>
+                          <input
+                            type="text"
+                            value={formData.generatedId}
+                            placeholder="Auto-generated from Name"
+                            onChange={(e) => {
+                              setIsCustomUserIdEdited(true);
+                              setFormData({ ...formData, generatedId: e.target.value });
+                            }}
+                            className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-amber-400 text-xs font-bold outline-none focus:border-amber-400"
+                          />
+                        </div>
+                        <div>
+                          <span className="text-gray-400 text-[10px] block mb-1">Password:</span>
+                          <input
+                            type="text"
+                            value={formData.generatedPass}
+                            onChange={(e) =>
+                              setFormData({ ...formData, generatedPass: e.target.value })
+                            }
+                            className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white text-xs font-bold outline-none focus:border-amber-400"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="pt-2.5 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <span className="text-gray-300 text-xs font-semibold">
+                          Portal Login Status
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setFormData((prev) => ({ ...prev, status: 'ACTIVE' }))}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                              formData.status !== 'SUSPENDED'
+                                ? 'bg-green-500/20 text-green-300 border border-green-500/40 shadow-sm'
+                                : 'bg-white/5 text-gray-400 hover:text-white border border-white/10'
+                            }`}
+                          >
+                            <Check size={12} /> Active
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setFormData((prev) => ({ ...prev, status: 'SUSPENDED' }))
+                            }
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                              formData.status === 'SUSPENDED'
+                                ? 'bg-amber-500/25 text-amber-300 border border-amber-500/50 shadow-sm'
+                                : 'bg-white/5 text-gray-400 hover:text-amber-300 border border-white/10'
+                            }`}
+                          >
+                            <Lock size={12} /> Suspend
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Sticky Actions Footer */}
+              <div className="flex justify-end gap-3 p-3.5 sm:p-4 border-t border-white/10 bg-slate-900/95 backdrop-blur-md shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="px-4 py-2 text-xs text-gray-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveUser}
+                  className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl shadow-lg shadow-brand-600/30 flex items-center gap-2 text-xs font-semibold transition-all cursor-pointer"
+                >
+                  <Save size={15} /> {isEditing ? 'Update Account' : 'Save User ID'}
+                </button>
+              </div>
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        )}
 
       {/* ========================================================================= */}
-      {/* 5. DUAL LEDGER MODAL FOR STAFF (Salary & Daily Routine Petty Cash) */}
-      {/* ========================================================================= */}
-      {selectedStaffUser && (
-        <StaffLedgerModal
-          isOpen={Boolean(selectedStaffUser)}
-          onClose={() => setSelectedStaffUser(null)}
-          staffUser={selectedStaffUser}
-          ledgerEntries={staffLedgerEntries}
-        />
-      )}
-
-      {/* ========================================================================= */}
-      {/* 6. CLIENT REGISTRATION & DEFAULT TARIFF SETUP MODAL */}
+      {/* CLIENT REGISTRATION & DEFAULT TARIFF SETUP MODAL */}
       {/* ========================================================================= */}
       <ClientRegistrationModal
         isOpen={showClientModal}
@@ -2696,12 +2264,22 @@ const UserManagement: React.FC = () => {
         }}
         initialClient={clientToEdit || undefined}
         onSave={(savedClient) => {
-          const normSaved = (savedClient.name || '').trim().toUpperCase().replace(/[.,\-_/()]/g, ' ').replace(/\s+/g, ' ');
-          setClientsList(prev => [
+          const normSaved = (savedClient.name || '')
+            .trim()
+            .toUpperCase()
+            .replace(/[.,\-_/()]/g, ' ')
+            .replace(/\s+/g, ' ');
+          setClientsList((prev) => [
             savedClient,
-            ...prev.filter(c => {
-              const normC = (c.name || '').trim().toUpperCase().replace(/[.,\-_/()]/g, ' ').replace(/\s+/g, ' ');
-              return (c.id || c.name) !== (savedClient.id || savedClient.name) && normC !== normSaved;
+            ...prev.filter((c) => {
+              const normC = (c.name || '')
+                .trim()
+                .toUpperCase()
+                .replace(/[.,\-_/()]/g, ' ')
+                .replace(/\s+/g, ' ');
+              return (
+                (c.id || c.name) !== (savedClient.id || savedClient.name) && normC !== normSaved
+              );
             })
           ]);
           setShowClientModal(false);
@@ -2710,20 +2288,7 @@ const UserManagement: React.FC = () => {
       />
 
       {/* ========================================================================= */}
-      {/* 7. CLIENT FINANCIAL STATEMENT LEDGER MODAL */}
-      {/* ========================================================================= */}
-      {ledgerClient && (
-        <ClientLedgerModal
-          isOpen={Boolean(ledgerClient)}
-          onClose={() => setLedgerClient(null)}
-          client={ledgerClient}
-          cases={casesList}
-          finances={financesList}
-        />
-      )}
-
-      {/* ========================================================================= */}
-      {/* 8. DESTINATION STAFF MODAL */}
+      {/* DESTINATION STAFF MODAL */}
       {/* ========================================================================= */}
       <DestinationStaffModal
         isOpen={showDestinationModal}
@@ -2734,14 +2299,18 @@ const UserManagement: React.FC = () => {
         staffToEdit={destinationStaffToEdit}
         onSaved={(savedStaff, savedUser) => {
           if (savedStaff) {
-            setDestinationStaffList(prev => [
+            setDestinationStaffList((prev) => [
               savedStaff,
-              ...prev.filter(d => String(d.id) !== String(savedStaff.id))
+              ...prev.filter((d) => String(d.id) !== String(savedStaff.id))
             ]);
           }
           if (savedUser) {
-            setUsers(prev => [
-              ...prev.filter(u => String(u.id) !== String(savedUser.id) && (u.userId || '').toLowerCase() !== (savedUser.userId || '').toLowerCase()),
+            setUsers((prev) => [
+              ...prev.filter(
+                (u) =>
+                  String(u.id) !== String(savedUser.id) &&
+                  (u.userId || '').toLowerCase() !== (savedUser.userId || '').toLowerCase()
+              ),
               savedUser
             ]);
           }
@@ -2751,36 +2320,41 @@ const UserManagement: React.FC = () => {
       />
 
       {/* ========================================================================= */}
-      {/* 9. DELETE CONFIRMATION MODAL */}
+      {/* DELETE CONFIRMATION MODAL */}
       {/* ========================================================================= */}
-      {deleteTarget && createPortal(
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-[9999] p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
-          <div className="glass-card p-6 rounded-2xl w-full max-w-sm border border-white/10 text-center space-y-4 bg-slate-900 shadow-2xl my-auto">
-            <div className="bg-red-500/20 w-12 h-12 rounded-full flex items-center justify-center mx-auto border border-red-500/30">
-              <AlertTriangle size={24} className="text-red-500" />
+      {deleteTarget &&
+        createPortal(
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-[10030] p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+            <div className="glass-card p-6 rounded-2xl w-full max-w-sm border border-white/10 text-center space-y-4 bg-slate-900 shadow-2xl my-auto">
+              <div className="bg-red-500/20 w-12 h-12 rounded-full flex items-center justify-center mx-auto border border-red-500/30">
+                <AlertTriangle size={24} className="text-red-500" />
+              </div>
+              <h3 className="text-base font-bold text-white">Confirm Removal</h3>
+              <p className="text-xs text-gray-400">
+                Are you sure you want to remove{' '}
+                <strong className="text-white">&quot;{deleteTarget.name}&quot;</strong>? This action
+                cannot be undone.
+              </p>
+              <div className="flex gap-2.5 justify-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(null)}
+                  className="px-4 py-2 bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeleteTarget}
+                  className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-red-600/30 cursor-pointer"
+                >
+                  Yes, Delete
+                </button>
+              </div>
             </div>
-            <h3 className="text-base font-bold text-white">Confirm Removal</h3>
-            <p className="text-xs text-gray-400">
-              Are you sure you want to remove <strong className="text-white">&quot;{deleteTarget.name}&quot;</strong>? This action cannot be undone.
-            </p>
-            <div className="flex gap-2.5 justify-center pt-2">
-              <button 
-                onClick={() => setDeleteTarget(null)} 
-                className="px-4 py-2 bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-semibold"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={confirmDeleteTarget} 
-                className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-red-600/30"
-              >
-                Yes, Delete
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

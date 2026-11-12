@@ -20,7 +20,8 @@ import {
   getActiveDbUserSession,
   clearActiveDbUserSession
 } from './firebase';
-import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver } from '../types';
+import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver, SalaryStaffMember } from '../types';
+import { saveVendor } from './vendorService';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
 import { dedupeAndMergeVehicles, normalizeVehiclePlate, getDeterministicVehicleId } from './documentParserService';
@@ -773,11 +774,12 @@ export function subscribeToFinances(
           return;
         }
 
-        // 2. Deduplicate auto-generated SAL- / REC- / Staff Payroll & Salaries / recurringTemplateId entries
+        // 2. Deduplicate auto-generated SAL- / REC- / Payroll & Salaries / recurringTemplateId entries
         const refStr = String(data.reference || '').trim();
         const isAutoSalaryOrRecurring =
           refStr.startsWith('SAL-') ||
           refStr.startsWith('REC-') ||
+          data.category === 'Payroll / Salary' ||
           data.category === 'Staff Payroll & Salaries' ||
           data.recurringTemplateId !== undefined;
 
@@ -829,11 +831,14 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
   try {
     // Monthly recurring fixed overheads and staff payroll are auto-approved upon entry
     const isMonthlyOrRecurring = 
+      entry.category === 'Payroll / Salary' ||
       entry.category === 'Staff Payroll & Salaries' ||
       entry.recurringTemplateId !== undefined ||
+      Boolean((entry as any).isRecurring) ||
       entry.reference?.startsWith('SAL-') ||
       entry.reference?.startsWith('REC-') ||
       entry.description?.toLowerCase().includes('monthly salary') ||
+      entry.description?.toLowerCase().includes('monthly office staff salary') ||
       entry.description?.toLowerCase().includes('fixed expense') ||
       entry.description?.toLowerCase().includes('monthly overhead');
 
@@ -1064,110 +1069,24 @@ export async function deleteFinanceFromFirestore(financeId: number | string): Pr
 let isAutoPostingMonthly = false;
 
 /**
- * Automatically ensures that eligible custom staff members
- * have their monthly base salary posted to Payables using a deterministic ID so duplicates can never occur.
+ * Software login users in User Management do not carry payroll salaries.
+ * Monthly office staff salaries are managed exclusively in Finance Management -> Staff Ledger (`salary_staff`)
+ * and post automatically after 12:00 AM midnight following the last day of each month.
  */
 export async function syncMonthlyStaffSalariesToPayables(
-  staffUsers: AppUser[],
+  _staffUsers?: AppUser[],
   existingPayables?: FinanceEntry[]
 ): Promise<FinanceEntry[]> {
-  if (!staffUsers || staffUsers.length === 0 || isAutoPostingMonthly) return [];
-  isAutoPostingMonthly = true;
-  try {
-    const now = new Date();
-    const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const firstOfMonthDate = `${currentMonthStr}-01`;
-    const activeCompany = getActiveCompanyId();
-
-    const storedPayables = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', []) || [];
-    const storedFinances = (safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', []) || []).filter(
-      (f) => f && f.type === 'PAYABLE'
-    );
-    const currentPayables = dedupeArrayById([
-      ...(existingPayables || []),
-      ...storedPayables,
-      ...storedFinances
-    ]);
-
-    const newlyCreated: FinanceEntry[] = [];
-
-    for (const user of staffUsers) {
-      const nameLower = (user.name || '').toLowerCase();
-      if (
-        isDefaultOrPlaceholderSystemAccount(user) ||
-        user.role === UserRole.CLIENT ||
-        user.role === UserRole.TRANSPORTER ||
-        user.role === UserRole.VENDOR ||
-        user.role === UserRole.DRIVER ||
-        user.role === UserRole.ADMIN ||
-        user.userId === 'admin' ||
-        nameLower.includes('administrator')
-      ) {
-        continue;
-      }
-      const salary = Number(user.baseSalary || 0);
-      if (salary <= 0) continue;
-
-      const userStableKey = String(user.userId || user.id).trim().toLowerCase();
-      const salaryRef = `SAL-${currentMonthStr}-${user.id}`;
-      const deterministicId = parseNumericDocId(undefined, `${activeCompany}_${ currentMonthStr }_${userStableKey}`, 0);
-
-      const alreadyExists =
-        currentPayables.some(
-          (p) =>
-            Number(p.id) === deterministicId ||
-            p.reference === salaryRef ||
-            (p.category === 'Staff Payroll & Salaries' &&
-              p.party?.trim().toLowerCase() === user.name?.trim().toLowerCase() &&
-              String(p.date || '').slice(0, 7) === currentMonthStr)
-        ) || newlyCreated.some((p) => p.reference === salaryRef || Number(p.id) === deterministicId);
-
-      if (!alreadyExists) {
-        const netSalary = Math.max(0, salary - Number(user.loansAdvances || 0));
-        const roleLabel =
-          user.designation ||
-          (user.role === UserRole.OFFICE_STAFF ? 'Office Staff' : String(user.role).replace(/_/g, ' '));
-        const salaryEntry: FinanceEntry = {
-          id: deterministicId,
-          date: firstOfMonthDate,
-          description: `Monthly Salary - ${user.name} (${roleLabel}) [Gross: PKR ${salary.toLocaleString()}]`,
-          party: user.name,
-          amount: netSalary,
-          type: 'PAYABLE',
-          status: 'APPROVED',
-          category: 'Staff Payroll & Salaries',
-          reference: salaryRef,
-          paymentMethod: 'BANK',
-          bankName: 'Meezan Bank'
-        };
-
-        try {
-          await saveFinanceToFirestore(salaryEntry);
-        } catch (err) {
-          console.warn('Could not save auto salary payable to Firestore:', err);
-        }
-        newlyCreated.push(salaryEntry);
-      }
-    }
-
-    if (newlyCreated.length > 0) {
-      const updated = dedupeArrayById([...newlyCreated, ...currentPayables]);
-      safeAppStorage.setJSON('dpl_live_payables', updated);
-    }
-
-    return newlyCreated;
-  } finally {
-    isAutoPostingMonthly = false;
-  }
+  return syncCompletedMonthSalaryStaffToPayables({ existingPayables });
 }
 
 /**
- * Posts recurring monthly fixed expenses and custom staff salaries using deterministic IDs
- * so duplicate payables can never be generated.
+ * Posts recurring monthly fixed expenses and completed-month Finance salary staff payables
+ * using deterministic IDs so duplicate payables can never be generated.
  */
 export async function autoPostMonthlyRecurringAndSalaries(
   recurringTemplates?: RecurringFinanceTemplate[],
-  staffUsers?: AppUser[],
+  _staffUsers?: AppUser[],
   existingPayables?: FinanceEntry[],
   existingReceivables?: FinanceEntry[]
 ): Promise<{ addedPayables: FinanceEntry[]; addedReceivables: FinanceEntry[] }> {
@@ -1230,6 +1149,7 @@ export async function autoPostMonthlyRecurringAndSalaries(
       if (!alreadyExists) {
         const recEntry: FinanceEntry = {
           id: deterministicRecId,
+          companyId: activeCompany,
           date: firstOfMonthDate,
           description: `${tpl.title} (${tpl.category || 'Fixed Expense'})`,
           party: tpl.party || 'Vendor / Utility',
@@ -1257,73 +1177,6 @@ export async function autoPostMonthlyRecurringAndSalaries(
       }
     }
 
-    // 2. Process Custom Staff Base Salaries (skipping all default seeded placeholder accounts)
-    if (staffUsers && staffUsers.length > 0) {
-      for (const user of staffUsers) {
-        const nameLower = (user.name || '').toLowerCase();
-        if (
-          isDefaultOrPlaceholderSystemAccount(user) ||
-          user.role === UserRole.CLIENT ||
-          user.role === UserRole.TRANSPORTER ||
-          user.role === UserRole.VENDOR ||
-          user.role === UserRole.DRIVER ||
-          user.role === UserRole.ADMIN ||
-          user.userId === 'admin' ||
-          nameLower.includes('administrator')
-        ) {
-          continue;
-        }
-        const salary = Number(user.baseSalary || 0);
-        if (salary <= 0) continue;
-
-        const userStableKey = String(user.userId || user.id).trim().toLowerCase();
-        const salaryRef = `SAL-${currentMonthStr}-${user.id}`;
-        const deterministicId = parseNumericDocId(
-          undefined,
-          `${activeCompany}_${currentMonthStr}_${userStableKey}`,
-          0
-        );
-
-        const alreadyExists =
-          currentPayables.some(
-            (p) =>
-              Number(p.id) === deterministicId ||
-              p.reference === salaryRef ||
-              (p.category === 'Staff Payroll & Salaries' &&
-                p.party?.trim().toLowerCase() === user.name?.trim().toLowerCase() &&
-                String(p.date || '').slice(0, 7) === currentMonthStr)
-          ) ||
-          addedPayables.some((p) => p.reference === salaryRef || Number(p.id) === deterministicId);
-
-        if (!alreadyExists) {
-          const netSalary = Math.max(0, salary - Number(user.loansAdvances || 0));
-          const roleLabel =
-            user.designation ||
-            (user.role === UserRole.OFFICE_STAFF ? 'Office Staff' : String(user.role).replace(/_/g, ' '));
-          const salaryEntry: FinanceEntry = {
-            id: deterministicId,
-            date: firstOfMonthDate,
-            description: `Monthly Salary - ${user.name} (${roleLabel}) [Gross: PKR ${salary.toLocaleString()}]`,
-            party: user.name,
-            amount: netSalary,
-            type: 'PAYABLE',
-            status: 'APPROVED',
-            category: 'Staff Payroll & Salaries',
-            reference: salaryRef,
-            paymentMethod: 'BANK',
-            bankName: 'Meezan Bank'
-          };
-
-          try {
-            await saveFinanceToFirestore(salaryEntry);
-          } catch (err) {
-            console.warn('Could not save auto salary payable to Firestore:', err);
-          }
-          addedPayables.push(salaryEntry);
-        }
-      }
-    }
-
     if (addedPayables.length > 0) {
       const updatedPay = dedupeArrayById([...addedPayables, ...currentPayables]);
       safeAppStorage.setJSON('dpl_live_payables', updatedPay);
@@ -1332,6 +1185,15 @@ export async function autoPostMonthlyRecurringAndSalaries(
     if (addedReceivables.length > 0) {
       const updatedRec = dedupeArrayById([...addedReceivables, ...currentReceivables]);
       safeAppStorage.setJSON('dpl_live_receivables', updatedRec);
+    }
+
+    // 2. Also ensure any completed calendar month salaries (post-midnight after month end) are synced
+    isAutoPostingMonthly = false;
+    const salaryPayables = await syncCompletedMonthSalaryStaffToPayables({
+      existingPayables: [...currentPayables, ...addedPayables]
+    });
+    if (salaryPayables.length > 0) {
+      addedPayables.push(...salaryPayables);
     }
 
     return { addedPayables, addedReceivables };
@@ -3442,17 +3304,16 @@ export async function authenticateDatabaseUser(
 
       let idScore = 0;
       if (uIdLower && (uIdLower === cleanId || (cleanIdNoSpaces && uIdNoSpaces === cleanIdNoSpaces))) {
-        idScore = 100;
+        idScore = 150;
       } else if (uEmailLower && uEmailLower === cleanId) {
-        idScore = 95;
+        idScore = 120;
       } else if (uContactClean && cleanIdNoSpaces.length >= 7 && uContactClean === cleanIdNoSpaces) {
-        idScore = 90;
-      } else if (uNameLower && uNameLower === cleanId) {
-        idScore = 85;
-      } else if (cleanId.length >= 4 && uIdLower && (uIdLower.includes(cleanId) || cleanId.includes(uIdLower))) {
-        idScore = 60;
-      } else if (cleanId.length >= 4 && uNameLower && uNameLower.includes(cleanId)) {
-        idScore = 50;
+        idScore = 110;
+      } else if (uNameLower && (uNameLower === cleanId || uNameLower.replace(/\s+/g, '') === cleanIdNoSpaces)) {
+        // Only fall back to name match if the user ID does not carry a numbered duplicate suffix like 01 / 02
+        if (!/\d+$/.test(uIdLower)) {
+          idScore = 85;
+        }
       }
 
       if (idScore === 0) return 0;
@@ -4375,10 +4236,9 @@ export async function saveStaffLedgerEntryToFirestore(entry: Partial<StaffLedger
 }
 
 /**
- * Automatically calculates and posts Destination Staff Default Per-Container Charges
- * (`containerCount * defaultPerContainerCharge`) into the Destination Staff's Ledger
- * (`staff_ledgers` and `staff_private_ledgers`) as an Internal Company Transaction
- * (Charges received at Destination that the Destination Staff must remit to Karachi Head Office).
+ * Registers/syncs Destination Staff representatives as Vendors in Finance Management (`vendors`)
+ * and posts per-container charges into Finance Management Payables (`finances`) so all destination
+ * staff financial settlements are managed strictly inside Finance Management -> Vendors & Utilities.
  */
 export async function syncDestinationStaffContainerCharges(options?: {
   cases?: Case[];
@@ -4386,65 +4246,58 @@ export async function syncDestinationStaffContainerCharges(options?: {
   users?: AppUser[];
 }): Promise<void> {
   try {
-    const allCases: Case[] =
-      options?.cases && options.cases.length > 0
-        ? options.cases
-        : safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
-    if (!allCases || allCases.length === 0) return;
-
     const destStaffList: DestinationStaff[] =
       options?.destinationStaff ||
       safeAppStorage.getJSON<DestinationStaff[]>('dpl_destination_staff', []);
 
     let usersList: AppUser[] = options?.users || [];
     if (usersList.length === 0) {
-      try {
-        const uSnap = await getDocs(collection(db, 'users'));
-        uSnap.forEach(d => usersList.push({ ...(d.data() as AppUser), id: Number(d.data().id || d.id) || 0 }));
-      } catch (_) {}
+      usersList = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || [];
     }
 
-    // Build unified list of destination staff profiles who have a defaultPerContainerCharge > 0
-    interface ActiveDestRateProfile {
+    interface ActiveDestVendorProfile {
       staffId: string;
       userId: string;
       name: string;
       station: string;
+      phone: string;
+      address: string;
       rate: number;
     }
 
-    const profilesMap = new Map<string, ActiveDestRateProfile>();
+    const profilesMap = new Map<string, ActiveDestVendorProfile>();
 
     destStaffList.forEach(ds => {
-      const rate = Number(ds.defaultPerContainerCharge) || 0;
-      if (rate > 0 && ds.status !== 'INACTIVE' && ds.status !== 'Inactive') {
+      if (ds.status !== 'INACTIVE' && ds.status !== 'Inactive' && ds.name?.trim()) {
         const key = (ds.userId || ds.name || ds.id).toLowerCase().trim();
         profilesMap.set(key, {
           staffId: String(ds.userId || ds.id),
           userId: String(ds.userId || ds.id),
-          name: ds.name,
-          station: ds.station || '',
-          rate
+          name: ds.name.trim(),
+          station: ds.station || 'Destination Port',
+          phone: ds.phone || '',
+          address: ds.address || ds.station || '',
+          rate: Number(ds.defaultPerContainerCharge) || 0
         });
       }
     });
 
     usersList.forEach(u => {
-      const rate = Number(u.defaultPerContainerCharge) || 0;
       const roles = u.roles && u.roles.length > 0 ? u.roles : [u.role];
       const isDestRole =
         roles.includes(UserRole.UNLOADING_PORT_STAFF) ||
-        roles.includes(UserRole.DESTINATION_PORT_STAFF) ||
-        rate > 0;
-      if (isDestRole && rate > 0 && u.status !== 'SUSPENDED' && u.status !== 'INACTIVE') {
+        roles.includes(UserRole.DESTINATION_PORT_STAFF);
+      if (isDestRole && u.status !== 'SUSPENDED' && u.status !== 'INACTIVE' && u.name?.trim()) {
         const key = (u.userId || u.name || String(u.id)).toLowerCase().trim();
         const existing = profilesMap.get(key);
         profilesMap.set(key, {
           staffId: String(u.id || u.userId),
           userId: String(u.userId || u.id),
-          name: u.name,
-          station: u.assignedStation || existing?.station || u.designation || '',
-          rate
+          name: u.name.trim(),
+          station: u.assignedStation || existing?.station || 'Destination Port',
+          phone: u.contact || existing?.phone || '',
+          address: u.residentialAddress || existing?.address || u.assignedStation || '',
+          rate: Number(u.defaultPerContainerCharge) || existing?.rate || 0
         });
       }
     });
@@ -4452,11 +4305,33 @@ export async function syncDestinationStaffContainerCharges(options?: {
     const profiles = Array.from(profilesMap.values());
     if (profiles.length === 0) return;
 
-    const existingLedgers = safeAppStorage.getJSON<StaffLedgerEntry[]>('dpl_staff_ledgers', []);
-    const existingLedgerMap = new Map<string, StaffLedgerEntry>();
-    existingLedgers.forEach(e => {
-      if (e.id) existingLedgerMap.set(e.id, e);
-    });
+    // 1. Ensure every Destination Staff profile is registered as a Vendor in Finance Management
+    for (const prof of profiles) {
+      const vendorId = `VND-DEST-${String(prof.userId || prof.staffId).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      await saveVendor({
+        id: vendorId,
+        name: prof.name,
+        companyTitle: `Destination Staff — ${prof.station}`,
+        contactNumber: prof.phone || '-',
+        address: prof.address || prof.station,
+        category: 'Destination Port Staff (Per Container)',
+        isRecurring: false,
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    // 2. For any profile with a configured per-container rate > 0, sync per-container charges to Finance Payables
+    const ratedProfiles = profiles.filter(p => p.rate > 0);
+    if (ratedProfiles.length === 0) return;
+
+    const allCases: Case[] =
+      options?.cases && options.cases.length > 0
+        ? options.cases
+        : safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
+    if (!allCases || allCases.length === 0) return;
+
+    const activeCompany = getActiveCompanyId();
+    const existingFinances = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', []) || [];
 
     for (const c of allCases) {
       if (!c || String(c.status || '').toUpperCase() === 'CANCELLED') continue;
@@ -4471,7 +4346,7 @@ export async function syncDestinationStaffContainerCharges(options?: {
       const explicitStaffId = String(destStep.staffUserId || (c as any).assignedDestinationStaffId || '').toLowerCase().trim();
       const explicitOfficer = String(destStep.officer || (c as any).assignedDestinationStaffName || '').toLowerCase().trim();
 
-      for (const prof of profiles) {
+      for (const prof of ratedProfiles) {
         const profUserLower = prof.userId.toLowerCase().trim();
         const profIdLower = prof.staffId.toLowerCase().trim();
         const profNameLower = prof.name.toLowerCase().trim();
@@ -4488,8 +4363,7 @@ export async function syncDestinationStaffContainerCharges(options?: {
         const matchesStation =
           stationTokens.length > 0 && podRaw.length > 0 && stationTokens.some(tok => podRaw.includes(tok));
 
-        // If only 1 destination staff profile has a default per-container rate configured and no station mismatch, or if matched by station / explicit assignment
-        const isSingleConfiguredDestStaff = profiles.length === 1 && (!stationTokens.length || !podRaw || matchesStation);
+        const isSingleConfiguredDestStaff = ratedProfiles.length === 1 && (!stationTokens.length || !podRaw || matchesStation);
 
         if (!matchesExplicitStaff && !matchesStation && !isSingleConfiguredDestStaff) {
           continue;
@@ -4506,56 +4380,28 @@ export async function syncDestinationStaffContainerCharges(options?: {
 
         const safeCaseKey = String(caseNo).replace(/[^a-zA-Z0-9_-]/g, '_');
         const safeStaffKey = String(prof.userId || prof.staffId).replace(/[^a-zA-Z0-9_-]/g, '_');
-        const ledgerDocId = `dest_cntr_${safeStaffKey}_${safeCaseKey}`;
+        const finRef = `DEST-CNTR-${safeStaffKey}-${safeCaseKey}`;
+        const deterministicFinId = parseNumericDocId(undefined, `${activeCompany}_${finRef}`, 0);
 
-        const prevEntry = existingLedgerMap.get(ledgerDocId);
-        // Only write if not yet created or if containerCount / rate changed
-        if (prevEntry && Number(prevEntry.debit) === totalCharge && Number(prevEntry.containerCount) === containerCount) {
-          continue;
-        }
+        const alreadyPosted = existingFinances.some(
+          f => f.reference === finRef || (Number(f.id) === deterministicFinId && Number(f.amount) === totalCharge)
+        );
+        if (alreadyPosted) continue;
 
         const dateStr = (c.createdAt || new Date().toISOString()).split('T')[0];
-        const description = `Internal Company Transaction: ${containerCount} Container(s) [${containerNums}] × PKR ${prof.rate.toLocaleString()}/cntr — Case #${caseNo} (${c.pod || 'Destination'}) — Received by Destination Staff, Payable to Karachi Head Office`;
-
-        // 1. Save to Staff Ledger (`staff_ledgers`) for User Management -> Staff Ledger Modal
-        await saveStaffLedgerEntryToFirestore({
-          id: ledgerDocId,
-          staffId: prof.staffId,
-          staffName: prof.name,
-          type: 'CONTAINER_CHARGES',
+        await saveFinanceToFirestore({
+          id: deterministicFinId,
+          companyId: (c as any).companyId || activeCompany,
           date: dateStr,
-          description,
-          category: 'Internal Company Transaction (Karachi Head Office Remittance)',
-          debit: totalCharge,
-          credit: prevEntry?.credit || 0,
-          balance: totalCharge - (prevEntry?.credit || 0),
-          caseNo: String(caseNo),
-          containerCount,
-          perContainerRate: prof.rate,
-          isInternalCompanyTransaction: true,
-          notes: `Auto-posted from Default Per-Container Charge (PKR ${prof.rate.toLocaleString()} × ${containerCount} container(s)) for Case #${caseNo}. Remittance due to Karachi Head Office.`,
-          settled: prevEntry?.settled ?? false
-        });
-
-        // 2. Also save to Staff Private Ledger (`staff_private_ledgers`) so Destination Staff sees it in their own portal
-        const privDocId = `priv_cntr_${safeStaffKey}_${safeCaseKey}`;
-        await saveStaffPrivateLedgerEntryToFirestore({
-          id: privDocId,
-          staffUserId: prof.userId.toLowerCase().trim(),
-          staffName: prof.name,
-          clientName: 'Karachi Head Office (Internal Company Remittance)',
-          caseNo: String(caseNo),
-          containerNo: containerNums,
-          date: dateStr,
-          description: `Internal Company Remittance Due to Karachi Head Office: ${containerCount} Container(s) × PKR ${prof.rate.toLocaleString()} (Case #${caseNo})`,
-          reference: `HO-CNTR-${caseNo}`,
-          debit: totalCharge,
-          credit: 0,
-          balance: totalCharge,
-          type: 'DEBIT',
-          paymentMode: 'CASH',
-          createdAt: new Date().toISOString()
-        });
+          description: `Destination Container Charges: ${containerCount} Container(s) [${containerNums}] × PKR ${prof.rate.toLocaleString()}/cntr — Case #${caseNo} (${c.pod || prof.station})`,
+          party: prof.name,
+          amount: totalCharge,
+          type: 'PAYABLE',
+          status: 'APPROVED',
+          category: 'Destination Port Staff (Per Container)',
+          reference: finRef,
+          caseNo: String(caseNo)
+        } as FinanceEntry);
       }
     }
   } catch (err) {
@@ -5999,3 +5845,348 @@ export async function deleteUserWorkDraftFromFirestore(userId: string): Promise<
     await setDoc(doc(db, 'settings', `work_draft_${cleanUser}`), { active: false, updatedAt: new Date().toISOString() }, { merge: true });
   } catch (_) {}
 }
+
+// ============================================================================
+// STANDARDIZED USER CREDENTIALS AUTO-GENERATION (FullNameWithoutSpaces + 01/02)
+// ============================================================================
+export const DEFAULT_USER_PASSWORD = 'Docks01234';
+
+/**
+ * Generates a unique User ID from the user's Full Name without spaces.
+ * If another user already has that User ID, appends 01, 02, 03, etc. (folder-style).
+ */
+export function generateUniqueUsernameFromFullName(
+  fullName: string,
+  existingUsers?: Array<{ id?: number | string; userId?: string }>,
+  excludeRecord?: { id?: number | string; currentUserId?: string }
+): string {
+  const base = (fullName || '').trim().replace(/[^a-zA-Z0-9]/g, '');
+  if (!base) return '';
+
+  const takenLower = new Set<string>();
+  const excludeIdStr = excludeRecord?.id !== undefined && excludeRecord?.id !== null ? String(excludeRecord.id) : null;
+  const excludeUserLower = excludeRecord?.currentUserId ? excludeRecord.currentUserId.trim().toLowerCase() : null;
+
+  const collect = (items: Array<{ id?: number | string; userId?: string }>) => {
+    for (const item of items) {
+      if (!item || !item.userId) continue;
+      if (excludeIdStr && item.id !== undefined && String(item.id) === excludeIdStr) continue;
+      const uidLower = item.userId.trim().toLowerCase();
+      if (!uidLower) continue;
+      if (excludeUserLower && uidLower === excludeUserLower) continue;
+      takenLower.add(uidLower);
+    }
+  };
+
+  if (Array.isArray(existingUsers)) collect(existingUsers);
+  collect(safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || []);
+  collect(safeAppStorage.getJSON<Client[]>('dpl_live_clients', []) || []);
+  collect(safeAppStorage.getJSON<DestinationStaff[]>('dpl_destination_staff', []) || []);
+
+  if (!takenLower.has(base.toLowerCase())) {
+    return base;
+  }
+
+  for (let counter = 1; counter <= 999; counter++) {
+    const suffix = String(counter).padStart(2, '0');
+    const candidate = `${base}${suffix}`;
+    if (!takenLower.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+  }
+
+  return `${base}${Date.now().toString().slice(-3)}`;
+}
+
+// ============================================================================
+// COMPANY-SCOPED FINANCE OFFICE SALARY STAFF (`salary_staff`) & MONTH-END PAYROLL
+// ============================================================================
+const SALARY_STAFF_STORAGE_KEY = 'dpl_salary_staff';
+
+export function getStoredSalaryStaff(companyIdFilter?: string): SalaryStaffMember[] {
+  const all = safeAppStorage.getJSON<SalaryStaffMember[]>(SALARY_STAFF_STORAGE_KEY, []) || [];
+  if (!companyIdFilter) return all;
+  return all.filter((s) => (s.companyId || 'docks') === companyIdFilter);
+}
+
+export function subscribeToSalaryStaff(
+  onData: (items: SalaryStaffMember[]) => void,
+  options?: { allCompanies?: boolean }
+): () => void {
+  const path = 'salary_staff';
+  let cachedDocs: SalaryStaffMember[] = getStoredSalaryStaff();
+  let hasSnapshot = false;
+
+  const emit = () => {
+    const activeCompany = getActiveCompanyId();
+    const filtered = options?.allCompanies
+      ? cachedDocs
+      : cachedDocs.filter((s) => (s.companyId || 'docks') === activeCompany);
+    onData(filtered);
+  };
+
+  emit();
+
+  const unsubCompany = subscribeToActiveCompany(() => {
+    emit();
+  });
+
+  let unsubFirestore = () => {};
+  if (db) {
+    try {
+      unsubFirestore = onSnapshot(
+        collection(db, path),
+        (snapshot) => {
+          hasSnapshot = true;
+          const firestoreList: SalaryStaffMember[] = [];
+          snapshot.forEach((docSnap) => {
+            const d = docSnap.data() as SalaryStaffMember;
+            if (d && d.name) {
+              firestoreList.push({
+                ...d,
+                id: d.id || docSnap.id,
+                companyId: d.companyId || 'docks'
+              });
+            }
+          });
+          // Merge any optimistic local items not yet reflected if snapshot is empty on offline cache
+          const localOnly = getStoredSalaryStaff().filter(
+            (loc) => !firestoreList.some((rem) => rem.id === loc.id)
+          );
+          cachedDocs = snapshot.empty && !hasSnapshot ? getStoredSalaryStaff() : [...firestoreList, ...(snapshot.metadata.fromCache ? localOnly : [])];
+          safeAppStorage.setJSON(SALARY_STAFF_STORAGE_KEY, cachedDocs);
+          emit();
+        },
+        (err) => {
+          console.warn('subscribeToSalaryStaff notice:', err);
+        }
+      );
+    } catch (err) {
+      console.warn('subscribeToSalaryStaff setup notice:', err);
+    }
+  }
+
+  return () => {
+    unsubFirestore();
+    unsubCompany();
+  };
+}
+
+export async function saveSalaryStaffToFirestore(staff: SalaryStaffMember): Promise<SalaryStaffMember> {
+  const path = 'salary_staff';
+  const activeCompany = getActiveCompanyId();
+  const normalized: SalaryStaffMember = {
+    ...staff,
+    id: staff.id || `sal_staff_${Date.now()}`,
+    companyId: staff.companyId || activeCompany,
+    name: (staff.name || '').trim(),
+    fatherName: (staff.fatherName || '').trim(),
+    designation: (staff.designation || '').trim(),
+    primaryContact: (staff.primaryContact || '').trim(),
+    residentialContact: (staff.residentialContact || '').trim(),
+    residentialAddress: (staff.residentialAddress || '').trim(),
+    totalSalary: Number(staff.totalSalary) || 0,
+    status: staff.status || 'ACTIVE',
+    createdAt: staff.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  const current = getStoredSalaryStaff();
+  const updated = [normalized, ...current.filter((s) => s.id !== normalized.id)];
+  safeAppStorage.setJSON(SALARY_STAFF_STORAGE_KEY, updated);
+
+  if (db) {
+    try {
+      await setDoc(doc(db, path, normalized.id), sanitizeForFirestore(normalized), { merge: true });
+    } catch (err) {
+      console.warn('saveSalaryStaffToFirestore notice:', err);
+    }
+  }
+
+  return normalized;
+}
+
+export async function deleteSalaryStaffFromFirestore(staffId: string): Promise<void> {
+  const path = 'salary_staff';
+  const current = getStoredSalaryStaff().filter((s) => s.id !== staffId);
+  safeAppStorage.setJSON(SALARY_STAFF_STORAGE_KEY, current);
+
+  if (db) {
+    try {
+      await deleteDoc(doc(db, path, staffId));
+    } catch (err) {
+      console.warn('deleteSalaryStaffFromFirestore notice:', err);
+    }
+  }
+}
+
+function getLastDayOfYearMonth(year: number, monthOneBased: number): number {
+  return new Date(year, monthOneBased, 0).getDate();
+}
+
+/**
+ * Automatically generates monthly salary on the last date of each completed month
+ * and posts it into Finance Payables AFTER 12:00 AM midnight following the last day of that month
+ * (`now >= 00:00:00` of the 1st of the next month).
+ * Each salary entry stays strictly inside the company (`staff.companyId`) where that staff member was added.
+ */
+let isSyncingCompletedSalaries = false;
+
+export async function syncCompletedMonthSalaryStaffToPayables(options?: {
+  nowOverride?: Date;
+  existingPayables?: FinanceEntry[];
+}): Promise<FinanceEntry[]> {
+  if (isSyncingCompletedSalaries) return [];
+  isSyncingCompletedSalaries = true;
+
+  try {
+    const now = options?.nowOverride || new Date();
+
+    // Load all SalaryStaffMember records from local cache + Firestore
+    let allStaff = getStoredSalaryStaff();
+    if (db) {
+      try {
+        const snap = await getDocs(collection(db, 'salary_staff'));
+        if (!snap.empty) {
+          const remote: SalaryStaffMember[] = [];
+          snap.forEach((ds) => {
+            const d = ds.data() as SalaryStaffMember;
+            if (d && d.name) {
+              remote.push({ ...d, id: d.id || ds.id, companyId: d.companyId || 'docks' });
+            }
+          });
+          allStaff = remote;
+          safeAppStorage.setJSON(SALARY_STAFF_STORAGE_KEY, remote);
+        }
+      } catch (_) {}
+    }
+
+    const activeStaff = allStaff.filter(
+      (s) => s && s.status !== 'INACTIVE' && Number(s.totalSalary) > 0
+    );
+    if (activeStaff.length === 0) return [];
+
+    // Load existing finance entries across all companies to prevent duplicate salary postings
+    let allFinances: FinanceEntry[] = [
+      ...(options?.existingPayables || []),
+      ...(safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', []) || []),
+      ...(safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', []) || [])
+    ];
+    if (db) {
+      try {
+        const fSnap = await getDocs(collection(db, 'finances'));
+        fSnap.forEach((ds) => {
+          allFinances.push(ds.data() as FinanceEntry);
+        });
+      } catch (_) {}
+    }
+
+    // Latest completed month whose last date + 12:00 AM midnight has ALREADY passed:
+    // At 00:00:00 on day 1 of month M, month (M - 1)'s last day has just passed 12:00 AM midnight!
+    const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const maxCompletedYear = prevMonthDate.getFullYear();
+    const maxCompletedMonth = prevMonthDate.getMonth() + 1; // 1..12
+    const maxCompletedYm = `${maxCompletedYear}-${String(maxCompletedMonth).padStart(2, '0')}`;
+
+    const newlyPosted: FinanceEntry[] = [];
+
+    for (const staff of activeStaff) {
+      const staffCompany = staff.companyId || 'docks';
+      const createdDate = staff.createdAt ? new Date(staff.createdAt) : now;
+      const startYear = isNaN(createdDate.getTime()) ? now.getFullYear() : createdDate.getFullYear();
+      const startMonth = isNaN(createdDate.getTime()) ? now.getMonth() + 1 : createdDate.getMonth() + 1;
+      const startYm = `${startYear}-${String(startMonth).padStart(2, '0')}`;
+
+      // If staff was added in the current month (e.g. Nov 2026), their first month-end + 12:00 AM has not passed yet
+      if (startYm > maxCompletedYm) continue;
+
+      let cursorYear = startYear;
+      let cursorMonth = startMonth;
+      let safetyCounter = 0;
+
+      while (
+        `${cursorYear}-${String(cursorMonth).padStart(2, '0')}` <= maxCompletedYm &&
+        safetyCounter < 36
+      ) {
+        safetyCounter++;
+        const ym = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}`;
+        const lastDay = getLastDayOfYearMonth(cursorYear, cursorMonth);
+        const monthEndDateStr = `${ym}-${String(lastDay).padStart(2, '0')}`;
+
+        // Verify current clock is strictly past 12:00 AM midnight at the end of `monthEndDateStr`
+        const postMidnightThreshold = new Date(cursorYear, cursorMonth, 1, 0, 0, 0, 0);
+        if (now.getTime() >= postMidnightThreshold.getTime()) {
+          const salaryRef = `SAL-${ym}-${staff.id}`;
+          const deterministicId = parseNumericDocId(
+            undefined,
+            `${staffCompany}_${salaryRef}`,
+            0
+          );
+
+          const alreadyExists =
+            allFinances.some(
+              (f) =>
+                f &&
+                (f.reference === salaryRef ||
+                  Number(f.id) === deterministicId ||
+                  ((f.category === 'Payroll / Salary' || f.category === 'Staff Payroll & Salaries') &&
+                    (f.companyId || 'docks') === staffCompany &&
+                    f.party?.trim().toLowerCase() === staff.name.trim().toLowerCase() &&
+                    String(f.date || '').slice(0, 7) === ym))
+            ) || newlyPosted.some((f) => f.reference === salaryRef);
+
+          if (!alreadyExists) {
+            const monthLabel = new Date(cursorYear, cursorMonth - 1, 1).toLocaleDateString('en-GB', {
+              month: 'short',
+              year: 'numeric'
+            });
+            const salaryEntry: FinanceEntry & { isRecurring?: boolean } = {
+              id: deterministicId,
+              companyId: staffCompany,
+              date: monthEndDateStr,
+              description: `Monthly Office Staff Salary (${monthLabel}) — ${staff.name}${staff.designation ? ` (${staff.designation})` : ''}`,
+              party: staff.name,
+              amount: Number(staff.totalSalary),
+              type: 'PAYABLE',
+              status: 'APPROVED',
+              category: 'Payroll / Salary',
+              reference: salaryRef,
+              paymentMethod: 'BANK',
+              bankName: 'Meezan Bank',
+              isRecurring: true
+            };
+
+            try {
+              await saveFinanceToFirestore(salaryEntry);
+            } catch (err) {
+              console.warn(`Could not save auto month-end salary ${salaryRef}:`, err);
+            }
+            newlyPosted.push(salaryEntry);
+          }
+        }
+
+        cursorMonth++;
+        if (cursorMonth > 12) {
+          cursorMonth = 1;
+          cursorYear++;
+        }
+      }
+    }
+
+    if (newlyPosted.length > 0) {
+      const activeComp = getActiveCompanyId();
+      const activeNew = newlyPosted.filter((p) => matchesActiveCompany(p.companyId, activeComp));
+      if (activeNew.length > 0) {
+        const storedPay = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_payables', []) || [];
+        safeAppStorage.setJSON('dpl_live_payables', dedupeArrayById([...activeNew, ...storedPay]));
+      }
+      const storedFin = safeAppStorage.getJSON<FinanceEntry[]>('dpl_live_finance', []) || [];
+      safeAppStorage.setJSON('dpl_live_finance', dedupeArrayById([...newlyPosted, ...storedFin]));
+    }
+
+    return newlyPosted;
+  } finally {
+    isSyncingCompletedSalaries = false;
+  }
+}
+

@@ -366,20 +366,33 @@ export async function runDailyCompanyDocExpiryCheck(): Promise<void> {
 }
 
 /**
- * 3. Monthly Auto-Payable Entries Check:
- *    Automatically posts active user-configured RecurringFinanceTemplates once per month
- *    and notifies Finance Manager ONLY (via saveFinanceToFirestore's isMonthlyOrRecurring branch).
+ * 3. Monthly Auto-Payable & Post-Midnight Month-End Office Salary Check:
+ *    - Automatically posts completed month-end Office Staff Salaries (`salary_staff`) right after 12:00 AM midnight
+ *      following the last day of each month (strictly within each staff member's company).
+ *    - Automatically posts active user-configured RecurringFinanceTemplates once per month.
+ *    - Notifies Finance Manager ONLY (via saveFinanceToFirestore's isMonthlyOrRecurring branch).
  */
 export async function runMonthlySalaryRolloverCheck(): Promise<void> {
   try {
     const now = new Date();
     const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const activeCompany = getActiveCompanyId();
+
+    // 3A. Run post-midnight month-end salary check (guarded once per calendar month rollover + staff count)
+    const staffCount = (safeAppStorage.getJSON<any[]>('dpl_salary_staff', []) || []).length;
+    const salaryRolloverKey = `dpl_month_end_salary_checked_${currentMonth}_${staffCount}`;
+    if (safeAppStorage.getItem(salaryRolloverKey) !== 'true') {
+      const { syncCompletedMonthSalaryStaffToPayables } = await import('./dbService');
+      await syncCompletedMonthSalaryStaffToPayables({ nowOverride: now });
+      safeAppStorage.setItem(salaryRolloverKey, 'true');
+    }
+
+    // 3B. Run monthly recurring overhead templates check
     const rolloverKey = `dpl_recurring_payable_checked_${activeCompany}_${currentMonth}`;
     if (safeAppStorage.getItem(rolloverKey) === 'true') return;
 
     const [recSnap, finSnap] = await Promise.all([
-      getDocs(collection(db, 'recurring_finances')).catch(() => null),
+      getDocs(collection(db, 'recurring_templates')).catch(() => null),
       getDocs(collection(db, 'finances')).catch(() => null)
     ]);
     if (!recSnap || recSnap.empty) {
@@ -408,6 +421,7 @@ export async function runMonthlySalaryRolloverCheck(): Promise<void> {
 
       const autoPayable: FinanceEntry & { isRecurring?: boolean } = {
         id: hashDeterministicNumericId(refCode),
+        companyId: tpl.companyId || activeCompany,
         date: formatDateYmdLocal(now),
         description: `Monthly Recurring Payable: ${tpl.title}`,
         amount: Number(tpl.amount),
