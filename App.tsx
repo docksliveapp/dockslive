@@ -751,7 +751,25 @@ const App: React.FC = () => {
         }
         return <CompanyDocuments />;
       }
-      case 'cases': return <CaseManagement initialFilter={navigationFilter} clearFilter={() => setNavigationFilter(null)} onActionComplete={handleActionComplete} customLogo={customLogo} userRole={currentRole} userRoles={currentRoles} currentClientName={currentClientName} />;
+      case 'cases':
+        return (
+          <CaseManagement
+            initialFilter={navigationFilter}
+            clearFilter={() => setNavigationFilter(null)}
+            onActionComplete={handleActionComplete}
+            customLogo={customLogo}
+            userRole={currentRole}
+            userRoles={currentRoles}
+            currentClientName={currentClientName}
+            onOpenCaseStatus={() => {
+              setOpenedFromInternalWorkspace(true);
+              setIsPublicContainerTrackingOpen(true);
+              try {
+                window.history.pushState({ mode: 'status' }, '', '/?mode=status');
+              } catch (_) {}
+            }}
+          />
+        );
       case 'drive': return <GoogleDriveManager />;
       case 'finance': {
         const canAccessFinance = currentRoles.includes(UserRole.ADMIN) || currentRoles.includes(UserRole.FINANCE_MANAGER) || currentRole === UserRole.ADMIN || currentRole === UserRole.FINANCE_MANAGER;
@@ -795,14 +813,7 @@ const App: React.FC = () => {
             userRole={currentRole} 
             userRoles={currentRoles}
             onOpenPublicTracker={(plate) => {
-              const host = (window.location.hostname || '').toLowerCase();
-              if (host.includes('makpk.online') || host.includes('mak-group.com')) {
-                window.location.href = plate 
-                  ? `https://vehicle.makpk.online?vehicle=${encodeURIComponent(plate)}`
-                  : 'https://vehicle.makpk.online';
-                return;
-              }
-              if (plate) setSelectedPublicVehiclePlate(plate);
+              setSelectedPublicVehiclePlate(plate || '');
               setOpenedFromInternalWorkspace(true);
               setIsPublicVehicleTrackingOpen(true);
               try {
@@ -843,13 +854,11 @@ const App: React.FC = () => {
           onExitPortal={openedFromInternalWorkspace ? () => {
             setIsPublicVehicleTrackingOpen(false);
             setOpenedFromInternalWorkspace(false);
+            try {
+              window.history.replaceState({}, '', '/');
+            } catch (_) {}
           } : undefined}
           onSwitchToContainerTracker={() => {
-            const host = (window.location.hostname || '').toLowerCase();
-            if (host.includes('makpk.online') || host.includes('mak-group.com')) {
-              window.location.href = 'https://status.makpk.online';
-              return;
-            }
             setIsPublicVehicleTrackingOpen(false);
             setIsPublicContainerTrackingOpen(true);
             try {
@@ -868,13 +877,11 @@ const App: React.FC = () => {
           onExitPortal={openedFromInternalWorkspace ? () => {
             setIsPublicContainerTrackingOpen(false);
             setOpenedFromInternalWorkspace(false);
+            try {
+              window.history.replaceState({}, '', '/');
+            } catch (_) {}
           } : undefined}
           onSwitchToVehicleTracker={() => {
-            const host = (window.location.hostname || '').toLowerCase();
-            if (host.includes('makpk.online') || host.includes('mak-group.com')) {
-              window.location.href = 'https://vehicle.makpk.online';
-              return;
-            }
             setIsPublicContainerTrackingOpen(false);
             setIsPublicVehicleTrackingOpen(true);
             try {
@@ -1455,52 +1462,6 @@ const App: React.FC = () => {
 
           {/* Right: Actions, Notifications & Sign Out */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 justify-end">
-            {/* Quick Public Trackers Preview Buttons for Staff (Desktop) */}
-            <div className="hidden 2xl:flex items-center gap-1.5 mr-1">
-              <button
-                type="button"
-                onClick={() => {
-                  const host = (window.location.hostname || '').toLowerCase();
-                  if (host.includes('makpk.online') || host.includes('mak-group.com')) {
-                    window.location.href = 'https://status.makpk.online';
-                    return;
-                  }
-                  setIsPublicContainerTrackingOpen(true);
-                  try { window.history.pushState({ mode: 'status' }, '', '/?mode=status'); } catch (_) {}
-                }}
-                className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer ${
-                  appTheme === 'pearl'
-                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
-                    : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border-white/10'
-                }`}
-                title="Preview Public Container Tracker (Status.makpk.online)"
-              >
-                <Package size={13} />
-                <span>status.</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const host = (window.location.hostname || '').toLowerCase();
-                  if (host.includes('makpk.online') || host.includes('mak-group.com')) {
-                    window.location.href = 'https://vehicle.makpk.online';
-                    return;
-                  }
-                  setIsPublicVehicleTrackingOpen(true);
-                  try { window.history.pushState({ mode: 'vehicle' }, '', '/?mode=vehicle'); } catch (_) {}
-                }}
-                className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer ${
-                  appTheme === 'pearl'
-                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
-                    : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border-white/10'
-                }`}
-                title="Preview Public Vehicle Tracker (vehicle.makpk.online)"
-              >
-                <Truck size={13} />
-                <span>vehicle.</span>
-              </button>
-            </div>
-
             {/* Header Theme Switcher (Left = Charcoal Dark, Right = Pearl White) */}
             <ThemeToggleSwitch compact />
 

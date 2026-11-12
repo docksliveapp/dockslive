@@ -32,8 +32,6 @@ export enum CaseStatus {
 
 export const WORKFLOW_8_STEPS = [
   CaseStatus.SHIPPING_LINE_DO,
-  CaseStatus.TP_FILING,
-  CaseStatus.EXCISE_PAYMENT,
   CaseStatus.VEHICLE_ASSIGNMENT,
   CaseStatus.LOADING_PORT_PROCESSING,
   CaseStatus.IN_TRANSIT,
@@ -391,25 +389,124 @@ export interface MockDocument {
   [key: string]: any;
 }
 
+export type CorporateRootCategory =
+  | 'Legal'
+  | 'Tax'
+  | 'Assets'
+  | 'Company Documents'
+  | 'Quotations';
+
+export type LegalCaseTrack = 'LOGISTICS_CRIMINAL' | 'CIVIL_CORPORATE';
+
+export type CorporateDocumentStatus =
+  | 'Active'
+  | 'Expired'
+  | 'Pending Hearing'
+  | 'Resolved'
+  | 'Archived';
+
+export type QuotationStatus = 'Pending' | 'Accepted' | 'Rejected';
+
+export type CorporateRecipientEntity =
+  | 'Docks'
+  | 'Truckit'
+  | 'Muhib'
+  | 'Vantage'
+  | 'MAK Group';
+
+export interface CorporateLegalCase {
+  id: string;
+  companyId?: string;
+  identifier: string; // e.g. "Container # MSKU1234567" or "State Life Office Rent Dispute"
+  caseTrack: LegalCaseTrack;
+  recipientEntity: CorporateRecipientEntity | string;
+  caseReferenceNo?: string;
+  courtOrForum?: string;
+  legalCounsel?: string;
+  opposingParty?: string;
+  nextHearingDate?: string;
+  status: CorporateDocumentStatus;
+  subFolders: string[];
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+  createdBy?: string;
+}
+
+export interface CorporateVaultCredential {
+  id: string;
+  companyId?: string;
+  portalName: string; // e.g. "FBR IRIS Portal", "WeBOC Customs ID", "SECP eServices"
+  portalUrl?: string;
+  usernameOrId: string;
+  passwordSecret: string;
+  pinOr2faNote?: string;
+  recipientEntity: CorporateRecipientEntity | string;
+  recoveryContact?: string;
+  issuanceDate?: string;
+  expiryDate?: string;
+  alarmDaysBefore?: number;
+  statusTag: CorporateDocumentStatus;
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+  createdBy?: string;
+}
+
 export interface CompanyDocument {
   id: string;
   companyId?: string;
   title: string;
+  // Multi-tier hierarchy coordinates
+  rootCategory?: CorporateRootCategory;
   category?: string;
   subcategory?: string;
+  subFolder?: string;
+  // Legal hierarchy metadata
+  legalCaseId?: string;
+  legalCaseTitle?: string;
+  legalCaseTrack?: LegalCaseTrack;
+  // Tax hierarchy metadata
+  taxAuthority?: 'FBR' | 'SRB' | 'Labour Department' | string;
+  taxYear?: string;
+  // Assets hierarchy metadata
+  assetGroup?: 'Security Deposits Tracking' | 'Company Properties & Investments' | string;
+  assetSubType?: string;
+  assetValuationPkr?: number;
+  assetLocationOrBank?: string;
+  // Quotations metadata
+  quotationClientName?: string;
+  quotationServiceType?: string;
+  quotationStatus?: QuotationStatus;
+  quotationAmountPkr?: number;
+  // Universal mandatory metadata & smart alarm engine
+  senderIssuer?: string;
+  recipientEntity?: CorporateRecipientEntity | string;
+  issuanceDate?: string;
   documentDate?: string;
   from?: string;
   to?: string;
   subject?: string;
+  validityStartDate?: string;
+  validityEndDate?: string;
+  alarmDaysBefore?: number;
+  statusTag?: CorporateDocumentStatus;
   hearingRequired?: boolean;
   hearingDate?: string;
   hearingTime?: string;
   hearingNotes?: string;
+  // Attachment & storage metadata
   fileUrl?: string;
   fileName?: string;
   url?: string;
   fileType?: string;
   fileSize?: number;
+  additionalFiles?: {
+    name: string;
+    url: string;
+    type?: string;
+    size?: number;
+  }[];
   uploadedAt?: string;
   uploadDate?: string;
   uploadedBy?: string;
@@ -1546,21 +1643,11 @@ export interface Bank {
 }
 
 export const DEFAULT_COMPANY_DOCUMENT_CATEGORIES: string[] = [
-  'SECP',
-  'SRB',
-  'FBR income tax',
-  'PAKISTAN customs',
-  'State Bank of Pakistan',
-  'Stocks Exchange',
-  'Deposits/Guaranties',
-  'Chamber of Commerce',
-  'Showcase/ONOs reply',
-  'FIRs',
-  'Petitions',
-  "Agreement's",
-  'Quotations',
-  'Banks',
-  'Assets'
+  'Legal',
+  'Tax',
+  'Assets',
+  'Company Documents',
+  'Quotations'
 ];
 
 export interface SalaryStaffMember {

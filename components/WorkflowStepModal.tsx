@@ -32,7 +32,6 @@ import {
   CaseStepDetail, 
   CaseCharge, 
   WORKFLOW_8_STEPS, 
-  PAKISTAN_REGIONS, 
   Vehicle, 
   UserRole 
 } from '../types';
@@ -118,11 +117,11 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     const stepStr = String(stepStatus).toLowerCase();
     const isLoadingWorkflowStep =
       stepStatus === CaseStatus.LOADING_PORT_PROCESSING ||
-      (normCategory === 'Bonded Carrier' && stepIndex === 4) ||
+      (normCategory === 'Bonded Carrier' && stepIndex === 2) ||
       stepStr.includes('loading port');
     const isDestinationWorkflowStep =
       stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL ||
-      (normCategory === 'Bonded Carrier' && (stepIndex === 6 || stepIndex === 7)) ||
+      (normCategory === 'Bonded Carrier' && stepIndex === 4) ||
       stepStr.includes('destination port');
 
     // Loading workflow and Loading bill can be updated by Loading Port Staff, Admin, or Operations Manager
@@ -145,7 +144,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     }
 
     // In Transit can be updated by Destination Port Staff (to receive vehicle & complete transit), Transporter, Documentation Manager, Operations Manager, or Admin
-    if (stepStatus === CaseStatus.IN_TRANSIT || (normCategory === 'Bonded Carrier' && stepIndex === 5)) {
+    if (stepStatus === CaseStatus.IN_TRANSIT || (normCategory === 'Bonded Carrier' && stepIndex === 3)) {
       if (
         rolesList.includes(UserRole.DESTINATION_PORT_STAFF) ||
         rolesList.includes(UserRole.UNLOADING_PORT_STAFF) ||
@@ -157,7 +156,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       }
     }
 
-    // Admin, Documentation Manager, Operations Manager & Case Manager can update all Documentation Processing workflows (DO, TP Filing, Excise Payment, Vehicle Assignment)
+    // Admin, Documentation Manager, Operations Manager & Case Manager can update all Documentation Processing workflows (Shipping Line DO, Vehicle Assignment)
     if (
       rolesList.includes(UserRole.ADMIN) ||
       rolesList.includes(UserRole.DOCUMENTATION_MANAGER) ||
@@ -198,7 +197,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     // Loading Port Staff: Loading Port Processing only
     if (rolesList.includes(UserRole.LOADING_PORT_STAFF)) {
       if (
-        stepIndex === 4 ||
+        (normCategory === 'Bonded Carrier' ? stepIndex === 2 : stepIndex === 4) ||
         stepStatus === CaseStatus.LOADING_PORT_PROCESSING ||
         stepStr.includes('loading') ||
         stepStr.includes('dispatch') ||
@@ -212,7 +211,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
     // Unloading Port Staff / Destination Officers: Unloading, Gate-in, Gate-out, Terminal DO, Empty Return
     if (rolesList.includes(UserRole.UNLOADING_PORT_STAFF) || rolesList.includes(UserRole.DESTINATION_PORT_STAFF)) {
-      if (stepIndex >= 5 || stepStr.includes('destination') || stepStr.includes('unload') || stepStr.includes('arrival') || stepStr.includes('gate') || stepStr.includes('return') || stepStr.includes('empty') || stepStr.includes('delivery')) {
+      if ((normCategory === 'Bonded Carrier' ? stepIndex >= 3 : stepIndex >= 5) || stepStr.includes('destination') || stepStr.includes('unload') || stepStr.includes('arrival') || stepStr.includes('gate') || stepStr.includes('return') || stepStr.includes('empty') || stepStr.includes('delivery')) {
         canEdit = true;
       }
     }
@@ -628,7 +627,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
   // Strict validation rules when clicking [Completed]
   const validateStepStrict = (): { valid: boolean; error?: string } => {
     if (normCategory === 'Bonded Carrier') {
-      if (stepIndex === 0) { // Step 1: Shipping Line DO
+      if (stepIndex === 0 || stepStatus === CaseStatus.SHIPPING_LINE_DO) { // Step 1: Shipping Line DO
         if (formData.doDueChargesArrangedBy === 'DPL') {
           if (!formData.doReceiptUrl && (!formData.multiFiles || Object.keys(formData.multiFiles).length === 0)) {
             return { valid: false, error: 'Document Required: Please upload the Delivery Order document or receipt before marking this step as completed.' };
@@ -639,25 +638,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         }
       }
 
-      if (stepIndex === 1) { // Step 2: TP Filing
-        if (!formData.tpGdPrintUrl) {
-          return { valid: false, error: 'Document Required: Please upload Customs TP / GD Print document.' };
-        }
-        if (!formData.tpGdNumber?.trim()) {
-          return { valid: false, error: 'Field Required: Please enter the TP / GD Reference Number.' };
-        }
-      }
-
-      if (stepIndex === 2) { // Step 3: Excise Payment
-        if (!formData.exciseRegion) {
-          return { valid: false, error: 'Excise Region is mandatory. Please select a Pakistan administrative region.' };
-        }
-        if (!formData.exciseReceiptUrl) {
-          return { valid: false, error: 'Receipt Required: Please upload the Provincial Excise Duty Payment voucher.' };
-        }
-      }
-
-      if (stepIndex === 3 || stepStatus === CaseStatus.VEHICLE_ASSIGNMENT) { // Step 4: Vehicle Assignment (Documentation Manager)
+      if (stepIndex === 1 || stepStatus === CaseStatus.VEHICLE_ASSIGNMENT) { // Step 2: Vehicle Assignment (Documentation Manager)
         if (!formData.assignedVehicleNo?.trim()) {
           return { valid: false, error: 'Vehicle Required: Please select and validate a registered vehicle from the Fleet List.' };
         }
@@ -691,7 +672,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         }
       }
 
-      if (stepIndex === 4 || stepStatus === CaseStatus.LOADING_PORT_PROCESSING) { // Step 5: Loading Port Processing
+      if (stepIndex === 2 || stepStatus === CaseStatus.LOADING_PORT_PROCESSING) { // Step 3: Loading Port Processing
         if (!formData.portGatePassUrl) {
           return { valid: false, error: 'Port Gate Pass upload is required before completing loading step.' };
         }
@@ -703,7 +684,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         }
       }
 
-      if (stepIndex === 6 || stepIndex === 7 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL) { // Step 7: Destination Port Arrival
+      if (stepIndex === 4 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL) { // Step 5: Destination Port Arrival
         if (!formData.destinationGateInToggled) {
           return { valid: false, error: 'Please mark Vehicle Received.' };
         }
@@ -748,10 +729,10 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     const dplItemsToSync: Array<{ key: string; label: string; amount: number; receiptUrl?: string; receiptName?: string }> = [];
 
     const activeStepId = categoryWorkflow.steps[stepIndex]?.id || String(stepStatus);
-    const isDoStep = stepIndex === 0 || activeStepId === 'DELIVERY_ORDER' || activeStepId === CaseStatus.SHIPPING_LINE_DO;
-    const isExciseStep = stepIndex === 2 || activeStepId === 'SINDH_EXCISE' || activeStepId === CaseStatus.EXCISE_PAYMENT;
-    const isVehicleStep = stepIndex === 3 || activeStepId === 'TRANSPORTER' || activeStepId === CaseStatus.VEHICLE_ASSIGNMENT;
-    const isLoadingStep = stepIndex === 4 || activeStepId === 'CUSTOMS_GATE' || activeStepId === CaseStatus.LOADING_PORT_PROCESSING;
+    const isDoStep = activeStepId === 'DELIVERY_ORDER' || activeStepId === CaseStatus.SHIPPING_LINE_DO || (normCategory === 'Bonded Carrier' && stepIndex === 0);
+    const isExciseStep = activeStepId === 'SINDH_EXCISE' || activeStepId === CaseStatus.EXCISE_PAYMENT;
+    const isVehicleStep = activeStepId === 'TRANSPORTER' || activeStepId === CaseStatus.VEHICLE_ASSIGNMENT || (normCategory === 'Bonded Carrier' && stepIndex === 1);
+    const isLoadingStep = activeStepId === 'CUSTOMS_GATE' || activeStepId === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 2);
 
     if (isDoStep) {
       if ((updatedDetail.doDueChargesArrangedBy === 'DPL' || updatedDetail.doChargesPaidByDpl) && Number(updatedDetail.doDueChargesAmount) > 0) {
@@ -882,9 +863,9 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     if (effectiveCompleting) {
       isCompleted = true;
       const totalSteps = categoryWorkflow.totalSteps;
-      if (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 4)) {
+      if (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 2)) {
         finalStatus = CaseStatus.IN_TRANSIT;
-      } else if (stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL || (normCategory === 'Bonded Carrier' && (stepIndex === 6 || stepIndex === 7))) {
+      } else if (stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL || (normCategory === 'Bonded Carrier' && stepIndex === 4)) {
         finalStatus = CaseStatus.COMPLETED;
       } else if (stepIndex < totalSteps - 1) {
         finalStatus = categoryWorkflow.steps[stepIndex + 1].id as any;
@@ -898,7 +879,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     // Loading Gate-Out auto-completion trigger:
     // Once Gate-Out is confirmed at the loading port, the Loading Port workflow completes automatically and transitions the case to In Transit.
     if (
-      (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 4)) &&
+      (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 2)) &&
       (formData.gateOutToggled || forceGateOutComplete) &&
       formData.portGatePassUrl &&
       formData.customsSealNumber?.trim()
@@ -909,7 +890,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
     // Final step completion trigger (Destination Port Arrival -> Case Finish)
     if (
-      (stepIndex === categoryWorkflow.totalSteps - 1 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL || (normCategory === 'Bonded Carrier' && (stepIndex === 6 || stepIndex === 7))) &&
+      (stepIndex === categoryWorkflow.totalSteps - 1 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL || (normCategory === 'Bonded Carrier' && stepIndex === 4)) &&
       (effectiveCompleting || (formData.destinationGateInToggled && formData.containerUnloadedToggled && formData.vehicleGateOutToggled) || formData.outOfChargeCleared)
     ) {
       finalStatus = CaseStatus.COMPLETED;
@@ -929,7 +910,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
     // Update container with vehicle & driver if assigned in Vehicle Assignment
     let updatedContainers = targetCase.containers ? [...targetCase.containers] : [];
-    if ((stepIndex === 3 || stepStatus === CaseStatus.VEHICLE_ASSIGNMENT) && formData.assignedVehicleNo) {
+    if ((stepStatus === CaseStatus.VEHICLE_ASSIGNMENT || (normCategory === 'Bonded Carrier' && stepIndex === 1)) && formData.assignedVehicleNo) {
       updatedContainers = updatedContainers.map(c => ({
         ...c,
         vehicleNo: formData.assignedVehicleNo,
@@ -947,7 +928,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
     // When Loading completes and transitions to IN_TRANSIT, also activate IN_TRANSIT step detail
     if (
-      (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 4)) &&
+      (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 2)) &&
       isCompleted &&
       finalStatus === CaseStatus.IN_TRANSIT
     ) {
@@ -972,9 +953,9 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       });
     });
 
-    // If Loading Port Staff updated driver CNIC / name / front & back in Step 5, sync it to VEHICLE_ASSIGNMENT step as well
+    // If Loading Port Staff updated driver CNIC / name / ID card in Step 3, sync it to VEHICLE_ASSIGNMENT step as well
     if (
-      (stepIndex === 4 || stepStatus === CaseStatus.LOADING_PORT_PROCESSING) &&
+      (stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 2)) &&
       (formData.driverCnic || formData.driverName || formData.driverCnicFrontUrl || formData.driverCnicBackUrl)
     ) {
       const existingVehStep = mergedWorkflowDetails[CaseStatus.VEHICLE_ASSIGNMENT] || ({ status: CaseStatus.VEHICLE_ASSIGNMENT } as CaseStepDetail);
@@ -990,7 +971,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
       };
     }
 
-    const vehStep = mergedWorkflowDetails[CaseStatus.VEHICLE_ASSIGNMENT] || ((stepIndex === 3 || stepStatus === CaseStatus.VEHICLE_ASSIGNMENT) ? updatedStepDetail : undefined);
+    const vehStep = mergedWorkflowDetails[CaseStatus.VEHICLE_ASSIGNMENT] || ((stepStatus === CaseStatus.VEHICLE_ASSIGNMENT || (normCategory === 'Bonded Carrier' && stepIndex === 1)) ? updatedStepDetail : undefined);
     const loadingStepForSync = mergedWorkflowDetails[CaseStatus.LOADING_PORT_PROCESSING];
     const resolvedPlate = vehStep?.assignedVehicleNo || loadingStepForSync?.assignedVehicleNo || targetCase.vehicleAssignment?.vehicleNo || targetCase.containers?.[0]?.vehicleNo;
     const syncedVehicleAssignment = resolvedPlate ? {
@@ -1207,7 +1188,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
   const handleTriggerIncident = () => {
     if (!incidentForm.reason.trim()) {
-      alert('Please specify the incident / stoppage reason.');
+      setValidationError('Please specify the incident / stoppage reason.');
       return;
     }
 
@@ -1320,11 +1301,11 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
               <div className="flex items-center gap-2.5">
                 <Lock size={18} className="text-amber-400 shrink-0" />
                 <span className="text-xs">
-                  {(stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 4)) ? (
+                  {(stepStatus === CaseStatus.LOADING_PORT_PROCESSING || (normCategory === 'Bonded Carrier' && stepIndex === 2)) ? (
                     <>
                       <strong>Exclusive Loading Staff Stage:</strong> Only <strong>Loading Port Staff</strong> can update the Loading workflow or generate the Loading Bill. (Current Role: <strong>{userRole}</strong> — View Only)
                     </>
-                  ) : (stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL || (normCategory === 'Bonded Carrier' && (stepIndex === 6 || stepIndex === 7))) ? (
+                  ) : (stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL || (normCategory === 'Bonded Carrier' && stepIndex === 4)) ? (
                     <>
                       <strong>Exclusive Destination Staff Stage:</strong> Only <strong>Destination Port Staff</strong> can update the Destination Unloading workflow or generate the Destination Bill. (Current Role: <strong>{userRole}</strong> — View Only)
                     </>
@@ -1507,8 +1488,8 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
             />
           )}
 
-          {/* BONDED CARRIER (CORE 8-STEP WORKFLOW) */}
-          {(normCategory === 'Bonded Carrier' || !['Customs Clearance', 'Afghan Transit', 'TIR', 'Transportation of Private Cargo', 'Warehousing & Distribution', 'Car Carrier', 'ISO Tank Service', 'Breakbulk / Chartering Services', 'Liner & NVOCC'].includes(normCategory)) && (
+          {/* BONDED CARRIER (CORE 5-STEP WORKFLOW: Shipping Line DO -> Vehicle Assignment -> Loading Port -> In Transit -> Destination Port) */}
+          {(normCategory === 'Bonded Carrier' || !['Customs Clearance', 'Afghan Transit', 'TIR', 'Transportation of Private Cargo', 'Warehousing & Distribution', 'Car Carrier', 'ISO Tank Service', 'Breakbulk / Chartering Services', 'Liner & NVOCC', 'Import & Export Services'].includes(normCategory)) && (
             <div className="space-y-6">
               {targetCase.subCategory && targetCase.subCategory !== 'Standard Container / General Cargo' && (
                 <CargoEquipmentSubCategoryFields
@@ -1521,7 +1502,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                 />
               )}
           {/* STEP 1: SHIPPING LINE DO */}
-          {stepIndex === 0 && (
+          {(stepIndex === 0 || stepStatus === CaseStatus.SHIPPING_LINE_DO) && (
             <div className="space-y-4">
               {/* Top Choice: Arrange by DPL vs Arrange by Client */}
               <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
@@ -1787,189 +1768,8 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
             </div>
           )}
 
-          {/* STEP 2: TP FILING */}
-          {stepIndex === 1 && (
-            <div className="space-y-4">
-              {/* TP/GD Print Document Upload */}
-              <WorkflowMultiUploader
-                label="Customs TP / GD Print Document"
-                sublabel="Upload customs transit permit or goods declaration (Supports multi-page, camera capture, replace & remove)"
-                urlField="tpGdPrintUrl"
-                nameField="tpGdPrintName"
-                formData={formData}
-                setFormData={setFormData}
-                onPreview={setActivePdfPreview}
-              />
-
-              {/* Number & Date */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-gray-300 block mb-1.5">TP / GD Reference Number</label>
-                  <input 
-                    type="text"
-                    value={formData.tpGdNumber}
-                    onChange={(e) => setFormData({ ...formData, tpGdNumber: e.target.value, referenceNo: e.target.value })}
-                    placeholder="e.g. KPT-TP-2024-998"
-                    className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-300 block mb-1.5">TP Filing Date</label>
-                  <input 
-                    type="date"
-                    value={formData.tpFilingDate}
-                    onChange={(e) => setFormData({ ...formData, tpFilingDate: e.target.value, date: e.target.value })}
-                    className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white"
-                  />
-                </div>
-              </div>
-
-              {/* Item Description */}
-              <div>
-                <label className="font-semibold text-gray-300 block mb-1.5">Item Description as per TP/GD</label>
-                <textarea 
-                  value={formData.tpItemDescription}
-                  onChange={(e) => setFormData({ ...formData, tpItemDescription: e.target.value })}
-                  placeholder="Enter goods description, packaging count, HS codes, or cargo specifications as stated on the TP/GD document..."
-                  rows={3}
-                  className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-white placeholder-gray-500"
-                />
-              </div>
-
-              {/* Filing Entity Toggle */}
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 flex items-center justify-between">
-                <div>
-                  <span className="font-bold text-white text-sm block">Filing Entity</span>
-                  <span className="text-gray-400 text-[11px]">Select whether TP was filed by the client or DPL customs brokerage</span>
-                </div>
-                <div className="flex rounded-xl bg-slate-800 p-1 border border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, tpFilingEntity: 'Client' })}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                      formData.tpFilingEntity === 'Client' ? 'bg-brand-600 text-white shadow' : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    Filed by Client
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, tpFilingEntity: 'DPL' })}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                      formData.tpFilingEntity === 'DPL' ? 'bg-emerald-600 text-white shadow' : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    Filed by DPL
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: EXCISE PAYMENT */}
-          {stepIndex === 2 && (
-            <div className="space-y-4">
-              {/* Payment Entity Handled By (Client vs DPL) */}
-              <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 flex items-center justify-between">
-                <div>
-                  <span className="font-bold text-white text-sm block">Excise Payment Handled By</span>
-                  <span className="text-[11px] text-gray-400">
-                    {formData.exciseHandledBy === 'DPL' 
-                      ? 'Arranged by DPL: Auto-appends excise amount to final client invoice' 
-                      : 'Arranged by Client: Expense not billed to invoice'}
-                  </span>
-                </div>
-                <div className="flex rounded-xl bg-slate-800 p-1 border border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, exciseHandledBy: 'Client' })}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                      (formData.exciseHandledBy || 'Client') === 'Client' ? 'bg-brand-600 text-white shadow' : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    Paid by Client
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, exciseHandledBy: 'DPL' })}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                      formData.exciseHandledBy === 'DPL' ? 'bg-emerald-600 text-white shadow' : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    Paid by DPL
-                  </button>
-                </div>
-              </div>
-
-              {/* Payment Receipt */}
-              <WorkflowMultiUploader
-                label="Excise Payment Receipt"
-                sublabel="Upload bank challan / provincial excise receipt (Supports multi-page, camera capture, replace & remove)"
-                urlField="exciseReceiptUrl"
-                nameField="exciseReceiptName"
-                formData={formData}
-                setFormData={setFormData}
-                onPreview={setActivePdfPreview}
-              />
-
-              {/* Excise Amount & Reference */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-gray-300 block mb-1.5">Excise Paid Amount (PKR)</label>
-                  <input 
-                    type="number"
-                    value={formData.exciseAmount || ''}
-                    onChange={(e) => setFormData({ ...formData, exciseAmount: Number(e.target.value) })}
-                    placeholder="e.g. 4500"
-                    className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="font-semibold text-gray-300 block mb-1.5">Excise Challan / Reference No.</label>
-                  <input 
-                    type="text"
-                    value={formData.exciseReferenceNo}
-                    onChange={(e) => setFormData({ ...formData, exciseReferenceNo: e.target.value, referenceNo: e.target.value })}
-                    placeholder="e.g. EXC-SND-99210"
-                    className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* Mandatory Pakistan Administrative Region */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-amber-400 block mb-1.5 flex items-center gap-1.5">
-                    <MapPin size={13} /> Excise Administrative Region (Mandatory)
-                  </label>
-                  <select 
-                    value={formData.exciseRegion}
-                    onChange={(e) => setFormData({ ...formData, exciseRegion: e.target.value })}
-                    className="w-full bg-slate-800 border border-amber-500/40 rounded-xl px-3 py-2 text-white font-semibold focus:border-amber-400 focus:outline-none"
-                  >
-                    {PAKISTAN_REGIONS.map(reg => (
-                      <option key={reg} value={reg} className="bg-slate-900 text-white">
-                        {reg}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="font-semibold text-gray-300 block mb-1.5">Excise Payment Date</label>
-                  <input 
-                    type="date"
-                    value={formData.excisePaymentDate}
-                    onChange={(e) => setFormData({ ...formData, excisePaymentDate: e.target.value, date: e.target.value })}
-                    className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-white"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 4: VEHICLE ASSIGNMENT (STEP INDEX 3) */}
-          {(stepIndex === 3 || stepStatus === CaseStatus.VEHICLE_ASSIGNMENT) && (
+          {/* STEP 2: VEHICLE ASSIGNMENT (STEP INDEX 1) */}
+          {(stepIndex === 1 || stepStatus === CaseStatus.VEHICLE_ASSIGNMENT) && (
             <div className="space-y-4">
               {/* Vehicle Registration & DB Verification */}
               <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
@@ -2197,18 +1997,18 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                 )}
               </div>
 
-              {/* Driver Information, Mobile Number & Compulsory Dual-Sided CNIC (Entered in Step 4 by Documentation Manager) */}
+              {/* Driver Information, Mobile Number & Single Combined CNIC PDF/Scan (Entered in Step 2 by Documentation Manager) */}
               <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <label className="font-bold text-white text-sm">Driver Details &amp; ID Card (Front &amp; Back)</label>
+                      <label className="font-bold text-white text-sm">Driver Details &amp; ID Card (Single PDF / Scan — Front &amp; Back)</label>
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-bold">
                         Documentation Manager
                       </span>
                     </div>
                     <span className="text-[11px] text-gray-400 block mt-0.5">
-                      Enter Driver Full Name, Mobile Number, ID Card Number, and upload ID Card Front &amp; Back during Vehicle Assignment. Typing CNIC auto-loads existing driver records from backup.
+                      Enter Driver Full Name, Mobile Number, ID Card Number, and upload 1 combined PDF or scan containing Front &amp; Back of the Driver ID Card. Typing CNIC auto-loads existing driver records from backup.
                     </span>
                   </div>
                 </div>
@@ -2258,42 +2058,31 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
                   </div>
                 </div>
 
-                {/* Dual-Sided CNIC Compulsory Uploads */}
-                <div className="space-y-3 pt-1">
-                  <span className="text-gray-300 font-semibold block text-xs">
-                    Driver ID Card Front &amp; Back (Mandatory in Step 4 Vehicle Assignment)
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <WorkflowMultiUploader
-                      label="Driver CNIC Front Side *"
-                      sublabel="Upload or scan CNIC front (Image / Document Scan)"
-                      urlField="driverCnicFrontUrl"
-                      nameField="driverCnicFrontName"
-                      required={true}
-                      isPhotoOnly={true}
-                      accept="image/*"
-                      allowCamera={true}
-                      compact={true}
-                      formData={formData}
-                      setFormData={setFormData}
-                      onPreview={setActivePdfPreview}
-                    />
-
-                    <WorkflowMultiUploader
-                      label="Driver CNIC Back Side *"
-                      sublabel="Upload or scan CNIC back (Image / Document Scan)"
-                      urlField="driverCnicBackUrl"
-                      nameField="driverCnicBackName"
-                      required={true}
-                      isPhotoOnly={true}
-                      accept="image/*"
-                      allowCamera={true}
-                      compact={true}
-                      formData={formData}
-                      setFormData={setFormData}
-                      onPreview={setActivePdfPreview}
-                    />
-                  </div>
+                {/* Single Combined CNIC PDF / Image Upload (Front & Back in 1 File) */}
+                <div className="space-y-2 pt-1">
+                  <WorkflowMultiUploader
+                    label="Driver ID Card / CNIC (Single PDF or Scan — Front & Back in 1 File) *"
+                    sublabel="Upload 1 PDF or image containing both Front & Back of Driver CNIC (Prints As-It-Is)"
+                    urlField="driverCnicFrontUrl"
+                    nameField="driverCnicFrontName"
+                    required={true}
+                    isPhotoOnly={false}
+                    accept="application/pdf,image/*"
+                    allowCamera={true}
+                    compact={false}
+                    formData={formData}
+                    setFormData={(updater: any) => {
+                      setFormData(prev => {
+                        const next = typeof updater === 'function' ? updater(prev) : updater;
+                        return {
+                          ...next,
+                          driverCnicBackUrl: '',
+                          driverCnicBackName: ''
+                        };
+                      });
+                    }}
+                    onPreview={setActivePdfPreview}
+                  />
                 </div>
 
                 {/* Optional Driving License Document */}
@@ -2366,8 +2155,8 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
             </div>
           )}
 
-          {/* STEP 5: LOADING PORT PROCESSING — SINGLE-PAGE COMPACT VIEW (STEP INDEX 4) */}
-          {(stepIndex === 4 || stepStatus === CaseStatus.LOADING_PORT_PROCESSING) && (() => {
+          {/* STEP 3: LOADING PORT PROCESSING — SINGLE-PAGE COMPACT VIEW (STEP INDEX 2) */}
+          {(stepIndex === 2 || stepStatus === CaseStatus.LOADING_PORT_PROCESSING) && (() => {
             const displayVehicleNo =
               formData.assignedVehicleNo ||
               targetCase.vehicleAssignment?.vehicleNo ||
@@ -2533,8 +2322,8 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
             );
           })()}
 
-          {/* STEP 6: IN TRANSIT & DESTINATION VEHICLE RECEPTION TRIGGER (STEP INDEX 5) */}
-          {(stepIndex === 5 || stepStatus === CaseStatus.IN_TRANSIT) && (
+          {/* STEP 4: IN TRANSIT & DESTINATION VEHICLE RECEPTION TRIGGER (STEP INDEX 3) */}
+          {(stepIndex === 3 || stepStatus === CaseStatus.IN_TRANSIT) && (
             <div className="space-y-5">
               {/* Motion Feature: Animated Transport Carrier */}
               <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-blue-500/30 relative overflow-hidden">
@@ -2621,8 +2410,8 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
             </div>
           )}
 
-          {/* STEP 7: DESTINATION PORT ARRIVAL — SINGLE-PAGE COMPACT VIEW (STEP INDEX 6 / 7) */}
-          {(stepIndex === 6 || stepIndex === 7 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL) && (() => {
+          {/* STEP 5: DESTINATION PORT ARRIVAL — SINGLE-PAGE COMPACT VIEW (STEP INDEX 4) */}
+          {(stepIndex === 4 || stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL) && (() => {
             const displayVehicleNo =
               formData.assignedVehicleNo ||
               targetCase.vehicleAssignment?.vehicleNo ||
@@ -2834,7 +2623,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
           )}
 
           {/* Live Transit Route Locations History (Shown strictly on Transit step so Loading & Destination stay single-screen) */}
-          {(stepIndex === 5 || stepStatus === CaseStatus.IN_TRANSIT) && (
+          {(stepStatus === CaseStatus.IN_TRANSIT || (normCategory === 'Bonded Carrier' && stepIndex === 3)) && (
             <CaseTransitHistoryCard targetCase={targetCase} compact={true} />
           )}
 
@@ -2862,9 +2651,8 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         {(() => {
           const isSinglePagePortModal =
             normCategory === 'Bonded Carrier' &&
-            (stepIndex === 4 ||
-              stepIndex === 6 ||
-              stepIndex === 7 ||
+            (stepIndex === 2 ||
+              stepIndex === 4 ||
               stepStatus === CaseStatus.LOADING_PORT_PROCESSING ||
               stepStatus === CaseStatus.DESTINATION_PORT_ARRIVAL);
           return (

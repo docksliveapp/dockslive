@@ -781,7 +781,7 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
             </div>
           </div>
 
-          {/* Dedicated Locked Transporter Heading Sub-Bar (Nichey heading ki tarah - Locked) */}
+          {/* Dedicated Locked Transporter Heading Sub-Bar */}
           <div className="px-3.5 sm:px-6 py-2.5 sm:py-3 bg-slate-900/95 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center font-bold text-base sm:text-lg shrink-0">

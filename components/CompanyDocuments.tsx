@@ -1,1587 +1,2749 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  FolderArchive, 
-  Search, 
-  Filter, 
-  Plus, 
-  Upload, 
-  Download, 
-  Trash2, 
-  Calendar, 
-  Clock, 
-  FileText, 
-  CheckCircle2, 
-  AlertCircle, 
-  Sparkles, 
-  Loader2, 
-  X, 
-  Eye, 
-  Building, 
-  Scale, 
-  Gavel, 
-  ChevronRight,
-  Send,
-  User,
-  MapPin,
-  Tag,
-  Paperclip,
-  Check,
-  FileCheck
-} from 'lucide-react';
-import { CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES } from '../types';
-import { 
-  subscribeToCompanyDocuments, 
-  saveCompanyDocumentToFirestore, 
-  deleteCompanyDocumentFromFirestore,
-  subscribeToCompanyCategories,
-  saveCompanyCategoryToFirestore
-} from '../services/dbService';
-import { analyzeCompanyDocumentWithAI, downloadFile } from '../services/geminiService';
-import { resolveStoredDocumentDataUrl } from '../services/documentStorage';
-import { safeAppStorage } from '../services/storage';
-import { useBranding } from '../services/brandingService';
-import { useActiveCompany } from '../services/companyService';
-import { sendAppNotification } from '../services/notificationService';
-import { jsPDF } from 'jspdf';
-import { drawPdfCorporateHeader, drawPdfCorporateFooter, drawOfficialCompanyStampOnly, cleanPdfText } from '../services/pdfExportService';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Building2,
-  Landmark,
-  Shield,
-  ShieldCheck,
-  Coins,
-  TrendingUp,
-  Award,
-  AlertTriangle,
-  Siren,
-  FileSignature,
-  CreditCard,
-  HardDrive,
+  FolderArchive,
   FolderOpen,
   FolderPlus,
-  Layers,
-  FileDown,
-  ArrowRight,
-  LayoutGrid
+  Scale,
+  Landmark,
+  Building2,
+  ShieldCheck,
+  FileText,
+  Tag,
+  Search,
+  Upload,
+  Plus,
+  Download,
+  Eye,
+  Edit,
+  Trash2,
+  ChevronRight,
+  Calendar,
+  Clock,
+  Gavel,
+  Bell,
+  AlertTriangle,
+  CheckCircle2,
+  Lock,
+  KeyRound,
+  EyeOff,
+  Copy,
+  Check,
+  Database,
+  X,
+  Loader2,
+  Filter,
+  HardDrive,
+  Award,
+  CreditCard,
+  TrendingUp,
+  FileSignature,
+  Users
 } from 'lucide-react';
+import {
+  CompanyDocument,
+  CorporateDocumentStatus,
+  CorporateLegalCase,
+  CorporateRecipientEntity,
+  CorporateRootCategory,
+  CorporateVaultCredential,
+  LegalCaseTrack,
+  QuotationStatus
+} from '../types';
+import {
+  subscribeToCompanyDocuments,
+  saveCompanyDocumentToFirestore,
+  deleteCompanyDocumentFromFirestore,
+  subscribeToCorporateLegalCases,
+  saveCorporateLegalCaseToFirestore,
+  deleteCorporateLegalCaseFromFirestore,
+  subscribeToCorporateVaultCredentials,
+  saveCorporateVaultCredentialToFirestore,
+  deleteCorporateVaultCredentialFromFirestore
+} from '../services/dbService';
+import {
+  CORPORATE_ROOT_CATEGORIES,
+  LEGAL_LOGISTICS_CRIMINAL_SUBFOLDERS,
+  LEGAL_CIVIL_CORPORATE_SUBFOLDERS,
+  getProvisionedLegalSubFolders,
+  TAX_AUTHORITIES,
+  DEFAULT_FISCAL_YEARS,
+  ASSETS_SUBFOLDERS,
+  MASTER_COMPANY_DOC_FOLDERS,
+  RECIPIENT_ENTITIES,
+  DOCUMENT_STATUS_TAGS,
+  QUOTATION_STATUSES,
+  QUOTATION_SERVICE_TYPES,
+  resolveDocumentHierarchy,
+  evaluateDocumentAlarms,
+  POSTGRESQL_CORPORATE_DMS_DDL,
+  FIRESTORE_CORPORATE_DMS_SPEC
+} from '../services/corporateFilingArchitecture';
+import { resolveStoredDocumentDataUrl } from '../services/documentStorage';
+import { downloadFile } from '../services/geminiService';
+import { safeAppStorage } from '../services/storage';
+import { useActiveCompany } from '../services/companyService';
+import { ThemeToggleSwitch } from './ThemeToggleSwitch';
+import { UniversalDocumentPreviewModal, DataMappingCheckItem } from './UniversalDocumentPreviewModal';
+import { CompanyDocumentUploadModal, UploadHierarchyPreset } from './CompanyDocumentUploadModal';
+import { jsPDF } from 'jspdf';
+import {
+  drawPdfCorporateHeader,
+  drawPdfCorporateFooter,
+  drawOfficialCompanyStampOnly,
+  cleanPdfText
+} from '../services/pdfExportService';
 
-// Category color badges & rich metadata
-export interface CategoryMeta {
-  icon: React.ElementType;
-  description: string;
-  gradient: string;
-  badgeBg: string;
-  textColor: string;
-  borderColor: string;
-  iconBg: string;
-  glowColor: string;
+const CUSTOM_FISCAL_YEARS_KEY = 'mak_corp_dms_fiscal_years';
+
+function mapActiveCompanyToEntity(companyId?: string): CorporateRecipientEntity {
+  const clean = String(companyId || '').toLowerCase();
+  if (clean.includes('truckit')) return 'Truckit';
+  if (clean.includes('muhib')) return 'Muhib';
+  if (clean.includes('vantage')) return 'Vantage';
+  if (clean.includes('docks')) return 'Docks';
+  return 'MAK Group';
 }
 
-export const CATEGORY_META: Record<string, CategoryMeta> = {
-  'SECP': {
-    icon: Building2,
-    description: 'Corporate filings, Form 29, incorporation & statutory compliance',
-    gradient: 'from-blue-950/60 to-slate-900/90 hover:from-blue-900/40 hover:to-slate-850',
-    badgeBg: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-    textColor: 'text-blue-400',
-    borderColor: 'border-blue-500/30 hover:border-blue-400/70',
-    iconBg: 'bg-blue-500/20 text-blue-400',
-    glowColor: 'group-hover:shadow-blue-500/20'
-  },
-  'SRB': {
-    icon: Landmark,
-    description: 'Sindh Revenue Board, provincial sales tax & withholding filings',
-    gradient: 'from-emerald-950/60 to-slate-900/90 hover:from-emerald-900/40 hover:to-slate-850',
-    badgeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-    textColor: 'text-emerald-400',
-    borderColor: 'border-emerald-500/30 hover:border-emerald-400/70',
-    iconBg: 'bg-emerald-500/20 text-emerald-400',
-    glowColor: 'group-hover:shadow-emerald-500/20'
-  },
-  'FBR income tax': {
-    icon: Coins,
-    description: 'Federal Board of Revenue, income tax returns, CPRs & audit notices',
-    gradient: 'from-amber-950/60 to-slate-900/90 hover:from-amber-900/40 hover:to-slate-850',
-    badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-    textColor: 'text-amber-400',
-    borderColor: 'border-amber-500/30 hover:border-amber-400/70',
-    iconBg: 'bg-amber-500/20 text-amber-400',
-    glowColor: 'group-hover:shadow-amber-500/20'
-  },
-  'PAKISTAN customs': {
-    icon: Shield,
-    description: 'Customs Collectorates, WeBOC, GDs, port clearance & orders',
-    gradient: 'from-red-950/60 to-slate-900/90 hover:from-red-900/40 hover:to-slate-850',
-    badgeBg: 'bg-red-500/20 text-red-300 border-red-500/30',
-    textColor: 'text-red-400',
-    borderColor: 'border-red-500/30 hover:border-red-400/70',
-    iconBg: 'bg-red-500/20 text-red-400',
-    glowColor: 'group-hover:shadow-red-500/20'
-  },
-  'State Bank of Pakistan': {
-    icon: Landmark,
-    description: 'Central bank foreign exchange, E-forms, remittance & approvals',
-    gradient: 'from-teal-950/60 to-slate-900/90 hover:from-teal-900/40 hover:to-slate-850',
-    badgeBg: 'bg-teal-500/20 text-teal-300 border-teal-500/30',
-    textColor: 'text-teal-400',
-    borderColor: 'border-teal-500/30 hover:border-teal-400/70',
-    iconBg: 'bg-teal-500/20 text-teal-400',
-    glowColor: 'group-hover:shadow-teal-500/20'
-  },
-  'Stocks Exchange': {
-    icon: TrendingUp,
-    description: 'Pakistan Stock Exchange (PSX), corporate shares & equity records',
-    gradient: 'from-purple-950/60 to-slate-900/90 hover:from-purple-900/40 hover:to-slate-850',
-    badgeBg: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
-    textColor: 'text-purple-400',
-    borderColor: 'border-purple-500/30 hover:border-purple-400/70',
-    iconBg: 'bg-purple-500/20 text-purple-400',
-    glowColor: 'group-hover:shadow-purple-500/20'
-  },
-  'Deposits/Guaranties': {
-    icon: ShieldCheck,
-    description: 'Port authority security deposits, bank guarantees & cash bonds',
-    gradient: 'from-cyan-950/60 to-slate-900/90 hover:from-cyan-900/40 hover:to-slate-850',
-    badgeBg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
-    textColor: 'text-cyan-400',
-    borderColor: 'border-cyan-500/30 hover:border-cyan-400/70',
-    iconBg: 'bg-cyan-500/20 text-cyan-400',
-    glowColor: 'group-hover:shadow-cyan-500/20'
-  },
-  'Chamber of Commerce': {
-    icon: Award,
-    description: 'KCCI / FPCCI membership, certificates of origin & attestations',
-    gradient: 'from-indigo-950/60 to-slate-900/90 hover:from-indigo-900/40 hover:to-slate-850',
-    badgeBg: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
-    textColor: 'text-indigo-400',
-    borderColor: 'border-indigo-500/30 hover:border-indigo-400/70',
-    iconBg: 'bg-indigo-500/20 text-indigo-400',
-    glowColor: 'group-hover:shadow-indigo-500/20'
-  },
-  'Showcase/ONOs reply': {
-    icon: AlertTriangle,
-    description: 'Show Cause Notices, Order in Originals, hearings & formal replies',
-    gradient: 'from-orange-950/60 to-slate-900/90 hover:from-orange-900/40 hover:to-slate-850',
-    badgeBg: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
-    textColor: 'text-orange-400',
-    borderColor: 'border-orange-500/30 hover:border-orange-400/70',
-    iconBg: 'bg-orange-500/20 text-orange-400',
-    glowColor: 'group-hover:shadow-orange-500/20'
-  },
-  'FIRs': {
-    icon: Siren,
-    description: 'First Information Reports, police notices & regulatory citations',
-    gradient: 'from-rose-950/60 to-slate-900/90 hover:from-rose-900/40 hover:to-slate-850',
-    badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
-    textColor: 'text-rose-400',
-    borderColor: 'border-rose-500/30 hover:border-rose-400/70',
-    iconBg: 'bg-rose-500/20 text-rose-400',
-    glowColor: 'group-hover:shadow-rose-500/20'
-  },
-  'Petitions': {
-    icon: Scale,
-    description: 'High Court, Supreme Court & Customs Appellate Tribunal petitions',
-    gradient: 'from-violet-950/60 to-slate-900/90 hover:from-violet-900/40 hover:to-slate-850',
-    badgeBg: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
-    textColor: 'text-violet-400',
-    borderColor: 'border-violet-500/30 hover:border-violet-400/70',
-    iconBg: 'bg-violet-500/20 text-violet-400',
-    glowColor: 'group-hover:shadow-violet-500/20'
-  },
-  "Agreement's": {
-    icon: FileSignature,
-    description: 'Vendor, client, warehouse, lease agreements & corporate contracts',
-    gradient: 'from-sky-950/60 to-slate-900/90 hover:from-sky-900/40 hover:to-slate-850',
-    badgeBg: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
-    textColor: 'text-sky-400',
-    borderColor: 'border-sky-500/30 hover:border-sky-400/70',
-    iconBg: 'bg-sky-500/20 text-sky-400',
-    glowColor: 'group-hover:shadow-sky-500/20'
-  },
-  'Quotations': {
-    icon: Tag,
-    description: 'Commercial quotes, freight proposals & tariff rate cards',
-    gradient: 'from-lime-950/60 to-slate-900/90 hover:from-lime-900/40 hover:to-slate-850',
-    badgeBg: 'bg-lime-500/20 text-lime-300 border-lime-500/30',
-    textColor: 'text-lime-400',
-    borderColor: 'border-lime-500/30 hover:border-lime-400/70',
-    iconBg: 'bg-lime-500/20 text-lime-400',
-    glowColor: 'group-hover:shadow-lime-500/20'
-  },
-  'Banks': {
-    icon: CreditCard,
-    description: 'Bank statements, sanction letters, LC facilities & signatory cards',
-    gradient: 'from-emerald-950/60 to-slate-900/90 hover:from-emerald-900/40 hover:to-slate-850',
-    badgeBg: 'bg-emerald-600/20 text-emerald-300 border-emerald-600/30',
-    textColor: 'text-emerald-400',
-    borderColor: 'border-emerald-600/30 hover:border-emerald-500/70',
-    iconBg: 'bg-emerald-600/20 text-emerald-400',
-    glowColor: 'group-hover:shadow-emerald-500/20'
-  },
-  'Assets': {
-    icon: HardDrive,
-    description: 'Vehicle ownership books, warehouse titles, office machinery deeds',
-    gradient: 'from-yellow-950/60 to-slate-900/90 hover:from-yellow-900/40 hover:to-slate-850',
-    badgeBg: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
-    textColor: 'text-yellow-400',
-    borderColor: 'border-yellow-500/30 hover:border-yellow-400/70',
-    iconBg: 'bg-yellow-500/20 text-yellow-400',
-    glowColor: 'group-hover:shadow-yellow-500/20'
+function getRootCategoryIcon(cat: CorporateRootCategory) {
+  switch (cat) {
+    case 'Legal':
+      return Scale;
+    case 'Tax':
+      return Landmark;
+    case 'Assets':
+      return HardDrive;
+    case 'Company Documents':
+      return ShieldCheck;
+    case 'Quotations':
+      return Tag;
   }
-};
+}
 
-export const getCategoryMeta = (cat: string): CategoryMeta => {
-  if (CATEGORY_META[cat]) return CATEGORY_META[cat];
-  return {
-    icon: FolderArchive,
-    description: 'Corporate archive & official regulatory records folder',
-    gradient: 'from-slate-900 to-slate-950 hover:from-slate-850 hover:to-slate-900',
-    badgeBg: 'bg-white/10 text-gray-200 border-white/20',
-    textColor: 'text-amber-400',
-    borderColor: 'border-white/10 hover:border-amber-500/50',
-    iconBg: 'bg-white/10 text-amber-400',
-    glowColor: 'group-hover:shadow-amber-500/20'
-  };
-};
+function getMasterFolderIcon(folderId: string) {
+  switch (folderId) {
+    case 'SECP':
+      return Building2;
+    case 'Chamber of Commerce':
+      return Award;
+    case 'Licence Book':
+      return ShieldCheck;
+    case 'Owners ID Cards & Passports':
+      return Users;
+    case 'Insurance Guarantees':
+      return CreditCard;
+    case 'Customs Certificates & Permissions':
+      return FolderArchive;
+    case 'Office Rent Agreements & Slips':
+      return FileSignature;
+    case 'Office ID Passwords (Secure Vault)':
+      return Lock;
+    case 'Stock Exchange Documents':
+      return TrendingUp;
+    case 'State Bank Documents':
+      return Landmark;
+    default:
+      return FolderOpen;
+  }
+}
 
-const getCategoryStyle = (cat: string) => {
-  const meta = getCategoryMeta(cat);
-  const parts = meta.badgeBg.split(' ');
-  return { bg: parts[0] || 'bg-white/10', text: meta.textColor, border: parts[2] || 'border-white/20' };
-};
+function getStatusBadgeClasses(status: CorporateDocumentStatus): string {
+  switch (status) {
+    case 'Active':
+      return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+    case 'Pending Hearing':
+      return 'bg-sky-500/15 text-sky-300 border-sky-400/30';
+    case 'Expired':
+      return 'bg-rose-500/15 text-rose-300 border-rose-500/30';
+    case 'Resolved':
+      return 'bg-teal-500/15 text-teal-300 border-teal-500/30';
+    case 'Archived':
+      return 'bg-white/10 text-gray-300 border-white/15';
+    default:
+      return 'bg-white/10 text-gray-300 border-white/15';
+  }
+}
+
+function getQuotationBadgeClasses(status: QuotationStatus): string {
+  switch (status) {
+    case 'Accepted':
+      return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+    case 'Rejected':
+      return 'bg-rose-500/15 text-rose-300 border-rose-500/30';
+    default:
+      return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+  }
+}
 
 export const CompanyDocuments: React.FC = () => {
-  const { customLogo, companyName } = useBranding();
   const { activeCompany } = useActiveCompany();
+  const defaultEntity = useMemo(
+    () => mapActiveCompanyToEntity(activeCompany?.id),
+    [activeCompany?.id]
+  );
 
-  // State
+  // Real-time Firestore Collections
   const [documents, setDocuments] = useState<CompanyDocument[]>([]);
-  const [categories, setCategories] = useState<string[]>(DEFAULT_COMPANY_DOCUMENT_CATEGORIES);
-  const [selectedCategoryTab, setSelectedCategoryTab] = useState<string>('ALL');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const [legalCases, setLegalCases] = useState<CorporateLegalCase[]>([]);
+  const [vaultCredentials, setVaultCredentials] = useState<CorporateVaultCredential[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Modals & Category Window View
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showAdvanceSearchModal, setShowAdvanceSearchModal] = useState(false);
-  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
-  const [selectedDocForPreview, setSelectedDocForPreview] = useState<CompanyDocument | null>(null);
-  const [activeCategoryModal, setActiveCategoryModal] = useState<string | null>(null);
-  const [categoryModalSearch, setCategoryModalSearch] = useState<string>('');
-  const [viewMode, setViewMode] = useState<'categories' | 'documents'>('categories');
+  // Multi-Tier Navigation State (Drives Breadcrumbs & Active View)
+  const [activeRoot, setActiveRoot] = useState<CorporateRootCategory | null>(null);
+  const [activeLegalCaseId, setActiveLegalCaseId] = useState<string | null>(null);
+  const [activeSubFolder, setActiveSubFolder] = useState<string | null>(null);
+  const [activeTaxAuthority, setActiveTaxAuthority] = useState<string | null>(null);
+  const [activeTaxYear, setActiveTaxYear] = useState<string | null>(null);
+  const [activeAssetGroup, setActiveAssetGroup] = useState<string | null>(null);
 
-  // New Category Form
-  const [newCategoryName, setNewCategoryName] = useState('');
+  // Global & Watchlist Filters
+  const [globalSearch, setGlobalSearch] = useState<string>('');
+  const [entityFilter, setEntityFilter] = useState<string>('ALL');
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [alarmWatchFilter, setAlarmWatchFilter] = useState<'NONE' | 'HEARINGS' | 'EXPIRING_SOON' | 'EXPIRED'>('NONE');
 
-  // Advance Search Filters
-  const [advCategory, setAdvCategory] = useState('ALL');
-  const [advSubcategory, setAdvSubcategory] = useState('');
-  const [advDateFrom, setAdvDateFrom] = useState('');
-  const [advDateTo, setAdvDateTo] = useState('');
-  const [advTitle, setAdvTitle] = useState('');
-  const [advFrom, setAdvFrom] = useState('');
-  const [advTo, setAdvTo] = useState('');
-  const [advHearingFilter, setAdvHearingFilter] = useState<'ALL' | 'YES' | 'NO'>('ALL');
-  const [isAdvActive, setIsAdvActive] = useState(false);
+  // Asset & Quotation Specific Filters
+  const [assetSubTypeFilter, setAssetSubTypeFilter] = useState<string>('ALL');
+  const [quoteClientSearch, setQuoteClientSearch] = useState<string>('');
+  const [quoteServiceFilter, setQuoteServiceFilter] = useState<string>('ALL');
+  const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>('ALL');
+  const [quoteDateFrom, setQuoteDateFrom] = useState<string>('');
+  const [quoteDateTo, setQuoteDateTo] = useState<string>('');
 
-  // Add Document Form State
-  const [docCategory, setDocCategory] = useState(DEFAULT_COMPANY_DOCUMENT_CATEGORIES[0]);
-  const [docDate, setDocDate] = useState(new Date().toISOString().split('T')[0]);
-  const [docTitle, setDocTitle] = useState('');
-  const [docFrom, setDocFrom] = useState('');
-  const [docTo, setDocTo] = useState(() => `${activeCompany?.legalTitle || activeCompany?.name || 'Company Operations'}, Karachi`);
-  const [docSubject, setDocSubject] = useState('');
+  // Custom Fiscal Years State
+  const [customFiscalYears, setCustomFiscalYears] = useState<string[]>(() =>
+    safeAppStorage.getJSON<string[]>(CUSTOM_FISCAL_YEARS_KEY, [])
+  );
+  const [showAddYearModal, setShowAddYearModal] = useState<boolean>(false);
+  const [newFiscalYearInput, setNewFiscalYearInput] = useState<string>('');
 
-  useEffect(() => {
-    setDocTo(`${activeCompany?.legalTitle || activeCompany?.name || 'Company Operations'}, Karachi`);
-  }, [activeCompany?.id]);
-  const [docRefNo, setDocRefNo] = useState('');
-  const [hearingRequired, setHearingRequired] = useState(false);
-  const [hearingDate, setHearingDate] = useState('');
-  const [hearingTime, setHearingTime] = useState('');
-  const [hearingNotes, setHearingNotes] = useState('');
-  const [hasExpiry, setHasExpiry] = useState(false);
-  const [expiryDate, setExpiryDate] = useState('');
+  // Upload / Edit Document Modal State
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
+  const [uploadPreset, setUploadPreset] = useState<UploadHierarchyPreset | undefined>(undefined);
+  const [editingDocument, setEditingDocument] = useState<CompanyDocument | null>(null);
 
-  // Uploaded Files for Add Modal (Supports Multiple!)
-  interface UploadItem {
-    name: string;
-    dataUrl: string;
-    type: string;
-    size: number;
-    status: 'idle' | 'analyzing' | 'done';
-  }
-  const [uploadedFiles, setUploadedFiles] = useState<UploadItem[]>([]);
-  const [aiAnalyzing, setAiAnalyzing] = useState(false);
-  const [aiNotice, setAiNotice] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Universal Document Preview Modal State
+  const [previewDoc, setPreviewDoc] = useState<CompanyDocument | null>(null);
+  const [previewResolvedFile, setPreviewResolvedFile] = useState<string | null>(null);
 
-  // Subscribe to live Firestore data
+  // Dynamic Legal Case Creation & Custom Sub-Folder State
+  const [showNewLegalCaseModal, setShowNewLegalCaseModal] = useState<boolean>(false);
+  const [newCaseIdentifier, setNewCaseIdentifier] = useState<string>('');
+  const [newCaseTrack, setNewCaseTrack] = useState<LegalCaseTrack>('LOGISTICS_CRIMINAL');
+  const [newCaseEntity, setNewCaseEntity] = useState<string>(defaultEntity);
+  const [newCaseRefNo, setNewCaseRefNo] = useState<string>('');
+  const [newCaseCourt, setNewCaseCourt] = useState<string>('');
+  const [newCaseCounsel, setNewCaseCounsel] = useState<string>('');
+  const [newCaseOpposing, setNewCaseOpposing] = useState<string>('');
+  const [newCaseHearingDate, setNewCaseHearingDate] = useState<string>('');
+  const [newCaseNotes, setNewCaseNotes] = useState<string>('');
+  const [newCaseError, setNewCaseError] = useState<string | null>(null);
+  const [addingCustomSubFolder, setAddingCustomSubFolder] = useState<boolean>(false);
+  const [customSubFolderName, setCustomSubFolderName] = useState<string>('');
+
+  // Secure Vault Credential State
+  const [showVaultModal, setShowVaultModal] = useState<boolean>(false);
+  const [editingVaultItem, setEditingVaultItem] = useState<CorporateVaultCredential | null>(null);
+  const [vaultPortalName, setVaultPortalName] = useState<string>('');
+  const [vaultPortalUrl, setVaultPortalUrl] = useState<string>('');
+  const [vaultUsername, setVaultUsername] = useState<string>('');
+  const [vaultPassword, setVaultPassword] = useState<string>('');
+  const [vaultPinNote, setVaultPinNote] = useState<string>('');
+  const [vaultEntity, setVaultEntity] = useState<string>(defaultEntity);
+  const [vaultRecovery, setVaultRecovery] = useState<string>('');
+  const [vaultExpiryDate, setVaultExpiryDate] = useState<string>('');
+  const [revealedVaultIds, setRevealedVaultIds] = useState<Set<string>>(new Set());
+  const [copiedVaultField, setCopiedVaultField] = useState<string | null>(null);
+
+  // Inline Delete Confirmation IDs (No window.confirm)
+  const [confirmDeleteDocId, setConfirmDeleteDocId] = useState<string | null>(null);
+  const [confirmDeleteCaseId, setConfirmDeleteCaseId] = useState<string | null>(null);
+  const [confirmDeleteVaultId, setConfirmDeleteVaultId] = useState<string | null>(null);
+
+  // Database Schema & Architecture Modal
+  const [showSchemaModal, setShowSchemaModal] = useState<boolean>(false);
+  const [schemaTab, setSchemaTab] = useState<'POSTGRES' | 'FIRESTORE'>('POSTGRES');
+  const [copiedSchema, setCopiedSchema] = useState<boolean>(false);
+
+  // Subscribe to Firestore collections
   useEffect(() => {
     setIsLoading(true);
-    const unsubDocs = subscribeToCompanyDocuments((docs) => {
-      setDocuments(docs);
+    const unsubDocs = subscribeToCompanyDocuments((items) => {
+      setDocuments(items || []);
       setIsLoading(false);
     });
-
-    const unsubCats = subscribeToCompanyCategories((cats) => {
-      if (cats && cats.length > 0) {
-        setCategories(cats);
-      }
+    const unsubCases = subscribeToCorporateLegalCases((items) => {
+      setLegalCases(items || []);
+    });
+    const unsubVault = subscribeToCorporateVaultCredentials((items) => {
+      setVaultCredentials(items || []);
     });
 
     return () => {
       unsubDocs();
-      unsubCats();
+      unsubCases();
+      unsubVault();
     };
   }, []);
 
-  // Filtered documents
-  const filteredDocuments = useMemo(() => {
-    return documents.filter((doc) => {
-      // Category Tab
-      if (selectedCategoryTab !== 'ALL' && doc.category !== selectedCategoryTab) {
-        return false;
-      }
-
-      // Quick Search Query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const matchesQuery = 
-          (doc.title && doc.title.toLowerCase().includes(q)) ||
-          (doc.subject && doc.subject.toLowerCase().includes(q)) ||
-          (doc.from && doc.from.toLowerCase().includes(q)) ||
-          (doc.to && doc.to.toLowerCase().includes(q)) ||
-          (doc.category && doc.category.toLowerCase().includes(q)) ||
-          (doc.referenceNo && doc.referenceNo.toLowerCase().includes(q)) ||
-          (doc.documentDate && doc.documentDate.includes(q));
-
-        if (!matchesQuery) return false;
-      }
-
-      // Advance Search Filters
-      if (isAdvActive) {
-        if (advCategory !== 'ALL' && doc.category !== advCategory) return false;
-        if (advSubcategory.trim() && !doc.subcategory?.toLowerCase().includes(advSubcategory.toLowerCase().trim())) return false;
-        if (advTitle.trim() && !doc.title.toLowerCase().includes(advTitle.toLowerCase().trim())) return false;
-        if (advFrom.trim() && !doc.from.toLowerCase().includes(advFrom.toLowerCase().trim())) return false;
-        if (advTo.trim() && !doc.to.toLowerCase().includes(advTo.toLowerCase().trim())) return false;
-        if (advDateFrom && doc.documentDate < advDateFrom) return false;
-        if (advDateTo && doc.documentDate > advDateTo) return false;
-        if (advHearingFilter === 'YES' && !doc.hearingRequired) return false;
-        if (advHearingFilter === 'NO' && doc.hearingRequired) return false;
-      }
-
-      return true;
+  // Enrich every document with resolved hierarchy + live alarm evaluation
+  const enrichedDocuments = useMemo(() => {
+    return documents.map((doc) => {
+      const hierarchy = resolveDocumentHierarchy(doc);
+      const alarms = evaluateDocumentAlarms(doc);
+      return {
+        doc,
+        hierarchy,
+        alarms
+      };
     });
-  }, [documents, selectedCategoryTab, searchQuery, isAdvActive, advCategory, advSubcategory, advTitle, advFrom, advTo, advDateFrom, advDateTo, advHearingFilter]);
-
-  // Documents for the currently opened category modal window
-  const activeCategoryDocuments = useMemo(() => {
-    if (!activeCategoryModal) return [];
-    return documents.filter((doc) => {
-      if (doc.category !== activeCategoryModal) return false;
-      if (!categoryModalSearch.trim()) return true;
-      const q = categoryModalSearch.toLowerCase().trim();
-      return (
-        (doc.title && doc.title.toLowerCase().includes(q)) ||
-        (doc.subject && doc.subject.toLowerCase().includes(q)) ||
-        (doc.from && doc.from.toLowerCase().includes(q)) ||
-        (doc.to && doc.to.toLowerCase().includes(q)) ||
-        (doc.referenceNo && doc.referenceNo.toLowerCase().includes(q)) ||
-        (doc.documentDate && doc.documentDate.includes(q))
-      );
-    });
-  }, [documents, activeCategoryModal, categoryModalSearch]);
-
-  // Unique Lists for Advance Search Autocomplete/Dropdowns
-  const uniqueFromList = useMemo(() => {
-    const set = new Set<string>();
-    documents.forEach(d => { if (d.from) set.add(d.from); });
-    return Array.from(set).sort();
   }, [documents]);
 
-  const uniqueToList = useMemo(() => {
-    const set = new Set<string>();
-    documents.forEach(d => { if (d.to) set.add(d.to); });
-    return Array.from(set).sort();
-  }, [documents]);
+  // Include virtual Legal Case if legacy FIR/Petition/ONO documents exist without a created case dossier
+  const effectiveLegalCases = useMemo(() => {
+    const hasLegacyLegalDocs = enrichedDocuments.some(
+      (item) =>
+        item.hierarchy.rootCategory === 'Legal' &&
+        item.hierarchy.legalCaseId === 'legacy_general_legal_archive'
+    );
+    const existsInDb = legalCases.some((c) => c.id === 'legacy_general_legal_archive');
+    if (hasLegacyLegalDocs && !existsInDb) {
+      const virtualArchive: CorporateLegalCase = {
+        id: 'legacy_general_legal_archive',
+        identifier: 'General Legal & Enforcement Archive',
+        caseTrack: 'LOGISTICS_CRIMINAL',
+        recipientEntity: 'MAK Group',
+        courtOrForum: 'Customs / High Court / Enforcement',
+        status: 'Active',
+        subFolders: [...LEGAL_LOGISTICS_CRIMINAL_SUBFOLDERS],
+        createdAt: new Date(0).toISOString()
+      };
+      return [...legalCases, virtualArchive];
+    }
+    return legalCases;
+  }, [legalCases, enrichedDocuments]);
 
-  // Handle Multi-File Upload & AI OCR Trigger
-  const handleFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const activeLegalCase = useMemo(
+    () => effectiveLegalCases.find((c) => c.id === activeLegalCaseId) || null,
+    [effectiveLegalCases, activeLegalCaseId]
+  );
 
-    const newUploads: UploadItem[] = [];
-    const filesArray = Array.from(files);
+  // Global Alarm Metrics
+  const alarmMetrics = useMemo(() => {
+    let hearingsCount = 0;
+    let expiringSoonCount = 0;
+    let expiredCount = 0;
 
-    for (const file of filesArray) {
-      await new Promise<void>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          newUploads.push({
-            name: file.name,
-            dataUrl: ev.target?.result as string,
-            type: file.type,
-            size: file.size,
-            status: 'idle'
-          });
-          resolve();
-        };
-        reader.readAsDataURL(file);
+    for (const item of enrichedDocuments) {
+      if (entityFilter !== 'ALL' && item.hierarchy.recipientEntity !== entityFilter) continue;
+      if (item.alarms.isHearingDueOrSoon || item.alarms.isHearingOverdue) hearingsCount++;
+      if (item.alarms.isWithinExpiryAlarm) expiringSoonCount++;
+      if (item.alarms.isExpired) expiredCount++;
+    }
+
+    return {
+      total: enrichedDocuments.filter(
+        (i) => entityFilter === 'ALL' || i.hierarchy.recipientEntity === entityFilter
+      ).length,
+      hearingsCount,
+      expiringSoonCount,
+      expiredCount
+    };
+  }, [enrichedDocuments, entityFilter]);
+
+  // Reset navigation to Root Dashboard
+  const navigateToRoot = () => {
+    setActiveRoot(null);
+    setActiveLegalCaseId(null);
+    setActiveSubFolder(null);
+    setActiveTaxAuthority(null);
+    setActiveTaxYear(null);
+    setActiveAssetGroup(null);
+    setAlarmWatchFilter('NONE');
+  };
+
+  // Select Root Category Card
+  const openRootCategory = (cat: CorporateRootCategory) => {
+    setActiveRoot(cat);
+    setActiveLegalCaseId(null);
+    setActiveSubFolder(null);
+    setActiveTaxAuthority(null);
+    setActiveTaxYear(null);
+    setActiveAssetGroup(null);
+    setAlarmWatchFilter('NONE');
+    setAssetSubTypeFilter('ALL');
+  };
+
+  // Open Upload Modal with current Breadcrumb Context Pre-Selected
+  const handleOpenUploadModal = (overridePreset?: UploadHierarchyPreset) => {
+    setEditingDocument(null);
+    if (overridePreset) {
+      setUploadPreset(overridePreset);
+    } else {
+      setUploadPreset({
+        rootCategory: activeRoot || 'Company Documents',
+        legalCaseId: activeLegalCaseId || effectiveLegalCases[0]?.id,
+        subFolder: activeSubFolder || undefined,
+        taxAuthority: activeTaxAuthority || 'FBR',
+        taxYear: activeTaxYear || new Date().getFullYear().toString(),
+        assetGroup: activeAssetGroup || 'Security Deposits Tracking'
       });
     }
-
-    setUploadedFiles(prev => [...prev, ...newUploads]);
-
-    // Run AI OCR on the primary/first file to automatically extract fields
-    const primaryFile = newUploads[0];
-    if (primaryFile) {
-      setAiAnalyzing(true);
-      setAiNotice(null);
-      try {
-        const aiResult = await analyzeCompanyDocumentWithAI(primaryFile);
-
-        if (aiResult.title) setDocTitle(aiResult.title);
-        if (aiResult.category && categories.includes(aiResult.category)) {
-          setDocCategory(aiResult.category);
-        }
-        if (aiResult.documentDate) setDocDate(aiResult.documentDate);
-        if (aiResult.from) setDocFrom(aiResult.from);
-        if (aiResult.to) setDocTo(aiResult.to);
-        if (aiResult.subject) setDocSubject(aiResult.subject);
-        if (aiResult.referenceNo) setDocRefNo(aiResult.referenceNo);
-        if (aiResult.hearingRequired !== undefined) {
-          setHearingRequired(aiResult.hearingRequired);
-          if (aiResult.hearingDate) setHearingDate(aiResult.hearingDate);
-          if (aiResult.hearingTime) setHearingTime(aiResult.hearingTime);
-        }
-
-        if (aiResult.unreadFieldsNote) {
-          setAiNotice(`AI Notice: ${aiResult.unreadFieldsNote}`);
-        } else {
-          setAiNotice('✨ AI has successfully analyzed and filled document fields. Review below.');
-        }
-      } catch (err) {
-        console.warn('AI analysis notice:', err);
-        setAiNotice('Document attached. Fill in any fields manually if needed.');
-      } finally {
-        setAiAnalyzing(false);
-      }
-    }
+    setIsUploadModalOpen(true);
   };
 
-  // Save Document
-  const handleSaveDocument = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!docTitle.trim() || !docCategory) return;
-
-    const primaryFile = uploadedFiles[0];
-
-    const newDoc: CompanyDocument = {
-      id: `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      title: docTitle.trim(),
-      category: docCategory,
-      documentDate: docDate || new Date().toISOString().split('T')[0],
-      from: docFrom.trim(),
-      to: docTo.trim(),
-      subject: docSubject.trim(),
-      referenceNo: docRefNo.trim(),
-      hearingRequired: hearingRequired,
-      hearingDate: hearingRequired ? hearingDate : undefined,
-      hearingTime: hearingRequired ? hearingTime : undefined,
-      hearingNotes: hearingRequired ? hearingNotes.trim() : undefined,
-      hasExpiry,
-      expiryDate: hasExpiry ? expiryDate : undefined,
-      fileUrl: primaryFile?.dataUrl || undefined,
-      fileName: primaryFile?.name || (uploadedFiles.length > 1 ? `${uploadedFiles.length} files attached` : undefined),
-      fileType: primaryFile?.type || undefined,
-      fileSize: primaryFile?.size || undefined,
-      uploadedAt: new Date().toISOString(),
-      uploadedBy: safeAppStorage.getItem('dpl_current_user_name') || 'Documentation Manager'
-    };
-
-    await saveCompanyDocumentToFirestore(newDoc);
-
-    // Reset Form
-    setShowAddModal(false);
-    setDocTitle('');
-    setDocFrom('');
-    setDocTo(`${activeCompany?.legalTitle || activeCompany?.name || 'Company Operations'}, Karachi`);
-    setDocSubject('');
-    setDocRefNo('');
-    setHearingRequired(false);
-    setHearingDate('');
-    setHearingTime('');
-    setHearingNotes('');
-    setHasExpiry(false);
-    setExpiryDate('');
-    setUploadedFiles([]);
-    setAiNotice(null);
-  };
-
-  // Add Custom Category
-  const handleSaveCategory = async () => {
-    const trimmed = newCategoryName.trim();
-    if (!trimmed) return;
-
-    await saveCompanyCategoryToFirestore(trimmed);
-    if (!categories.includes(trimmed)) {
-      setCategories(prev => [...prev, trimmed]);
-    }
-    setDocCategory(trimmed);
-    setNewCategoryName('');
-    setShowAddCategoryModal(false);
-  };
-
-  // Delete Document
-  const handleDeleteDocument = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (window.confirm('Are you sure you want to delete this company document record?')) {
-      await deleteCompanyDocumentFromFirestore(id);
-    }
-  };
-
-  // Download PDF Handler (Downloads original uploaded attachment from memory/IDB/Cloud Chunks or creates official generated PDF)
-  const handleDownloadPdf = async (docItem: CompanyDocument) => {
-    const resolvedFileUrl = await resolveStoredDocumentDataUrl({
+  // Open Preview Modal
+  const handleOpenPreview = async (docItem: CompanyDocument) => {
+    setPreviewDoc(docItem);
+    const resolved = await resolveStoredDocumentDataUrl({
       url: docItem.fileUrl || null,
       id: docItem.id || null,
       name: docItem.fileName || docItem.title || null
     });
-    if (resolvedFileUrl) {
-      downloadFile(resolvedFileUrl, docItem.fileName || `${docItem.title.replace(/\s+/g, '_')}.pdf`);
+    setPreviewResolvedFile(resolved || docItem.fileUrl || null);
+  };
+
+  // Download Original File or Official Compliance Summary PDF
+  const handleDownloadDocument = async (docItem: CompanyDocument) => {
+    const resolvedUrl = await resolveStoredDocumentDataUrl({
+      url: docItem.fileUrl || null,
+      id: docItem.id || null,
+      name: docItem.fileName || docItem.title || null
+    });
+    if (resolvedUrl) {
+      downloadFile(resolvedUrl, docItem.fileName || `${docItem.title.replace(/\s+/g, '_')}.pdf`);
       return;
     }
 
-    // Generate formatted official PDF with jsPDF using MAK Group official letterhead
+    const hierarchy = resolveDocumentHierarchy(docItem);
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const margin = 14;
 
-    // 1. Draw unified MAK GROUP OF COMPANIES letterhead
     let currentY = await drawPdfCorporateHeader(pdf, {
-      title: 'LEGAL & COMPLIANCE RECORD',
-      refNo: docItem.referenceNo || `DOC-${docItem.id}`,
-      date: docItem.documentDate || new Date().toISOString().split('T')[0],
+      title: 'CORPORATE COMPLIANCE & FILING RECORD',
+      refNo: docItem.referenceNo || `DMS-${docItem.id.slice(-8).toUpperCase()}`,
+      date: hierarchy.issuanceDate || new Date().toISOString().split('T')[0],
       subject: docItem.subject || docItem.title
     });
 
-    // 2. Document Title Box
     pdf.setFillColor(248, 250, 252);
     pdf.setDrawColor(226, 232, 240);
-    pdf.roundedRect(margin, currentY, pageWidth - (margin * 2), 10, 1.5, 1.5, 'FD');
+    pdf.roundedRect(margin, currentY, pageWidth - margin * 2, 10, 1.5, 1.5, 'FD');
     pdf.setTextColor(15, 23, 42);
-    pdf.setFontSize(11);
+    pdf.setFontSize(10.5);
     pdf.setFont('helvetica', 'bold');
-    pdf.text(cleanPdfText(docItem.title), margin + 4, currentY + 6.5, { maxWidth: pageWidth - (margin * 2) - 8 });
-    currentY += 14;
+    pdf.text(cleanPdfText(docItem.title), margin + 4, currentY + 6.5, {
+      maxWidth: pageWidth - margin * 2 - 8
+    });
+    currentY += 15;
 
-    const addRow = (label: string, val: string, isAlert = false) => {
+    const addRow = (label: string, val?: string | number) => {
+      if (val === undefined || val === null || val === '') return;
       pdf.setFont('helvetica', 'bold');
       pdf.setFontSize(8.5);
       pdf.setTextColor(100, 116, 139);
-      pdf.text(label, margin + 4, currentY);
+      pdf.text(label, margin + 2, currentY);
 
-      pdf.setFont('helvetica', isAlert ? 'bold' : 'normal');
-      pdf.setFontSize(8.5);
-      pdf.setTextColor(isAlert ? 180 : 15, isAlert ? 83 : 23, isAlert ? 9 : 42);
-      pdf.text(cleanPdfText(val) || 'N/A', margin + 45, currentY, { maxWidth: pageWidth - margin - 50 });
+      pdf.setFont('helvetica', 'normal');
+      pdf.setTextColor(15, 23, 42);
+      pdf.text(cleanPdfText(String(val)), margin + 48, currentY, {
+        maxWidth: pageWidth - margin - 52
+      });
       currentY += 6.5;
     };
 
-    addRow('Category:', docItem.category);
-    addRow('Document Date:', docItem.documentDate);
-    if (docItem.referenceNo) addRow('Reference #:', docItem.referenceNo);
-    addRow('Sender (From):', docItem.from);
-    addRow('Recipient (To):', docItem.to);
-    addRow('Subject:', docItem.subject);
+    addRow('Primary Category:', hierarchy.rootCategory);
+    if (hierarchy.legalCaseTitle) addRow('Legal Case Dossier:', hierarchy.legalCaseTitle);
+    if (hierarchy.subFolder) addRow('Sub-Folder:', hierarchy.subFolder);
+    if (hierarchy.taxAuthority) addRow('Tax Authority / Year:', `${hierarchy.taxAuthority} — FY ${hierarchy.taxYear}`);
+    if (hierarchy.assetGroup) addRow('Asset Repository:', hierarchy.assetGroup);
+    addRow('Sender / Issuer:', hierarchy.senderIssuer);
+    addRow('Recipient Entity:', hierarchy.recipientEntity);
+    addRow('Issuance Date:', hierarchy.issuanceDate);
+    addRow('Validity Period:', docItem.unlimitedValidity ? 'Perpetual / Unlimited' : `${hierarchy.validityStartDate || '-'} to ${hierarchy.validityEndDate || '-'}`);
+    if (docItem.hearingDate) addRow('Hearing / Action Date:', `${docItem.hearingDate} ${docItem.hearingTime || ''}`);
+    addRow('Status Tag:', docItem.statusTag || 'Active');
+    if (docItem.subject) addRow('Summary / Notes:', docItem.subject);
 
-    if (docItem.hearingRequired) {
-      currentY += 3;
-      pdf.setFillColor(254, 243, 199);
-      pdf.rect(margin, currentY - 4, pageWidth - (margin * 2), 16, 'F');
-      pdf.setDrawColor(245, 158, 11);
-      pdf.rect(margin, currentY - 4, pageWidth - (margin * 2), 16, 'S');
-
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(8);
-      pdf.setTextColor(180, 83, 9);
-      pdf.text(`LEGAL HEARING SCHEDULED: ${docItem.hearingDate || 'TBD'} ${docItem.hearingTime ? 'at ' + docItem.hearingTime : ''}`, margin + 4, currentY + 3);
-      if (docItem.hearingNotes) {
-        pdf.setFont('helvetica', 'normal');
-        pdf.setFontSize(7.5);
-        pdf.text(`Notes: ${cleanPdfText(docItem.hearingNotes)}`, margin + 4, currentY + 9);
-      }
-      currentY += 18;
-    }
-
-    // 3. Issuing Company Signature & Official Seal at bottom
-    const stampY = Math.max(currentY + 5, 230);
-    drawOfficialCompanyStampOnly(pdf, pageWidth - margin - 60, stampY, 'COMPLIANCE RECORD SEAL', activeCompany?.id);
-
-    // Left signature line
-    pdf.setDrawColor(148, 163, 184);
-    pdf.setLineWidth(0.3);
-    pdf.line(margin, stampY + 12, margin + 55, stampY + 12);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(7);
-    pdf.setTextColor(51, 65, 85);
-    pdf.text('AUTHORIZED COMPLIANCE OFFICER', margin, stampY + 16);
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(6.2);
-    pdf.setTextColor(100, 116, 139);
-    pdf.text(activeCompany?.legalTitle || activeCompany?.name || 'Operating Entity', margin, stampY + 19.5);
-
-    // 4. Draw unified corporate footer
+    const stampY = Math.max(currentY + 8, 228);
+    drawOfficialCompanyStampOnly(pdf, pageWidth - margin - 60, stampY, 'CORPORATE FILING SEAL', activeCompany?.id);
     drawPdfCorporateFooter(pdf, 'Page 1 of 1');
-
     pdf.save(`${docItem.title.replace(/\s+/g, '_')}_record.pdf`);
   };
 
-  // Reset Advance Search
-  const handleResetAdvSearch = () => {
-    setAdvCategory('ALL');
-    setAdvSubcategory('');
-    setAdvDateFrom('');
-    setAdvDateTo('');
-    setAdvTitle('');
-    setAdvFrom('');
-    setAdvTo('');
-    setAdvHearingFilter('ALL');
-    setIsAdvActive(false);
-    setShowAdvanceSearchModal(false);
+  // Dynamic Legal Case Creation Handler
+  const handleCreateLegalCase = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setNewCaseError(null);
+    const cleanId = newCaseIdentifier.trim();
+    if (!cleanId) {
+      setNewCaseError('Please enter a Unique Case Identifier (e.g., Container # MSKU1234567 or Case Title).');
+      return;
+    }
+    const duplicate = legalCases.some(
+      (c) => c.identifier.trim().toLowerCase() === cleanId.toLowerCase()
+    );
+    if (duplicate) {
+      setNewCaseError('A legal case folder with this identifier already exists.');
+      return;
+    }
+
+    const provisionedFolders = getProvisionedLegalSubFolders(newCaseTrack);
+    const createdCase: CorporateLegalCase = {
+      id: `lcase_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      identifier: cleanId,
+      caseTrack: newCaseTrack,
+      recipientEntity: newCaseEntity || defaultEntity,
+      caseReferenceNo: newCaseRefNo.trim() || undefined,
+      courtOrForum: newCaseCourt.trim() || undefined,
+      legalCounsel: newCaseCounsel.trim() || undefined,
+      opposingParty: newCaseOpposing.trim() || undefined,
+      nextHearingDate: newCaseHearingDate || undefined,
+      status: newCaseHearingDate ? 'Pending Hearing' : 'Active',
+      subFolders: provisionedFolders,
+      notes: newCaseNotes.trim() || undefined,
+      createdAt: new Date().toISOString(),
+      createdBy: safeAppStorage.getItem('dpl_current_user_name') || 'Documentation Manager'
+    };
+
+    await saveCorporateLegalCaseToFirestore(createdCase);
+    setShowNewLegalCaseModal(false);
+    setNewCaseIdentifier('');
+    setNewCaseRefNo('');
+    setNewCaseCourt('');
+    setNewCaseCounsel('');
+    setNewCaseOpposing('');
+    setNewCaseHearingDate('');
+    setNewCaseNotes('');
+    setActiveRoot('Legal');
+    setActiveLegalCaseId(createdCase.id);
+    setActiveSubFolder(null);
   };
 
-  const handleApplyAdvSearch = () => {
-    setIsAdvActive(true);
-    setShowAdvanceSearchModal(false);
+  // Add Custom Sub-Folder inside an existing Legal Case
+  const handleAddCustomSubFolderToCase = async () => {
+    const trimmed = customSubFolderName.trim();
+    if (!trimmed || !activeLegalCase) return;
+    const existing = activeLegalCase.subFolders || getProvisionedLegalSubFolders(activeLegalCase.caseTrack);
+    if (!existing.includes(trimmed)) {
+      await saveCorporateLegalCaseToFirestore({
+        ...activeLegalCase,
+        subFolders: [...existing, trimmed]
+      });
+    }
+    setCustomSubFolderName('');
+    setAddingCustomSubFolder(false);
+  };
+
+  // Add Custom Fiscal Year in Tax
+  const handleAddFiscalYear = (e: React.FormEvent) => {
+    e.preventDefault();
+    const yr = newFiscalYearInput.trim().replace(/[^0-9-]/g, '');
+    if (yr.length < 4) return;
+    const next = Array.from(new Set([...customFiscalYears, yr]));
+    setCustomFiscalYears(next);
+    safeAppStorage.setJSON(CUSTOM_FISCAL_YEARS_KEY, next);
+    setNewFiscalYearInput('');
+    setShowAddYearModal(false);
+    setActiveTaxYear(yr);
+  };
+
+  // Save Vault Credential
+  const handleSaveVaultCredential = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vaultPortalName.trim() || !vaultUsername.trim() || !vaultPassword.trim()) return;
+
+    const record: CorporateVaultCredential = {
+      id: editingVaultItem?.id || `vault_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      portalName: vaultPortalName.trim(),
+      portalUrl: vaultPortalUrl.trim() || undefined,
+      usernameOrId: vaultUsername.trim(),
+      passwordSecret: vaultPassword,
+      pinOr2faNote: vaultPinNote.trim() || undefined,
+      recipientEntity: vaultEntity || defaultEntity,
+      recoveryContact: vaultRecovery.trim() || undefined,
+      expiryDate: vaultExpiryDate || undefined,
+      alarmDaysBefore: 15,
+      statusTag: 'Active',
+      createdAt: editingVaultItem?.createdAt || new Date().toISOString(),
+      createdBy: safeAppStorage.getItem('dpl_current_user_name') || 'Documentation Manager'
+    };
+
+    await saveCorporateVaultCredentialToFirestore(record);
+    setShowVaultModal(false);
+    setEditingVaultItem(null);
+    setVaultPortalName('');
+    setVaultPortalUrl('');
+    setVaultUsername('');
+    setVaultPassword('');
+    setVaultPinNote('');
+    setVaultRecovery('');
+    setVaultExpiryDate('');
+  };
+
+  const handleCopyText = (text: string, key: string) => {
+    if (!text) return;
+    navigator.clipboard?.writeText(text).catch(() => {});
+    setCopiedVaultField(key);
+    setTimeout(() => setCopiedVaultField(null), 2000);
+  };
+
+  // Inline Quotation Status Update
+  const handleUpdateQuotationStatus = async (docItem: CompanyDocument, nextStatus: QuotationStatus) => {
+    await saveCompanyDocumentToFirestore({
+      ...docItem,
+      quotationStatus: nextStatus
+    });
+  };
+
+  // Filtered Documents for the Active Folder / Search / Alarm Watch View
+  const visibleDocuments = useMemo(() => {
+    const q = globalSearch.trim().toLowerCase();
+
+    return enrichedDocuments.filter(({ doc, hierarchy, alarms }) => {
+      // 1. Entity Filter
+      if (entityFilter !== 'ALL' && hierarchy.recipientEntity !== entityFilter) {
+        return false;
+      }
+
+      // 2. Status Tag Filter
+      if (statusFilter !== 'ALL' && alarms.effectiveStatus !== statusFilter) {
+        return false;
+      }
+
+      // 3. Smart Alarm Watchbar Override
+      if (alarmWatchFilter === 'HEARINGS') {
+        if (!alarms.isHearingDueOrSoon && !alarms.isHearingOverdue && !doc.hearingDate) return false;
+      } else if (alarmWatchFilter === 'EXPIRING_SOON') {
+        if (!alarms.isWithinExpiryAlarm) return false;
+      } else if (alarmWatchFilter === 'EXPIRED') {
+        if (!alarms.isExpired) return false;
+      } else if (!q) {
+        // 4. Strict Folder Hierarchy Scoping when not running a global search or alarm filter
+        if (!activeRoot) return false;
+        if (hierarchy.rootCategory !== activeRoot) return false;
+
+        if (activeRoot === 'Legal') {
+          if (activeLegalCaseId && hierarchy.legalCaseId !== activeLegalCaseId) return false;
+          if (activeSubFolder && hierarchy.subFolder !== activeSubFolder) return false;
+        } else if (activeRoot === 'Tax') {
+          if (activeTaxAuthority && hierarchy.taxAuthority !== activeTaxAuthority) return false;
+          if (activeTaxYear && hierarchy.taxYear !== activeTaxYear) return false;
+        } else if (activeRoot === 'Assets') {
+          if (activeAssetGroup && hierarchy.assetGroup !== activeAssetGroup) return false;
+          if (assetSubTypeFilter !== 'ALL' && doc.assetSubType !== assetSubTypeFilter) return false;
+        } else if (activeRoot === 'Company Documents') {
+          if (activeSubFolder && hierarchy.subFolder !== activeSubFolder) return false;
+        } else if (activeRoot === 'Quotations') {
+          if (
+            quoteClientSearch.trim() &&
+            !(doc.quotationClientName || hierarchy.senderIssuer || '')
+              .toLowerCase()
+              .includes(quoteClientSearch.trim().toLowerCase())
+          ) {
+            return false;
+          }
+          if (quoteServiceFilter !== 'ALL' && doc.quotationServiceType !== quoteServiceFilter) {
+            return false;
+          }
+          if (quoteStatusFilter !== 'ALL' && hierarchy.quotationStatus !== quoteStatusFilter) {
+            return false;
+          }
+          if (quoteDateFrom && hierarchy.issuanceDate < quoteDateFrom) return false;
+          if (quoteDateTo && hierarchy.issuanceDate > quoteDateTo) return false;
+        }
+      }
+
+      // 5. Global Search Query
+      if (q) {
+        if (activeRoot && hierarchy.rootCategory !== activeRoot) return false;
+        const searchable = [
+          doc.title,
+          doc.referenceNo,
+          doc.subject,
+          hierarchy.senderIssuer,
+          hierarchy.recipientEntity,
+          hierarchy.legalCaseTitle,
+          hierarchy.subFolder,
+          hierarchy.taxAuthority,
+          hierarchy.taxYear,
+          hierarchy.assetGroup,
+          doc.assetLocationOrBank,
+          doc.quotationClientName,
+          doc.quotationServiceType
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!searchable.includes(q)) return false;
+      }
+
+      return true;
+    });
+  }, [
+    enrichedDocuments,
+    entityFilter,
+    statusFilter,
+    alarmWatchFilter,
+    globalSearch,
+    activeRoot,
+    activeLegalCaseId,
+    activeSubFolder,
+    activeTaxAuthority,
+    activeTaxYear,
+    activeAssetGroup,
+    assetSubTypeFilter,
+    quoteClientSearch,
+    quoteServiceFilter,
+    quoteStatusFilter,
+    quoteDateFrom,
+    quoteDateTo
+  ]);
+
+  // Dynamic Fiscal Years for Selected Tax Authority
+  const authorityFiscalYears = useMemo(() => {
+    const years = new Set<string>([...DEFAULT_FISCAL_YEARS, ...customFiscalYears]);
+    enrichedDocuments.forEach(({ hierarchy }) => {
+      if (hierarchy.rootCategory === 'Tax' && (!activeTaxAuthority || hierarchy.taxAuthority === activeTaxAuthority)) {
+        if (hierarchy.taxYear) years.add(hierarchy.taxYear);
+      }
+    });
+    return Array.from(years).sort((a, b) => b.localeCompare(a));
+  }, [enrichedDocuments, activeTaxAuthority, customFiscalYears]);
+
+  // Build Breadcrumb Trail Segments
+  const breadcrumbs = useMemo(() => {
+    const crumbs: { label: string; onClick: () => void; isCurrent?: boolean }[] = [
+      {
+        label: 'Dashboard',
+        onClick: navigateToRoot,
+        isCurrent: !activeRoot && alarmWatchFilter === 'NONE'
+      }
+    ];
+
+    if (alarmWatchFilter !== 'NONE') {
+      const watchLabel =
+        alarmWatchFilter === 'HEARINGS'
+          ? 'Upcoming Legal Hearings'
+          : alarmWatchFilter === 'EXPIRING_SOON'
+            ? 'Expiring Within Alarm Window'
+            : 'Expired Compliance Records';
+      crumbs.push({ label: watchLabel, onClick: () => {}, isCurrent: true });
+      return crumbs;
+    }
+
+    if (activeRoot) {
+      crumbs.push({
+        label: activeRoot,
+        onClick: () => openRootCategory(activeRoot),
+        isCurrent:
+          !activeLegalCaseId && !activeSubFolder && !activeTaxAuthority && !activeAssetGroup
+      });
+    }
+
+    if (activeRoot === 'Legal' && activeLegalCase) {
+      crumbs.push({
+        label: activeLegalCase.identifier,
+        onClick: () => setActiveSubFolder(null),
+        isCurrent: !activeSubFolder
+      });
+      if (activeSubFolder) {
+        crumbs.push({
+          label: activeSubFolder,
+          onClick: () => {},
+          isCurrent: true
+        });
+      }
+    } else if (activeRoot === 'Tax' && activeTaxAuthority) {
+      crumbs.push({
+        label: activeTaxAuthority,
+        onClick: () => setActiveTaxYear(null),
+        isCurrent: !activeTaxYear
+      });
+      if (activeTaxYear) {
+        crumbs.push({
+          label: `Year ${activeTaxYear}`,
+          onClick: () => {},
+          isCurrent: true
+        });
+      }
+    } else if (activeRoot === 'Assets' && activeAssetGroup) {
+      crumbs.push({
+        label: activeAssetGroup,
+        onClick: () => {},
+        isCurrent: true
+      });
+    } else if (activeRoot === 'Company Documents' && activeSubFolder) {
+      crumbs.push({
+        label: activeSubFolder,
+        onClick: () => {},
+        isCurrent: true
+      });
+    }
+
+    return crumbs;
+  }, [
+    activeRoot,
+    activeLegalCase,
+    activeSubFolder,
+    activeTaxAuthority,
+    activeTaxYear,
+    activeAssetGroup,
+    alarmWatchFilter
+  ]);
+
+  // Verification metadata items for UniversalDocumentPreviewModal
+  const previewVerificationItems: DataMappingCheckItem[] = useMemo(() => {
+    if (!previewDoc) return [];
+    const h = resolveDocumentHierarchy(previewDoc);
+    const a = evaluateDocumentAlarms(previewDoc);
+    const items: DataMappingCheckItem[] = [
+      { label: 'Root Category', value: h.rootCategory, status: 'verified' },
+      { label: 'Sub-Folder / Authority', value: h.subFolder || h.taxAuthority || h.assetGroup || 'Archive', status: 'info' },
+      { label: 'Sender / Issuer', value: h.senderIssuer, status: 'verified' },
+      { label: 'Recipient Entity', value: h.recipientEntity, status: 'verified' },
+      { label: 'Issuance Date', value: h.issuanceDate || 'N/A', status: 'info' },
+      {
+        label: 'Validity End Date',
+        value: previewDoc.unlimitedValidity ? 'Perpetual' : h.validityEndDate || 'Not Set',
+        status: a.isExpired ? 'warning' : 'verified'
+      },
+      { label: 'Status Tag', value: a.effectiveStatus, status: a.isExpired ? 'warning' : 'verified' }
+    ];
+    if (previewDoc.hearingDate) {
+      items.push({
+        label: 'Hearing / Action Date',
+        value: `${previewDoc.hearingDate} ${previewDoc.hearingTime || ''}`.trim(),
+        status: 'warning'
+      });
+    }
+    return items;
+  }, [previewDoc]);
+
+  // Reusable Document Table Renderer
+  const renderDocumentRegistryTable = (emptyLabel: string) => {
+    if (isLoading) {
+      return (
+        <div className="py-16 text-center space-y-2 bg-slate-900/60 border border-white/10 rounded-2xl">
+          <Loader2 size={28} className="animate-spin text-sky-400 mx-auto" />
+          <p className="text-xs text-gray-400">Synchronizing corporate filings from cloud repository...</p>
+        </div>
+      );
+    }
+
+    if (visibleDocuments.length === 0) {
+      return (
+        <div className="py-14 px-6 text-center bg-slate-900/60 border border-white/10 rounded-2xl space-y-3">
+          <FolderOpen size={34} className="mx-auto text-gray-500" />
+          <div className="space-y-1">
+            <h4 className="text-sm font-bold text-white">{emptyLabel}</h4>
+            <p className="text-xs text-gray-400 max-w-md mx-auto">
+              Drag and drop PDFs or scanned images with mandatory sender, recipient, validity, and alarm metadata.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleOpenUploadModal()}
+            className="mak-btn px-4 py-2 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Upload size={14} />
+            <span>Upload Filing Here</span>
+          </button>
+        </div>
+      );
+    }
+
+    const isQuotationsView = activeRoot === 'Quotations' && alarmWatchFilter === 'NONE';
+    const isAssetsView = activeRoot === 'Assets' && alarmWatchFilter === 'NONE';
+
+    return (
+      <div className="bg-slate-900 border border-white/10 rounded-2xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-white/10 bg-slate-950/70 text-[11px] text-gray-400 uppercase tracking-wider">
+                <th className="py-3 px-4 font-semibold">Filing Title &amp; Path</th>
+                <th className="py-3 px-3 font-semibold">
+                  {isQuotationsView ? 'Client & Service' : 'Sender / Issuer'}
+                </th>
+                <th className="py-3 px-3 font-semibold">Recipient</th>
+                <th className="py-3 px-3 font-semibold">Issuance / FY</th>
+                {isAssetsView && <th className="py-3 px-3 font-semibold text-right">Valuation (PKR)</th>}
+                {isQuotationsView && <th className="py-3 px-3 font-semibold text-right">Tariff (PKR)</th>}
+                <th className="py-3 px-3 font-semibold">Validity &amp; Hearing Alarm</th>
+                <th className="py-3 px-3 font-semibold">Status</th>
+                <th className="py-3 px-4 font-semibold text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {visibleDocuments.map(({ doc, hierarchy, alarms }) => {
+                const pathSummary =
+                  hierarchy.rootCategory === 'Legal'
+                    ? `${hierarchy.legalCaseTitle || 'Legal'} › ${hierarchy.subFolder || ''}`
+                    : hierarchy.rootCategory === 'Tax'
+                      ? `${hierarchy.taxAuthority} › Year ${hierarchy.taxYear}`
+                      : hierarchy.rootCategory === 'Assets'
+                        ? `${hierarchy.assetGroup}${doc.assetSubType ? ` › ${doc.assetSubType}` : ''}`
+                        : hierarchy.rootCategory === 'Company Documents'
+                          ? hierarchy.subFolder
+                          : 'Outbound Quotation';
+
+                return (
+                  <tr key={doc.id} className="hover:bg-white/[0.03] transition-colors">
+                    <td className="py-3 px-4 max-w-[280px]">
+                      <div className="font-bold text-white truncate" title={doc.title}>
+                        {doc.title}
+                      </div>
+                      <div className="flex items-center flex-wrap gap-1.5 mt-0.5 text-[11px] text-gray-400">
+                        <span className="truncate max-w-[220px]">{pathSummary}</span>
+                        {doc.referenceNo && (
+                          <span className="font-mono text-sky-400 tabular-nums">
+                            · #{doc.referenceNo}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="py-3 px-3 max-w-[200px]">
+                      {isQuotationsView ? (
+                        <div>
+                          <div className="font-semibold text-white truncate">
+                            {doc.quotationClientName || hierarchy.senderIssuer}
+                          </div>
+                          <div className="text-[11px] text-gray-400 truncate">
+                            {doc.quotationServiceType || 'Commercial Proposal'}
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="font-medium text-gray-200 truncate">
+                            {hierarchy.senderIssuer}
+                          </div>
+                          {doc.assetLocationOrBank && (
+                            <div className="text-[11px] text-gray-400 truncate">
+                              {doc.assetLocationOrBank}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </td>
+
+                    <td className="py-3 px-3 whitespace-nowrap">
+                      <span className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 font-semibold text-[11px] text-gray-200">
+                        {hierarchy.recipientEntity}
+                      </span>
+                    </td>
+
+                    <td className="py-3 px-3 whitespace-nowrap font-mono tabular-nums text-gray-300">
+                      <div>{hierarchy.issuanceDate || '-'}</div>
+                      {hierarchy.taxYear && (
+                        <div className="text-[10px] text-gray-400">FY {hierarchy.taxYear}</div>
+                      )}
+                    </td>
+
+                    {isAssetsView && (
+                      <td className="py-3 px-3 text-right whitespace-nowrap font-mono font-semibold tabular-nums text-emerald-300">
+                        {typeof doc.assetValuationPkr === 'number'
+                          ? doc.assetValuationPkr.toLocaleString()
+                          : '-'}
+                      </td>
+                    )}
+
+                    {isQuotationsView && (
+                      <td className="py-3 px-3 text-right whitespace-nowrap font-mono font-semibold tabular-nums text-sky-300">
+                        {typeof doc.quotationAmountPkr === 'number'
+                          ? doc.quotationAmountPkr.toLocaleString()
+                          : '-'}
+                      </td>
+                    )}
+
+                    <td className="py-3 px-3 whitespace-nowrap">
+                      <div className="space-y-1">
+                        {doc.unlimitedValidity ? (
+                          <span className="text-[11px] text-gray-400">Perpetual Validity</span>
+                        ) : hierarchy.validityEndDate ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-[11px] text-gray-300 tabular-nums">
+                              Exp: {hierarchy.validityEndDate}
+                            </span>
+                            {alarms.remainingValidityDays !== null && (
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold tabular-nums border ${
+                                  alarms.isExpired
+                                    ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                                    : alarms.isWithinExpiryAlarm
+                                      ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                      : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                                }`}
+                              >
+                                {alarms.remainingValidityDays <= 0
+                                  ? `${Math.abs(alarms.remainingValidityDays)}d exp`
+                                  : `${alarms.remainingValidityDays}d left`}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-gray-500">No Expiry Set</span>
+                        )}
+
+                        {doc.hearingDate && (
+                          <div className="flex items-center gap-1 text-[11px] text-amber-300 font-mono tabular-nums">
+                            <Gavel size={11} className="shrink-0" />
+                            <span>{doc.hearingDate}</span>
+                            {alarms.remainingHearingDays !== null && (
+                              <span className="text-[10px] font-bold">
+                                ({alarms.remainingHearingDays < 0
+                                  ? `${Math.abs(alarms.remainingHearingDays)}d ago`
+                                  : alarms.remainingHearingDays === 0
+                                    ? 'Today'
+                                    : `in ${alarms.remainingHearingDays}d`})
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="py-3 px-3 whitespace-nowrap">
+                      {isQuotationsView ? (
+                        <select
+                          aria-label="Update Quotation Status"
+                          value={hierarchy.quotationStatus}
+                          onChange={(e) =>
+                            handleUpdateQuotationStatus(doc, e.target.value as QuotationStatus)
+                          }
+                          className={`px-2 py-1 rounded-md text-[11px] font-bold border outline-none cursor-pointer bg-slate-900 ${getQuotationBadgeClasses(
+                            hierarchy.quotationStatus
+                          )}`}
+                        >
+                          {QUOTATION_STATUSES.map((st) => (
+                            <option key={st} value={st}>
+                              {st}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold border ${getStatusBadgeClasses(
+                            alarms.effectiveStatus
+                          )}`}
+                        >
+                          {alarms.effectiveStatus}
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="py-3 px-4 text-right whitespace-nowrap">
+                      {confirmDeleteDocId === doc.id ? (
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await deleteCompanyDocumentFromFirestore(doc.id);
+                              setConfirmDeleteDocId(null);
+                            }}
+                            className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold cursor-pointer"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteDocId(null)}
+                            className="px-2 py-1 rounded bg-white/10 text-gray-300 text-[10px] font-semibold cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPreview(doc)}
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition cursor-pointer"
+                            title="Inspect Document & Metadata"
+                          >
+                            <Eye size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadDocument(doc)}
+                            className="p-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-400/30 transition cursor-pointer"
+                            title="Download Filing / PDF"
+                          >
+                            <Download size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingDocument(doc);
+                              setIsUploadModalOpen(true);
+                            }}
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition cursor-pointer"
+                            title="Edit Metadata & Alarm Window"
+                          >
+                            <Edit size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteDocId(doc.id)}
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-rose-500/20 text-gray-400 hover:text-rose-300 border border-white/10 transition cursor-pointer"
+                            title="Delete Record"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
   };
 
   return (
-    <div className="space-y-6 animate-fade-in pb-12 text-gray-100">
-      {/* Top Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 backdrop-blur-md p-5 rounded-2xl border border-white/10 shadow-xl">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0 shadow-lg shadow-amber-500/10">
-            <FolderArchive size={26} />
+    <div className="space-y-5 pb-12">
+      {/* Top Corporate Filing Header */}
+      <div className="bg-slate-900 border border-white/10 rounded-2xl p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+          <div className="w-11 h-11 rounded-xl bg-sky-500/15 border border-sky-400/30 text-sky-400 flex items-center justify-center shrink-0">
+            <FolderArchive size={22} />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-black text-white tracking-wide">Company Documents</h1>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
-                {filteredDocuments.length} Records
+          <div className="min-w-0">
+            <div className="flex items-center flex-wrap gap-2">
+              <h1 className="text-lg sm:text-xl font-extrabold text-white tracking-tight">
+                Corporate Filing &amp; Document Repository
+              </h1>
+              <span className="px-2 py-0.5 rounded-md text-[11px] font-mono font-bold tabular-nums bg-white/5 border border-white/10 text-sky-300">
+                {alarmMetrics.total} Filings
               </span>
             </div>
             <p className="text-xs text-gray-400 mt-0.5">
-              Legal, regulatory, customs, taxation, agreements, and official corporate archives with AI scanning.
+              MAK Group Multi-Tier Legal, Tax, Assets, Statutory Compliance &amp; Commercial Quotations Architecture
             </p>
           </div>
         </div>
 
-        {/* Action Controls */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/25 transition-all transform active:scale-95 cursor-pointer"
-          >
-            <Plus size={16} className="stroke-[3]" />
-            <span>Add Document</span>
-          </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <ThemeToggleSwitch compact />
 
           <button
             type="button"
-            onClick={() => setShowAddCategoryModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-200 border border-white/10 hover:border-amber-500/30 text-xs font-semibold transition cursor-pointer"
+            onClick={() => setShowSchemaModal(true)}
+            className="mak-btn-secondary px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+            title="Inspect PostgreSQL DDL & Firebase Firestore Schema"
           >
-            <FolderPlus size={14} className="text-amber-400" />
-            <span>New Category</span>
+            <Database size={14} className="text-sky-400" />
+            <span>DB Schema</span>
           </button>
+
+          {activeRoot === 'Legal' && (
+            <button
+              type="button"
+              onClick={() => {
+                setNewCaseEntity(defaultEntity);
+                setShowNewLegalCaseModal(true);
+              }}
+              className="mak-btn-secondary px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <FolderPlus size={14} className="text-amber-400" />
+              <span>New Legal Case</span>
+            </button>
+          )}
 
           <button
             type="button"
-            onClick={() => setShowAdvanceSearchModal(true)}
-            className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-              isAdvActive 
-                ? 'bg-amber-500 text-slate-950 font-bold border-amber-400 shadow-lg shadow-amber-500/20' 
-                : 'bg-white/5 hover:bg-white/10 text-gray-200 border-white/10 hover:border-amber-500/30'
-            }`}
+            onClick={() => handleOpenUploadModal()}
+            className="mak-btn px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
           >
-            <Filter size={14} className={isAdvActive ? 'text-slate-950' : 'text-amber-400'} />
-            <span>Advance Search</span>
-            {isAdvActive && <span className="w-2 h-2 rounded-full bg-slate-950 ml-1"></span>}
+            <Upload size={14} />
+            <span>Upload Document</span>
           </button>
         </div>
       </div>
 
-      {/* Main Search Input & Active Filter Bar & View Switcher */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        {/* Quick Search */}
-        <div className="relative flex-1 max-w-xl">
-          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search document title, subject, sender, recipient, reference #..."
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900/90 border border-white/10 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50 shadow-inner"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-
-        {/* View Switcher: Square Category Folders vs All Documents List */}
-        <div className="flex items-center gap-2">
-          <div className="flex items-center p-1 rounded-xl bg-slate-900 border border-white/10 shadow-inner">
-            <button
-              type="button"
-              onClick={() => setViewMode('categories')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                viewMode === 'categories'
-                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <LayoutGrid size={13} />
-              <span>Category Folders ({categories.length})</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setViewMode('documents')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                viewMode === 'documents'
-                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <FileText size={13} />
-              <span>All Documents ({filteredDocuments.length})</span>
-            </button>
-          </div>
-
-          {/* Active Filter Chips */}
-          {isAdvActive && (
-            <div className="flex items-center gap-2 text-xs bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-xl text-amber-300">
-              <Filter size={13} />
-              <span>Filtered</span>
+      {/* Interactive Breadcrumb Trail + Global Search + Entity/Status Filter Bar */}
+      <div className="bg-slate-900 border border-white/10 rounded-xl px-4 py-3 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+        {/* Breadcrumb Navigation */}
+        <nav aria-label="Filing Breadcrumb" className="flex items-center flex-wrap gap-1.5 text-xs min-w-0">
+          {breadcrumbs.map((crumb, idx) => (
+            <React.Fragment key={`${crumb.label}_${idx}`}>
+              {idx > 0 && <ChevronRight size={13} className="text-gray-500 shrink-0" />}
               <button
                 type="button"
-                onClick={handleResetAdvSearch}
-                className="ml-1 underline text-amber-400 hover:text-white font-bold cursor-pointer"
+                onClick={crumb.onClick}
+                className={`px-2 py-1 rounded-md transition-colors cursor-pointer truncate max-w-[260px] ${
+                  crumb.isCurrent
+                    ? 'bg-sky-500/15 text-sky-300 border border-sky-400/30 font-bold'
+                    : 'text-gray-300 hover:text-white hover:bg-white/5 font-medium'
+                }`}
               >
-                Reset
+                {crumb.label}
               </button>
-            </div>
-          )}
+            </React.Fragment>
+          ))}
+        </nav>
+
+        {/* Search & Entity Filter Controls */}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="relative flex-1 sm:w-64">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+              placeholder="Search case, title, issuer, ref #..."
+              className="glass-input w-full rounded-lg pl-8 pr-7 py-1.5 text-xs outline-none"
+            />
+            {globalSearch && (
+              <button
+                type="button"
+                onClick={() => setGlobalSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white cursor-pointer"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          <select
+            aria-label="Filter by Recipient Entity"
+            value={entityFilter}
+            onChange={(e) => setEntityFilter(e.target.value)}
+            className="glass-input rounded-lg px-2.5 py-1.5 text-xs bg-slate-900 text-gray-200 border border-white/15 outline-none"
+          >
+            <option value="ALL">All Entities (MAK Group)</option>
+            {RECIPIENT_ENTITIES.map((ent) => (
+              <option key={ent.id} value={ent.id}>
+                {ent.id}
+              </option>
+            ))}
+          </select>
+
+          <select
+            aria-label="Filter by Status Tag"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="glass-input rounded-lg px-2.5 py-1.5 text-xs bg-slate-900 text-gray-200 border border-white/15 outline-none"
+          >
+            <option value="ALL">All Statuses</option>
+            {DOCUMENT_STATUS_TAGS.map((st) => (
+              <option key={st} value={st}>
+                {st}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
-      {/* When in Category View and user typed a search query, show prompt banner */}
-      {viewMode === 'categories' && searchQuery && (
-        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs text-amber-300">
-          <div className="flex items-center gap-2">
-            <Search size={14} className="text-amber-400" />
-            <span>Search query "{searchQuery}" matches <strong>{filteredDocuments.length}</strong> document(s) across archives.</span>
+      {/* 4-Column Smart Notification & Compliance Alarm Watchbar */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <button
+          type="button"
+          onClick={navigateToRoot}
+          data-custom-control="true"
+          className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+            !activeRoot && alarmWatchFilter === 'NONE'
+              ? 'bg-sky-500/15 border-sky-400/50'
+              : 'bg-slate-900 border-white/10 hover:bg-slate-800/70'
+          }`}
+        >
+          <div className="flex items-center justify-between text-[11px] text-gray-400 font-semibold">
+            <span>Primary Filing Categories</span>
+            <FolderArchive size={14} className="text-sky-400" />
           </div>
-          <button
-            type="button"
-            onClick={() => setViewMode('documents')}
-            className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition cursor-pointer flex items-center gap-1"
-          >
-            <span>View Matching Documents</span>
-            <ArrowRight size={12} />
-          </button>
-        </div>
-      )}
+          <div className="mt-1 flex items-baseline justify-between">
+            <span className="text-xl font-bold font-mono tabular-nums text-white">5</span>
+            <span className="text-[11px] text-gray-400 font-mono tabular-nums">
+              {alarmMetrics.total} Total Records
+            </span>
+          </div>
+        </button>
 
-      {/* ========================================================================= */}
-      {/* MAIN VIEW: SQUARE CATEGORY ICONS GRID (Default View)                     */}
-      {/* ========================================================================= */}
-      {viewMode === 'categories' ? (
-        <div className="space-y-4">
+        <button
+          type="button"
+          onClick={() =>
+            setAlarmWatchFilter((prev) => (prev === 'HEARINGS' ? 'NONE' : 'HEARINGS'))
+          }
+          data-custom-control="true"
+          className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+            alarmWatchFilter === 'HEARINGS'
+              ? 'bg-amber-500/15 border-amber-400/50'
+              : 'bg-slate-900 border-white/10 hover:bg-slate-800/70'
+          }`}
+        >
+          <div className="flex items-center justify-between text-[11px] text-gray-400 font-semibold">
+            <span>Hearing / Action Countdown</span>
+            <Gavel size={14} className="text-amber-400" />
+          </div>
+          <div className="mt-1 flex items-baseline justify-between">
+            <span className="text-xl font-bold font-mono tabular-nums text-amber-300">
+              {alarmMetrics.hearingsCount}
+            </span>
+            <span className="text-[11px] text-gray-400">Court &amp; ONO Dates</span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() =>
+            setAlarmWatchFilter((prev) => (prev === 'EXPIRING_SOON' ? 'NONE' : 'EXPIRING_SOON'))
+          }
+          data-custom-control="true"
+          className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+            alarmWatchFilter === 'EXPIRING_SOON'
+              ? 'bg-amber-500/15 border-amber-400/50'
+              : 'bg-slate-900 border-white/10 hover:bg-slate-800/70'
+          }`}
+        >
+          <div className="flex items-center justify-between text-[11px] text-gray-400 font-semibold">
+            <span>Expiring Within Alarm Window</span>
+            <Bell size={14} className="text-amber-400" />
+          </div>
+          <div className="mt-1 flex items-baseline justify-between">
+            <span className="text-xl font-bold font-mono tabular-nums text-amber-300">
+              {alarmMetrics.expiringSoonCount}
+            </span>
+            <span className="text-[11px] text-gray-400">Renewal Alert Active</span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() =>
+            setAlarmWatchFilter((prev) => (prev === 'EXPIRED' ? 'NONE' : 'EXPIRED'))
+          }
+          data-custom-control="true"
+          className={`text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
+            alarmWatchFilter === 'EXPIRED'
+              ? 'bg-rose-500/15 border-rose-400/50'
+              : 'bg-slate-900 border-white/10 hover:bg-slate-800/70'
+          }`}
+        >
+          <div className="flex items-center justify-between text-[11px] text-gray-400 font-semibold">
+            <span>Expired Documents</span>
+            <AlertTriangle size={14} className="text-rose-400" />
+          </div>
+          <div className="mt-1 flex items-baseline justify-between">
+            <span className="text-xl font-bold font-mono tabular-nums text-rose-400">
+              {alarmMetrics.expiredCount}
+            </span>
+            <span className="text-[11px] text-gray-400">Action Required</span>
+          </div>
+        </button>
+      </div>
+
+      {/* ===================================================================== */}
+      {/* VIEW 0: GLOBAL SEARCH OR ALARM WATCHLIST OVERRIDE                     */}
+      {/* ===================================================================== */}
+      {alarmWatchFilter !== 'NONE' || (globalSearch.trim() && !activeRoot) ? (
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-xs uppercase tracking-wider font-bold text-gray-400">Company Document Folders</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white/10 text-gray-300">
-                {categories.length} Categories
-              </span>
-            </div>
-            <span className="text-xs text-amber-400/80">Click any folder to view documents & download PDF</span>
+            <h2 className="text-sm font-bold text-white">
+              {alarmWatchFilter !== 'NONE'
+                ? `Compliance Alarm Watchlist (${visibleDocuments.length} Records)`
+                : `Search Results Across All Repositories (${visibleDocuments.length})`}
+            </h2>
+            <button
+              type="button"
+              onClick={() => {
+                setAlarmWatchFilter('NONE');
+                setGlobalSearch('');
+              }}
+              className="text-xs font-semibold text-sky-400 hover:underline cursor-pointer"
+            >
+              Return to Folder Hierarchy
+            </button>
+          </div>
+          {renderDocumentRegistryTable('No matching compliance records found.')}
+        </div>
+      ) : !activeRoot ? (
+        /* =================================================================== */
+        /* VIEW 1: ROOT DASHBOARD — 5 PRIMARY CATEGORY CARDS                   */
+        /* =================================================================== */
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">
+              Primary Corporate Repositories (5 Root Modules)
+            </span>
+            <span className="text-xs text-gray-400">
+              Select a category card to drill into dynamic sub-folders
+            </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-4.5">
-            {categories.map((cat) => {
-              const meta = getCategoryMeta(cat);
-              const CategoryIcon = meta.icon;
-              const catDocs = documents.filter(d => d.category === cat);
-              const count = catDocs.length;
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+            {CORPORATE_ROOT_CATEGORIES.map((cat) => {
+              const Icon = getRootCategoryIcon(cat.id);
+              const catItems = enrichedDocuments.filter(
+                (i) =>
+                  i.hierarchy.rootCategory === cat.id &&
+                  (entityFilter === 'ALL' || i.hierarchy.recipientEntity === entityFilter)
+              );
+              const alertCount = catItems.filter(
+                (i) =>
+                  i.alarms.isExpired ||
+                  i.alarms.isWithinExpiryAlarm ||
+                  i.alarms.isHearingDueOrSoon
+              ).length;
+
+              const subSummary =
+                cat.id === 'Legal'
+                  ? `${effectiveLegalCases.length} Case Dossiers`
+                  : cat.id === 'Tax'
+                    ? 'FBR · SRB · Labour Dept'
+                    : cat.id === 'Assets'
+                      ? 'Deposits & Properties'
+                      : cat.id === 'Company Documents'
+                        ? '10 Master Folders + Vault'
+                        : 'Pending · Accepted · Rejected';
 
               return (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => {
-                    setActiveCategoryModal(cat);
-                    setCategoryModalSearch('');
-                  }}
-                  className={`aspect-square p-4 sm:p-5 rounded-2xl border transition-all duration-300 flex flex-col justify-between items-center text-center cursor-pointer group shadow-lg hover:shadow-2xl hover:scale-[1.03] active:scale-[0.98] bg-gradient-to-br ${meta.gradient} ${meta.borderColor} ${meta.glowColor}`}
+                <div
+                  key={cat.id}
+                  onClick={() => openRootCategory(cat.id)}
+                  className="bg-slate-900 hover:bg-slate-800/80 border border-white/10 hover:border-sky-400/40 rounded-2xl p-5 flex flex-col justify-between gap-4 cursor-pointer transition-colors group"
                 >
-                  {/* Top Square Icon Badge */}
-                  <div className={`w-13 h-13 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center shadow-lg transition-transform group-hover:scale-110 ${meta.iconBg}`}>
-                    <CategoryIcon size={26} className={meta.textColor} />
-                  </div>
-
-                  {/* Category Title & Badge */}
-                  <div className="space-y-1.5 w-full px-1">
-                    <h3 className="text-xs sm:text-sm font-black text-white group-hover:text-amber-300 transition-colors line-clamp-2 leading-tight">
-                      {cat}
-                    </h3>
-                    <div className="flex justify-center">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono border ${
-                        count > 0 
-                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/30 font-bold' 
-                          : 'bg-white/5 text-gray-400 border-white/10'
-                      }`}>
-                        {count} {count === 1 ? 'Document' : 'Documents'}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="w-11 h-11 rounded-xl bg-sky-500/15 border border-sky-400/30 text-sky-400 flex items-center justify-center">
+                        <Icon size={21} />
+                      </div>
+                      <span className="font-mono text-xs font-bold text-gray-400 tabular-nums">
+                        {cat.numberLabel}
                       </span>
+                    </div>
+
+                    <div>
+                      <h3 className="text-base font-extrabold text-white group-hover:text-sky-300 transition-colors">
+                        {cat.title}
+                      </h3>
+                      <p className="text-[11px] font-semibold text-sky-400 mt-0.5">
+                        {cat.subtitle}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-2 leading-relaxed line-clamp-3">
+                        {cat.description}
+                      </p>
                     </div>
                   </div>
 
-                  {/* Bottom Action Prompt */}
-                  <div className="flex items-center gap-1 text-[11px] font-semibold text-gray-400 group-hover:text-amber-400 transition-colors">
-                    <span>Open Folder</span>
-                    <ChevronRight size={13} className="transition-transform group-hover:translate-x-0.5" />
+                  <div className="pt-3 border-t border-white/10 space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-gray-400 truncate">{subSummary}</span>
+                      <span className="font-mono font-bold text-white tabular-nums">
+                        {catItems.length} Files
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      {alertCount > 0 ? (
+                        <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[10px] font-mono font-bold text-amber-300 tabular-nums">
+                          {alertCount} Active Alert(s)
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-emerald-400 font-medium">
+                          Compliant
+                        </span>
+                      )}
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-sky-400">
+                        <span>Open</span>
+                        <ChevronRight size={13} />
+                      </span>
+                    </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
         </div>
-      ) : (
-        /* ========================================================================= */
-        /* ALL DOCUMENTS FLAT VIEW                                                   */
-        /* ========================================================================= */
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => setViewMode('categories')}
-              className="inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 font-bold cursor-pointer"
-            >
-              <span>← Back to Category Folders</span>
-            </button>
-            <span className="text-xs text-gray-400 font-mono">Showing {filteredDocuments.length} Records</span>
-          </div>
-
-          {isLoading ? (
-            <div className="py-20 text-center space-y-3">
-              <Loader2 size={32} className="animate-spin text-amber-400 mx-auto" />
-              <p className="text-xs text-gray-400">Loading company document archives...</p>
+      ) : activeRoot === 'Legal' ? (
+        /* =================================================================== */
+        /* VIEW 2: LEGAL — DYNAMIC CASE FOLDERS & AUTO-PROVISIONED SUB-FOLDERS */
+        /* =================================================================== */
+        !activeLegalCase ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-white">
+                  Legal Case Dossiers ({effectiveLegalCases.length})
+                </h2>
+                <p className="text-xs text-gray-400">
+                  Create dynamic case folders by Container/Shipment Number or Corporate Dispute Title with auto-provisioned legal sub-folders.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewCaseEntity(defaultEntity);
+                  setShowNewLegalCaseModal(true);
+                }}
+                className="mak-btn px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Plus size={14} />
+                <span>Create New Legal Case</span>
+              </button>
             </div>
-          ) : filteredDocuments.length === 0 ? (
-            <div className="py-16 text-center space-y-3 bg-slate-900/40 rounded-2xl border border-white/5 p-8">
-              <FolderArchive size={40} className="text-gray-600 mx-auto" />
-              <h3 className="text-sm font-bold text-gray-300">No Documents Found</h3>
-              <p className="text-xs text-gray-500 max-w-md mx-auto">
-                {isAdvActive || searchQuery
-                  ? 'No documents match the specified filters. Try clearing your search criteria.'
-                  : 'No documents have been recorded in this category yet. Click "Add Document" to upload a new record.'}
-              </p>
-              <div className="pt-2">
+
+            {effectiveLegalCases.length === 0 ? (
+              <div className="py-14 px-6 text-center bg-slate-900 border border-white/10 rounded-2xl space-y-3">
+                <Scale size={34} className="mx-auto text-sky-400" />
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-white">No Legal Case Folders Created Yet</h3>
+                  <p className="text-xs text-gray-400 max-w-lg mx-auto">
+                    Enter a Unique Identifier such as &ldquo;Container # MSKU1234567&rdquo; (Logistics/Criminal — 7 sub-folders) or &ldquo;State Life Office Rent Dispute&rdquo; (Civil/Corporate — 5 sub-folders).
+                  </p>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(true)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md transition cursor-pointer"
+                  onClick={() => setShowNewLegalCaseModal(true)}
+                  className="mak-btn px-4 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Plus size={14} /> Add Document Now
+                  <FolderPlus size={14} />
+                  <span>Provision First Legal Case</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {effectiveLegalCases.map((lc) => {
+                  const caseDocs = enrichedDocuments.filter(
+                    (i) => i.hierarchy.rootCategory === 'Legal' && i.hierarchy.legalCaseId === lc.id
+                  );
+                  const subList =
+                    lc.subFolders && lc.subFolders.length > 0
+                      ? lc.subFolders
+                      : getProvisionedLegalSubFolders(lc.caseTrack);
+                  const isLegacy = lc.id === 'legacy_general_legal_archive';
+
+                  return (
+                    <div
+                      key={lc.id}
+                      onClick={() => {
+                        setActiveLegalCaseId(lc.id);
+                        setActiveSubFolder(null);
+                      }}
+                      className="bg-slate-900 hover:bg-slate-800/80 border border-white/10 hover:border-sky-400/40 rounded-2xl p-4 flex flex-col justify-between gap-3.5 cursor-pointer transition-colors"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-sky-500/15 text-sky-300 border border-sky-400/30">
+                            {lc.caseTrack === 'CIVIL_CORPORATE'
+                              ? 'Civil / Corporate Case'
+                              : 'Logistics / Criminal Case'}
+                          </span>
+
+                          {!isLegacy && (
+                            <div onClick={(e) => e.stopPropagation()}>
+                              {confirmDeleteCaseId === lc.id ? (
+                                <div className="inline-flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      await deleteCorporateLegalCaseFromFirestore(lc.id);
+                                      setConfirmDeleteCaseId(null);
+                                    }}
+                                    className="px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Delete
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteCaseId(null)}
+                                    className="px-2 py-0.5 rounded bg-white/10 text-gray-300 text-[10px] cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteCaseId(lc.id)}
+                                  className="p-1 rounded hover:bg-rose-500/20 text-gray-400 hover:text-rose-300 cursor-pointer"
+                                  title="Remove Case Folder"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <h3 className="text-sm sm:text-base font-bold text-white leading-snug">
+                          {lc.identifier}
+                        </h3>
+
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
+                          <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-gray-200 font-semibold">
+                            {lc.recipientEntity}
+                          </span>
+                          {lc.courtOrForum && <span>· {lc.courtOrForum}</span>}
+                          {lc.caseReferenceNo && (
+                            <span className="font-mono text-sky-400">· {lc.caseReferenceNo}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2 font-mono tabular-nums text-gray-300">
+                          <span>{subList.length} Sub-Folders</span>
+                          <span>·</span>
+                          <span className="font-bold text-white">{caseDocs.length} Filings</span>
+                        </div>
+                        {lc.nextHearingDate ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-amber-300 tabular-nums">
+                            <Gavel size={12} />
+                            <span>{lc.nextHearingDate}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-sky-400 font-semibold">
+                            <span>Open Case</span>
+                            <ChevronRight size={13} />
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : !activeSubFolder ? (
+          /* Inside a Specific Legal Case: Provisioned Sub-Folders Grid */
+          <div className="space-y-4">
+            <div className="bg-slate-900 border border-white/10 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center flex-wrap gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-sky-500/15 text-sky-300 border border-sky-400/30">
+                    {activeLegalCase.caseTrack === 'CIVIL_CORPORATE'
+                      ? 'Civil / Corporate Track'
+                      : 'Logistics / Criminal Track'}
+                  </span>
+                  <h2 className="text-base font-extrabold text-white">
+                    {activeLegalCase.identifier}
+                  </h2>
+                </div>
+                <p className="text-xs text-gray-400">
+                  Entity: <strong className="text-gray-200">{activeLegalCase.recipientEntity}</strong>
+                  {activeLegalCase.courtOrForum ? ` · Forum: ${activeLegalCase.courtOrForum}` : ''}
+                  {activeLegalCase.nextHearingDate ? ` · Next Hearing: ${activeLegalCase.nextHearingDate}` : ''}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {addingCustomSubFolder ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={customSubFolderName}
+                      onChange={(e) => setCustomSubFolderName(e.target.value)}
+                      placeholder="Sub-folder title..."
+                      className="glass-input rounded-lg px-2.5 py-1.5 text-xs outline-none w-44"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomSubFolderToCase}
+                      className="mak-btn px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
+                    >
+                      Add
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAddingCustomSubFolder(false)}
+                      className="mak-btn-secondary px-2.5 py-1.5 rounded-lg text-xs cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setAddingCustomSubFolder(true)}
+                    className="mak-btn-secondary px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <FolderPlus size={14} className="text-sky-400" />
+                    <span>Add Sub-Folder</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleOpenUploadModal({
+                      rootCategory: 'Legal',
+                      legalCaseId: activeLegalCase.id,
+                      subFolder: activeLegalCase.subFolders?.[0]
+                    })
+                  }
+                  className="mak-btn px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Upload size={14} />
+                  <span>Upload to Case</span>
                 </button>
               </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredDocuments.map((doc) => {
-                const catStyle = getCategoryStyle(doc.category);
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
+              {(activeLegalCase.subFolders && activeLegalCase.subFolders.length > 0
+                ? activeLegalCase.subFolders
+                : getProvisionedLegalSubFolders(activeLegalCase.caseTrack)
+              ).map((sf, idx) => {
+                const sfDocs = enrichedDocuments.filter(
+                  (i) =>
+                    i.hierarchy.rootCategory === 'Legal' &&
+                    i.hierarchy.legalCaseId === activeLegalCase.id &&
+                    i.hierarchy.subFolder === sf
+                );
                 return (
                   <div
-                    key={doc.id}
-                    onClick={() => handleDownloadPdf(doc)}
-                    className="bg-slate-900/70 hover:bg-slate-900 border border-white/10 hover:border-amber-500/30 rounded-2xl p-4.5 transition-all shadow-lg hover:shadow-amber-500/5 flex flex-col justify-between cursor-pointer group space-y-3"
-                    title="Click to download PDF document"
+                    key={sf}
+                    onClick={() => setActiveSubFolder(sf)}
+                    className="bg-slate-900 hover:bg-slate-800/80 border border-white/10 hover:border-sky-400/40 rounded-xl p-4 flex flex-col justify-between gap-3 cursor-pointer transition-colors"
                   >
-                    {/* Top Badge & Action */}
                     <div className="flex items-start justify-between gap-2">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border ${catStyle.bg} ${catStyle.text} ${catStyle.border}`}>
-                        <Tag size={10} /> {doc.category}
+                      <div className="w-9 h-9 rounded-lg bg-sky-500/15 border border-sky-400/30 text-sky-400 flex items-center justify-center shrink-0">
+                        <FolderOpen size={17} />
+                      </div>
+                      <span className="font-mono text-[11px] text-gray-500 tabular-nums">
+                        0{idx + 1}
                       </span>
-
-                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadPdf(doc)}
-                          className="p-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 transition cursor-pointer"
-                          title="Download PDF"
-                        >
-                          <Download size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedDocForPreview(doc)}
-                          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition cursor-pointer"
-                          title="View Details"
-                        >
-                          <Eye size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteDocument(doc.id, e)}
-                          className="p-1.5 rounded-lg bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer"
-                          title="Delete Record"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
                     </div>
 
-                    {/* Document Title & Reference */}
                     <div>
-                      <h3 className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors line-clamp-2">
-                        {doc.title}
-                      </h3>
-                      {doc.referenceNo && (
-                        <div className="text-[10px] font-mono text-amber-400/90 mt-0.5">
-                          Ref #: {doc.referenceNo}
-                        </div>
-                      )}
+                      <h4 className="text-sm font-bold text-white leading-snug">{sf}</h4>
+                      <p className="text-[11px] text-gray-400 mt-1 font-mono tabular-nums">
+                        {sfDocs.length} {sfDocs.length === 1 ? 'Document' : 'Documents'}
+                      </p>
                     </div>
 
-                    {/* Subject & Summary */}
-                    {doc.subject && (
-                      <p className="text-xs text-gray-400 line-clamp-2 bg-black/25 p-2 rounded-xl border border-white/5">
-                        {doc.subject}
-                      </p>
-                    )}
-
-                    {/* Hearing Alert Box if applicable */}
-                    {doc.hearingRequired && (
-                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs text-amber-300">
-                        <div className="flex items-center gap-1.5">
-                          <Gavel size={14} className="text-amber-400 shrink-0" />
-                          <span className="font-bold">Hearing Scheduled:</span>
-                        </div>
-                        <span className="font-mono font-bold text-[11px] text-white">
-                          {doc.hearingDate || 'Scheduled'} {doc.hearingTime ? `@ ${doc.hearingTime}` : ''}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Expiry Badge if applicable */}
-                    {doc.hasExpiry && doc.expiryDate && (() => {
-                      const today = new Date().toISOString().split('T')[0];
-                      const diffDays = Math.ceil((new Date(doc.expiryDate).getTime() - new Date(today).getTime()) / (24 * 60 * 60 * 1000));
-                      const isExpired = diffDays <= 0;
-                      const isExpiringSoon = diffDays > 0 && diffDays <= 10;
-                      return (
-                        <div className={`p-2 rounded-xl border flex items-center justify-between text-xs ${
-                          isExpired 
-                            ? 'bg-red-500/10 border-red-500/30 text-red-300' 
-                            : isExpiringSoon 
-                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' 
-                            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                        }`}>
-                          <div className="flex items-center gap-1.5 font-bold">
-                            <Clock size={13} />
-                            <span>{isExpired ? 'Expired:' : isExpiringSoon ? 'Expiring Soon:' : 'Valid Until:'}</span>
-                          </div>
-                          <span className="font-mono font-bold text-[11px]">
-                            {doc.expiryDate} {isExpiringSoon ? `(${diffDays}d left)` : ''}
-                          </span>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Bottom Meta Info (From, To, Date) */}
-                    <div className="pt-2 border-t border-white/5 text-[11px] text-gray-400 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="truncate max-w-[150px]">
-                          <strong className="text-gray-300">From:</strong> {doc.from || 'Not specified'}
-                        </span>
-                        <span className="flex items-center gap-1 text-gray-400 shrink-0 font-mono text-[10px]">
-                          <Calendar size={11} /> {doc.documentDate}
-                        </span>
-                      </div>
-                      <div className="truncate">
-                        <strong className="text-gray-300">To:</strong> {doc.to || activeCompany?.legalTitle || activeCompany?.name || 'Company'}
-                      </div>
+                    <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenUploadModal({
+                            rootCategory: 'Legal',
+                            legalCaseId: activeLegalCase.id,
+                            subFolder: sf
+                          });
+                        }}
+                        className="text-sky-400 hover:underline font-semibold cursor-pointer"
+                      >
+                        + Upload Here
+                      </button>
+                      <ChevronRight size={14} className="text-gray-400" />
                     </div>
                   </div>
                 );
               })}
             </div>
-          )}
-        </div>
-      )}
 
-      {/* ========================================================================= */}
-      {/* DEDICATED CATEGORY DOCUMENTS MODAL WINDOW (OPENS ON CATEGORY CLICK)       */}
-      {/* ========================================================================= */}
-      {activeCategoryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-fade-in overflow-y-auto custom-scrollbar">
-          <div className="bg-slate-900 border border-white/15 rounded-3xl w-full max-w-4xl max-h-[92vh] overflow-y-auto p-5 sm:p-7 space-y-5 shadow-2xl custom-scrollbar my-auto flex flex-col">
-            {/* Modal Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
-              <div className="flex items-center gap-3.5">
-                {(() => {
-                  const meta = getCategoryMeta(activeCategoryModal);
-                  const IconComp = meta.icon;
-                  return (
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg ${meta.iconBg}`}>
-                      <IconComp size={24} className={meta.textColor} />
-                    </div>
-                  );
-                })()}
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-lg sm:text-xl font-black text-white tracking-wide">
-                      {activeCategoryModal}
-                    </h2>
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      {activeCategoryDocuments.length} Documents
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {getCategoryMeta(activeCategoryModal).description}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 self-end sm:self-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDocCategory(activeCategoryModal);
-                    setShowAddModal(true);
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition cursor-pointer"
-                >
-                  <Plus size={14} className="stroke-[3]" />
-                  <span>Add Document</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveCategoryModal(null)}
-                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
-                  title="Close Window"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-
-            {/* In-Modal Search Bar */}
-            <div className="relative">
-              <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                value={categoryModalSearch}
-                onChange={(e) => setCategoryModalSearch(e.target.value)}
-                placeholder={`Search within ${activeCategoryModal} (title, subject, reference #, date)...`}
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-amber-500/50"
-              />
-              {categoryModalSearch && (
-                <button
-                  type="button"
-                  onClick={() => setCategoryModalSearch('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-
-            {/* Documents List inside Category Modal */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1 min-h-[220px]">
-              {activeCategoryDocuments.length === 0 ? (
-                <div className="py-12 text-center space-y-3 bg-black/25 rounded-2xl border border-white/5 p-6">
-                  {(() => {
-                    const meta = getCategoryMeta(activeCategoryModal);
-                    const EmptyIcon = meta.icon;
-                    return (
-                      <div className={`w-12 h-12 rounded-2xl mx-auto flex items-center justify-center opacity-80 ${meta.iconBg}`}>
-                        <EmptyIcon size={24} className={meta.textColor} />
-                      </div>
-                    );
-                  })()}
-                  <h4 className="text-sm font-bold text-gray-300">
-                    {categoryModalSearch ? 'No Matching Documents' : `No Documents Recorded in ${activeCategoryModal}`}
-                  </h4>
-                  <p className="text-xs text-gray-500 max-w-sm mx-auto">
-                    {categoryModalSearch 
-                      ? 'No documents match your keyword. Try clearing the search query.'
-                      : `No files or notices have been uploaded under ${activeCategoryModal} yet. Click below to add the first document.`}
-                  </p>
-                  <div className="pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDocCategory(activeCategoryModal);
-                        setShowAddModal(true);
-                      }}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-md transition cursor-pointer"
-                    >
-                      <Plus size={14} /> Upload First Document to {activeCategoryModal}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="text-[11px] text-gray-400 font-semibold flex items-center justify-between px-1">
-                    <span>Click any document to download PDF directly</span>
-                    <span>{activeCategoryDocuments.length} Record(s)</span>
-                  </div>
-
-                  {activeCategoryDocuments.map((doc) => (
-                    <div
-                      key={doc.id}
-                      onClick={() => handleDownloadPdf(doc)}
-                      className="bg-slate-800/60 hover:bg-slate-800/90 border border-white/10 hover:border-amber-500/40 rounded-2xl p-4 transition-all shadow-md hover:shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer group"
-                      title="Click to Download PDF"
-                    >
-                      {/* Document Details */}
-                      <div className="space-y-1.5 flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h4 className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors">
-                            {doc.title}
-                          </h4>
-                          {doc.referenceNo && (
-                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                              Ref: {doc.referenceNo}
-                            </span>
-                          )}
-                          {doc.fileName && (
-                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-mono text-gray-300 bg-white/5 border border-white/10 flex items-center gap-1">
-                              <Paperclip size={10} className="text-amber-400" />
-                              <span className="truncate max-w-[140px]">{doc.fileName}</span>
-                            </span>
-                          )}
-                        </div>
-
-                        {doc.subject && (
-                          <p className="text-xs text-gray-300 line-clamp-1">
-                            {doc.subject}
-                          </p>
-                        )}
-
-                        <div className="flex flex-wrap items-center gap-3 text-[11px] text-gray-400 font-mono">
-                          <span className="flex items-center gap-1">
-                            <Calendar size={11} className="text-amber-400" /> {doc.documentDate}
-                          </span>
-                          {doc.from && (
-                            <span><strong>From:</strong> {doc.from}</span>
-                          )}
-                          {doc.to && (
-                            <span><strong>To:</strong> {doc.to}</span>
-                          )}
-                        </div>
-
-                        {doc.hearingRequired && (
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-[11px] font-bold text-amber-300 mt-1">
-                            <Gavel size={12} className="text-amber-400" />
-                            <span>Hearing Scheduled: {doc.hearingDate || 'TBD'} {doc.hearingTime ? `@ ${doc.hearingTime}` : ''}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-center" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadPdf(doc)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition cursor-pointer"
-                          title="Download PDF"
-                        >
-                          <Download size={13} />
-                          <span>Download PDF</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setSelectedDocForPreview(doc)}
-                          className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-white/10 transition cursor-pointer"
-                          title="View Details"
-                        >
-                          <Eye size={14} />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteDocument(doc.id, e)}
-                          className="p-2 rounded-xl bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-300 border border-white/10 transition cursor-pointer"
-                          title="Delete Record"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Modal Bottom Bar */}
-            <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs text-gray-400">
-              <span>Folder: <strong className="text-white">{activeCategoryModal}</strong></span>
-              <button
-                type="button"
-                onClick={() => setActiveCategoryModal(null)}
-                className="px-4 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 font-semibold cursor-pointer"
-              >
-                Close Window
-              </button>
+            <div className="pt-2 space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">
+                All Case Proceedings &amp; Filings ({visibleDocuments.length})
+              </h3>
+              {renderDocumentRegistryTable('No proceedings uploaded in this legal case yet.')}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 1. ADD DOCUMENT MODAL (WITH AI OCR & CUSTOM CATEGORY) */}
-      {/* ========================================================================= */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto custom-scrollbar">
-          <div className="bg-slate-900 border border-white/15 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto p-5 sm:p-6 space-y-5 shadow-2xl custom-scrollbar my-auto">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
-                  <Plus size={18} />
-                </div>
-                <div>
-                  <h2 className="text-sm sm:text-base font-bold text-white">Add Company Document</h2>
-                  <p className="text-[11px] text-gray-400">Upload letter/notice for AI reading or enter details manually</p>
-                </div>
+        ) : (
+          /* Specific Legal Case Sub-Folder View */
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-white">{activeSubFolder}</h2>
+                <p className="text-xs text-gray-400">
+                  Case Dossier: <span className="text-gray-200 font-semibold">{activeLegalCase.identifier}</span>
+                </p>
               </div>
               <button
                 type="button"
-                onClick={() => setShowAddModal(false)}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10"
+                onClick={() =>
+                  handleOpenUploadModal({
+                    rootCategory: 'Legal',
+                    legalCaseId: activeLegalCase.id,
+                    subFolder: activeSubFolder
+                  })
+                }
+                className="mak-btn px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
               >
-                <X size={18} />
+                <Upload size={14} />
+                <span>Upload to {activeSubFolder}</span>
+              </button>
+            </div>
+            {renderDocumentRegistryTable(`No filings recorded in "${activeSubFolder}" yet.`)}
+          </div>
+        )
+      ) : activeRoot === 'Tax' ? (
+        /* =================================================================== */
+        /* VIEW 3: TAX — AUTHORITY (FBR / SRB / LABOUR) & FISCAL YEAR ARCHIVE  */
+        /* =================================================================== */
+        !activeTaxAuthority ? (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-base font-bold text-white">
+                Tax &amp; Statutory Authorities (FBR · SRB · Labour Department)
+              </h2>
+              <p className="text-xs text-gray-400">
+                Select a regulatory authority to browse returns, audit notices, and challans dynamically grouped by Fiscal Year.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {TAX_AUTHORITIES.map((auth) => {
+                const authDocs = enrichedDocuments.filter(
+                  (i) =>
+                    i.hierarchy.rootCategory === 'Tax' &&
+                    i.hierarchy.taxAuthority === auth.id &&
+                    (entityFilter === 'ALL' || i.hierarchy.recipientEntity === entityFilter)
+                );
+                const distinctYears = Array.from(
+                  new Set([...DEFAULT_FISCAL_YEARS, ...authDocs.map((d) => d.hierarchy.taxYear).filter(Boolean)])
+                )
+                  .sort((a, b) => String(b).localeCompare(String(a)))
+                  .slice(0, 4);
+
+                return (
+                  <div
+                    key={auth.id}
+                    onClick={() => {
+                      setActiveTaxAuthority(auth.id);
+                      setActiveTaxYear(null);
+                    }}
+                    className="bg-slate-900 hover:bg-slate-800/80 border border-white/10 hover:border-sky-400/40 rounded-2xl p-5 flex flex-col justify-between gap-4 cursor-pointer transition-colors"
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="w-11 h-11 rounded-xl bg-sky-500/15 border border-sky-400/30 text-sky-400 flex items-center justify-center">
+                          <Landmark size={20} />
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-md bg-white/5 border border-white/10 font-mono text-xs font-bold text-white tabular-nums">
+                          {authDocs.length} Filings
+                        </span>
+                      </div>
+
+                      <div>
+                        <h3 className="text-base font-extrabold text-white">{auth.title}</h3>
+                        <p className="text-xs font-semibold text-sky-400">{auth.fullName}</p>
+                        <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">
+                          {auth.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-white/10 flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap gap-1">
+                        {distinctYears.map((yr) => (
+                          <span
+                            key={yr}
+                            className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-mono text-gray-300 tabular-nums"
+                          >
+                            FY {yr}
+                          </span>
+                        ))}
+                      </div>
+                      <span className="inline-flex items-center gap-1 text-xs font-bold text-sky-400 shrink-0">
+                        <span>Years</span>
+                        <ChevronRight size={13} />
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : !activeTaxYear ? (
+          /* Fiscal Year Folders inside Selected Tax Authority */
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-white">
+                  {activeTaxAuthority} — Fiscal Year Archives
+                </h2>
+                <p className="text-xs text-gray-400">
+                  Filed tax returns, withholding statements, and compliance reports grouped by Tax / Fiscal Year.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddYearModal(true)}
+                  className="mak-btn-secondary px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <FolderPlus size={14} className="text-sky-400" />
+                  <span>Add Fiscal Year</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleOpenUploadModal({
+                      rootCategory: 'Tax',
+                      taxAuthority: activeTaxAuthority,
+                      taxYear: authorityFiscalYears[0]
+                    })
+                  }
+                  className="mak-btn px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Upload size={14} />
+                  <span>Upload {activeTaxAuthority} Filing</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
+              {authorityFiscalYears.map((yr) => {
+                const yrDocs = enrichedDocuments.filter(
+                  (i) =>
+                    i.hierarchy.rootCategory === 'Tax' &&
+                    i.hierarchy.taxAuthority === activeTaxAuthority &&
+                    i.hierarchy.taxYear === yr &&
+                    (entityFilter === 'ALL' || i.hierarchy.recipientEntity === entityFilter)
+                );
+                return (
+                  <div
+                    key={yr}
+                    onClick={() => setActiveTaxYear(yr)}
+                    className="bg-slate-900 hover:bg-slate-800/80 border border-white/10 hover:border-sky-400/40 rounded-2xl p-4 flex flex-col justify-between gap-3 cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="w-9 h-9 rounded-lg bg-sky-500/15 border border-sky-400/30 text-sky-400 flex items-center justify-center">
+                        <Calendar size={17} />
+                      </div>
+                      <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 font-mono text-[11px] font-bold text-white tabular-nums">
+                        {yrDocs.length}
+                      </span>
+                    </div>
+
+                    <div>
+                      <h3 className="text-base font-extrabold font-mono text-white tabular-nums">
+                        Year {yr}
+                      </h3>
+                      <p className="text-[11px] text-gray-400">
+                        {activeTaxAuthority} Fiscal Archive
+                      </p>
+                    </div>
+
+                    <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs text-sky-400 font-semibold">
+                      <span>Open Year</span>
+                      <ChevronRight size={13} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          /* Specific Authority + Specific Fiscal Year Table */
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-white">
+                  {activeTaxAuthority} — Year {activeTaxYear} Filings ({visibleDocuments.length})
+                </h2>
+                <p className="text-xs text-gray-400">
+                  Returns, CPR payment receipts, audit proceedings, and statutory certificates for FY {activeTaxYear}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  handleOpenUploadModal({
+                    rootCategory: 'Tax',
+                    taxAuthority: activeTaxAuthority,
+                    taxYear: activeTaxYear
+                  })
+                }
+                className="mak-btn px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Upload size={14} />
+                <span>Upload Year {activeTaxYear} Filing</span>
+              </button>
+            </div>
+            {renderDocumentRegistryTable(
+              `No ${activeTaxAuthority} reports uploaded for Year ${activeTaxYear} yet.`
+            )}
+          </div>
+        )
+      ) : activeRoot === 'Assets' ? (
+        /* =================================================================== */
+        /* VIEW 4: ASSETS — SECURITY DEPOSITS & COMPANY PROPERTIES             */
+        /* =================================================================== */
+        !activeAssetGroup ? (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-base font-bold text-white">
+                Corporate Assets, Guarantees &amp; Property Investments
+              </h2>
+              <p className="text-xs text-gray-400">
+                Track bank guarantees, port/utility security deposits, and real estate &amp; fleet capital investments.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {ASSETS_SUBFOLDERS.map((ag) => {
+                const agDocs = enrichedDocuments.filter(
+                  (i) =>
+                    i.hierarchy.rootCategory === 'Assets' &&
+                    i.hierarchy.assetGroup === ag.id &&
+                    (entityFilter === 'ALL' || i.hierarchy.recipientEntity === entityFilter)
+                );
+                const totalValuation = agDocs.reduce(
+                  (acc, item) => acc + (Number(item.doc.assetValuationPkr) || 0),
+                  0
+                );
+
+                return (
+                  <div
+                    key={ag.id}
+                    onClick={() => setActiveAssetGroup(ag.id)}
+                    className="bg-slate-900 hover:bg-slate-800/80 border border-white/10 hover:border-sky-400/40 rounded-2xl p-5 flex flex-col justify-between gap-4 cursor-pointer transition-colors"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="w-11 h-11 rounded-xl bg-sky-500/15 border border-sky-400/30 text-sky-400 flex items-center justify-center">
+                          <HardDrive size={20} />
+                        </div>
+                        <div className="text-right">
+                          <span className="block font-mono text-xs font-bold text-white tabular-nums">
+                            {agDocs.length} Records
+                          </span>
+                          {totalValuation > 0 && (
+                            <span className="block font-mono text-[11px] text-emerald-400 font-semibold tabular-nums">
+                              PKR {totalValuation.toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h3 className="text-base font-extrabold text-white">{ag.title}</h3>
+                        <p className="text-xs font-semibold text-sky-400">{ag.subtitle}</p>
+                        <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">
+                          {ag.description}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {ag.quickExamples.map((ex) => (
+                          <span
+                            key={ex}
+                            className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[11px] text-gray-300"
+                          >
+                            {ex}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenUploadModal({
+                            rootCategory: 'Assets',
+                            assetGroup: ag.id
+                          });
+                        }}
+                        className="text-sky-400 hover:underline font-semibold cursor-pointer"
+                      >
+                        + Add Asset / Deposit Record
+                      </button>
+                      <span className="inline-flex items-center gap-1 font-bold text-sky-400">
+                        <span>Open Catalog</span>
+                        <ChevronRight size={14} />
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          /* Specific Asset Catalog View */
+          <div className="space-y-4">
+            {(() => {
+              const cfg = ASSETS_SUBFOLDERS.find((a) => a.id === activeAssetGroup) || ASSETS_SUBFOLDERS[0];
+              const totalPkr = visibleDocuments.reduce(
+                (sum, i) => sum + (Number(i.doc.assetValuationPkr) || 0),
+                0
+              );
+              return (
+                <>
+                  <div className="bg-slate-900 border border-white/10 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-base font-bold text-white">{cfg.title}</h2>
+                      <p className="text-xs text-gray-400">{cfg.subtitle}</p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      {totalPkr > 0 && (
+                        <div className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs">
+                          <span className="text-gray-400 mr-1.5">Recorded Value:</span>
+                          <span className="font-mono font-bold text-emerald-300 tabular-nums">
+                            PKR {totalPkr.toLocaleString()}
+                          </span>
+                        </div>
+                      )}
+
+                      <select
+                        aria-label="Filter Asset Sub-Type"
+                        value={assetSubTypeFilter}
+                        onChange={(e) => setAssetSubTypeFilter(e.target.value)}
+                        className="glass-input rounded-lg px-3 py-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
+                      >
+                        <option value="ALL">All Classifications</option>
+                        {cfg.subTypes.map((st) => (
+                          <option key={st} value={st}>
+                            {st}
+                          </option>
+                        ))}
+                      </select>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenUploadModal({
+                            rootCategory: 'Assets',
+                            assetGroup: cfg.id
+                          })
+                        }
+                        className="mak-btn px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                      >
+                        <Upload size={14} />
+                        <span>Add Record</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {renderDocumentRegistryTable(`No records filed in "${cfg.title}" yet.`)}
+                </>
+              );
+            })()}
+          </div>
+        )
+      ) : activeRoot === 'Company Documents' ? (
+        /* =================================================================== */
+        /* VIEW 5: COMPANY DOCUMENTS — 10 COMPLIANCE FOLDERS & SECURE VAULT    */
+        /* =================================================================== */
+        !activeSubFolder ? (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-base font-bold text-white">
+                Master Corporate Compliance Repository (10 Statutory Folders)
+              </h2>
+              <p className="text-xs text-gray-400">
+                Pre-configured statutory, licensing, identity, banking, PSX, SBP, and encrypted portal credential folders.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5">
+              {MASTER_COMPANY_DOC_FOLDERS.map((folder) => {
+                const FolderIcon = getMasterFolderIcon(folder.id);
+                const folderDocs = enrichedDocuments.filter(
+                  (i) =>
+                    i.hierarchy.rootCategory === 'Company Documents' &&
+                    i.hierarchy.subFolder === folder.id &&
+                    (entityFilter === 'ALL' || i.hierarchy.recipientEntity === entityFilter)
+                );
+                const vaultCount = folder.isSecureVault
+                  ? vaultCredentials.filter(
+                      (v) => entityFilter === 'ALL' || v.recipientEntity === entityFilter
+                    ).length
+                  : 0;
+
+                return (
+                  <div
+                    key={folder.id}
+                    onClick={() => setActiveSubFolder(folder.id)}
+                    className="bg-slate-900 hover:bg-slate-800/80 border border-white/10 hover:border-sky-400/40 rounded-2xl p-4 flex flex-col justify-between gap-3.5 cursor-pointer transition-colors"
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div
+                          className={`w-10 h-10 rounded-xl border flex items-center justify-center ${
+                            folder.isSecureVault
+                              ? 'bg-amber-500/15 border-amber-400/30 text-amber-300'
+                              : 'bg-sky-500/15 border-sky-400/30 text-sky-400'
+                          }`}
+                        >
+                          <FolderIcon size={19} />
+                        </div>
+                        <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 font-mono text-[11px] font-bold text-white tabular-nums">
+                          {folder.isSecureVault
+                            ? `${vaultCount} IDs · ${folderDocs.length} Docs`
+                            : `${folderDocs.length} Docs`}
+                        </span>
+                      </div>
+
+                      <div>
+                        <h3 className="text-sm font-bold text-white leading-snug">
+                          {folder.title}
+                        </h3>
+                        <p className="text-[11px] text-gray-400 mt-1 line-clamp-3 leading-relaxed">
+                          {folder.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2.5 border-t border-white/10 flex items-center justify-between text-xs">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenUploadModal({
+                            rootCategory: 'Company Documents',
+                            subFolder: folder.id
+                          });
+                        }}
+                        className="text-sky-400 hover:underline font-semibold cursor-pointer"
+                      >
+                        + Upload
+                      </button>
+                      <span className="inline-flex items-center gap-1 text-gray-300 font-semibold">
+                        <span>Open</span>
+                        <ChevronRight size={13} />
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          /* Inside One of the 10 Master Compliance Folders */
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-white">{activeSubFolder}</h2>
+                <p className="text-xs text-gray-400">
+                  {MASTER_COMPANY_DOC_FOLDERS.find((f) => f.id === activeSubFolder)?.description}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {activeSubFolder === 'Office ID Passwords (Secure Vault)' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingVaultItem(null);
+                      setVaultPortalName('');
+                      setVaultPortalUrl('');
+                      setVaultUsername('');
+                      setVaultPassword('');
+                      setVaultPinNote('');
+                      setVaultEntity(defaultEntity);
+                      setVaultRecovery('');
+                      setVaultExpiryDate('');
+                      setShowVaultModal(true);
+                    }}
+                    className="mak-btn-secondary px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <KeyRound size={14} className="text-amber-400" />
+                    <span>Add Portal Credential</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleOpenUploadModal({
+                      rootCategory: 'Company Documents',
+                      subFolder: activeSubFolder
+                    })
+                  }
+                  className="mak-btn px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Upload size={14} />
+                  <span>Upload Document</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Interactive Encrypted Credential Vault when inside Office ID Passwords (Secure Vault) */}
+            {activeSubFolder === 'Office ID Passwords (Secure Vault)' && (
+              <div className="bg-slate-900 border border-white/10 rounded-2xl overflow-hidden">
+                <div className="px-4 py-3 bg-slate-950/70 border-b border-white/10 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Lock size={15} className="text-amber-400" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      Protected Office ID &amp; Portal Credentials Vault
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-mono text-gray-400 tabular-nums">
+                    {vaultCredentials.length} Saved Logins
+                  </span>
+                </div>
+
+                {vaultCredentials.length === 0 ? (
+                  <div className="p-8 text-center space-y-2">
+                    <KeyRound size={26} className="mx-auto text-gray-500" />
+                    <p className="text-xs text-gray-400">
+                      Store FBR IRIS, WeBOC, PSW, SECP eServices, SRB, and corporate portal IDs with masked password protection.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-white/10 text-[11px] text-gray-400 uppercase">
+                          <th className="py-2.5 px-4 font-semibold">Portal / System</th>
+                          <th className="py-2.5 px-3 font-semibold">Entity</th>
+                          <th className="py-2.5 px-3 font-semibold">Login ID / Username</th>
+                          <th className="py-2.5 px-3 font-semibold">Password</th>
+                          <th className="py-2.5 px-3 font-semibold">PIN / 2FA / Recovery</th>
+                          <th className="py-2.5 px-4 font-semibold text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {vaultCredentials
+                          .filter(
+                            (v) => entityFilter === 'ALL' || v.recipientEntity === entityFilter
+                          )
+                          .map((cred) => {
+                            const isRevealed = revealedVaultIds.has(cred.id);
+                            return (
+                              <tr key={cred.id} className="hover:bg-white/[0.03]">
+                                <td className="py-2.5 px-4">
+                                  <div className="font-bold text-white">{cred.portalName}</div>
+                                  {cred.portalUrl && (
+                                    <div className="text-[11px] font-mono text-sky-400 truncate max-w-[200px]">
+                                      {cred.portalUrl}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3 whitespace-nowrap">
+                                  <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[11px] font-semibold text-gray-200">
+                                    {cred.recipientEntity}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 font-mono text-gray-200 whitespace-nowrap">
+                                  <div className="inline-flex items-center gap-1.5">
+                                    <span>{cred.usernameOrId}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyText(cred.usernameOrId, `u_${cred.id}`)}
+                                      className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white cursor-pointer"
+                                      title="Copy Username"
+                                    >
+                                      {copiedVaultField === `u_${cred.id}` ? (
+                                        <Check size={12} className="text-emerald-400" />
+                                      ) : (
+                                        <Copy size={12} />
+                                      )}
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-3 font-mono whitespace-nowrap">
+                                  <div className="inline-flex items-center gap-1.5">
+                                    <span className="text-amber-300">
+                                      {isRevealed ? cred.passwordSecret : '••••••••••••'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setRevealedVaultIds((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(cred.id)) next.delete(cred.id);
+                                          else next.add(cred.id);
+                                          return next;
+                                        })
+                                      }
+                                      className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white cursor-pointer"
+                                      title={isRevealed ? 'Hide Password' : 'Reveal Password'}
+                                    >
+                                      {isRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyText(cred.passwordSecret, `p_${cred.id}`)}
+                                      className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white cursor-pointer"
+                                      title="Copy Password"
+                                    >
+                                      {copiedVaultField === `p_${cred.id}` ? (
+                                        <Check size={12} className="text-emerald-400" />
+                                      ) : (
+                                        <Copy size={12} />
+                                      )}
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-3 text-gray-400 max-w-[200px] truncate">
+                                  {[cred.pinOr2faNote, cred.recoveryContact].filter(Boolean).join(' · ') || '-'}
+                                </td>
+                                <td className="py-2.5 px-4 text-right whitespace-nowrap">
+                                  {confirmDeleteVaultId === cred.id ? (
+                                    <div className="inline-flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          await deleteCorporateVaultCredentialFromFirestore(cred.id);
+                                          setConfirmDeleteVaultId(null);
+                                        }}
+                                        className="px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold cursor-pointer"
+                                      >
+                                        Confirm
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteVaultId(null)}
+                                        className="px-2 py-0.5 rounded bg-white/10 text-gray-300 text-[10px] cursor-pointer"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="inline-flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingVaultItem(cred);
+                                          setVaultPortalName(cred.portalName);
+                                          setVaultPortalUrl(cred.portalUrl || '');
+                                          setVaultUsername(cred.usernameOrId);
+                                          setVaultPassword(cred.passwordSecret);
+                                          setVaultPinNote(cred.pinOr2faNote || '');
+                                          setVaultEntity(cred.recipientEntity);
+                                          setVaultRecovery(cred.recoveryContact || '');
+                                          setVaultExpiryDate(cred.expiryDate || '');
+                                          setShowVaultModal(true);
+                                        }}
+                                        className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 cursor-pointer"
+                                        title="Edit Credential"
+                                      >
+                                        <Edit size={12} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteVaultId(cred.id)}
+                                        className="p-1.5 rounded-lg bg-white/5 hover:bg-rose-500/20 text-gray-400 hover:text-rose-300 cursor-pointer"
+                                        title="Delete Credential"
+                                      >
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {renderDocumentRegistryTable(`No compliance documents uploaded in "${activeSubFolder}" yet.`)}
+          </div>
+        )
+      ) : (
+        /* =================================================================== */
+        /* VIEW 6: QUOTATIONS — COMMERCIAL PROPOSALS ARCHIVE & MULTI-FILTER    */
+        /* =================================================================== */
+        <div className="space-y-4">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl p-4 space-y-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-white">
+                  Outbound Commercial Quotations Archive ({visibleDocuments.length})
+                </h2>
+                <p className="text-xs text-gray-400">
+                  Search and filter outbound rate proposals by Client Name, Issuance Date, Service Type, and Approval Status.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleOpenUploadModal({ rootCategory: 'Quotations' })}
+                className="mak-btn px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Upload size={14} />
+                <span>Upload Quotation</span>
               </button>
             </div>
 
-            {/* Step 1: Upload Document Button (AI Auto-Reading) */}
-            <div className="p-4 rounded-xl bg-gradient-to-r from-amber-500/10 via-slate-800/80 to-blue-500/10 border border-amber-500/30 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
-                  <Sparkles size={15} className="text-amber-400" />
-                  <span>AI Document Scanner & Auto-Fill</span>
-                </div>
-                {aiAnalyzing && (
-                  <span className="flex items-center gap-1.5 text-[11px] text-amber-300 font-semibold animate-pulse">
-                    <Loader2 size={12} className="animate-spin" /> AI Reading document...
-                  </span>
-                )}
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 pt-2 border-t border-white/10">
+              <input
+                type="text"
+                value={quoteClientSearch}
+                onChange={(e) => setQuoteClientSearch(e.target.value)}
+                placeholder="Filter by Client Name..."
+                className="glass-input rounded-lg px-3 py-2 text-xs outline-none"
+              />
 
-              <p className="text-[11px] text-gray-300 leading-relaxed">
-                Upload image or PDF document. AI will automatically scan and read the date, sender, recipient, subject, reference number, and legal hearing status!
-              </p>
+              <select
+                aria-label="Filter Quotation Service Type"
+                value={quoteServiceFilter}
+                onChange={(e) => setQuoteServiceFilter(e.target.value)}
+                className="glass-input rounded-lg px-3 py-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
+              >
+                <option value="ALL">All Service Types</option>
+                {QUOTATION_SERVICE_TYPES.map((st) => (
+                  <option key={st} value={st}>
+                    {st}
+                  </option>
+                ))}
+              </select>
 
-              <div className="flex flex-wrap items-center gap-3 pt-1">
+              <select
+                aria-label="Filter Quotation Status"
+                value={quoteStatusFilter}
+                onChange={(e) => setQuoteStatusFilter(e.target.value)}
+                className="glass-input rounded-lg px-3 py-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
+              >
+                <option value="ALL">All Quotation Statuses</option>
+                {QUOTATION_STATUSES.map((qs) => (
+                  <option key={qs} value={qs}>
+                    {qs}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                type="date"
+                aria-label="Quotation Date From"
+                value={quoteDateFrom}
+                onChange={(e) => setQuoteDateFrom(e.target.value)}
+                className="glass-input rounded-lg px-3 py-2 text-xs font-mono tabular-nums outline-none"
+              />
+
+              <div className="flex items-center gap-1.5">
                 <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFilesSelected}
-                  multiple
-                  accept="image/*,application/pdf"
-                  className="hidden"
+                  type="date"
+                  aria-label="Quotation Date To"
+                  value={quoteDateTo}
+                  onChange={(e) => setQuoteDateTo(e.target.value)}
+                  className="glass-input flex-1 rounded-lg px-3 py-2 text-xs font-mono tabular-nums outline-none"
                 />
-                <button
-                  type="button"
-                  disabled={aiAnalyzing}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition cursor-pointer"
-                >
-                  <Upload size={14} />
-                  <span>{uploadedFiles.length > 0 ? 'Upload More Documents' : 'Upload Document (PDF / Image)'}</span>
-                </button>
-
-                {uploadedFiles.length > 0 && (
-                  <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
-                    <CheckCircle2 size={14} /> {uploadedFiles.length} file(s) attached
-                  </span>
-                )}
-              </div>
-
-              {/* Uploaded Files Chips */}
-              {uploadedFiles.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {uploadedFiles.map((f, idx) => (
-                    <span key={idx} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/40 text-[10px] text-gray-200 border border-white/10 font-mono">
-                      <Paperclip size={11} className="text-amber-400" />
-                      <span className="truncate max-w-[180px]">{f.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => setUploadedFiles(uploadedFiles.filter((_, i) => i !== idx))}
-                        className="text-red-400 hover:text-red-300 ml-1"
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* AI Notice Banner */}
-              {aiNotice && (
-                <div className="p-2.5 rounded-lg bg-black/40 border border-amber-500/20 text-[11px] text-amber-200 flex items-start gap-2">
-                  <Sparkles size={14} className="text-amber-400 shrink-0 mt-0.5" />
-                  <span>{aiNotice}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Document Form */}
-            <form onSubmit={handleSaveDocument} className="space-y-4">
-              {/* Category Dropdown with "+ Add New Category" button */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-semibold text-gray-300">Category *</label>
+                {(quoteClientSearch || quoteServiceFilter !== 'ALL' || quoteStatusFilter !== 'ALL' || quoteDateFrom || quoteDateTo) && (
                   <button
                     type="button"
-                    onClick={() => setShowAddCategoryModal(true)}
-                    className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 underline cursor-pointer"
+                    onClick={() => {
+                      setQuoteClientSearch('');
+                      setQuoteServiceFilter('ALL');
+                      setQuoteStatusFilter('ALL');
+                      setQuoteDateFrom('');
+                      setQuoteDateTo('');
+                    }}
+                    className="mak-btn-secondary px-2.5 py-2 rounded-lg text-xs cursor-pointer"
+                    title="Reset Quotation Filters"
                   >
-                    <Plus size={12} /> Add New Category
+                    <X size={13} />
                   </button>
-                </div>
-                <select
-                  value={docCategory}
-                  onChange={(e) => setDocCategory(e.target.value)}
-                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
-                >
-                  {categories.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+                )}
               </div>
+            </div>
+          </div>
 
-              {/* Grid: Document Date & Reference No */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-gray-300 block mb-1">Document Date *</label>
-                  <input
-                    type="date"
-                    required
-                    value={docDate}
-                    onChange={(e) => setDocDate(e.target.value)}
-                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-300 block mb-1">Reference / Notice #</label>
-                  <input
-                    type="text"
-                    value={docRefNo}
-                    onChange={(e) => setDocRefNo(e.target.value)}
-                    placeholder="e.g. FBR/2026/0991, SECP-REG-44"
-                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400 font-mono"
-                  />
-                </div>
+          {renderDocumentRegistryTable('No outbound commercial quotations match the current filters.')}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* MODAL 1: UNIVERSAL DRAG-AND-DROP UPLOAD & MANDATORY METADATA MODAL    */}
+      {/* ===================================================================== */}
+      <CompanyDocumentUploadModal
+        isOpen={isUploadModalOpen}
+        onClose={() => {
+          setIsUploadModalOpen(false);
+          setEditingDocument(null);
+        }}
+        onSave={async (docRecord) => {
+          await saveCompanyDocumentToFirestore(docRecord);
+        }}
+        legalCases={effectiveLegalCases.filter((c) => c.id !== 'legacy_general_legal_archive')}
+        preset={uploadPreset}
+        editingDocument={editingDocument}
+        defaultRecipientEntity={defaultEntity}
+        customFiscalYears={customFiscalYears}
+      />
+
+      {/* ===================================================================== */}
+      {/* MODAL 2: UNIVERSAL DOCUMENT PREVIEW MODAL                             */}
+      {/* ===================================================================== */}
+      {previewDoc && (
+        <UniversalDocumentPreviewModal
+          isOpen={Boolean(previewDoc)}
+          onClose={() => {
+            setPreviewDoc(null);
+            setPreviewResolvedFile(null);
+          }}
+          file={previewResolvedFile}
+          filename={previewDoc.fileName || `${previewDoc.title}.pdf`}
+          title={previewDoc.title}
+          verificationItems={previewVerificationItems}
+          onDownload={() => handleDownloadDocument(previewDoc)}
+        />
+      )}
+
+      {/* ===================================================================== */}
+      {/* MODAL 3: CREATE DYNAMIC LEGAL CASE DOSSIER                            */}
+      {/* ===================================================================== */}
+      {showNewLegalCaseModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-slate-950 border border-white/15 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="px-5 py-3.5 bg-slate-900 border-b border-white/10 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Scale size={18} className="text-sky-400" />
+                <h3 className="text-sm sm:text-base font-bold text-white">
+                  Provision Dynamic Legal Case Folder
+                </h3>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowNewLegalCaseModal(false)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-white cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
 
-              {/* Document Title */}
+            <form onSubmit={handleCreateLegalCase} className="p-5 space-y-4">
+              {newCaseError && (
+                <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-xs text-rose-300">
+                  {newCaseError}
+                </div>
+              )}
+
               <div>
-                <label className="text-xs font-semibold text-gray-300 block mb-1">Document Title *</label>
+                <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                  Unique Case Identifier (Container / Shipment # or Corporate Case Title) *
+                </label>
                 <input
                   type="text"
                   required
-                  value={docTitle}
-                  onChange={(e) => setDocTitle(e.target.value)}
-                  placeholder="e.g. Annual Tax Return Acknowledgment, Sindh Revenue Board Show-Cause Notice"
-                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                  value={newCaseIdentifier}
+                  onChange={(e) => setNewCaseIdentifier(e.target.value)}
+                  placeholder="e.g. Container # MSKU1234567 or State Life Office Rent Dispute"
+                  className="glass-input w-full rounded-lg px-3 py-2.5 text-xs outline-none"
                 />
               </div>
 
-              {/* Grid: From & To */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-gray-300 block mb-1">From (Sender & Address) *</label>
-                  <input
-                    type="text"
-                    required
-                    value={docFrom}
-                    onChange={(e) => setDocFrom(e.target.value)}
-                    placeholder="e.g. Commissioner Inland Revenue, RTO-II Karachi"
-                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-300 block mb-1">To (Recipient & Address) *</label>
-                  <input
-                    type="text"
-                    required
-                    value={docTo}
-                    onChange={(e) => setDocTo(e.target.value)}
-                    placeholder={`e.g. ${activeCompany?.legalTitle || activeCompany?.name || 'Company'}, Executive Office, Karachi`}
-                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-              </div>
-
-              {/* Subject */}
-              <div>
-                <label className="text-xs font-semibold text-gray-300 block mb-1">Subject / Summary</label>
-                <textarea
-                  rows={2}
-                  value={docSubject}
-                  onChange={(e) => setDocSubject(e.target.value)}
-                  placeholder="Subject of the letter or brief description..."
-                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400 resize-none"
-                />
-              </div>
-
-              {/* Official Hearing Scheduled Option */}
-              <div className="p-3.5 rounded-xl bg-black/30 border border-white/10 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="text-xs font-bold text-white block">Official Hearing / Appearance Scheduled?</label>
-                    <p className="text-[11px] text-gray-400">Select whether personal appearance or hearing date is scheduled.</p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setHearingRequired(true)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                        hearingRequired 
-                          ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' 
-                          : 'bg-white/5 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      Yes
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setHearingRequired(false)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                        !hearingRequired 
-                          ? 'bg-slate-700 text-white' 
-                          : 'bg-white/5 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      No
-                    </button>
-                  </div>
-                </div>
-
-                {/* If Hearing Required = True, show Date & Time inputs */}
-                {hearingRequired && (
-                  <div className="pt-2 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fade-in">
-                    <div>
-                      <label className="text-[11px] text-amber-300 font-semibold block mb-1">Hearing Date *</label>
-                      <input
-                        type="date"
-                        required={hearingRequired}
-                        value={hearingDate}
-                        onChange={(e) => setHearingDate(e.target.value)}
-                        className="w-full rounded-xl bg-black/50 border border-amber-500/30 p-2 text-xs text-white font-mono focus:border-amber-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-amber-300 font-semibold block mb-1">Hearing Time</label>
-                      <input
-                        type="time"
-                        value={hearingTime}
-                        onChange={(e) => setHearingTime(e.target.value)}
-                        className="w-full rounded-xl bg-black/50 border border-amber-500/30 p-2 text-xs text-white font-mono focus:border-amber-400"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="text-[11px] text-gray-300 block mb-1">Hearing Bench / Court / Officer Notes</label>
-                      <input
-                        type="text"
-                        value={hearingNotes}
-                        onChange={(e) => setHearingNotes(e.target.value)}
-                        placeholder="e.g. Before Honorable Collector Appeals, Custom House, Karachi"
-                        className="w-full rounded-xl bg-black/50 border border-white/10 p-2 text-xs text-white"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Document Expiry Option */}
-              <div className="p-3.5 rounded-xl bg-black/30 border border-white/10 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="text-xs font-bold text-white block">Does this document have an expiry date?</label>
-                    <p className="text-[11px] text-gray-400">If enabled, automated expiration notices are dispatched 10 days prior to expiry to Admin, Finance, and Operations.</p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setHasExpiry(true)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                        hasExpiry 
-                          ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20' 
-                          : 'bg-white/5 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      Yes
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setHasExpiry(false); setExpiryDate(''); }}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                        !hasExpiry 
-                          ? 'bg-slate-700 text-white' 
-                          : 'bg-white/5 text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      No
-                    </button>
-                  </div>
-                </div>
-
-                {hasExpiry && (
-                  <div className="pt-2 border-t border-white/10 animate-fade-in">
-                    <label className="text-[11px] text-amber-300 font-semibold block mb-1">Document Expiry Date *</label>
-                    <input
-                      type="date"
-                      required={hasExpiry}
-                      value={expiryDate}
-                      onChange={(e) => setExpiryDate(e.target.value)}
-                      className="w-full rounded-xl bg-black/50 border border-amber-500/30 p-2 text-xs text-white font-mono focus:border-amber-400"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Submit Buttons */}
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-white/10">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-gray-400 hover:text-white transition cursor-pointer"
+                  onClick={() => setNewCaseTrack('LOGISTICS_CRIMINAL')}
+                  data-custom-control="true"
+                  className={`p-3 rounded-xl border text-left cursor-pointer transition-colors ${
+                    newCaseTrack === 'LOGISTICS_CRIMINAL'
+                      ? 'bg-sky-500/15 border-sky-400/50'
+                      : 'bg-slate-900 border-white/10'
+                  }`}
+                >
+                  <div className="text-xs font-bold text-white">Logistics / Criminal Case</div>
+                  <div className="text-[11px] text-gray-400 mt-0.5">
+                    Auto-provisions 7 sub-folders (Sahiwal Police FIR, Customs FIR, ONO, Tribunals, High Courts, Follow-ups, Consignment Docs)
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setNewCaseTrack('CIVIL_CORPORATE')}
+                  data-custom-control="true"
+                  className={`p-3 rounded-xl border text-left cursor-pointer transition-colors ${
+                    newCaseTrack === 'CIVIL_CORPORATE'
+                      ? 'bg-sky-500/15 border-sky-400/50'
+                      : 'bg-slate-900 border-white/10'
+                  }`}
+                >
+                  <div className="text-xs font-bold text-white">Civil / Corporate Case</div>
+                  <div className="text-[11px] text-gray-400 mt-0.5">
+                    Auto-provisions 5 sub-folders (Original Plaint, Written Statement, Evidence &amp; Exhibits, Lower Court, Appellate)
+                  </div>
+                </button>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-900/80 border border-white/10">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-sky-400 mb-1.5">
+                  Auto-Provisioned Sub-Folders Preview
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(newCaseTrack === 'CIVIL_CORPORATE'
+                    ? LEGAL_CIVIL_CORPORATE_SUBFOLDERS
+                    : LEGAL_LOGISTICS_CRIMINAL_SUBFOLDERS
+                  ).map((sf) => (
+                    <span
+                      key={sf}
+                      className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] text-gray-300"
+                    >
+                      {sf}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    Internal Entity *
+                  </label>
+                  <select
+                    value={newCaseEntity}
+                    onChange={(e) => setNewCaseEntity(e.target.value)}
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
+                  >
+                    {RECIPIENT_ENTITIES.map((ent) => (
+                      <option key={ent.id} value={ent.id}>
+                        {ent.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    FIR / Suit / Reference #
+                  </label>
+                  <input
+                    type="text"
+                    value={newCaseRefNo}
+                    onChange={(e) => setNewCaseRefNo(e.target.value)}
+                    placeholder="e.g. Suit # 412/2025"
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs font-mono outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    Court / Collectorate / Forum
+                  </label>
+                  <input
+                    type="text"
+                    value={newCaseCourt}
+                    onChange={(e) => setNewCaseCourt(e.target.value)}
+                    placeholder="e.g. Sindh High Court / Customs Appraisement"
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    Next Hearing Date (Optional)
+                  </label>
+                  <input
+                    type="date"
+                    value={newCaseHearingDate}
+                    onChange={(e) => setNewCaseHearingDate(e.target.value)}
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs font-mono tabular-nums outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewLegalCaseModal(false)}
+                  className="mak-btn-secondary px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/25 transition cursor-pointer"
+                  className="mak-btn px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                 >
-                  Save Document
+                  <FolderPlus size={14} />
+                  <span>Create Case &amp; Sub-Folders</span>
                 </button>
               </div>
             </form>
@@ -1589,379 +2751,289 @@ export const CompanyDocuments: React.FC = () => {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 2. ADVANCE SEARCH MODAL */}
-      {/* ========================================================================= */}
-      {showAdvanceSearchModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto custom-scrollbar">
-          <div className="bg-slate-900 border border-white/15 rounded-2xl w-full max-w-xl max-h-[92vh] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl custom-scrollbar my-auto">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
-              <div className="flex items-center gap-2">
-                <Filter size={18} className="text-amber-400" />
-                <h2 className="text-sm sm:text-base font-bold text-white">Advance Document Search</h2>
-              </div>
+      {/* ===================================================================== */}
+      {/* MODAL 4: ADD CUSTOM FISCAL YEAR                                       */}
+      {/* ===================================================================== */}
+      {showAddYearModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleAddFiscalYear}
+            className="w-full max-w-sm bg-slate-950 border border-white/15 rounded-2xl p-5 space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white">Add Tax / Fiscal Year Folder</h3>
               <button
                 type="button"
-                onClick={() => setShowAdvanceSearchModal(false)}
-                className="text-gray-400 hover:text-white p-1"
+                onClick={() => setShowAddYearModal(false)}
+                className="text-gray-400 hover:text-white cursor-pointer"
               >
-                <X size={18} />
+                <X size={15} />
               </button>
             </div>
-
-            <div className="space-y-3.5 text-xs">
-              {/* Category Dropdown */}
-              <div>
-                <label className="text-gray-300 font-semibold block mb-1">Category</label>
-                <select
-                  value={advCategory}
-                  onChange={(e) => setAdvCategory(e.target.value)}
-                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white"
-                >
-                  <option value="ALL">All Categories</option>
-                  {categories.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Subcategory */}
-              <div>
-                <label className="text-gray-300 font-semibold block mb-1">Subcategory / Document Type</label>
-                <input
-                  type="text"
-                  value={advSubcategory}
-                  onChange={(e) => setAdvSubcategory(e.target.value)}
-                  placeholder="e.g. Notice, Order, Reply, Return, Challan"
-                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white"
-                />
-              </div>
-
-              {/* Date Selection (From & To) */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-gray-300 font-semibold block mb-1">Date From</label>
-                  <input
-                    type="date"
-                    value={advDateFrom}
-                    onChange={(e) => setAdvDateFrom(e.target.value)}
-                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="text-gray-300 font-semibold block mb-1">Date To</label>
-                  <input
-                    type="date"
-                    value={advDateTo}
-                    onChange={(e) => setAdvDateTo(e.target.value)}
-                    className="w-full rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* Document Title */}
-              <div>
-                <label className="text-gray-300 font-semibold block mb-1">Document Title</label>
-                <input
-                  type="text"
-                  value={advTitle}
-                  onChange={(e) => setAdvTitle(e.target.value)}
-                  placeholder="Filter by title..."
-                  className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white"
-                />
-              </div>
-
-              {/* Recipient / Addressee Filter */}
-              <div>
-                <label className="text-gray-300 font-semibold block mb-1">Recipient / Addressee</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={advTo}
-                    onChange={(e) => setAdvTo(e.target.value)}
-                    placeholder="Recipient name..."
-                    className="flex-1 rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-white"
-                  />
-                  {uniqueToList.length > 0 && (
-                    <select
-                      onChange={(e) => setAdvTo(e.target.value)}
-                      className="w-32 rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-gray-300"
-                    >
-                      <option value="">Pick From List...</option>
-                      {uniqueToList.map(t => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              </div>
-
-              {/* From (Kisse Aaya) */}
-              <div>
-                <label className="text-gray-300 font-semibold block mb-1">From (Kisse document aaya list)</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={advFrom}
-                    onChange={(e) => setAdvFrom(e.target.value)}
-                    placeholder="Sender name..."
-                    className="flex-1 rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-white"
-                  />
-                  {uniqueFromList.length > 0 && (
-                    <select
-                      onChange={(e) => setAdvFrom(e.target.value)}
-                      className="w-32 rounded-xl bg-black/40 border border-white/10 p-2 text-xs text-gray-300"
-                    >
-                      <option value="">Pick From List...</option>
-                      {uniqueFromList.map(f => (
-                        <option key={f} value={f}>{f}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              </div>
-
-              {/* Hearing Filter */}
-              <div>
-                <label className="text-gray-300 font-semibold block mb-1">Hearing Scheduled?</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setAdvHearingFilter('ALL')}
-                    className={`p-2 rounded-xl border text-center transition cursor-pointer ${
-                      advHearingFilter === 'ALL' ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold' : 'bg-black/30 border-white/10 text-gray-400'
-                    }`}
-                  >
-                    All Documents
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAdvHearingFilter('YES')}
-                    className={`p-2 rounded-xl border text-center transition cursor-pointer ${
-                      advHearingFilter === 'YES' ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold' : 'bg-black/30 border-white/10 text-gray-400'
-                    }`}
-                  >
-                    ⚖️ Hearing Only
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAdvHearingFilter('NO')}
-                    className={`p-2 rounded-xl border text-center transition cursor-pointer ${
-                      advHearingFilter === 'NO' ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold' : 'bg-black/30 border-white/10 text-gray-400'
-                    }`}
-                  >
-                    No Hearing
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="pt-3 border-t border-white/10 flex items-center justify-between">
+            <input
+              type="text"
+              required
+              value={newFiscalYearInput}
+              onChange={(e) => setNewFiscalYearInput(e.target.value)}
+              placeholder="e.g. 2023 or 2027"
+              className="glass-input w-full rounded-lg px-3 py-2 text-xs font-mono outline-none"
+            />
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={handleResetAdvSearch}
-                className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-gray-400 hover:text-white"
-              >
-                Reset Filters
-              </button>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAdvanceSearchModal(false)}
-                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-gray-400"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleApplyAdvSearch}
-                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md cursor-pointer"
-                >
-                  Search Documents
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 3. ADD NEW CATEGORY SUB-MODAL */}
-      {/* ========================================================================= */}
-      {showAddCategoryModal && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in">
-          <div className="bg-slate-900 border border-white/20 rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                <Tag size={16} className="text-amber-400" /> Add New Category
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowAddCategoryModal(false)}
-                className="text-gray-400 hover:text-white text-xs"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-300 block mb-1">Category Name *</label>
-              <input
-                type="text"
-                autoFocus
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                placeholder="e.g. Legal Notices, Customs Port Clearances"
-                className="w-full rounded-xl bg-black/40 border border-white/10 p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleSaveCategory();
-                  }
-                }}
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
-              <button
-                type="button"
-                onClick={() => setShowAddCategoryModal(false)}
-                className="px-3 py-1.5 rounded-xl bg-white/5 text-xs text-gray-400"
+                onClick={() => setShowAddYearModal(false)}
+                className="mak-btn-secondary px-3.5 py-2 rounded-xl text-xs cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                type="button"
-                onClick={handleSaveCategory}
-                className="px-4 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer shadow-md"
+                type="submit"
+                className="mak-btn px-4 py-2 rounded-xl text-xs font-bold cursor-pointer"
               >
-                Save Category
+                Add Year
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 4. DOCUMENT PREVIEW MODAL */}
-      {/* ========================================================================= */}
-      {selectedDocForPreview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm animate-fade-in overflow-y-auto custom-scrollbar">
-          <div className="bg-slate-900 border border-white/15 rounded-2xl w-full max-w-xl max-h-[92vh] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl custom-scrollbar my-auto">
-            <div className="flex items-start justify-between border-b border-white/10 pb-3 gap-2">
-              <div>
-                <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border mb-1.5 ${getCategoryStyle(selectedDocForPreview.category).bg} ${getCategoryStyle(selectedDocForPreview.category).text} ${getCategoryStyle(selectedDocForPreview.category).border}`}>
-                  {selectedDocForPreview.category}
-                </span>
-                <h2 className="text-base sm:text-lg font-bold text-white leading-snug">
-                  {selectedDocForPreview.title}
-                </h2>
+      {/* ===================================================================== */}
+      {/* MODAL 5: SECURE VAULT CREDENTIAL MODAL                                */}
+      {/* ===================================================================== */}
+      {showVaultModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleSaveVaultCredential}
+            className="w-full max-w-lg bg-slate-950 border border-white/15 rounded-2xl overflow-hidden shadow-2xl"
+          >
+            <div className="px-5 py-3.5 bg-slate-900 border-b border-white/10 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Lock size={16} className="text-amber-400" />
+                <h3 className="text-sm font-bold text-white">
+                  {editingVaultItem ? 'Update Portal Credential' : 'Save Office ID / Portal Credential'}
+                </h3>
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedDocForPreview(null)}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 shrink-0"
+                onClick={() => setShowVaultModal(false)}
+                className="text-gray-400 hover:text-white cursor-pointer"
               >
-                <X size={18} />
+                <X size={16} />
               </button>
             </div>
 
-            {/* Hearing Card if scheduled */}
-            {selectedDocForPreview.hearingRequired && (
-              <div className="p-3.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-xs text-amber-300">
-                  <Gavel size={15} />
-                  <span>COURT / LEGAL HEARING SCHEDULED</span>
+            <div className="p-5 space-y-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    Portal / Regulatory System *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={vaultPortalName}
+                    onChange={(e) => setVaultPortalName(e.target.value)}
+                    placeholder="e.g. FBR IRIS / WeBOC / PSW / SECP"
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs outline-none"
+                  />
                 </div>
-                <div className="font-mono text-sm font-bold text-white">
-                  Date: {selectedDocForPreview.hearingDate || 'Scheduled'} {selectedDocForPreview.hearingTime ? `@ ${selectedDocForPreview.hearingTime}` : ''}
-                </div>
-                {selectedDocForPreview.hearingNotes && (
-                  <p className="text-[11px] text-gray-300 mt-1">{selectedDocForPreview.hearingNotes}</p>
-                )}
-              </div>
-            )}
 
-            {/* Document Details Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                <span className="text-gray-400 block text-[10px]">DOCUMENT DATE</span>
-                <span className="text-white font-mono font-semibold">{selectedDocForPreview.documentDate}</span>
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    Internal Entity *
+                  </label>
+                  <select
+                    value={vaultEntity}
+                    onChange={(e) => setVaultEntity(e.target.value)}
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
+                  >
+                    {RECIPIENT_ENTITIES.map((ent) => (
+                      <option key={ent.id} value={ent.id}>
+                        {ent.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                <span className="text-gray-400 block text-[10px]">REFERENCE #</span>
-                <span className="text-amber-300 font-mono font-semibold">{selectedDocForPreview.referenceNo || 'None'}</span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    User ID / NTN / Login *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={vaultUsername}
+                    onChange={(e) => setVaultUsername(e.target.value)}
+                    placeholder="Login username or NTN"
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs font-mono outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    Password *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={vaultPassword}
+                    onChange={(e) => setVaultPassword(e.target.value)}
+                    placeholder="Portal password"
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs font-mono outline-none"
+                  />
+                </div>
               </div>
-              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                <span className="text-gray-400 block text-[10px]">SENDER (FROM)</span>
-                <span className="text-white font-medium">{selectedDocForPreview.from || 'N/A'}</span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    PIN / 2FA Note
+                  </label>
+                  <input
+                    type="text"
+                    value={vaultPinNote}
+                    onChange={(e) => setVaultPinNote(e.target.value)}
+                    placeholder="e.g. FBR 4-digit PIN"
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    Portal URL (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={vaultPortalUrl}
+                    onChange={(e) => setVaultPortalUrl(e.target.value)}
+                    placeholder="https://iris.fbr.gov.pk"
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs font-mono outline-none"
+                  />
+                </div>
               </div>
-              <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                <span className="text-gray-400 block text-[10px]">RECIPIENT (TO)</span>
-                <span className="text-white font-medium">{selectedDocForPreview.to || activeCompany?.legalTitle || activeCompany?.name || 'Company'}</span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    Registered Recovery Email / Mobile
+                  </label>
+                  <input
+                    type="text"
+                    value={vaultRecovery}
+                    onChange={(e) => setVaultRecovery(e.target.value)}
+                    placeholder="Registered phone or email"
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    Password / Token Expiry Date
+                  </label>
+                  <input
+                    type="date"
+                    value={vaultExpiryDate}
+                    onChange={(e) => setVaultExpiryDate(e.target.value)}
+                    className="glass-input w-full rounded-lg px-3 py-2 text-xs font-mono tabular-nums outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowVaultModal(false)}
+                  className="mak-btn-secondary px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="mak-btn px-4 py-2 rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  Save to Secure Vault
+                </button>
               </div>
             </div>
+          </form>
+        </div>
+      )}
 
-            {/* Subject */}
-            {selectedDocForPreview.subject && (
-              <div className="bg-black/30 p-3 rounded-xl border border-white/5 text-xs">
-                <span className="text-gray-400 block text-[10px] mb-1">SUBJECT / DESCRIPTION</span>
-                <p className="text-gray-200 leading-relaxed whitespace-pre-wrap">{selectedDocForPreview.subject}</p>
-              </div>
-            )}
-
-            {/* Attached File Preview if available */}
-            {selectedDocForPreview.fileUrl && (
-              <div className="p-3 rounded-xl bg-black/40 border border-white/10 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-300 font-semibold flex items-center gap-1.5">
-                    <Paperclip size={14} className="text-amber-400" />
-                    <span>Attached Document: {selectedDocForPreview.fileName || 'document.pdf'}</span>
-                  </span>
+      {/* ===================================================================== */}
+      {/* MODAL 6: DATABASE SCHEMA & API ARCHITECTURE SPEC (POSTGRES + FIREBASE)*/}
+      {/* ===================================================================== */}
+      {showSchemaModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="w-full max-w-4xl max-h-[88vh] bg-slate-950 border border-white/15 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div className="px-5 py-3.5 bg-slate-900 border-b border-white/10 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <Database size={18} className="text-sky-400" />
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white">
+                    Enterprise Corporate DMS Schema &amp; Live Cloud Collections
+                  </h3>
+                  <p className="text-[11px] text-gray-400">
+                    PostgreSQL Relational DDL &amp; Live Firebase Firestore Multi-Tier Collection Architecture
+                  </p>
                 </div>
-                {selectedDocForPreview.fileUrl.startsWith('data:image/') && (
-                  <div className="max-h-60 overflow-hidden rounded-lg border border-white/10">
-                    <img 
-                      src={selectedDocForPreview.fileUrl} 
-                      alt="Preview" 
-                      className="w-full h-auto object-contain max-h-60" 
-                    />
-                  </div>
-                )}
               </div>
-            )}
-
-            {/* Modal Actions */}
-            <div className="pt-3 border-t border-white/10 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={(e) => {
-                  handleDeleteDocument(selectedDocForPreview.id, e);
-                  setSelectedDocForPreview(null);
-                }}
-                className="px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs font-semibold border border-red-500/20 flex items-center gap-1.5 cursor-pointer"
-              >
-                <Trash2 size={13} /> Delete Document
-              </button>
 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setSelectedDocForPreview(null)}
-                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-gray-300 cursor-pointer"
+                  onClick={() => {
+                    const text =
+                      schemaTab === 'POSTGRES'
+                        ? POSTGRESQL_CORPORATE_DMS_DDL
+                        : FIRESTORE_CORPORATE_DMS_SPEC;
+                    navigator.clipboard?.writeText(text).catch(() => {});
+                    setCopiedSchema(true);
+                    setTimeout(() => setCopiedSchema(false), 2000);
+                  }}
+                  className="mak-btn-secondary px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                 >
-                  Close
+                  {copiedSchema ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                  <span>{copiedSchema ? 'Copied' : 'Copy Schema'}</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDownloadPdf(selectedDocForPreview)}
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+                  onClick={() => setShowSchemaModal(false)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-white cursor-pointer"
                 >
-                  <Download size={14} /> Download PDF
+                  <X size={16} />
                 </button>
               </div>
             </div>
+
+            <div className="px-5 py-2.5 bg-slate-900/60 border-b border-white/10 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSchemaTab('POSTGRES')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                  schemaTab === 'POSTGRES'
+                    ? 'bg-sky-500/20 text-sky-300 border border-sky-400/40'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                PostgreSQL DDL (Relational Spec)
+              </button>
+              <button
+                type="button"
+                onClick={() => setSchemaTab('FIRESTORE')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                  schemaTab === 'FIRESTORE'
+                    ? 'bg-sky-500/20 text-sky-300 border border-sky-400/40'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Firebase Firestore (Live Active Backend)
+              </button>
+            </div>
+
+            <pre className="flex-1 overflow-auto p-5 text-[11.5px] font-mono leading-relaxed text-gray-200 bg-slate-950">
+              {schemaTab === 'POSTGRES' ? POSTGRESQL_CORPORATE_DMS_DDL : FIRESTORE_CORPORATE_DMS_SPEC}
+            </pre>
           </div>
         </div>
       )}

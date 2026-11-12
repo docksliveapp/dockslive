@@ -18,7 +18,8 @@ import {
   getVehicleLegalSignatories,
   getCompanyOwnerByCompanyId,
   resolveCompanyOwnerWithImages,
-  resolveWitnessesWithImages
+  resolveWitnessesWithImages,
+  resolveSignatoryImageDataUrl
 } from './vehicleLegalSignatoriesService';
 
 // Standard company & witness registry (always consistent across Customs & Legal Word files; editable in Word anytime)
@@ -2140,30 +2141,37 @@ export async function generateAffidavitDocx(
 //    - Standard Witnesses ID Card (CNIC) Copy
 // ============================================================================
 
+function ensurePdfJsWorker(pdfjsLib: any) {
+  if (pdfjsLib?.GlobalWorkerOptions && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url
+    ).toString();
+  }
+}
+
 async function convertDataUrlToPngImages(
   dataUrl: string,
-  maxWidthPx: number = 560,
-  maxHeightPx: number = 640
+  maxWidthPx: number = 580,
+  maxHeightPx: number = 760
 ): Promise<Array<{ data: Uint8Array; width: number; height: number }>> {
   if (!dataUrl || !dataUrl.includes(',')) return [];
 
-  // Handle PDF dataUrls by rendering pages to PNG via pdfjs-dist
+  // Handle PDF dataUrls by rendering pages to high-DPI PNG via local bundled pdfjs-dist worker
   if (dataUrl.startsWith('data:application/pdf')) {
     try {
       const pdfjsLib: any = await import('pdfjs-dist');
-      if (pdfjsLib.GlobalWorkerOptions && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
-      }
+      ensurePdfJsWorker(pdfjsLib);
       const b64 = dataUrl.split(',')[1];
       const binary = atob(b64);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
-      const pageCount = Math.min(pdf.numPages || 1, 3);
+      const pageCount = Math.min(pdf.numPages || 1, 10);
       const rendered: Array<{ data: Uint8Array; width: number; height: number }> = [];
       for (let p = 1; p <= pageCount; p++) {
         const page = await pdf.getPage(p);
-        const viewport = page.getViewport({ scale: 1.8 });
+        const viewport = page.getViewport({ scale: 2.4 });
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
@@ -2500,7 +2508,14 @@ export async function generateCompanyOwnerIdCopyDocx(
   const frontUrl = options.frontImageUrl || resolvedOwner.cnicFrontUrl;
   const backUrl = options.backImageUrl || resolvedOwner.cnicBackUrl;
 
-  const frontImgs = frontUrl ? await convertDataUrlToPngImages(frontUrl, 470, 295) : [];
+  const isSingleCombinedOwnerFile = Boolean(frontUrl && !backUrl);
+  const frontImgs = frontUrl
+    ? await convertDataUrlToPngImages(
+        frontUrl,
+        isSingleCombinedOwnerFile ? 600 : 470,
+        isSingleCombinedOwnerFile ? 760 : 295
+      )
+    : [];
   const backImgs = backUrl ? await convertDataUrlToPngImages(backUrl, 470, 295) : [];
 
   const bodyChildren: (Paragraph | Table)[] = [
@@ -2546,13 +2561,15 @@ export async function generateCompanyOwnerIdCopyDocx(
 
   if (frontImgs.length > 0 || backImgs.length > 0) {
     if (frontImgs.length > 0) {
-      bodyChildren.push(
-        new Paragraph({
-          alignment: AlignmentType.CENTER,
-          spacing: { before: 60, after: 40 },
-          children: [new TextRun({ text: 'CNIC — FRONT SIDE', bold: true, underline: {}, size: 19, font: calibriFont })]
-        })
-      );
+      if (!isSingleCombinedOwnerFile) {
+        bodyChildren.push(
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 60, after: 40 },
+            children: [new TextRun({ text: 'CNIC — FRONT SIDE', bold: true, underline: {}, size: 19, font: calibriFont })]
+          })
+        );
+      }
       frontImgs.forEach((img) => {
         bodyChildren.push(
           new Paragraph({
@@ -2679,9 +2696,13 @@ export async function generateWitnessesIdCopyDocx(
   const w2BackUrl = options.witness2BackImageUrl || resolvedW2.cnicBackUrl;
 
   const [w1FrontImgs, w1BackImgs, w2FrontImgs, w2BackImgs] = await Promise.all([
-    w1FrontUrl ? convertDataUrlToPngImages(w1FrontUrl, 265, 195) : Promise.resolve([]),
+    w1FrontUrl
+      ? convertDataUrlToPngImages(w1FrontUrl, w1BackUrl ? 265 : 560, w1BackUrl ? 195 : 400)
+      : Promise.resolve([]),
     w1BackUrl ? convertDataUrlToPngImages(w1BackUrl, 265, 195) : Promise.resolve([]),
-    w2FrontUrl ? convertDataUrlToPngImages(w2FrontUrl, 265, 195) : Promise.resolve([]),
+    w2FrontUrl
+      ? convertDataUrlToPngImages(w2FrontUrl, w2BackUrl ? 265 : 560, w2BackUrl ? 195 : 400)
+      : Promise.resolve([]),
     w2BackUrl ? convertDataUrlToPngImages(w2BackUrl, 265, 195) : Promise.resolve([])
   ]);
 
@@ -2850,4 +2871,253 @@ export async function generateWitnessesIdCopyDocx(
       }
     ]
   });
+}
+
+// ============================================================================
+// 9. AS-IT-IS DIRECT PDF / PRINT COPY DOWNLOADER
+//    Downloads exact untouched PDF bytes when a PDF (Front & Back) is uploaded,
+//    or full-page un-cropped A4 PDF when combining Witness 1 & Witness 2 sheets!
+// ============================================================================
+
+function saveBlobDirectly(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function saveDataUrlAsExactPdf(dataUrl: string, baseFileName: string): string {
+  const [, b64] = dataUrl.split(',');
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const filename = baseFileName.endsWith('.pdf') ? baseFileName : `${baseFileName}.pdf`;
+  saveBlobDirectly(new Blob([bytes], { type: 'application/pdf' }), filename);
+  return filename;
+}
+
+async function saveDocxDocument(doc: Document, baseFileName: string): Promise<string> {
+  const blob = await Packer.toBlob(doc);
+  const filename = baseFileName.endsWith('.docx') ? baseFileName : `${baseFileName}.docx`;
+  saveBlobDirectly(blob, filename);
+  return filename;
+}
+
+async function rasterizeDataUrlPagesForPrint(
+  dataUrl: string
+): Promise<Array<{ jpegDataUrl: string; width: number; height: number }>> {
+  if (!dataUrl || !dataUrl.includes(',')) return [];
+
+  if (dataUrl.startsWith('data:application/pdf')) {
+    try {
+      const pdfjsLib: any = await import('pdfjs-dist');
+      ensurePdfJsWorker(pdfjsLib);
+      const b64 = dataUrl.split(',')[1];
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+      const pages: Array<{ jpegDataUrl: string; width: number; height: number }> = [];
+      for (let p = 1; p <= (pdf.numPages || 1); p++) {
+        const page = await pdf.getPage(p);
+        const viewport = page.getViewport({ scale: 2.5 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          pages.push({
+            jpegDataUrl: canvas.toDataURL('image/jpeg', 0.95),
+            width: canvas.width,
+            height: canvas.height
+          });
+        }
+      }
+      return pages;
+    } catch (err) {
+      console.warn('Witness PDF page rasterization error:', err);
+      return [];
+    }
+  }
+
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const w = img.naturalWidth || 1200;
+        const h = img.naturalHeight || 900;
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve([]);
+          return;
+        }
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve([
+          {
+            jpegDataUrl: canvas.toDataURL('image/jpeg', 0.95),
+            width: w,
+            height: h
+          }
+        ]);
+      };
+      img.onerror = () => resolve([]);
+      img.src = dataUrl;
+    } catch (_) {
+      resolve([]);
+    }
+  });
+}
+
+export async function downloadVehicleCopyAsItIs(
+  kind: 'VEH_BOOK_COPY' | 'OWNER_ID_COPY' | 'COMP_OWNER_ID_COPY' | 'WITNESSES_ID_COPY',
+  vehicle: Vehicle,
+  safePlateSlug: string
+): Promise<{ format: 'pdf' | 'docx'; filename: string }> {
+  if (kind === 'VEH_BOOK_COPY') {
+    const resolvedBook = vehicle.registrationBook
+      ? await resolveSignatoryImageDataUrl(vehicle.registrationBook, '')
+      : '';
+    if (resolvedBook && resolvedBook.startsWith('data:application/pdf')) {
+      const filename = saveDataUrlAsExactPdf(
+        resolvedBook,
+        `4_Vehicle_Registration_Book_Copy_${safePlateSlug}.pdf`
+      );
+      return { format: 'pdf', filename };
+    }
+    const doc = await generateVehicleBookCopyDocx({
+      ...vehicle,
+      registrationBook: resolvedBook || vehicle.registrationBook
+    });
+    const filename = await saveDocxDocument(
+      doc,
+      `4_Vehicle_Registration_Book_Copy_${safePlateSlug}.docx`
+    );
+    return { format: 'docx', filename };
+  }
+
+  if (kind === 'OWNER_ID_COPY') {
+    const resolvedOwnerId = vehicle.ownerIdCardUrl
+      ? await resolveSignatoryImageDataUrl(vehicle.ownerIdCardUrl, '')
+      : '';
+    if (resolvedOwnerId && resolvedOwnerId.startsWith('data:application/pdf')) {
+      const filename = saveDataUrlAsExactPdf(
+        resolvedOwnerId,
+        `5_Vehicle_Owner_ID_Card_Copy_${safePlateSlug}.pdf`
+      );
+      return { format: 'pdf', filename };
+    }
+    const doc = await generateVehicleOwnerIdCopyDocx({
+      ...vehicle,
+      ownerIdCardUrl: resolvedOwnerId || vehicle.ownerIdCardUrl
+    });
+    const filename = await saveDocxDocument(
+      doc,
+      `5_Vehicle_Owner_ID_Card_Copy_${safePlateSlug}.docx`
+    );
+    return { format: 'docx', filename };
+  }
+
+  if (kind === 'COMP_OWNER_ID_COPY') {
+    const comp = resolveVehicleDocxCompany(vehicle);
+    const resolvedOwner = await resolveCompanyOwnerWithImages(comp.id);
+    const singlePdfUrl =
+      resolvedOwner.cnicFrontUrl && !resolvedOwner.cnicBackUrl
+        ? resolvedOwner.cnicFrontUrl
+        : !resolvedOwner.cnicFrontUrl && resolvedOwner.cnicBackUrl
+        ? resolvedOwner.cnicBackUrl
+        : '';
+    if (singlePdfUrl && singlePdfUrl.startsWith('data:application/pdf')) {
+      const filename = saveDataUrlAsExactPdf(
+        singlePdfUrl,
+        `6_Company_Owner_ID_Card_Copy_${safePlateSlug}.pdf`
+      );
+      return { format: 'pdf', filename };
+    }
+    const doc = await generateCompanyOwnerIdCopyDocx(vehicle);
+    const filename = await saveDocxDocument(
+      doc,
+      `6_Company_Owner_ID_Card_Copy_${safePlateSlug}.docx`
+    );
+    return { format: 'docx', filename };
+  }
+
+  // kind === 'WITNESSES_ID_COPY'
+  const [w1, w2] = await resolveWitnessesWithImages();
+  const w1Urls = [w1.cnicFrontUrl, w1.cnicBackUrl].filter(Boolean);
+  const w2Urls = [w2.cnicFrontUrl, w2.cnicBackUrl].filter(Boolean);
+
+  // If only 1 single PDF was uploaded (e.g. containing both witnesses), download exact bytes untouched
+  if (
+    w1Urls.length === 1 &&
+    w2Urls.length === 0 &&
+    w1Urls[0].startsWith('data:application/pdf')
+  ) {
+    const filename = saveDataUrlAsExactPdf(
+      w1Urls[0],
+      `7_Witnesses_ID_Card_Copy_${safePlateSlug}.pdf`
+    );
+    return { format: 'pdf', filename };
+  }
+  if (
+    w2Urls.length === 1 &&
+    w1Urls.length === 0 &&
+    w2Urls[0].startsWith('data:application/pdf')
+  ) {
+    const filename = saveDataUrlAsExactPdf(
+      w2Urls[0],
+      `7_Witnesses_ID_Card_Copy_${safePlateSlug}.pdf`
+    );
+    return { format: 'pdf', filename };
+  }
+
+  // If PDFs or images are uploaded for Witness 1 & Witness 2, output un-cropped A4 PDF As-It-Is!
+  const allSourceUrls = [...w1Urls, ...w2Urls];
+  if (allSourceUrls.length > 0) {
+    const allPagesArrays = await Promise.all(
+      allSourceUrls.map((u) => rasterizeDataUrlPagesForPrint(u))
+    );
+    const allPages = allPagesArrays.flat();
+    if (allPages.length > 0) {
+      const { jsPDF } = await import('jspdf');
+      const pdfDoc = new jsPDF('p', 'mm', 'a4');
+      const pageW = pdfDoc.internal.pageSize.getWidth();
+      const pageH = pdfDoc.internal.pageSize.getHeight();
+
+      allPages.forEach((pg, idx) => {
+        if (idx > 0) pdfDoc.addPage('a4', 'p');
+        // Fit exact original page onto A4 preserving 100% original aspect ratio with zero header/crop
+        const scale = Math.min(pageW / pg.width, pageH / pg.height);
+        const drawW = pg.width * scale;
+        const drawH = pg.height * scale;
+        const drawX = (pageW - drawW) / 2;
+        const drawY = (pageH - drawH) / 2;
+        pdfDoc.addImage(pg.jpegDataUrl, 'JPEG', drawX, drawY, drawW, drawH, undefined, 'FAST');
+      });
+
+      const filename = `7_Witnesses_ID_Card_Copy_${safePlateSlug}.pdf`;
+      const pdfBlob = pdfDoc.output('blob');
+      saveBlobDirectly(pdfBlob, filename);
+      return { format: 'pdf', filename };
+    }
+  }
+
+  const doc = await generateWitnessesIdCopyDocx(vehicle);
+  const filename = await saveDocxDocument(
+    doc,
+    `7_Witnesses_ID_Card_Copy_${safePlateSlug}.docx`
+  );
+  return { format: 'docx', filename };
 }

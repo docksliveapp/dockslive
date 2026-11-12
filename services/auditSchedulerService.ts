@@ -326,42 +326,83 @@ export async function runDailyCompanyDocExpiryCheck(): Promise<void> {
     const todayMidnight = new Date(todayStr).getTime();
     snap.forEach((ds) => {
       const docItem = ds.data() as CompanyDocument;
-      if (!matchesActiveCompany(docItem.companyId, activeCompany)) return;
-      if (docItem.unlimitedValidity || !docItem.hasExpiry || !docItem.expiryDate) return;
+      if (docItem.statusTag === 'Resolved' || docItem.statusTag === 'Archived') return;
 
-      const expTime = new Date(docItem.expiryDate).getTime();
-      if (isNaN(expTime)) return;
-      const diffDays = Math.ceil((expTime - todayMidnight) / (24 * 60 * 60 * 1000));
-      if (diffDays <= 10) {
-        const statusBucket = diffDays <= 0 ? 'EXPIRED' : `SOON_${diffDays}`;
-        const notifId = hashDeterministicNumericId(`COMP_DOC_EXP_${ds.id}_${docItem.expiryDate}_${statusBucket}`);
-        saveNotificationToFirestore({
-          id: notifId,
-          title:
-            diffDays <= 0
-              ? `Company Document Expired: ${docItem.title}`
-              : `Company Document Expiring Soon (${diffDays}d): ${docItem.title}`,
-          description:
-            diffDays <= 0
-              ? `Company document "${docItem.title}" expired on ${docItem.expiryDate}.`
-              : `Company document "${docItem.title}" will expire in ${diffDays} day(s) on ${docItem.expiryDate}.`,
-          details: `Document: ${docItem.title}\nCategory: ${docItem.category || 'Company Document'}\nExpiry Date: ${docItem.expiryDate}`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          type: 'INFO',
-          notificationSubType: 'DOC_EXPIRY_ALERT',
-          status: 'PENDING',
-          actionLabel: 'Open Company Documents',
-          priority: 'HIGH',
-          targetRole: 'ADMIN,DOCUMENTATION_MANAGER',
-          category: 'GENERAL',
-          targetView: 'company_documents'
-        }).catch(() => {});
+      const alarmLeadDays =
+        typeof docItem.alarmDaysBefore === 'number' && docItem.alarmDaysBefore > 0
+          ? docItem.alarmDaysBefore
+          : 15;
+
+      // 1. Validity / Expiry Countdown Alarm
+      const effectiveExp = docItem.validityEndDate || docItem.expiryDate;
+      if (!docItem.unlimitedValidity && effectiveExp) {
+        const expTime = new Date(effectiveExp).getTime();
+        if (!isNaN(expTime)) {
+          const diffDays = Math.ceil((expTime - todayMidnight) / (24 * 60 * 60 * 1000));
+          if (diffDays <= alarmLeadDays) {
+            const statusBucket = diffDays <= 0 ? 'EXPIRED' : `SOON_${diffDays}`;
+            const notifId = hashDeterministicNumericId(`COMP_DOC_EXP_${ds.id}_${effectiveExp}_${statusBucket}`);
+            saveNotificationToFirestore({
+              id: notifId,
+              title:
+                diffDays <= 0
+                  ? `Company Document Expired: ${docItem.title}`
+                  : `Expiry Alarm (${diffDays}d left): ${docItem.title}`,
+              description:
+                diffDays <= 0
+                  ? `Document "${docItem.title}" (${docItem.recipientEntity || docItem.to || 'MAK Group'}) expired on ${effectiveExp}.`
+                  : `Document "${docItem.title}" will expire in ${diffDays} day(s) on ${effectiveExp}.`,
+              details: `Document: ${docItem.title}\nRoot Category: ${docItem.rootCategory || docItem.category || 'Company Document'}\nFolder: ${docItem.subFolder || docItem.taxAuthority || docItem.assetGroup || 'General'}\nExpiry Date: ${effectiveExp}`,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              type: 'ALERT',
+              notificationSubType: 'DOC_EXPIRY_ALERT',
+              status: 'PENDING',
+              actionLabel: 'Open Company Documents',
+              priority: 'HIGH',
+              targetRole: 'ADMIN,DOCUMENTATION_MANAGER',
+              category: 'GENERAL',
+              targetView: 'company_documents'
+            }).catch(() => {});
+          }
+        }
+      }
+
+      // 2. Legal Hearing / Action Date Countdown Alarm
+      if (docItem.hearingDate) {
+        const hearTime = new Date(docItem.hearingDate).getTime();
+        if (!isNaN(hearTime)) {
+          const hearDiff = Math.ceil((hearTime - todayMidnight) / (24 * 60 * 60 * 1000));
+          if (hearDiff <= Math.max(7, alarmLeadDays)) {
+            const hearBucket = hearDiff < 0 ? 'OVERDUE' : `DUE_${hearDiff}`;
+            const hearNotifId = hashDeterministicNumericId(`COMP_DOC_HEAR_${ds.id}_${docItem.hearingDate}_${hearBucket}`);
+            saveNotificationToFirestore({
+              id: hearNotifId,
+              title:
+                hearDiff < 0
+                  ? `Hearing Action Overdue (${Math.abs(hearDiff)}d): ${docItem.title}`
+                  : hearDiff === 0
+                    ? `Hearing / Action TODAY: ${docItem.title}`
+                    : `Upcoming Hearing in ${hearDiff}d: ${docItem.title}`,
+              description: `Hearing / Action scheduled on ${docItem.hearingDate}${docItem.hearingTime ? ` at ${docItem.hearingTime}` : ''} (${docItem.legalCaseTitle || docItem.senderIssuer || 'Legal Dossier'}).`,
+              details: `Case / Document: ${docItem.legalCaseTitle || docItem.title}\nSub-Folder: ${docItem.subFolder || 'Legal'}\nIssuer / Forum: ${docItem.senderIssuer || docItem.from || 'N/A'}\nHearing Date: ${docItem.hearingDate}`,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              type: 'ACTION',
+              notificationSubType: 'LEGAL_HEARING_ALERT',
+              status: 'PENDING',
+              actionLabel: 'Review Case Dossier',
+              priority: 'HIGH',
+              targetRole: 'ADMIN,DOCUMENTATION_MANAGER',
+              category: 'GENERAL',
+              targetView: 'company_documents'
+            }).catch(() => {});
+          }
+        }
       }
     });
 
     safeAppStorage.setItem(checkKey, 'true');
   } catch (err) {
-    console.warn('[Scheduler] Company document expiry check notice:', err);
+    console.warn('[Scheduler] Company document expiry & hearing check notice:', err);
   }
 }
 

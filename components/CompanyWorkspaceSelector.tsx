@@ -87,7 +87,7 @@ export const PORTAL_OPTIONS: PortalOption[] = [
     role: UserRole.DOCUMENTATION_MANAGER,
     targetView: 'cases',
     badge: 'DOCS MGR',
-    description: 'DO, TP Filing, Excise, Vehicle Assignment, Fleet & Company Docs'
+    description: 'Shipping Line DO, Vehicle Assignment, Fleet & Company Docs'
   },
   {
     id: 'loading_port_staff',

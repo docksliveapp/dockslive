@@ -79,7 +79,7 @@ export const APP_MODES: ModeOption[] = [
     name: 'Documentation Portal',
     role: UserRole.DOCUMENTATION_MANAGER,
     targetView: 'cases',
-    description: 'DO, TP Filing, Excise, Vehicle Assignment, Fleet & Company Docs',
+    description: 'Shipping Line DO, Vehicle Assignment, Fleet & Company Docs',
     badge: 'DOCS',
     icon: UserPlus,
     accentColor: 'text-slate-200',

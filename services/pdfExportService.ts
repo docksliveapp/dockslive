@@ -3823,6 +3823,39 @@ async function normalizeImageForJsPdf(src?: string): Promise<{ dataUrl: string; 
 }
 
 export async function downloadDriverIdCardPdf(data: DriverIdCardPdfData) {
+  const safeDriver = (data.driverName || 'Driver').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeVehicle = (data.vehicleNo || 'Vehicle').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeCase = data.caseNo ? `_${data.caseNo.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
+  const filename = `Driver_ID_Card_${safeDriver}_${safeVehicle}${safeCase}.pdf`;
+
+  // If user uploaded a single combined PDF (Front & Back together), download the exact untouched PDF As-It-Is!
+  const singleUploadedUrl =
+    data.cnicFrontUrl && !data.cnicBackUrl
+      ? data.cnicFrontUrl
+      : !data.cnicFrontUrl && data.cnicBackUrl
+      ? data.cnicBackUrl
+      : '';
+  if (singleUploadedUrl && singleUploadedUrl.startsWith('data:application/pdf') && singleUploadedUrl.includes(',')) {
+    try {
+      const b64 = singleUploadedUrl.split(',')[1];
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      return { success: true, filename, blobUrl: url };
+    } catch (err) {
+      console.warn('Direct Driver ID PDF download fallback:', err);
+    }
+  }
+
   const doc = new jsPDF('p', 'mm', 'a4');
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 14;
@@ -3890,9 +3923,13 @@ export async function downloadDriverIdCardPdf(data: DriverIdCardPdfData) {
 
   currentY += 54;
 
-  // Section 2: CNIC Front & Back Image Cards
-  const drawCnicSlot = async (slotTitle: string, imgSrc?: string, slotY: number = currentY): Promise<number> => {
-    const boxH = 82;
+  // Section 2: CNIC Scan Card(s)
+  const drawCnicSlot = async (
+    slotTitle: string,
+    imgSrc?: string,
+    slotY: number = currentY,
+    boxH: number = 82
+  ): Promise<number> => {
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(203, 213, 225);
     doc.roundedRect(margin, slotY, contentWidth, boxH, 2, 2, 'FD');
@@ -3919,7 +3956,7 @@ export async function downloadDriverIdCardPdf(data: DriverIdCardPdfData) {
       doc.setFontSize(8.5);
       doc.setTextColor(148, 163, 184);
       doc.text(
-        'Driver CNIC scan image not uploaded for this side — verified via CNIC & mobile particulars above.',
+        'Driver CNIC scan file not uploaded — verified via CNIC & mobile particulars above.',
         pageWidth / 2,
         slotY + boxH / 2 + 2,
         { align: 'center' }
@@ -3929,15 +3966,20 @@ export async function downloadDriverIdCardPdf(data: DriverIdCardPdfData) {
     return slotY + boxH + 6;
   };
 
-  currentY = await drawCnicSlot('1. DRIVER NATIONAL IDENTITY CARD (CNIC) — FRONT SIDE', data.cnicFrontUrl, currentY);
-  currentY = await drawCnicSlot('2. DRIVER NATIONAL IDENTITY CARD (CNIC) — BACK SIDE', data.cnicBackUrl, currentY);
+  if (data.cnicFrontUrl && data.cnicBackUrl) {
+    currentY = await drawCnicSlot('1. DRIVER NATIONAL IDENTITY CARD (CNIC) — FRONT SIDE', data.cnicFrontUrl, currentY, 82);
+    currentY = await drawCnicSlot('2. DRIVER NATIONAL IDENTITY CARD (CNIC) — BACK SIDE', data.cnicBackUrl, currentY, 82);
+  } else {
+    currentY = await drawCnicSlot(
+      'DRIVER NATIONAL IDENTITY CARD (CNIC — FRONT & BACK)',
+      data.cnicFrontUrl || data.cnicBackUrl,
+      currentY,
+      168
+    );
+  }
 
   drawPdfCorporateFooter(doc, 'Page 1 of 1', data.branding);
 
-  const safeDriver = (data.driverName || 'Driver').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const safeVehicle = (data.vehicleNo || 'Vehicle').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const safeCase = data.caseNo ? `_${data.caseNo.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
-  const filename = `Driver_ID_Card_${safeDriver}_${safeVehicle}${safeCase}.pdf`;
   return await triggerDirectDownload(doc, filename);
 }
 

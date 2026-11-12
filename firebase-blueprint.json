@@ -178,16 +178,67 @@
     },
     "CompanyDocument": {
       "title": "CompanyDocument",
-      "description": "Archived official company document, license, or certificate",
+      "description": "Archived corporate filing, legal case exhibit, tax return, asset record, compliance document, or quotation with smart alarm metadata",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Unique document identifier" },
-        "title": { "type": "string", "description": "Document title", "maxLength": 200 },
-        "category": { "type": "string", "description": "Document classification category", "maxLength": 100 },
-        "fileUrl": { "type": "string", "description": "URL or stored document link", "maxLength": 2000 },
+        "id": { "type": "string", "description": "Unique document identifier", "maxLength": 160 },
+        "title": { "type": "string", "description": "Document title", "maxLength": 240 },
+        "rootCategory": { "type": "string", "description": "Primary root category (Legal, Tax, Assets, Company Documents, Quotations)", "enum": ["Legal", "Tax", "Assets", "Company Documents", "Quotations"] },
+        "category": { "type": "string", "description": "Legacy or display classification category", "maxLength": 120 },
+        "subFolder": { "type": "string", "description": "Sub-folder inside Legal Case, Tax Authority, Asset Group, or Master Repository", "maxLength": 160 },
+        "legalCaseId": { "type": "string", "description": "Parent Legal Case dossier ID", "maxLength": 160 },
+        "legalCaseTitle": { "type": "string", "description": "Parent Legal Case identifier or title", "maxLength": 200 },
+        "taxAuthority": { "type": "string", "description": "Regulatory tax authority (FBR, SRB, Labour Department)", "maxLength": 60 },
+        "taxYear": { "type": "string", "description": "Applicable fiscal or tax report year", "maxLength": 20 },
+        "assetGroup": { "type": "string", "description": "Asset catalog sub-group", "maxLength": 100 },
+        "senderIssuer": { "type": "string", "description": "Issuing authority, court, bank, or sender", "maxLength": 180 },
+        "recipientEntity": { "type": "string", "description": "Receiving MAK Group entity (Docks, Truckit, Muhib, Vantage, MAK Group)", "maxLength": 80 },
+        "issuanceDate": { "type": "string", "description": "Document issuance date (YYYY-MM-DD)", "maxLength": 30 },
+        "validityStartDate": { "type": "string", "description": "Validity start date (YYYY-MM-DD)", "maxLength": 30 },
+        "validityEndDate": { "type": "string", "description": "Expiry or validity end date (YYYY-MM-DD)", "maxLength": 30 },
+        "alarmDaysBefore": { "type": "number", "description": "Lead days before expiry/hearing to trigger alarm" },
+        "hearingDate": { "type": "string", "description": "Scheduled court hearing or action date (YYYY-MM-DD)", "maxLength": 30 },
+        "statusTag": { "type": "string", "description": "Lifecycle status tag", "enum": ["Active", "Expired", "Pending Hearing", "Resolved", "Archived"] },
+        "quotationClientName": { "type": "string", "description": "Client name for commercial quotation", "maxLength": 160 },
+        "quotationServiceType": { "type": "string", "description": "Quoted logistics/clearance service type", "maxLength": 100 },
+        "quotationStatus": { "type": "string", "description": "Quotation outcome status", "enum": ["Pending", "Accepted", "Rejected"] },
+        "fileUrl": { "type": "string", "description": "URL or chunk storage link", "maxLength": 150000 },
         "uploadedAt": { "type": "string", "description": "Upload timestamp", "maxLength": 50 }
       },
       "required": ["title", "category"]
+    },
+    "CorporateLegalCase": {
+      "title": "CorporateLegalCase",
+      "description": "Dynamic Legal Case Dossier with auto-provisioned Logistics/Criminal or Civil/Corporate sub-folders",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique legal case dossier ID", "maxLength": 160 },
+        "identifier": { "type": "string", "description": "Unique shipment/container number or corporate case title", "maxLength": 200 },
+        "caseTrack": { "type": "string", "description": "Case sub-folder provisioning track", "enum": ["LOGISTICS_CRIMINAL", "CIVIL_CORPORATE"] },
+        "recipientEntity": { "type": "string", "description": "Internal group entity", "maxLength": 80 },
+        "courtOrForum": { "type": "string", "description": "Court, tribunal, collectorate, or police station", "maxLength": 160 },
+        "nextHearingDate": { "type": "string", "description": "Next scheduled hearing date", "maxLength": 30 },
+        "status": { "type": "string", "description": "Case status tag", "enum": ["Active", "Expired", "Pending Hearing", "Resolved", "Archived"] },
+        "createdAt": { "type": "string", "description": "ISO timestamp when case dossier was created", "maxLength": 50 }
+      },
+      "required": ["id", "identifier", "caseTrack", "status", "createdAt"]
+    },
+    "CorporateVaultCredential": {
+      "title": "CorporateVaultCredential",
+      "description": "Protected corporate portal ID & password credential stored inside Office ID Passwords (Secure Vault)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique vault credential ID", "maxLength": 160 },
+        "portalName": { "type": "string", "description": "Government or corporate portal name", "maxLength": 160 },
+        "portalUrl": { "type": "string", "description": "Login URL", "maxLength": 300 },
+        "usernameOrId": { "type": "string", "description": "Login username, NTN, or user ID", "maxLength": 160 },
+        "passwordSecret": { "type": "string", "description": "Portal password or secret", "maxLength": 200 },
+        "recipientEntity": { "type": "string", "description": "Owning entity", "maxLength": 80 },
+        "expiryDate": { "type": "string", "description": "Password/token rotation expiry date", "maxLength": 30 },
+        "statusTag": { "type": "string", "description": "Credential status", "maxLength": 40 },
+        "createdAt": { "type": "string", "description": "Creation timestamp", "maxLength": 50 }
+      },
+      "required": ["id", "portalName", "usernameOrId", "passwordSecret", "createdAt"]
     },
     "CompanyDocumentCategory": {
       "title": "CompanyDocumentCategory",
@@ -382,7 +433,15 @@
     },
     "/company_documents/{docId}": {
       "schema": "CompanyDocument",
-      "description": "Official company archives, licenses, and permits"
+      "description": "Official corporate filings, legal exhibits, tax returns, assets, and quotations"
+    },
+    "/corporate_legal_cases/{legalCaseId}": {
+      "schema": "CorporateLegalCase",
+      "description": "Dynamic Legal Case Dossiers with auto-provisioned criminal/logistics or civil sub-folders"
+    },
+    "/corporate_vault_credentials/{vaultId}": {
+      "schema": "CorporateVaultCredential",
+      "description": "Protected corporate portal credentials under Office ID Passwords (Secure Vault)"
     },
     "/company_document_categories/{catId}": {
       "schema": "CompanyDocumentCategory",

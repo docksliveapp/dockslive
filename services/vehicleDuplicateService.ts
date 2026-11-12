@@ -5,6 +5,8 @@ export type DuplicateMatchCategory =
   | 'CROSS_COMPANY_CE_MATCH'
   | 'SAME_CHASSIS_AND_ENGINE'
   | 'SAME_CHASSIS_ONLY'
+  | 'SAME_ENGINE_ONLY'
+  | 'SAME_PLATE_ONLY'
   | 'SAME_BASE_PLATE_DIFF_TECH';
 
 export interface DuplicateVehicleGroup {
@@ -18,6 +20,9 @@ export interface DuplicateVehicleGroup {
   recommendedKeepId: number;
   chassisMatch: boolean;
   engineMatch: boolean;
+  swappedTechMatch?: boolean;
+  duplicateChassisNorms?: string[];
+  duplicateEngineNorms?: string[];
   plateMatch: 'EXACT' | 'BASE_SUFFIX' | 'DIFFERENT';
 }
 
@@ -33,11 +38,50 @@ const INVALID_TECH_TOKENS = new Set([
   '00',
   '000',
   '0000',
+  '00000',
+  '000000',
+  '1111',
+  '11111',
+  '111111',
+  '1234',
+  '12345',
+  '123456',
+  '9999',
+  '99999',
+  '999999',
   'AF',
   'APPLIED',
   'APPLIEDFOR',
   'NOTAVAILABLE',
   'UNKNOWN',
+  'PENDING',
+  'LOCAL',
+  'BONDED',
+  'DIESEL',
+  'PETROL',
+  'HINO',
+  'NISSAN',
+  'BEDFORD',
+  'ISUZU',
+  'FIAT',
+  'MAZDA',
+  'TOYOTA',
+  'VOLVO',
+  'DAF',
+  'SCANIA',
+  'MERCEDES',
+  'MITSUBISHI',
+  'MASTER',
+  'FAW',
+  'DONGFENG',
+  'SINOTRUK',
+  'SHACMAN',
+  'PRIME',
+  'MOVER',
+  'TRAILER',
+  'TRUCK',
+  'TANKER',
+  'CARRIER',
 ]);
 
 // Common Pakistani Excise / MRA province & district suffixes appended after plate digits
@@ -121,27 +165,46 @@ export function extractVehicleBasePlate(reg?: string | null): {
 }
 
 /**
- * Normalizes Chassis or Engine serial numbers for accurate matching:
- * - Removes dashes, spaces, slashes
+ * Normalizes Chassis or Engine serial numbers for accurate duplicate matching across all lengths (3, 4, 5, 6, 7+ digits):
+ * - Removes dashes, spaces, slashes, dots
+ * - Requires at least 1 numeric digit (ignores pure text labels like "HINO" or "APPLIED")
  * - Converts letter 'O' adjacent to digits into '0' (e.g. HO7DA97360 -> H07DA97360)
- * - Strips leading zeros on purely numeric or zero-prefixed serials (e.g. 027776 -> 27776)
- * - Treats N/A, NIL, <4 chars as empty
+ * - Strips leading zeros on purely numeric or zero-prefixed serials (e.g. 019117 -> 19117, 00852 -> 852)
+ * - Rejects N/A, NIL, all-zeros, and dummy placeholders
  */
 export function normalizeTechNumber(raw?: string | null): string {
   const upper = String(raw || '').trim().toUpperCase();
   if (!upper || INVALID_TECH_TOKENS.has(upper)) return '';
 
   const alnum = upper.replace(/[^A-Z0-9]/g, '');
-  if (!alnum || INVALID_TECH_TOKENS.has(alnum) || alnum.length < 4) return '';
+  if (!alnum || INVALID_TECH_TOKENS.has(alnum) || alnum.length < 3) return '';
 
   // Fix common OCR / typing substitution: 'O' next to digits -> '0'
   const ocrFixed = alnum
     .replace(/O(?=\d)/g, '0')
     .replace(/(?<=\d)O/g, '0');
 
+  // Must contain at least one digit to be a valid Chassis or Engine serial
+  if (!/\d/.test(ocrFixed)) return '';
+
   const trimmedZeros = ocrFixed.replace(/^0+/, '');
-  if (!trimmedZeros || trimmedZeros.length < 4) return '';
+  if (!trimmedZeros || trimmedZeros.length < 2 || INVALID_TECH_TOKENS.has(trimmedZeros)) {
+    return '';
+  }
   return trimmedZeros;
+}
+
+/**
+ * Extracts trailing numeric serial from prefixed chassis/engine strings (e.g. "FF174LA12749" -> "12749", "PE6070941" -> "70941")
+ * so cross-sheet entries where one list omitted the manufacturer prefix still match pure numeric entries.
+ */
+function extractPrefixedNumericTail(norm: string): string {
+  if (!norm || /^\d+$/.test(norm)) return '';
+  const m = norm.match(/[A-Z](\d{5,})$/);
+  if (!m) return '';
+  const stripped = m[1].replace(/^0+/, '');
+  if (!stripped || stripped.length < 4 || INVALID_TECH_TOKENS.has(stripped)) return '';
+  return stripped;
 }
 
 export function matchTechNumbers(
@@ -154,28 +217,17 @@ export function matchTechNumbers(
 
   if (a === b) return 'EXACT';
 
-  // Suffix serial match when one list omitted maker prefix (e.g. "10357" vs "CM88WH10357" or "007695" vs "NE6007695")
+  // Suffix serial match when one list omitted maker prefix (e.g. "12749" vs "FF174LA12749" or "007695" vs "NE6007695")
   const shorter = a.length <= b.length ? a : b;
   const longer = a.length <= b.length ? b : a;
-  if (shorter.length >= 5 && longer.endsWith(shorter)) {
-    return 'PARTIAL';
-  }
-
-  // Single-character OCR difference on long serials (>= 6 chars) when one also matches suffix/prefix
-  if (shorter.length >= 6 && longer.length >= 6) {
-    const tailLen = Math.min(shorter.length, longer.length);
-    const tailA = a.slice(-tailLen);
-    const tailB = b.slice(-tailLen);
-    let diffs = 0;
-    for (let i = 0; i < tailLen; i++) {
-      if (tailA[i] !== tailB[i]) {
-        diffs++;
-        if (diffs > 1) break;
-      }
-    }
-    if (diffs === 1 && tailLen >= 7) {
+  if (shorter.length >= 4 && /^\d+$/.test(shorter)) {
+    const tail = extractPrefixedNumericTail(longer);
+    if (tail && tail === shorter) {
       return 'PARTIAL';
     }
+  }
+  if (shorter.length >= 5 && longer.endsWith(shorter)) {
+    return 'PARTIAL';
   }
 
   return 'NONE';
@@ -206,11 +258,14 @@ export function haveConflictingChassisAndEngine(
   const enA = normalizeTechNumber(a.engineNo);
   const enB = normalizeTechNumber(b.engineNo);
 
-  // Only consider a hard conflict if BOTH records have valid chassis & engine and NEITHER matches
+  // Only consider a hard conflict if BOTH records have valid chassis & engine and NEITHER matches (nor swapped)
   if (chA && chB && enA && enB) {
     const chMatch = matchTechNumbers(a.chassisNo, b.chassisNo);
     const enMatch = matchTechNumbers(a.engineNo, b.engineNo);
-    return chMatch === 'NONE' && enMatch === 'NONE';
+    const swappedMatch =
+      matchTechNumbers(a.chassisNo, b.engineNo) !== 'NONE' &&
+      matchTechNumbers(a.engineNo, b.chassisNo) !== 'NONE';
+    return chMatch === 'NONE' && enMatch === 'NONE' && !swappedMatch;
   }
   return false;
 }
@@ -302,7 +357,7 @@ function pickRicherTechValue(primaryVal?: string, secondaryVal?: string): string
   if (pNorm && !sNorm) return pClean;
   if (!pNorm && !sNorm) return pClean || sClean || 'N/A';
 
-  // If secondary has the full manufacturer prefix while primary only had trailing digits (e.g. "10357" vs "CM88WH10357")
+  // If secondary has the full manufacturer prefix while primary only had trailing digits (e.g. "12749" vs "FF174LA12749")
   if (sNorm.length > pNorm.length && sNorm.endsWith(pNorm)) {
     return sClean;
   }
@@ -417,7 +472,9 @@ export function mergeVehicleRecords(
 
 /**
  * Scans the entire fleet list in O(N) using hash buckets + Disjoint Set (Union-Find)
- * to discover all exact, cross-company, re-registered (Chassis+Engine), and suffix-plate duplicate groups.
+ * to discover EVERY vehicle whose Chassis No appears >1 time, whose Engine No appears >1 time,
+ * whose Chassis/Engine serial matches with/without manufacturer prefix, whose Chassis & Engine were swapped,
+ * or whose Registration Plate appears >1 time.
  */
 export function detectDuplicateVehicleGroups(vehicles: Vehicle[]): DuplicateVehicleGroup[] {
   const n = vehicles.length;
@@ -451,8 +508,11 @@ export function detectDuplicateVehicleGroups(vehicles: Vehicle[]): DuplicateVehi
 
   const byStrictPlate = new Map<string, number[]>();
   const byBasePlate = new Map<string, number[]>();
-  const byChassisAndEngine = new Map<string, number[]>();
-  const byLongChassis = new Map<string, number[]>();
+  const byChassis = new Map<string, number[]>();
+  const byEngine = new Map<string, number[]>();
+  const bySortedTechPair = new Map<string, number[]>();
+  const prefixedChassisTails: Array<{ idx: number; tail: string }> = [];
+  const prefixedEngineTails: Array<{ idx: number; tail: string }> = [];
 
   for (let i = 0; i < n; i++) {
     const v = vehicles[i];
@@ -483,54 +543,103 @@ export function detectDuplicateVehicleGroups(vehicles: Vehicle[]): DuplicateVehi
       arr.push(i);
     }
 
-    if (ch && en) {
-      const ceKey = `${ch}__${en}`;
-      let arr = byChassisAndEngine.get(ceKey);
+    if (ch) {
+      let arr = byChassis.get(ch);
       if (!arr) {
         arr = [];
-        byChassisAndEngine.set(ceKey, arr);
+        byChassis.set(ch, arr);
       }
       arr.push(i);
+
+      const chTail = extractPrefixedNumericTail(ch);
+      if (chTail) {
+        prefixedChassisTails.push({ idx: i, tail: chTail });
+      }
     }
 
-    if (ch && ch.length >= 7) {
-      let arr = byLongChassis.get(ch);
+    if (en) {
+      let arr = byEngine.get(en);
       if (!arr) {
         arr = [];
-        byLongChassis.set(ch, arr);
+        byEngine.set(en, arr);
+      }
+      arr.push(i);
+
+      const enTail = extractPrefixedNumericTail(en);
+      if (enTail) {
+        prefixedEngineTails.push({ idx: i, tail: enTail });
+      }
+    }
+
+    // Swapped Chassis <-> Engine check (when one Excel sheet had Chassis & Engine columns reversed)
+    if (ch && en && ch !== en) {
+      const sortedKey = ch < en ? `${ch}__${en}` : `${en}__${ch}`;
+      let arr = bySortedTechPair.get(sortedKey);
+      if (!arr) {
+        arr = [];
+        bySortedTechPair.set(sortedKey, arr);
       }
       arr.push(i);
     }
   }
 
-  // 1. Exact registration number matches
+  // 1. ALL duplicate Chassis numbers (> 1 occurrence across fleet — any valid length)
+  byChassis.forEach((indices) => {
+    if (indices.length > 1) {
+      for (let k = 1; k < indices.length; k++) {
+        union(indices[0], indices[k]);
+      }
+    }
+  });
+
+  // 2. ALL duplicate Engine numbers (> 1 occurrence across fleet — any valid length)
+  byEngine.forEach((indices) => {
+    if (indices.length > 1) {
+      for (let k = 1; k < indices.length; k++) {
+        union(indices[0], indices[k]);
+      }
+    }
+  });
+
+  // 3. Prefix-omitted numeric serial matches (e.g. "FF174LA12749" vs pure numeric "12749")
+  for (const item of prefixedChassisTails) {
+    const pureMatches = byChassis.get(item.tail);
+    if (pureMatches && pureMatches.length > 0) {
+      for (let k = 0; k < pureMatches.length; k++) {
+        union(item.idx, pureMatches[k]);
+      }
+    }
+  }
+  for (const item of prefixedEngineTails) {
+    const pureMatches = byEngine.get(item.tail);
+    if (pureMatches && pureMatches.length > 0) {
+      for (let k = 0; k < pureMatches.length; k++) {
+        union(item.idx, pureMatches[k]);
+      }
+    }
+  }
+
+  // 4. Swapped Chassis <-> Engine pairs
+  bySortedTechPair.forEach((indices) => {
+    if (indices.length > 1) {
+      for (let k = 1; k < indices.length; k++) {
+        union(indices[0], indices[k]);
+      }
+    }
+  });
+
+  // 5. Exact registration number matches (> 1 occurrence)
   byStrictPlate.forEach((indices) => {
-    for (let k = 1; k < indices.length; k++) {
-      union(indices[0], indices[k]);
-    }
-  });
-
-  // 2. Exact normalized Chassis + Engine matches (catches re-registered plates & cross-company duplicates)
-  byChassisAndEngine.forEach((indices) => {
-    if (indices.length > 1 && indices.length <= 10) {
+    if (indices.length > 1) {
       for (let k = 1; k < indices.length; k++) {
         union(indices[0], indices[k]);
       }
     }
   });
 
-  // 3. Long Chassis (>= 7 chars) matches
-  byLongChassis.forEach((indices) => {
-    if (indices.length > 1 && indices.length <= 8) {
-      for (let k = 1; k < indices.length; k++) {
-        union(indices[0], indices[k]);
-      }
-    }
-  });
-
-  // 4. Same Base Plate (e.g. TLC-880 vs TLC-880LS)
+  // 6. Same Base Plate with city/province suffix (e.g. TLC-880 vs TLC-880LS)
   byBasePlate.forEach((indices) => {
-    if (indices.length > 1 && indices.length <= 8) {
+    if (indices.length > 1 && indices.length <= 12) {
       for (let k = 1; k < indices.length; k++) {
         union(indices[0], indices[k]);
       }
@@ -554,7 +663,9 @@ export function detectDuplicateVehicleGroups(vehicles: Vehicle[]): DuplicateVehi
     CROSS_COMPANY_CE_MATCH: 2,
     SAME_CHASSIS_AND_ENGINE: 3,
     SAME_CHASSIS_ONLY: 4,
-    SAME_BASE_PLATE_DIFF_TECH: 5,
+    SAME_ENGINE_ONLY: 5,
+    SAME_PLATE_ONLY: 6,
+    SAME_BASE_PLATE_DIFF_TECH: 7,
   };
 
   const groups: DuplicateVehicleGroup[] = [];
@@ -571,12 +682,15 @@ export function detectDuplicateVehicleGroups(vehicles: Vehicle[]): DuplicateVehi
     const companySet = new Set(groupVehicles.map((v) => resolveCanonicalCompanyKey(v)));
     const isCrossCompanyTruckitDocks = companySet.has('truckit') && companySet.has('docks');
 
-    // Analyze pairwise similarity within the group
+    // Analyze pairwise similarity & collect exact duplicated Chassis / Engine values within the group
     let hasStrictPlateMatch = false;
     let hasBasePlateMatch = false;
     let hasChassisMatch = false;
     let hasEngineMatch = false;
     let hasBothTechMatch = false;
+    let hasSwappedTechMatch = false;
+    const dupChassisSet = new Set<string>();
+    const dupEngineSet = new Set<string>();
 
     for (let i = 0; i < groupVehicles.length; i++) {
       for (let j = i + 1; j < groupVehicles.length; j++) {
@@ -589,9 +703,30 @@ export function detectDuplicateVehicleGroups(vehicles: Vehicle[]): DuplicateVehi
 
         if (pA.strict && pA.strict === pB.strict) hasStrictPlateMatch = true;
         if (pA.base && pA.base === pB.base) hasBasePlateMatch = true;
-        if (chM !== 'NONE') hasChassisMatch = true;
-        if (enM !== 'NONE') hasEngineMatch = true;
+        if (chM !== 'NONE') {
+          hasChassisMatch = true;
+          const nA = normalizeTechNumber(A.chassisNo);
+          const nB = normalizeTechNumber(B.chassisNo);
+          if (nA) dupChassisSet.add(nA);
+          if (nB) dupChassisSet.add(nB);
+        }
+        if (enM !== 'NONE') {
+          hasEngineMatch = true;
+          const eA = normalizeTechNumber(A.engineNo);
+          const eB = normalizeTechNumber(B.engineNo);
+          if (eA) dupEngineSet.add(eA);
+          if (eB) dupEngineSet.add(eB);
+        }
         if (chM !== 'NONE' && enM !== 'NONE') hasBothTechMatch = true;
+
+        const swap1 = matchTechNumbers(A.chassisNo, B.engineNo) !== 'NONE';
+        const swap2 = matchTechNumbers(A.engineNo, B.chassisNo) !== 'NONE';
+        if (swap1 && swap2) {
+          hasSwappedTechMatch = true;
+          hasBothTechMatch = true;
+          hasChassisMatch = true;
+          hasEngineMatch = true;
+        }
       }
     }
 
@@ -606,7 +741,12 @@ export function detectDuplicateVehicleGroups(vehicles: Vehicle[]): DuplicateVehi
     let matchReason: string;
     let confidence: 'HIGH' | 'MEDIUM' | 'REVIEW';
 
-    if (hasBasePlateMatch && (hasBothTechMatch || (hasStrictPlateMatch && !haveConflictingChassisAndEngine(groupVehicles[0], groupVehicles[1])) || (hasChassisMatch && isCrossCompanyTruckitDocks))) {
+    if (
+      hasBasePlateMatch &&
+      (hasBothTechMatch ||
+        (hasStrictPlateMatch && !haveConflictingChassisAndEngine(groupVehicles[0], groupVehicles[1])) ||
+        ((hasChassisMatch || hasEngineMatch) && isCrossCompanyTruckitDocks))
+    ) {
       category = 'EXACT_TRI_MATCH';
       categoryLabel = 'Same Reg + Chassis + Engine';
       matchReason =
@@ -617,17 +757,38 @@ export function detectDuplicateVehicleGroups(vehicles: Vehicle[]): DuplicateVehi
     } else if (hasBothTechMatch && isCrossCompanyTruckitDocks) {
       category = 'CROSS_COMPANY_CE_MATCH';
       categoryLabel = 'Truckit vs Docks (Same Chassis & Engine)';
-      matchReason = 'Identical Chassis & Engine in both Truckit and Docks (Re-registered / Updated Plate)';
+      matchReason = hasSwappedTechMatch
+        ? 'Identical Chassis & Engine (columns swapped) in both Truckit and Docks'
+        : 'Identical Chassis & Engine in both Truckit and Docks (Re-registered / Updated Plate)';
       confidence = 'HIGH';
     } else if (hasBothTechMatch) {
       category = 'SAME_CHASSIS_AND_ENGINE';
-      categoryLabel = 'Same Chassis & Engine (Re-Registered Plate)';
-      matchReason = '100% Identical Chassis & Engine numbers under old & new registration plates';
+      categoryLabel = hasSwappedTechMatch
+        ? 'Same Chassis & Engine (Swapped Columns)'
+        : 'Same Chassis & Engine (>1x)';
+      matchReason = hasSwappedTechMatch
+        ? 'Chassis & Engine serials match across swapped columns'
+        : 'Identical Chassis & Engine numbers appearing more than once across fleet';
+      confidence = 'HIGH';
+    } else if (hasChassisMatch && hasEngineMatch) {
+      category = 'SAME_CHASSIS_AND_ENGINE';
+      categoryLabel = 'Duplicate Chassis & Engine (>1x)';
+      matchReason = 'Repeated Chassis & Engine numbers across multiple fleet entries';
       confidence = 'HIGH';
     } else if (hasChassisMatch) {
       category = 'SAME_CHASSIS_ONLY';
-      categoryLabel = 'Same Chassis Number (Verify Engine)';
-      matchReason = 'Identical Chassis number with different Engine number (possible engine swap or typo)';
+      categoryLabel = `Duplicate Chassis No (${groupVehicles.length}x)`;
+      matchReason = 'Same Chassis number appearing more than once in fleet (verify Engine / Plate)';
+      confidence = 'HIGH';
+    } else if (hasEngineMatch) {
+      category = 'SAME_ENGINE_ONLY';
+      categoryLabel = `Duplicate Engine No (${groupVehicles.length}x)`;
+      matchReason = 'Same Engine number appearing more than once in fleet (verify Chassis / Plate)';
+      confidence = 'HIGH';
+    } else if (hasStrictPlateMatch) {
+      category = 'SAME_PLATE_ONLY';
+      categoryLabel = `Duplicate Reg Plate (${groupVehicles.length}x)`;
+      matchReason = 'Exact same Registration Plate appearing more than once in fleet';
       confidence = 'MEDIUM';
     } else {
       category = 'SAME_BASE_PLATE_DIFF_TECH';
@@ -652,19 +813,22 @@ export function detectDuplicateVehicleGroups(vehicles: Vehicle[]): DuplicateVehi
       recommendedKeepId,
       chassisMatch: hasChassisMatch,
       engineMatch: hasEngineMatch,
+      swappedTechMatch: hasSwappedTechMatch,
+      duplicateChassisNorms: Array.from(dupChassisSet),
+      duplicateEngineNorms: Array.from(dupEngineSet),
       plateMatch,
     });
   });
 
   return groups.sort((a, b) => {
-    if (a.isCrossCompanyTruckitDocks !== b.isCrossCompanyTruckitDocks) {
-      // Among HIGH confidence groups, surface Truckit-vs-Docks first
-      if (a.confidence === 'HIGH' && b.confidence === 'HIGH') {
-        return a.isCrossCompanyTruckitDocks ? -1 : 1;
-      }
-    }
     const orderDiff = categoryOrder[a.category] - categoryOrder[b.category];
     if (orderDiff !== 0) return orderDiff;
+    if (a.isCrossCompanyTruckitDocks !== b.isCrossCompanyTruckitDocks) {
+      return a.isCrossCompanyTruckitDocks ? -1 : 1;
+    }
+    if (b.vehicles.length !== a.vehicles.length) {
+      return b.vehicles.length - a.vehicles.length;
+    }
     return String(a.vehicles[0]?.registrationNumber || '').localeCompare(
       String(b.vehicles[0]?.registrationNumber || '')
     );

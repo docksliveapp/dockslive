@@ -20,7 +20,7 @@ import {
   getActiveDbUserSession,
   clearActiveDbUserSession
 } from './firebase';
-import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver, SalaryStaffMember } from '../types';
+import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, CorporateLegalCase, CorporateVaultCredential, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver, SalaryStaffMember } from '../types';
 import { saveVendor } from './vendorService';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
@@ -5659,25 +5659,68 @@ export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocume
     const payload = sanitizeForFirestore(cloudReadyDoc);
     await setDoc(doc(db, path, docId), payload, { merge: true });
 
-    // Notify Admin & Documentation Manager ONLY if a Company Document is Expiring Soon (<= 10 days) or Expired
-    if (!documentItem.unlimitedValidity && documentItem.hasExpiry && documentItem.expiryDate) {
+    // Smart Notification Engine:
+    // 1. Validity / Expiry Alarm (X days before expiration configured via alarmDaysBefore, default 15d)
+    const alarmLeadDays =
+      typeof documentItem.alarmDaysBefore === 'number' && documentItem.alarmDaysBefore > 0
+        ? documentItem.alarmDaysBefore
+        : 15;
+    const effectiveExpiry = documentItem.validityEndDate || documentItem.expiryDate;
+    const isClosedDoc = documentItem.statusTag === 'Resolved' || documentItem.statusTag === 'Archived';
+
+    if (!documentItem.unlimitedValidity && effectiveExpiry && !isClosedDoc) {
       const todayTime = new Date(new Date().toISOString().split('T')[0]).getTime();
-      const expTime = new Date(documentItem.expiryDate).getTime();
+      const expTime = new Date(effectiveExpiry).getTime();
       if (!isNaN(expTime)) {
         const diffDays = Math.ceil((expTime - todayTime) / (24 * 60 * 60 * 1000));
-        if (diffDays <= 10) {
+        if (diffDays <= alarmLeadDays) {
           saveNotificationToFirestore({
             id: Date.now() + Math.floor(Math.random() * 1000),
-            title: diffDays <= 0 ? `Company Document Expired: ${documentItem.title}` : `Company Document Expiring Soon (${diffDays}d): ${documentItem.title}`,
-            description: diffDays <= 0
-              ? `Company document "${documentItem.title}" expired on ${documentItem.expiryDate}.`
-              : `Company document "${documentItem.title}" will expire in ${diffDays} day(s) on ${documentItem.expiryDate}.`,
-            details: `Document: ${documentItem.title}\nCategory: ${documentItem.category || 'Company Document'}\nExpiry Date: ${documentItem.expiryDate}`,
+            title:
+              diffDays <= 0
+                ? `Document Expired: ${documentItem.title}`
+                : `Expiry Alarm (${diffDays}d left): ${documentItem.title}`,
+            description:
+              diffDays <= 0
+                ? `"${documentItem.title}" (${documentItem.recipientEntity || documentItem.to || 'MAK Group'}) expired on ${effectiveExpiry}.`
+                : `"${documentItem.title}" (${documentItem.rootCategory || documentItem.category || 'Corporate Archive'}) expires in ${diffDays} day(s) on ${effectiveExpiry}.`,
+            details: `Document: ${documentItem.title}\nRoot Category: ${documentItem.rootCategory || documentItem.category || 'Company Documents'}\nFolder: ${documentItem.subFolder || documentItem.taxAuthority || documentItem.assetGroup || 'General'}\nSender / Issuer: ${documentItem.senderIssuer || documentItem.from || 'N/A'}\nRecipient Entity: ${documentItem.recipientEntity || documentItem.to || 'MAK Group'}\nExpiry Date: ${effectiveExpiry}`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            type: 'INFO',
+            type: 'ALERT',
             notificationSubType: 'DOC_EXPIRY_ALERT',
             status: 'PENDING',
-            actionLabel: 'Open Company Documents',
+            actionLabel: 'Open Corporate Archive',
+            priority: 'HIGH',
+            targetRole: 'ADMIN,DOCUMENTATION_MANAGER',
+            category: 'GENERAL',
+            targetView: 'company_documents'
+          }).catch(() => {});
+        }
+      }
+    }
+
+    // 2. Legal Hearing / Regulatory Action Date Countdown Alarm
+    if (documentItem.hearingDate && !isClosedDoc) {
+      const todayTime = new Date(new Date().toISOString().split('T')[0]).getTime();
+      const hearTime = new Date(documentItem.hearingDate).getTime();
+      if (!isNaN(hearTime)) {
+        const hearDiffDays = Math.ceil((hearTime - todayTime) / (24 * 60 * 60 * 1000));
+        if (hearDiffDays <= Math.max(7, alarmLeadDays)) {
+          saveNotificationToFirestore({
+            id: Date.now() + Math.floor(Math.random() * 1000) + 17,
+            title:
+              hearDiffDays < 0
+                ? `Hearing Action Overdue (${Math.abs(hearDiffDays)}d): ${documentItem.title}`
+                : hearDiffDays === 0
+                  ? `Hearing / Action TODAY: ${documentItem.title}`
+                  : `Upcoming Hearing in ${hearDiffDays}d: ${documentItem.title}`,
+            description: `Scheduled Hearing / Action on ${documentItem.hearingDate}${documentItem.hearingTime ? ` at ${documentItem.hearingTime}` : ''} for ${documentItem.legalCaseTitle || documentItem.title} (${documentItem.senderIssuer || documentItem.from || 'Court / Authority'}).`,
+            details: `Case / Document: ${documentItem.legalCaseTitle || documentItem.title}\nSub-Folder: ${documentItem.subFolder || 'Legal Proceedings'}\nIssuer / Forum: ${documentItem.senderIssuer || documentItem.from || 'N/A'}\nEntity: ${documentItem.recipientEntity || documentItem.to || 'MAK Group'}\nHearing Date: ${documentItem.hearingDate}${documentItem.hearingTime ? ` @ ${documentItem.hearingTime}` : ''}${documentItem.hearingNotes ? `\nNotes: ${documentItem.hearingNotes}` : ''}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            type: 'ACTION',
+            notificationSubType: 'LEGAL_HEARING_ALERT',
+            status: 'PENDING',
+            actionLabel: 'Review Case Dossier',
             priority: 'HIGH',
             targetRole: 'ADMIN,DOCUMENTATION_MANAGER',
             category: 'GENERAL',
@@ -5713,6 +5756,130 @@ export async function deleteCompanyDocumentFromFirestore(docId: string): Promise
   safeAppStorage.setJSON(COMPANY_DOCS_KEY, current.filter(d => d.id !== docId));
 }
 
+// =========================================================
+// DYNAMIC CORPORATE LEGAL CASES & SECURE VAULT CREDENTIALS
+// =========================================================
+const CORPORATE_LEGAL_CASES_KEY = 'dpl_corporate_legal_cases';
+const CORPORATE_VAULT_CREDS_KEY = 'dpl_corporate_vault_credentials';
+
+export function subscribeToCorporateLegalCases(
+  onData: (cases: CorporateLegalCase[]) => void,
+  onError?: (err: any) => void
+) {
+  const path = 'corporate_legal_cases';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const list: CorporateLegalCase[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ ...(docSnap.data() as CorporateLegalCase), id: docSnap.id });
+      });
+      list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      safeAppStorage.setJSON(CORPORATE_LEGAL_CASES_KEY, list);
+      onData(list);
+    },
+    (error) => {
+      console.warn(`Firestore subscription notice on ${path}:`, error);
+      if (onError) onError(error);
+      onData(safeAppStorage.getJSON<CorporateLegalCase[]>(CORPORATE_LEGAL_CASES_KEY, []));
+    }
+  );
+}
+
+export async function saveCorporateLegalCaseToFirestore(legalCase: CorporateLegalCase): Promise<void> {
+  const path = 'corporate_legal_cases';
+  const caseId = legalCase.id || `lcase_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const activeCompany = getActiveCompanyId();
+  const record: CorporateLegalCase = {
+    ...legalCase,
+    id: caseId,
+    companyId: legalCase.companyId || activeCompany,
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    await setDoc(doc(db, path, caseId), sanitizeForFirestore(record), { merge: true });
+  } catch (error) {
+    console.warn(`Firestore saveCorporateLegalCase warning for ${caseId}:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<CorporateLegalCase[]>(CORPORATE_LEGAL_CASES_KEY, []);
+  const idx = current.findIndex((c) => c.id === caseId);
+  if (idx >= 0) current[idx] = record;
+  else current.unshift(record);
+  safeAppStorage.setJSON(CORPORATE_LEGAL_CASES_KEY, current);
+}
+
+export async function deleteCorporateLegalCaseFromFirestore(caseId: string): Promise<void> {
+  const path = 'corporate_legal_cases';
+  try {
+    await deleteDoc(doc(db, path, caseId));
+  } catch (error) {
+    console.warn(`Firestore deleteCorporateLegalCase warning for ${caseId}:`, error);
+  }
+  const current = safeAppStorage.getJSON<CorporateLegalCase[]>(CORPORATE_LEGAL_CASES_KEY, []);
+  safeAppStorage.setJSON(CORPORATE_LEGAL_CASES_KEY, current.filter((c) => c.id !== caseId));
+}
+
+export function subscribeToCorporateVaultCredentials(
+  onData: (items: CorporateVaultCredential[]) => void,
+  onError?: (err: any) => void
+) {
+  const path = 'corporate_vault_credentials';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const list: CorporateVaultCredential[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ ...(docSnap.data() as CorporateVaultCredential), id: docSnap.id });
+      });
+      list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      safeAppStorage.setJSON(CORPORATE_VAULT_CREDS_KEY, list);
+      onData(list);
+    },
+    (error) => {
+      console.warn(`Firestore subscription notice on ${path}:`, error);
+      if (onError) onError(error);
+      onData(safeAppStorage.getJSON<CorporateVaultCredential[]>(CORPORATE_VAULT_CREDS_KEY, []));
+    }
+  );
+}
+
+export async function saveCorporateVaultCredentialToFirestore(cred: CorporateVaultCredential): Promise<void> {
+  const path = 'corporate_vault_credentials';
+  const credId = cred.id || `vault_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const activeCompany = getActiveCompanyId();
+  const record: CorporateVaultCredential = {
+    ...cred,
+    id: credId,
+    companyId: cred.companyId || activeCompany,
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    await setDoc(doc(db, path, credId), sanitizeForFirestore(record), { merge: true });
+  } catch (error) {
+    console.warn(`Firestore saveCorporateVaultCredential warning for ${credId}:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<CorporateVaultCredential[]>(CORPORATE_VAULT_CREDS_KEY, []);
+  const idx = current.findIndex((c) => c.id === credId);
+  if (idx >= 0) current[idx] = record;
+  else current.unshift(record);
+  safeAppStorage.setJSON(CORPORATE_VAULT_CREDS_KEY, current);
+}
+
+export async function deleteCorporateVaultCredentialFromFirestore(credId: string): Promise<void> {
+  const path = 'corporate_vault_credentials';
+  try {
+    await deleteDoc(doc(db, path, credId));
+  } catch (error) {
+    console.warn(`Firestore deleteCorporateVaultCredential warning for ${credId}:`, error);
+  }
+  const current = safeAppStorage.getJSON<CorporateVaultCredential[]>(CORPORATE_VAULT_CREDS_KEY, []);
+  safeAppStorage.setJSON(CORPORATE_VAULT_CREDS_KEY, current.filter((c) => c.id !== credId));
+}
+
 export function subscribeToCompanyCategories(
   onData: (categories: string[]) => void,
   onError?: (err: any) => void
@@ -5722,7 +5889,6 @@ export function subscribeToCompanyCategories(
     collection(db, path),
     async (snapshot) => {
       if (snapshot.empty) {
-        // Seed default categories
         try {
           for (const catName of DEFAULT_COMPANY_DOCUMENT_CATEGORIES) {
             const catId = catName.toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -5744,7 +5910,6 @@ export function subscribeToCompanyCategories(
         }
       });
 
-      // Ensure all default categories are represented
       DEFAULT_COMPANY_DOCUMENT_CATEGORIES.forEach(def => {
         if (!catList.includes(def)) catList.push(def);
       });

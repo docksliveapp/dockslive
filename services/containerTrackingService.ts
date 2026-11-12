@@ -252,7 +252,7 @@ export function extractMatchingContainers(
     let workflowTitle = unifiedStage;
     let workflowDesc = 'Consignment is undergoing authorized operational milestones.';
     let activeStepIdx = 0;
-    let totalSteps = 7;
+    let totalSteps = 5;
     const isCompleted =
       c.status === CaseStatus.COMPLETED ||
       String(c.status).toLowerCase().includes('completed') ||
@@ -262,7 +262,7 @@ export function extractMatchingContainers(
     if (getWorkflowFn && getStepIndexFn) {
       try {
         const wf = getWorkflowFn(c.category);
-        totalSteps = wf.totalSteps || 7;
+        totalSteps = wf.totalSteps || 5;
         activeStepIdx = getStepIndexFn(c.category, c.status);
         const curStep = wf.steps?.[activeStepIdx];
         if (isCompleted) {
@@ -274,7 +274,7 @@ export function extractMatchingContainers(
         } else if (isDocumentationProcessingCase(c)) {
           workflowTitle = 'Documentation Processing';
           const stepLabel = curStep ? `${curStep.title}` : String(c.status || 'Shipping Line DO');
-          workflowDesc = `Documentation Processing Stage (1. Shipping Line DO • 2. TP Filing • 3. Excise Payment • 4. Vehicle Assignment) — Active: ${stepLabel}`;
+          workflowDesc = `Documentation Processing Stage (1. Shipping Line DO • 2. Vehicle Assignment) — Active: ${stepLabel}`;
         } else {
           workflowTitle = unifiedStage;
           workflowDesc = curStep?.description || `Active Stage: ${unifiedStage}`;

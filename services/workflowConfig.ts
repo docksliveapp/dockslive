@@ -119,7 +119,7 @@ export const CATEGORY_WORKFLOW_MAP: Record<string, CategoryWorkflowConfig> = {
   'Bonded Carrier': {
     category: 'Bonded Carrier',
     normalizedCategory: 'Bonded Carrier',
-    totalSteps: 7,
+    totalSteps: 5,
     steps: [
       {
         stepIndex: 0,
@@ -131,22 +131,6 @@ export const CATEGORY_WORKFLOW_MAP: Record<string, CategoryWorkflowConfig> = {
       },
       {
         stepIndex: 1,
-        id: CaseStatus.TP_FILING,
-        title: 'TP Filing',
-        shortTitle: 'Transit Permit',
-        description: 'Upload TP/GD print, entry number, date, item description, and filing entity.',
-        categoryName: 'Bonded Carrier'
-      },
-      {
-        stepIndex: 2,
-        id: CaseStatus.EXCISE_PAYMENT,
-        title: 'Excise Payment',
-        shortTitle: 'Provincial Excise',
-        description: 'Provincial excise duty receipt, reference number, region selection, and payment status.',
-        categoryName: 'Bonded Carrier'
-      },
-      {
-        stepIndex: 3,
         id: CaseStatus.VEHICLE_ASSIGNMENT,
         title: 'Vehicle Assignment',
         shortTitle: 'Fleet Allocation',
@@ -154,7 +138,7 @@ export const CATEGORY_WORKFLOW_MAP: Record<string, CategoryWorkflowConfig> = {
         categoryName: 'Bonded Carrier'
       },
       {
-        stepIndex: 4,
+        stepIndex: 2,
         id: CaseStatus.LOADING_PORT_PROCESSING,
         title: 'Loading Port Processing',
         shortTitle: 'Port Gate Out',
@@ -162,7 +146,7 @@ export const CATEGORY_WORKFLOW_MAP: Record<string, CategoryWorkflowConfig> = {
         categoryName: 'Bonded Carrier'
       },
       {
-        stepIndex: 5,
+        stepIndex: 3,
         id: CaseStatus.IN_TRANSIT,
         title: 'In Transit & Emergency Exception',
         shortTitle: 'Highway Transit',
@@ -170,7 +154,7 @@ export const CATEGORY_WORKFLOW_MAP: Record<string, CategoryWorkflowConfig> = {
         categoryName: 'Bonded Carrier'
       },
       {
-        stepIndex: 6,
+        stepIndex: 4,
         id: CaseStatus.DESTINATION_PORT_ARRIVAL,
         title: 'Destination Port Arrival & Auto DO Generation',
         shortTitle: 'Dry Port Discharge',
@@ -609,16 +593,30 @@ export function getWorkflowStepsForCategory(category?: string): string[] {
 
 export function getWorkflowStepIndex(category?: string, status?: string): number {
   if (!status) return 0;
+  const norm = normalizeCategoryName(category);
+  const cfg = getCategoryWorkflow(category);
   if (status === CaseStatus.COMPLETED) {
-    const cfg = getCategoryWorkflow(category);
     return cfg.totalSteps;
   }
-  const cfg = getCategoryWorkflow(category);
   const idx = cfg.steps.findIndex(s => s.id === status || s.title === status);
   if (idx !== -1) return idx;
 
-  // Check if status is a number or matches legacy
-  const stepIdx = cfg.steps.findIndex(s => s.title.toLowerCase().includes(status.toLowerCase()));
+  // Map legacy Bonded Carrier TP Filing / Excise / Wharfage statuses cleanly to Step 2 (Vehicle Assignment, index 1)
+  const lower = status.toLowerCase();
+  if (
+    norm === 'Bonded Carrier' &&
+    (status === CaseStatus.TP_FILING ||
+      status === CaseStatus.EXCISE_PAYMENT ||
+      status === CaseStatus.WHARFAGE_PAYMENT ||
+      lower.includes('tp filing') ||
+      lower.includes('excise') ||
+      lower.includes('wharfage'))
+  ) {
+    return 1;
+  }
+
+  // Check if status matches partial title
+  const stepIdx = cfg.steps.findIndex(s => s.title.toLowerCase().includes(lower));
   return stepIdx !== -1 ? stepIdx : 0;
 }
 

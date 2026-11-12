@@ -627,7 +627,7 @@ export const PublicVehicleTrackingPortal: React.FC<PublicVehicleTrackingPortalPr
             </div>
           ) : (
             <>
-              {/* If search query entered and NO match found: "no record found likha jaega" */}
+              {/* If search query entered and NO match found: Display No Record Found empty state */}
               {activeSearch && matchingVehicles.length === 0 && (
                 <div className="p-8 sm:p-12 rounded-3xl bg-white border-2 border-rose-200 text-center space-y-4 max-w-lg mx-auto shadow-xl">
                   <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-300 flex items-center justify-center text-rose-600 mx-auto">

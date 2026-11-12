@@ -139,8 +139,7 @@ export function getBrowserNotificationPermission(): NotificationPermission | 'un
 
 export function isPushEnabledLocally(): boolean {
   if (!isWebPushSupportedInBrowser()) return false;
-  if (Notification.permission !== 'granted') return false;
-  return safeAppStorage.getItem(LOCAL_PUSH_PREF_KEY) === 'true';
+  return Notification.permission === 'granted';
 }
 
 export function isPushSoundEnabled(): boolean {
@@ -681,18 +680,34 @@ export async function disablePushNotificationsForCurrentDevice(
   }
 }
 
+let pendingAutoGesturePromptAttached = false;
+
 /**
- * Silently refreshes and syncs the current device's FCM token to the active logged-in user on app load / login
- * if the user previously enabled push notifications.
+ * Automatically enables and syncs push notifications on session load (Always-ON mode).
+ * If browser permission is already granted, refreshes FCM token immediately.
+ * If browser permission is 'default', triggers registration automatically on first user interaction.
  */
 export async function syncExistingPushSubscriptionOnSessionLoad(
   identityOverride?: PushIdentityContext
 ): Promise<void> {
   if (!isWebPushSupportedInBrowser()) return;
+  safeAppStorage.setItem(LOCAL_PUSH_PREF_KEY, 'true');
   await initForegroundPushListener();
 
-  if (Notification.permission === 'granted' && safeAppStorage.getItem(LOCAL_PUSH_PREF_KEY) === 'true') {
+  if (Notification.permission === 'granted') {
     await enablePushNotificationsForCurrentUser(identityOverride).catch(() => {});
+    return;
+  }
+
+  if (Notification.permission === 'default' && typeof window !== 'undefined' && !pendingAutoGesturePromptAttached) {
+    pendingAutoGesturePromptAttached = true;
+    const triggerAutoEnable = () => {
+      window.removeEventListener('pointerdown', triggerAutoEnable);
+      window.removeEventListener('keydown', triggerAutoEnable);
+      enablePushNotificationsForCurrentUser(identityOverride).catch(() => {});
+    };
+    window.addEventListener('pointerdown', triggerAutoEnable, { once: true, passive: true });
+    window.addEventListener('keydown', triggerAutoEnable, { once: true, passive: true });
   }
 }
 
@@ -755,7 +770,8 @@ function doesUserMatchNotificationTarget(
       subType === 'FINANCE_RECORDED' && explicitlyTargetsAdmin;
 
     const isCompanyDocExpiry =
-      subType === 'DOC_EXPIRY_ALERT' && notif.targetView === 'company_documents';
+      (subType === 'DOC_EXPIRY_ALERT' || subType === 'LEGAL_HEARING_ALERT') &&
+      notif.targetView === 'company_documents';
 
     const isAdminApprovalRequest =
       explicitlyTargetsAdmin &&
@@ -888,7 +904,6 @@ export async function dispatchPushForNotification(notif: AppNotification): Promi
     // 1. Check cached users first for zero-latency resolution, plus live Firestore `users`
     const localUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || [];
     for (const u of localUsers) {
-      if (u.pushNotificationsEnabled === false) continue;
       if (Array.isArray(u.fcmTokens) && u.fcmTokens.length > 0 && doesUserMatchNotificationTarget(u, notif)) {
         u.fcmTokens.forEach((tk) => {
           if (tk && tk.length >= 20 && !tk.startsWith('local-browser-perm-')) {
@@ -906,7 +921,6 @@ export async function dispatchPushForNotification(notif: AppNotification): Promi
     if (usersSnap) {
       usersSnap.forEach((docSnap) => {
         const u = docSnap.data() as Partial<AppUser>;
-        if (u.pushNotificationsEnabled === false) return;
         if (
           Array.isArray(u.fcmTokens) &&
           u.fcmTokens.length > 0 &&

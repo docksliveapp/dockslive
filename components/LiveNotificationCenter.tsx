@@ -194,7 +194,8 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
           subType === 'FINANCE_RECORDED' && explicitlyTargetsAdmin;
 
         const isCompanyDocumentExpiry =
-          subType === 'DOC_EXPIRY_ALERT' && n.targetView === 'company_documents';
+          (subType === 'DOC_EXPIRY_ALERT' || subType === 'LEGAL_HEARING_ALERT') &&
+          n.targetView === 'company_documents';
 
         const isAdminFinalApproval =
           explicitlyTargetsAdmin &&

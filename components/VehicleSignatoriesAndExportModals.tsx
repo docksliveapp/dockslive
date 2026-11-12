@@ -16,7 +16,8 @@ import {
   Phone,
   MapPin,
   Briefcase,
-  UserCheck
+  UserCheck,
+  FileText
 } from 'lucide-react';
 import { Vehicle } from '../types';
 import { CompanyId, GROUP_COMPANIES } from '../services/companyService';
@@ -235,22 +236,49 @@ export const FleetExcelExportModal: React.FC<FleetExcelExportModalProps> = ({
 };
 
 // ============================================================================
-// HELPER: Dual Front/Back CNIC Uploader Card
+// HELPER: Single Combined ID Card (PDF / Scan with Front & Back Together) Uploader
 // ============================================================================
-interface IdCardSideUploaderProps {
+interface IdCardCombinedUploaderProps {
   label: string;
   rawUrl?: string;
   fallbackChunkKey: string;
   fileName?: string;
+  defaultDownloadName: string;
   onUploaded: (dataUrl: string, name: string) => void;
   onClear: () => void;
 }
 
-const IdCardSideUploader: React.FC<IdCardSideUploaderProps> = ({
+function triggerDirectDataUrlDownload(dataUrl: string, desiredFileName: string) {
+  if (!dataUrl || !dataUrl.includes(',')) return;
+  try {
+    const [meta, b64] = dataUrl.split(',');
+    const mimeMatch = meta.match(/data:([^;]+)/);
+    const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const ext = mime.includes('pdf') ? '.pdf' : mime.includes('png') ? '.png' : '.jpg';
+    const cleanBase = desiredFileName.replace(/\.(pdf|png|jpe?g|webp)$/i, '');
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${cleanBase}${ext}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  } catch (err) {
+    console.error('Failed to download ID card file directly:', err);
+  }
+}
+
+const IdCardCombinedUploader: React.FC<IdCardCombinedUploaderProps> = ({
   label,
   rawUrl,
   fallbackChunkKey,
   fileName,
+  defaultDownloadName,
   onUploaded,
   onClear
 }) => {
@@ -280,20 +308,37 @@ const IdCardSideUploader: React.FC<IdCardSideUploaderProps> = ({
     if (!file) return;
     setUploading(true);
     try {
-      const processed = await compressAndPrepareFile(file);
-      if (processed.dataUrl) {
-        onUploaded(processed.dataUrl, file.name);
+      const isPdfFile =
+        file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (isPdfFile) {
+        // Read exact PDF bytes untouched so Front & Back print 100% As-It-Is
+        await new Promise<void>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string') {
+              onUploaded(reader.result, file.name);
+            }
+            resolve();
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
       } else {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          if (typeof reader.result === 'string') {
-            onUploaded(reader.result, file.name);
-          }
-        };
-        reader.readAsDataURL(file);
+        const processed = await compressAndPrepareFile(file);
+        if (processed.dataUrl) {
+          onUploaded(processed.dataUrl, file.name);
+        } else {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string') {
+              onUploaded(reader.result, file.name);
+            }
+          };
+          reader.readAsDataURL(file);
+        }
       }
     } catch (err) {
-      console.warn('CNIC image processing warning:', err);
+      console.warn('CNIC file upload warning:', err);
     } finally {
       setUploading(false);
       try {
@@ -302,58 +347,96 @@ const IdCardSideUploader: React.FC<IdCardSideUploaderProps> = ({
     }
   };
 
-  const hasImage = Boolean(rawUrl || previewUrl);
+  const hasFile = Boolean(rawUrl || previewUrl);
+  const isPdf =
+    previewUrl.startsWith('data:application/pdf') ||
+    (fileName || '').toLowerCase().endsWith('.pdf');
 
   return (
-    <div className="bg-black/35 border border-white/10 rounded-xl p-2.5 space-y-2">
-      <div className="flex items-center justify-between gap-2">
+    <div className="bg-black/35 border border-white/10 rounded-xl p-3 space-y-2.5">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-[11px] font-bold text-gray-200 flex items-center gap-1.5">
-          <CreditCard size={12} className="text-blue-400" />
+          <CreditCard size={13} className="text-blue-400 shrink-0" />
           <span>{label}</span>
         </span>
-        {hasImage ? (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
-            Uploaded
+        {hasFile ? (
+          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+            {isPdf ? '✓ PDF Uploaded (Front & Back — Prints As-It-Is)' : '✓ ID Scan Uploaded'}
           </span>
         ) : (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-gray-400 font-semibold">
-            Pending
+          <span className="text-[10px] px-2 py-0.5 rounded bg-white/10 text-gray-400 font-semibold">
+            Upload 1 PDF (Front &amp; Back)
           </span>
         )}
       </div>
 
       {previewUrl && previewUrl.startsWith('data:image') && (
-        <div className="relative rounded-lg overflow-hidden border border-white/15 bg-slate-900 h-24 flex items-center justify-center">
-          <img src={previewUrl} alt={label} className="max-h-24 w-auto object-contain" />
+        <div className="relative rounded-lg overflow-hidden border border-white/15 bg-slate-900 h-28 flex items-center justify-center">
+          <img src={previewUrl} alt={label} className="max-h-28 w-auto object-contain" />
         </div>
       )}
 
-      <div className="flex items-center gap-1.5">
-        <label className="flex-1 cursor-pointer mak-btn-secondary py-1.5 px-2.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 text-center">
+      {hasFile && isPdf && (
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <FileText size={16} className="text-emerald-400 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-emerald-200 truncate">
+                {fileName || `${defaultDownloadName}.pdf`}
+              </div>
+              <div className="text-[10px] text-emerald-300/80">
+                Combined Front &amp; Back PDF stored untouched — downloads &amp; prints as-it-is
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <label className="flex-1 min-w-[170px] cursor-pointer mak-btn-secondary py-2 px-3 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 text-center">
           <input
             type="file"
-            accept="image/*,application/pdf"
+            accept="application/pdf,image/*"
             className="hidden"
             onChange={handleFile}
           />
           {uploading ? (
             <>
-              <Loader2 size={12} className="animate-spin" />
-              <span>Uploading...</span>
+              <Loader2 size={13} className="animate-spin" />
+              <span>Uploading File...</span>
             </>
           ) : (
             <>
-              <UploadCloud size={12} />
-              <span className="truncate">{hasImage ? fileName || 'Replace ID Side' : `Upload ${label}`}</span>
+              <UploadCloud size={13} />
+              <span className="truncate">
+                {hasFile
+                  ? `Replace File (${fileName || 'ID_Card.pdf'})`
+                  : 'Upload Single PDF / Image (Front & Back)'}
+              </span>
             </>
           )}
         </label>
-        {hasImage && (
+
+        {previewUrl && (
+          <button
+            type="button"
+            onClick={() =>
+              triggerDirectDataUrlDownload(previewUrl, fileName || defaultDownloadName)
+            }
+            className="mak-btn px-2.5 py-2 rounded-lg text-[11px] font-semibold flex items-center gap-1 whitespace-nowrap"
+            title="Download exact uploaded PDF / Image to print as-it-is"
+          >
+            <Download size={12} />
+            <span>Print / Download As-It-Is</span>
+          </button>
+        )}
+
+        {hasFile && (
           <button
             type="button"
             onClick={onClear}
-            className="mak-btn-secondary px-2 py-1.5 rounded-lg text-[10px] text-rose-300 hover:text-rose-200"
-            title="Clear uploaded ID image"
+            className="mak-btn-secondary px-2.5 py-2 rounded-lg text-[11px] text-rose-300 hover:text-rose-200"
+            title="Clear uploaded ID file"
           >
             Clear
           </button>
@@ -479,22 +562,31 @@ export const ManageWitnessesModal: React.FC<ManageWitnessesModalProps> = ({ isOp
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-        <IdCardSideUploader
-          label={`Witness ${slot} ID Front`}
-          rawUrl={data.cnicFrontUrl}
+      <div className="pt-1">
+        <IdCardCombinedUploader
+          label={`Witness ${slot} ID Card (Single PDF / Scan — Front & Back)`}
+          rawUrl={data.cnicFrontUrl || data.cnicBackUrl}
           fallbackChunkKey={`signatory_witness_${slot}_front`}
-          fileName={data.cnicFrontName}
-          onUploaded={(url, name) => setData({ ...data, cnicFrontUrl: url, cnicFrontName: name })}
-          onClear={() => setData({ ...data, cnicFrontUrl: '', cnicFrontName: '' })}
-        />
-        <IdCardSideUploader
-          label={`Witness ${slot} ID Back`}
-          rawUrl={data.cnicBackUrl}
-          fallbackChunkKey={`signatory_witness_${slot}_back`}
-          fileName={data.cnicBackName}
-          onUploaded={(url, name) => setData({ ...data, cnicBackUrl: url, cnicBackName: name })}
-          onClear={() => setData({ ...data, cnicBackUrl: '', cnicBackName: '' })}
+          fileName={data.cnicFrontName || data.cnicBackName}
+          defaultDownloadName={`Witness_${slot}_ID_Card`}
+          onUploaded={(url, name) =>
+            setData({
+              ...data,
+              cnicFrontUrl: url,
+              cnicFrontName: name,
+              cnicBackUrl: '',
+              cnicBackName: ''
+            })
+          }
+          onClear={() =>
+            setData({
+              ...data,
+              cnicFrontUrl: '',
+              cnicFrontName: '',
+              cnicBackUrl: '',
+              cnicBackName: ''
+            })
+          }
         />
       </div>
     </div>
@@ -839,30 +931,31 @@ export const ManageCompanyOwnersModal: React.FC<ManageCompanyOwnersModalProps> =
               </div>
             </div>
 
-            {/* Front & Back CNIC Upload */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              <IdCardSideUploader
-                label={`${selectedCompanyInfo.shortName} Owner ID Card — Front`}
-                rawUrl={ownerForm.cnicFrontUrl}
+            {/* Single Combined PDF / Scan CNIC Upload (Front & Back in 1 File) */}
+            <div className="pt-1">
+              <IdCardCombinedUploader
+                label={`${selectedCompanyInfo.shortName} Owner ID Card (Single PDF / Scan — Front & Back)`}
+                rawUrl={ownerForm.cnicFrontUrl || ownerForm.cnicBackUrl}
                 fallbackChunkKey={`signatory_company_owner_${selectedCompanyId}_front`}
-                fileName={ownerForm.cnicFrontName}
+                fileName={ownerForm.cnicFrontName || ownerForm.cnicBackName}
+                defaultDownloadName={`${selectedCompanyInfo.shortName}_Owner_ID_Card`}
                 onUploaded={(url, name) =>
-                  setOwnerForm({ ...ownerForm, cnicFrontUrl: url, cnicFrontName: name })
+                  setOwnerForm({
+                    ...ownerForm,
+                    cnicFrontUrl: url,
+                    cnicFrontName: name,
+                    cnicBackUrl: '',
+                    cnicBackName: ''
+                  })
                 }
                 onClear={() =>
-                  setOwnerForm({ ...ownerForm, cnicFrontUrl: '', cnicFrontName: '' })
-                }
-              />
-              <IdCardSideUploader
-                label={`${selectedCompanyInfo.shortName} Owner ID Card — Back`}
-                rawUrl={ownerForm.cnicBackUrl}
-                fallbackChunkKey={`signatory_company_owner_${selectedCompanyId}_back`}
-                fileName={ownerForm.cnicBackName}
-                onUploaded={(url, name) =>
-                  setOwnerForm({ ...ownerForm, cnicBackUrl: url, cnicBackName: name })
-                }
-                onClear={() =>
-                  setOwnerForm({ ...ownerForm, cnicBackUrl: '', cnicBackName: '' })
+                  setOwnerForm({
+                    ...ownerForm,
+                    cnicFrontUrl: '',
+                    cnicFrontName: '',
+                    cnicBackUrl: '',
+                    cnicBackName: ''
+                  })
                 }
               />
             </div>
@@ -966,21 +1059,14 @@ export const CompanySignatoriesAutoBanner: React.FC<CompanySignatoriesAutoBanner
             <div className="flex items-center gap-1.5 pt-0.5">
               <span
                 className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                  hasOwnerFront
+                  hasOwnerFront || hasOwnerBack
                     ? 'bg-emerald-500/20 text-emerald-300'
                     : 'bg-white/10 text-gray-400'
                 }`}
               >
-                {hasOwnerFront ? '✓ ID Front' : 'ID Front Pending'}
-              </span>
-              <span
-                className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                  hasOwnerBack
-                    ? 'bg-emerald-500/20 text-emerald-300'
-                    : 'bg-white/10 text-gray-400'
-                }`}
-              >
-                {hasOwnerBack ? '✓ ID Back' : 'ID Back Pending'}
+                {hasOwnerFront || hasOwnerBack
+                  ? '✓ ID Card PDF / Scan Ready'
+                  : 'ID Card File Pending'}
               </span>
             </div>
           </div>

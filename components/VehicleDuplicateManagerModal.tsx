@@ -17,6 +17,7 @@ import {
   DuplicateVehicleGroup,
   matchTechNumbers,
   mergeVehicleRecords,
+  normalizeTechNumber,
   resolveCanonicalCompanyKey,
 } from '../services/vehicleDuplicateService';
 import { executeVehicleMergeAndDeleteBatch } from '../services/dbService';
@@ -33,10 +34,11 @@ interface VehicleDuplicateManagerModalProps {
 
 type ManagerMode = 'AUTO_DETECTED' | 'MANUAL_MATCH';
 type FilterTab =
-  | 'HIGH_CONFIDENCE'
-  | 'TRUCKIT_VS_DOCKS'
+  | 'ALL_ACTIONABLE'
+  | 'DUP_CHASSIS'
+  | 'DUP_ENGINE'
   | 'SAME_CHASSIS_ENGINE'
-  | 'SAME_CHASSIS_ONLY'
+  | 'TRUCKIT_VS_DOCKS'
   | 'SIMILAR_PLATE_REVIEW'
   | 'ALL';
 
@@ -66,7 +68,7 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
   getVehicleTripsCount,
 }) => {
   const [mode, setMode] = useState<ManagerMode>('AUTO_DETECTED');
-  const [activeFilter, setActiveFilter] = useState<FilterTab>('HIGH_CONFIDENCE');
+  const [activeFilter, setActiveFilter] = useState<FilterTab>('ALL_ACTIONABLE');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Per-group user overrides: which vehicle ID to KEEP, and optional company override
@@ -98,15 +100,24 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
   const allGroups = useMemo(() => detectDuplicateVehicleGroups(vehicles), [vehicles]);
 
   const counts = useMemo(() => {
-    let high = 0;
+    let actionable = 0;
+    let actionableVehicles = 0;
+    let dupChassis = 0;
+    let dupEngine = 0;
     let truckitDocks = 0;
     let sameCE = 0;
-    let sameChassisOnly = 0;
     let reviewPlates = 0;
 
     for (const g of allGroups) {
-      if (g.confidence === 'HIGH') high++;
-      if (g.isCrossCompanyTruckitDocks && g.confidence !== 'REVIEW') truckitDocks++;
+      if (g.category !== 'SAME_BASE_PLATE_DIFF_TECH') {
+        actionable++;
+        actionableVehicles += g.vehicles.length;
+      }
+      if (g.chassisMatch || g.swappedTechMatch) dupChassis++;
+      if (g.engineMatch || g.swappedTechMatch) dupEngine++;
+      if (g.isCrossCompanyTruckitDocks && g.category !== 'SAME_BASE_PLATE_DIFF_TECH') {
+        truckitDocks++;
+      }
       if (
         g.category === 'EXACT_TRI_MATCH' ||
         g.category === 'CROSS_COMPANY_CE_MATCH' ||
@@ -114,16 +125,17 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
       ) {
         sameCE++;
       }
-      if (g.category === 'SAME_CHASSIS_ONLY') sameChassisOnly++;
       if (g.category === 'SAME_BASE_PLATE_DIFF_TECH') reviewPlates++;
     }
 
     return {
       all: allGroups.length,
-      high,
+      actionable,
+      actionableVehicles,
+      dupChassis,
+      dupEngine,
       truckitDocks,
       sameCE,
-      sameChassisOnly,
       reviewPlates,
     };
   }, [allGroups]);
@@ -131,10 +143,18 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
   const filteredGroups = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return allGroups.filter((g) => {
-      if (activeFilter === 'HIGH_CONFIDENCE' && g.confidence !== 'HIGH') return false;
+      if (activeFilter === 'ALL_ACTIONABLE' && g.category === 'SAME_BASE_PLATE_DIFF_TECH') {
+        return false;
+      }
+      if (activeFilter === 'DUP_CHASSIS' && !(g.chassisMatch || g.swappedTechMatch)) {
+        return false;
+      }
+      if (activeFilter === 'DUP_ENGINE' && !(g.engineMatch || g.swappedTechMatch)) {
+        return false;
+      }
       if (
         activeFilter === 'TRUCKIT_VS_DOCKS' &&
-        !(g.isCrossCompanyTruckitDocks && g.confidence !== 'REVIEW')
+        !(g.isCrossCompanyTruckitDocks && g.category !== 'SAME_BASE_PLATE_DIFF_TECH')
       ) {
         return false;
       }
@@ -144,9 +164,6 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
         g.category !== 'CROSS_COMPANY_CE_MATCH' &&
         g.category !== 'SAME_CHASSIS_AND_ENGINE'
       ) {
-        return false;
-      }
-      if (activeFilter === 'SAME_CHASSIS_ONLY' && g.category !== 'SAME_CHASSIS_ONLY') {
         return false;
       }
       if (
@@ -427,7 +444,7 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
   const truckitDocksHighGroups = useMemo(
     () =>
       allGroups.filter(
-        (g) => g.isCrossCompanyTruckitDocks && g.confidence !== 'REVIEW'
+        (g) => g.isCrossCompanyTruckitDocks && g.category !== 'SAME_BASE_PLATE_DIFF_TECH'
       ),
     [allGroups]
   );
@@ -452,7 +469,8 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
               </h3>
               <p className="text-xs text-gray-400 truncate">
                 Total Fleet: <span className="font-mono font-semibold text-white tabular-nums">{vehicles.length}</span>
-                {' · '}Match by Registration No, Chassis No &amp; Engine No · Select which stays &amp; merge/delete duplicates
+                {' · '}Duplicate Groups: <span className="font-mono font-semibold text-amber-300 tabular-nums">{counts.actionable}</span>
+                {' '}({counts.actionableVehicles} Vehicles with Chassis/Engine/Plate &gt;1x)
               </p>
             </div>
           </div>
@@ -469,7 +487,7 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
                 }`}
               >
                 <ShieldCheck size={13} />
-                <span>Auto-Detected ({counts.high})</span>
+                <span>Auto-Detected ({counts.actionable})</span>
               </button>
               <button
                 type="button"
@@ -531,22 +549,66 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
                 <button
                   type="button"
-                  onClick={() => setActiveFilter('HIGH_CONFIDENCE')}
+                  onClick={() => setActiveFilter('ALL_ACTIONABLE')}
                   data-custom-control="true"
                   className={`text-left p-3 rounded-xl border transition-colors ${
-                    activeFilter === 'HIGH_CONFIDENCE'
+                    activeFilter === 'ALL_ACTIONABLE'
                       ? 'bg-sky-500/15 border-sky-400/50'
                       : 'bg-slate-900/80 border-white/10 hover:bg-slate-900'
                   }`}
                 >
                   <div className="text-[11px] text-gray-400 font-medium">
-                    Confirmed Doubling (Chassis + Engine)
+                    All Duplicate Chassis &amp; Engine (&gt;1x)
                   </div>
                   <div className="mt-1 flex items-baseline justify-between gap-2">
                     <span className="text-xl font-bold font-mono tabular-nums text-sky-400">
-                      {counts.high}
+                      {counts.actionable}
                     </span>
-                    <span className="text-[11px] text-gray-400">Ready to Merge</span>
+                    <span className="text-[11px] text-gray-400 font-mono tabular-nums">
+                      {counts.actionableVehicles} Vehicles
+                    </span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveFilter('DUP_CHASSIS')}
+                  data-custom-control="true"
+                  className={`text-left p-3 rounded-xl border transition-colors ${
+                    activeFilter === 'DUP_CHASSIS'
+                      ? 'bg-emerald-500/15 border-emerald-400/50'
+                      : 'bg-slate-900/80 border-white/10 hover:bg-slate-900'
+                  }`}
+                >
+                  <div className="text-[11px] text-gray-400 font-medium">
+                    Duplicate Chassis No (&gt;1x)
+                  </div>
+                  <div className="mt-1 flex items-baseline justify-between gap-2">
+                    <span className="text-xl font-bold font-mono tabular-nums text-emerald-400">
+                      {counts.dupChassis}
+                    </span>
+                    <span className="text-[11px] text-gray-400">Repeated Chassis</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveFilter('DUP_ENGINE')}
+                  data-custom-control="true"
+                  className={`text-left p-3 rounded-xl border transition-colors ${
+                    activeFilter === 'DUP_ENGINE'
+                      ? 'bg-amber-500/15 border-amber-400/50'
+                      : 'bg-slate-900/80 border-white/10 hover:bg-slate-900'
+                  }`}
+                >
+                  <div className="text-[11px] text-gray-400 font-medium">
+                    Duplicate Engine No (&gt;1x)
+                  </div>
+                  <div className="mt-1 flex items-baseline justify-between gap-2">
+                    <span className="text-xl font-bold font-mono tabular-nums text-amber-400">
+                      {counts.dupEngine}
+                    </span>
+                    <span className="text-[11px] text-gray-400">Repeated Engine</span>
                   </div>
                 </button>
 
@@ -570,48 +632,6 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
                     <span className="text-[11px] text-gray-400">Keep Truckit · Delete Docks</span>
                   </div>
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveFilter('SAME_CHASSIS_ONLY')}
-                  data-custom-control="true"
-                  className={`text-left p-3 rounded-xl border transition-colors ${
-                    activeFilter === 'SAME_CHASSIS_ONLY'
-                      ? 'bg-amber-500/15 border-amber-400/50'
-                      : 'bg-slate-900/80 border-white/10 hover:bg-slate-900'
-                  }`}
-                >
-                  <div className="text-[11px] text-gray-400 font-medium">
-                    Same Chassis Only (Verify Engine)
-                  </div>
-                  <div className="mt-1 flex items-baseline justify-between gap-2">
-                    <span className="text-xl font-bold font-mono tabular-nums text-amber-400">
-                      {counts.sameChassisOnly}
-                    </span>
-                    <span className="text-[11px] text-gray-400">Manual Check</span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveFilter('SIMILAR_PLATE_REVIEW')}
-                  data-custom-control="true"
-                  className={`text-left p-3 rounded-xl border transition-colors ${
-                    activeFilter === 'SIMILAR_PLATE_REVIEW'
-                      ? 'bg-slate-800 border-white/30'
-                      : 'bg-slate-900/80 border-white/10 hover:bg-slate-900'
-                  }`}
-                >
-                  <div className="text-[11px] text-gray-400 font-medium">
-                    Same Base Plate · Diff Chassis/Engine
-                  </div>
-                  <div className="mt-1 flex items-baseline justify-between gap-2">
-                    <span className="text-xl font-bold font-mono tabular-nums text-gray-200">
-                      {counts.reviewPlates}
-                    </span>
-                    <span className="text-[11px] text-gray-400">Review Only</span>
-                  </div>
-                </button>
               </div>
 
               {/* Filter Tabs + Search + Batch Action Bar */}
@@ -620,10 +640,11 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
                   <div className="flex flex-wrap items-center gap-1.5">
                     {(
                       [
-                        { id: 'HIGH_CONFIDENCE', label: `Confirmed Matches (${counts.high})` },
+                        { id: 'ALL_ACTIONABLE', label: `All Duplicate Chassis / Engine (${counts.actionable})` },
+                        { id: 'DUP_CHASSIS', label: `Duplicate Chassis >1x (${counts.dupChassis})` },
+                        { id: 'DUP_ENGINE', label: `Duplicate Engine >1x (${counts.dupEngine})` },
+                        { id: 'SAME_CHASSIS_ENGINE', label: `Both Chassis + Engine (${counts.sameCE})` },
                         { id: 'TRUCKIT_VS_DOCKS', label: `Truckit vs Docks (${counts.truckitDocks})` },
-                        { id: 'SAME_CHASSIS_ENGINE', label: `Same Chassis + Engine (${counts.sameCE})` },
-                        { id: 'SAME_CHASSIS_ONLY', label: `Same Chassis (${counts.sameChassisOnly})` },
                         { id: 'SIMILAR_PLATE_REVIEW', label: `Plate Suffix Review (${counts.reviewPlates})` },
                         { id: 'ALL', label: `All (${counts.all})` },
                       ] as Array<{ id: FilterTab; label: string }>
@@ -951,7 +972,7 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
                                             isKeep ? 'text-emerald-400' : 'text-rose-400'
                                           }`}
                                         >
-                                          {isKeep ? 'KEEP (Rahegi)' : 'DELETE / MERGE'}
+                                          {isKeep ? 'RETAIN RECORD' : 'MERGE / DELETE'}
                                         </span>
                                       </label>
                                     </td>
@@ -970,7 +991,11 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
 
                                     <td
                                       className={`py-2 px-2.5 font-mono tabular-nums whitespace-nowrap ${
-                                        group.chassisMatch
+                                        (group.duplicateChassisNorms?.includes(
+                                          normalizeTechNumber(v.chassisNo)
+                                        ) ||
+                                          group.chassisMatch ||
+                                          group.swappedTechMatch)
                                           ? 'text-emerald-300 font-semibold'
                                           : 'text-gray-300'
                                       }`}
@@ -980,7 +1005,11 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
 
                                     <td
                                       className={`py-2 px-2.5 font-mono tabular-nums whitespace-nowrap ${
-                                        group.engineMatch
+                                        (group.duplicateEngineNorms?.includes(
+                                          normalizeTechNumber(v.engineNo)
+                                        ) ||
+                                          group.engineMatch ||
+                                          group.swappedTechMatch)
                                           ? 'text-emerald-300 font-semibold'
                                           : 'text-gray-300'
                                       }`}
@@ -1049,7 +1078,7 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
                   {/* Column 1: Primary Vehicle to KEEP */}
                   <div className="p-3.5 rounded-xl bg-slate-950/70 border border-emerald-500/30 space-y-2.5">
                     <div className="text-xs font-bold text-emerald-400">
-                      1. Primary Vehicle — KEEP (Ye Vehicle Rahegi)
+                      1. Primary Vehicle — Retain Record
                     </div>
                     <input
                       type="text"
@@ -1107,7 +1136,7 @@ export const VehicleDuplicateManagerModal: React.FC<VehicleDuplicateManagerModal
                   {/* Column 2: Duplicate Vehicle to MERGE & DELETE */}
                   <div className="p-3.5 rounded-xl bg-slate-950/70 border border-rose-500/30 space-y-2.5">
                     <div className="text-xs font-bold text-rose-400">
-                      2. Duplicate Vehicle — DELETE / MERGE (Ye Vehicle Hata Di Jayegi)
+                      2. Duplicate Vehicle — Merge &amp; Remove Record
                     </div>
                     <input
                       type="text"

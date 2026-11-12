@@ -496,7 +496,7 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
               )}
             </div>
 
-            {/* A. If NO record found: "no record found likha jaega" */}
+            {/* A. If NO record found: Display No Record Found empty state */}
             {matchingContainers.length === 0 && (
               <div className="p-8 sm:p-12 rounded-3xl bg-white border-2 border-rose-200 text-center space-y-4 max-w-lg mx-auto shadow-xl">
                 <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-300 flex items-center justify-center text-rose-600 mx-auto">
@@ -702,9 +702,7 @@ const SingleContainerDossierCard: React.FC<SingleContainerDossierCardProps> = ({
                 <div className="pt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
                   {[
                     { idx: 0, label: '1. Shipping Line DO' },
-                    { idx: 1, label: '2. TP Filing' },
-                    { idx: 2, label: '3. Excise Payment' },
-                    { idx: 3, label: '4. Vehicle Assignment' }
+                    { idx: 1, label: '2. Vehicle Assignment' }
                   ].map((sub) => {
                     const done = sub.idx < activeStepIdx;
                     const active = sub.idx === activeStepIdx;

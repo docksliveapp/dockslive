@@ -322,7 +322,7 @@ export function checkVehicleWorkflowReadiness(
       : null;
     driverFrontPresent = Boolean(hasDriverFrontFlag);
     driverBackPresent = Boolean(hasDriverBackFlag);
-    requireBothDriverSides = hasDriverFrontFlag !== undefined || hasDriverBackFlag !== undefined;
+    requireBothDriverSides = false;
   } else if (
     arg1 &&
     typeof arg1 === 'object' &&
@@ -340,7 +340,7 @@ export function checkVehicleWorkflowReadiness(
     ownerCnicOverride = input.caseOwnerCnicUrl || '';
     driverFrontPresent = Boolean(input.driverCnicFrontUrl && input.driverCnicFrontUrl.trim());
     driverBackPresent = Boolean(input.driverCnicBackUrl && input.driverCnicBackUrl.trim());
-    requireBothDriverSides = true;
+    requireBothDriverSides = false;
   } else {
     // Signature: (vehicle, stepOverrides)
     vehicle = arg1 as Vehicle | null | undefined;
@@ -416,13 +416,13 @@ export function checkVehicleWorkflowReadiness(
   }
   if (requireBothDriverSides) {
     if (!driverFrontPresent) {
-      missingItems.push('Driver ID Card (CNIC Front) is required (Step 4 Vehicle Assignment — Documentation Manager)');
+      missingItems.push('Driver ID Card (CNIC) is required (Step 2 Vehicle Assignment — Documentation Manager)');
     }
     if (!driverBackPresent) {
-      missingItems.push('Driver ID Card (CNIC Back) is required (Step 4 Vehicle Assignment — Documentation Manager)');
+      missingItems.push('Driver ID Card (CNIC Back) is required (Step 2 Vehicle Assignment — Documentation Manager)');
     }
   } else if (!hasDriverIdCard) {
-    missingItems.push('Driver ID Card (CNIC) is not uploaded (Step 4 Vehicle Assignment — Documentation Manager)');
+    missingItems.push('Driver ID Card (Single PDF / Scan — Front & Back) is not uploaded (Step 2 Vehicle Assignment — Documentation Manager)');
   }
 
   const ready = missingItems.length === 0;
@@ -1022,7 +1022,7 @@ export function parseExcelVehicles(arrayBuffer: ArrayBuffer, fileNameHint?: stri
 
       const rawTransporter = transpCol >= 0 ? String(row[transpCol] || '').trim() : '';
       const rawBroker = brokerCol >= 0 ? String(row[brokerCol] || '').trim() : '';
-      // User mandate: "Transporter aur broker same hoga. Yahan Jo likha hua hai transporter mein vahi broker mein bhi automatic aaega"
+      // Synchronize Transporter and Broker fields automatically
       const unifiedTransporterBroker = rawTransporter || rawBroker || 'DIRECT FLEET';
 
       const rawCompanyCell = companyCol >= 0 ? String(row[companyCol] || '').trim() : '';
@@ -1030,9 +1030,9 @@ export function parseExcelVehicles(arrayBuffer: ArrayBuffer, fileNameHint?: stri
 
       const rawRegDateVal = regDateCol >= 0 ? row[regDateCol] : '';
       const rawExpiryVal = expiryCol >= 0 ? row[expiryCol] : '';
-      // User mandate:
+      // Validation Rules:
       // - Registration date > 6 months old => Expired
-      // - Empty / blank Registration date ("Khali khane") => Expired
+      // - Empty / blank Registration date => Expired
       // - Registration date within 6 months => Active ('AVAILABLE')
       const validity = evaluateVehicleRegistrationValidity(rawRegDateVal, rawExpiryVal, null);
 

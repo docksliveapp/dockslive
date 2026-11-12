@@ -53,6 +53,7 @@ import {
   generateVehicleOwnerIdCopyDocx,
   generateCompanyOwnerIdCopyDocx,
   generateWitnessesIdCopyDocx,
+  downloadVehicleCopyAsItIs,
   resolveVehicleDocxCompany,
   generateDocxBlob,
   downloadDocxBlob,
@@ -1800,19 +1801,14 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
             <button
               type="button"
               onClick={() => {
-                const host = (window.location.hostname || '').toLowerCase();
-                if (host.includes('makpk.online') || host.includes('mak-group.com')) {
-                  window.location.href = 'https://vehicle.makpk.online';
-                  return;
-                }
                 if (onOpenPublicTracker) onOpenPublicTracker();
                 else window.location.href = '/?mode=vehicle';
               }}
               className="mak-btn px-3.5 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
-              title="Open Live Public Vehicle Status Portal"
+              title="Open Live Vehicle Status Portal"
             >
-              <Globe size={14} />
-              <span>Status Portal</span>
+              <Truck size={14} />
+              <span>Vehicle Status</span>
             </button>
           </div>
 
@@ -3727,35 +3723,43 @@ const AddVehicleModal = ({
         });
       } else if (docKind === 'VEH_BOOK_COPY') {
         const liveVehicle = buildLiveVehicleRecord();
-        const doc = await generateVehicleBookCopyDocx(liveVehicle);
-        await downloadDocxBlob(doc, `4_Vehicle_Registration_Book_Copy_${safePlateSlug}.docx`);
+        const res = await downloadVehicleCopyAsItIs('VEH_BOOK_COPY', liveVehicle, safePlateSlug);
         setDocFeedback({
           type: 'success',
-          message: `Downloaded Vehicle Registration Book Copy (${cleanPlate}) in Word (.docx).`
+          message:
+            res.format === 'pdf'
+              ? `Downloaded exact uploaded Vehicle Registration Book PDF (${cleanPlate}) As-It-Is for printing.`
+              : `Downloaded Vehicle Registration Book Copy (${cleanPlate}) in Word (.docx).`
         });
       } else if (docKind === 'OWNER_ID_COPY') {
         const liveVehicle = buildLiveVehicleRecord();
-        const doc = await generateVehicleOwnerIdCopyDocx(liveVehicle);
-        await downloadDocxBlob(doc, `5_Vehicle_Owner_ID_Card_Copy_${safePlateSlug}.docx`);
+        const res = await downloadVehicleCopyAsItIs('OWNER_ID_COPY', liveVehicle, safePlateSlug);
         setDocFeedback({
           type: 'success',
-          message: `Downloaded Vehicle Owner ID Card Copy (${cleanPlate}) in Word (.docx).`
+          message:
+            res.format === 'pdf'
+              ? `Downloaded exact uploaded Vehicle Owner ID Card PDF (${cleanPlate}) As-It-Is for printing.`
+              : `Downloaded Vehicle Owner ID Card Copy (${cleanPlate}) in Word (.docx).`
         });
       } else if (docKind === 'COMP_OWNER_ID_COPY') {
         const liveVehicle = buildLiveVehicleRecord();
-        const doc = await generateCompanyOwnerIdCopyDocx(liveVehicle);
-        await downloadDocxBlob(doc, `6_Company_Owner_ID_Card_Copy_${safePlateSlug}.docx`);
+        const res = await downloadVehicleCopyAsItIs('COMP_OWNER_ID_COPY', liveVehicle, safePlateSlug);
         setDocFeedback({
           type: 'success',
-          message: `Downloaded Company Owner ID Card Copy (${cleanPlate}) in Word (.docx).`
+          message:
+            res.format === 'pdf'
+              ? `Downloaded exact uploaded Company Owner ID Card PDF (${cleanPlate}) As-It-Is for printing.`
+              : `Downloaded Company Owner ID Card Copy (${cleanPlate}) in Word (.docx).`
         });
       } else if (docKind === 'WITNESSES_ID_COPY') {
         const liveVehicle = buildLiveVehicleRecord();
-        const doc = await generateWitnessesIdCopyDocx(liveVehicle);
-        await downloadDocxBlob(doc, `7_Witnesses_ID_Card_Copy_${safePlateSlug}.docx`);
+        const res = await downloadVehicleCopyAsItIs('WITNESSES_ID_COPY', liveVehicle, safePlateSlug);
         setDocFeedback({
           type: 'success',
-          message: `Downloaded Witnesses ID Cards Copy (${cleanPlate}) in Word (.docx).`
+          message:
+            res.format === 'pdf'
+              ? `Downloaded Witnesses ID Cards PDF (${cleanPlate}) As-It-Is for printing.`
+              : `Downloaded Witnesses ID Cards Copy (${cleanPlate}) in Word (.docx).`
         });
       } else if (docKind === 'CANCEL_NOC_LETTERHEAD') {
         const liveVehicle = buildLiveVehicleRecord();
@@ -3953,7 +3957,7 @@ const AddVehicleModal = ({
                   <span className="text-gray-300 truncate">{formData.registrationBookName || 'Vehicle_Reg_Book'}</span>
                   <a
                     href={formData.registrationBook}
-                    download={formData.registrationBookName || `RegBook_${formData.registrationNumber || 'Vehicle'}.jpg`}
+                    download={formData.registrationBookName || `RegBook_${formData.registrationNumber || 'Vehicle'}.${String(formData.registrationBook).startsWith('data:application/pdf') ? 'pdf' : 'jpg'}`}
                     className="text-emerald-400 hover:underline font-bold flex items-center gap-1 shrink-0"
                   >
                     <Download size={11} /> File
@@ -3965,7 +3969,7 @@ const AddVehicleModal = ({
             {/* 2. Vehicle Owner ID Card Upload */}
             <div className="space-y-2 bg-white/5 p-3 rounded-xl border border-white/10">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-white">2. Vehicle Owner ID Card (CNIC) *</span>
+                <span className="text-xs font-bold text-white">2. Vehicle Owner ID Card (Single PDF / Scan — Front &amp; Back) *</span>
                 {formData.ownerIdCardUrl ? (
                   <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
                     ✓ Uploaded
@@ -3982,12 +3986,12 @@ const AddVehicleModal = ({
                     type="file"
                     id="owner-id-upload"
                     className="hidden"
-                    accept="image/*,application/pdf"
+                    accept="application/pdf,image/*"
                     onChange={handleOwnerIdUpload}
                   />
                   <div className="flex items-center justify-center gap-1.5 text-brand-300 text-xs font-semibold">
                     <UploadCloud size={15} />
-                    <span>{formData.ownerIdCardUrl ? 'Replace Owner ID (AI Fill)' : 'Upload Owner ID (AI Auto-Fill)'}</span>
+                    <span>{formData.ownerIdCardUrl ? 'Replace Owner ID PDF / Scan' : 'Upload Owner ID PDF (Front & Back)'}</span>
                   </div>
                 </label>
                 <button
@@ -4004,10 +4008,10 @@ const AddVehicleModal = ({
               </div>
               {formData.ownerIdCardUrl && (
                 <div className="flex items-center justify-between text-[11px] bg-black/40 p-2 rounded-lg border border-white/10">
-                  <span className="text-gray-300 truncate">{formData.ownerIdCardName || 'Owner_CNIC'}</span>
+                  <span className="text-gray-300 truncate">{formData.ownerIdCardName || 'Owner_CNIC.pdf'}</span>
                   <a
                     href={formData.ownerIdCardUrl}
-                    download={formData.ownerIdCardName || `OwnerID_${formData.registrationNumber || 'Vehicle'}.jpg`}
+                    download={formData.ownerIdCardName || `OwnerID_${formData.registrationNumber || 'Vehicle'}.${String(formData.ownerIdCardUrl).startsWith('data:application/pdf') ? 'pdf' : 'jpg'}`}
                     className="text-emerald-400 hover:underline font-bold flex items-center gap-1 shrink-0"
                   >
                     <Download size={11} /> File
@@ -4349,7 +4353,7 @@ const AddVehicleModal = ({
                   className="bg-cyan-600/25 hover:bg-cyan-600/40 disabled:opacity-50 border border-cyan-500/40 text-cyan-200 hover:text-white px-2.5 py-2 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
                 >
                   {generatingDocType === 'VEH_BOOK_COPY' ? <Loader2 size={13} className="animate-spin shrink-0" /> : <FileText size={13} className="shrink-0" />}
-                  <span>4. Vehicle Book Copy</span>
+                  <span>4. Vehicle Book Copy (As-It-Is)</span>
                 </button>
 
                 <button
@@ -4359,7 +4363,7 @@ const AddVehicleModal = ({
                   className="bg-teal-600/25 hover:bg-teal-600/40 disabled:opacity-50 border border-teal-500/40 text-teal-200 hover:text-white px-2.5 py-2 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
                 >
                   {generatingDocType === 'OWNER_ID_COPY' ? <Loader2 size={13} className="animate-spin shrink-0" /> : <User size={13} className="shrink-0" />}
-                  <span>5. Vehicle Owner ID Copy</span>
+                  <span>5. Vehicle Owner ID (As-It-Is)</span>
                 </button>
 
                 <button
@@ -4369,7 +4373,7 @@ const AddVehicleModal = ({
                   className="bg-sky-600/25 hover:bg-sky-600/40 disabled:opacity-50 border border-sky-500/40 text-sky-200 hover:text-white px-2.5 py-2 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
                 >
                   {generatingDocType === 'COMP_OWNER_ID_COPY' ? <Loader2 size={13} className="animate-spin shrink-0" /> : <Building size={13} className="shrink-0" />}
-                  <span>6. Company Owner ID Copy</span>
+                  <span>6. Company Owner ID (As-It-Is)</span>
                 </button>
 
                 <button
@@ -4379,7 +4383,7 @@ const AddVehicleModal = ({
                   className="bg-purple-600/25 hover:bg-purple-600/40 disabled:opacity-50 border border-purple-500/40 text-purple-200 hover:text-white px-2.5 py-2 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors sm:col-span-2"
                 >
                   {generatingDocType === 'WITNESSES_ID_COPY' ? <Loader2 size={13} className="animate-spin shrink-0" /> : <User size={13} className="shrink-0" />}
-                  <span>7. Witnesses ID Cards Copy (.docx)</span>
+                  <span>7. Witnesses ID Cards Copy (PDF / Print As-It-Is)</span>
                 </button>
               </div>
             </div>

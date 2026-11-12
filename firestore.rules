@@ -172,6 +172,20 @@ service cloud.firestore {
       allow delete: if isValidDocId(docId);
     }
 
+    // Dynamic Corporate Legal Case Dossiers
+    match /corporate_legal_cases/{legalCaseId} {
+      allow read: if true;
+      allow create, update: if isValidDocId(legalCaseId) && isValidPayload();
+      allow delete: if isValidDocId(legalCaseId);
+    }
+
+    // Corporate Office ID Passwords (Secure Vault)
+    match /corporate_vault_credentials/{vaultId} {
+      allow read: if true;
+      allow create, update: if isValidDocId(vaultId) && isValidPayload();
+      allow delete: if isValidDocId(vaultId);
+    }
+
     // Company Document Categories
     match /company_document_categories/{catId} {
       allow read: if true;

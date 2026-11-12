@@ -398,6 +398,7 @@ interface CaseManagementProps {
     userRole?: UserRole;
     userRoles?: UserRole[];
     currentClientName?: string;
+    onOpenCaseStatus?: () => void;
 }
 
 const CaseManagement: React.FC<CaseManagementProps> = ({ 
@@ -407,7 +408,8 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   customLogo,
   userRole: propUserRole,
   userRoles: propUserRoles,
-  currentClientName: propClientName
+  currentClientName: propClientName,
+  onOpenCaseStatus
 }) => {
   const branding = useBranding();
   const { activeCompany } = useActiveCompany();
@@ -3630,8 +3632,20 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
            <button onClick={() => handleOpenEditPort()} className="bg-white/5 hover:bg-white/10 text-white border border-white/10 px-4 py-2.5 rounded-lg flex items-center gap-2 font-medium transition-colors" title="Edit Port & Container Inquiry Link">
              <Edit size={18} className="text-amber-400" /> Edit Port
            </button>
-           <button onClick={() => setShowFilterModal(true)} className="bg-white/5 hover:bg-white/10 text-white border border-white/10 px-4 py-2.5 rounded-lg flex items-center gap-2 font-medium transition-colors">
+           <button onClick={() => setShowFilterModal(true)} className="bg-white/5 hover:bg-white/10 text-white border border-white/10 px-4 py-2.5 rounded-lg flex items-center gap-2 font-medium transition-colors whitespace-nowrap shrink-0">
              <ListFilter size={18} className="text-brand-400" /> View List / Reports
+           </button>
+           <button
+             type="button"
+             onClick={() => {
+               if (onOpenCaseStatus) onOpenCaseStatus();
+               else window.location.href = '/?mode=status';
+             }}
+             className="bg-white/5 hover:bg-white/10 text-white border border-white/10 px-4 py-2.5 rounded-lg flex items-center gap-2 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+             title="Open Live Case & Container Status Portal"
+           >
+             <Package size={18} className="text-sky-400" />
+             <span>Case Status</span>
            </button>
          </div>
          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">

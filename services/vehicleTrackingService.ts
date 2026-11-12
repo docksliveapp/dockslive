@@ -86,8 +86,7 @@ export async function fetchAllTrackingVehicles(): Promise<Vehicle[]> {
 }
 
 /**
- * Searches vehicles by registration number or plate digits.
- * User requirement: "Jo bhi vehicle number likha jaega use number se kitne ki vehicles hongi woh neeche a jaayengi"
+ * Searches vehicles by registration number or plate digits and returns all matching fleet entries.
  */
 export function searchTrackingVehicles(query: string, allVehicles: Vehicle[]): Vehicle[] {
   if (!query) return [];
