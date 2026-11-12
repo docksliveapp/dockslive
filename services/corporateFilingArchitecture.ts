@@ -38,7 +38,7 @@ export const CORPORATE_ROOT_CATEGORIES: RootCategoryConfig[] = [
     title: 'Assets',
     subtitle: 'Security Deposits & Corporate Properties',
     description:
-      'Bank guarantees, port & utility security deposits, real estate deeds (Nazimabad flat, Al Ghafoor Eden mezzanine), office setups, and fleet titles.'
+      'Bank guarantees, port and utility security deposits, commercial real estate deeds, office facilities, and commercial fleet titles.'
   },
   {
     id: 'Company Documents',
@@ -46,7 +46,7 @@ export const CORPORATE_ROOT_CATEGORIES: RootCategoryConfig[] = [
     title: 'Company Documents',
     subtitle: 'Master Statutory & Compliance Repository',
     description:
-      'SECP, Chamber of Commerce, Licence Book, Owners IDs/Passports, Insurance Guarantees, Customs Permissions, Rent Agreements, Secure Vault, PSX & SBP.'
+      'SECP, Chamber of Commerce, Licence Book, Owners IDs/Passports, Insurance Guarantees, Customs Permissions, Rent Agreements, Secure Vault, Stock Exchange & State Bank.'
   },
   {
     id: 'Quotations',
@@ -59,7 +59,7 @@ export const CORPORATE_ROOT_CATEGORIES: RootCategoryConfig[] = [
 ];
 
 export const LEGAL_LOGISTICS_CRIMINAL_SUBFOLDERS: string[] = [
-  'Sahiwal Police FIR & Proceedings',
+  'Police FIR & Proceedings',
   'Customs FIR & Enforcement',
   'Transit Trade & ONO',
   'Appeals & Tribunals',
@@ -67,6 +67,14 @@ export const LEGAL_LOGISTICS_CRIMINAL_SUBFOLDERS: string[] = [
   'Correspondence & Follow-ups',
   'Consignment Documents'
 ];
+
+export function normalizeLegalSubFolderName(name?: string): string {
+  const clean = (name || '').trim();
+  if (clean.toLowerCase() === 'sahiwal police fir & proceedings') {
+    return 'Police FIR & Proceedings';
+  }
+  return clean;
+}
 
 export const LEGAL_CIVIL_CORPORATE_SUBFOLDERS: string[] = [
   'Original Plaint / Notice',
@@ -127,7 +135,7 @@ export const ASSETS_SUBFOLDERS: AssetGroupConfig[] = [
     title: 'Security Deposits Tracking',
     subtitle: 'Bank Guarantees, Port Authorities & Utilities',
     description:
-      'Refundable cash margins, bank guarantees, KPT/PICT/SAPT/QICT port security deposits, shipping line container deposits, and K-Electric / SSGC utility deposits.',
+      'Refundable cash margins, bank guarantees, port & terminal security deposits, shipping line container deposits, and utility deposits.',
     subTypes: [
       'Bank Guarantee',
       'Port Authority Deposit',
@@ -137,18 +145,18 @@ export const ASSETS_SUBFOLDERS: AssetGroupConfig[] = [
       'Office Lease Security Deposit'
     ],
     quickExamples: [
-      'KPT Port Authority Deposit',
-      'Customs Licensing Bank Guarantee',
-      'SSGC / K-Electric Utility Deposit',
-      'PICT / SAPT Terminal Deposit'
+      'Bank Guarantees',
+      'Port Authority Deposits',
+      'Utility Deposits',
+      'Customs Cash Security'
     ]
   },
   {
     id: 'Company Properties & Investments',
     title: 'Company Properties & Investments',
-    subtitle: 'Real Estate, Office Setups & Commercial Fleet',
+    subtitle: 'Real Estate, Office Facilities & Commercial Fleet',
     description:
-      'Title deeds, allotment letters, sale agreements, valuation reports, and capital records for real estate (Nazimabad flat, Al Ghafoor Eden mezzanine), office setups, and commercial vehicles.',
+      'Title deeds, allotment letters, sale agreements, valuation reports, and capital records for real estate properties, corporate offices, and commercial vehicles.',
     subTypes: [
       'Real Estate Property',
       'Office Setup & Infrastructure',
@@ -157,10 +165,10 @@ export const ASSETS_SUBFOLDERS: AssetGroupConfig[] = [
       'Long-Term Corporate Investment'
     ],
     quickExamples: [
-      'Nazimabad Flat',
-      'Al Ghafoor Eden Mezzanine',
-      'Karachi Head Office Setup',
-      'Commercial Prime Mover / Trailer Asset'
+      'Real Estate Properties',
+      'Corporate Office Facilities',
+      'Warehouse & Yard Assets',
+      'Commercial Fleet Vehicles'
     ]
   }
 ];
@@ -299,7 +307,9 @@ export function resolveDocumentHierarchy(doc: CompanyDocument): ResolvedDocument
     rawRoot === 'Quotations'
   ) {
     rootCategory = rawRoot;
-    if (rootCategory === 'Tax') {
+    if (rootCategory === 'Legal') {
+      subFolder = normalizeLegalSubFolderName(subFolder);
+    } else if (rootCategory === 'Tax') {
       taxAuthority = taxAuthority || 'FBR';
       taxYear = taxYear || inferredYear;
     } else if (rootCategory === 'Assets') {
@@ -508,7 +518,7 @@ CREATE TYPE quotation_status AS ENUM (
 -- 1. Dynamic Legal Case Dossiers (Auto-provisions 7 Criminal/Logistics or 5 Civil Sub-folders)
 CREATE TABLE corporate_legal_cases (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  identifier VARCHAR(180) NOT NULL UNIQUE, -- e.g. 'Container # MSKU1234567' or 'State Life Office Rent Dispute'
+  identifier VARCHAR(180) NOT NULL UNIQUE, -- e.g. 'Container # ABC-12345' or 'Suit # 412/2025'
   case_track legal_case_track NOT NULL,
   recipient_entity corporate_entity NOT NULL DEFAULT 'MAK Group',
   case_reference_no VARCHAR(100),

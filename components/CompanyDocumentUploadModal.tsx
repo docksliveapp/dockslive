@@ -35,6 +35,7 @@ import {
   QUOTATION_SERVICE_TYPES,
   LEGAL_LOGISTICS_CRIMINAL_SUBFOLDERS,
   getProvisionedLegalSubFolders,
+  normalizeLegalSubFolderName,
   resolveDocumentHierarchy
 } from '../services/corporateFilingArchitecture';
 import { analyzeCompanyDocumentWithAI } from '../services/geminiService';
@@ -54,6 +55,7 @@ interface CompanyDocumentUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (doc: CompanyDocument) => Promise<void>;
+  onEnsureCustomSubFolder?: (caseId: string, subFolderName: string) => Promise<void>;
   legalCases: CorporateLegalCase[];
   preset?: UploadHierarchyPreset;
   editingDocument?: CompanyDocument | null;
@@ -69,17 +71,48 @@ interface UploadFileEntry {
 }
 
 const ISSUER_QUICK_PRESETS: Record<CorporateRootCategory, string[]> = {
-  Legal: ['Sahiwal Police', 'Pakistan Customs Enforcement', 'Customs Appellate Tribunal', 'Sindh High Court', 'Civil Court Karachi', 'Legal Counsel'],
-  Tax: ['Federal Board of Revenue (FBR)', 'Sindh Revenue Board (SRB)', 'EOBI / SESSI Labour Dept', 'Withholding Agent'],
-  Assets: ['Habib Bank Limited (HBL)', 'Meezan Bank', 'Karachi Port Trust (KPT)', 'SAPT / QICT Terminal', 'Sub-Registrar Property'],
-  'Company Documents': ['SECP', 'Karachi Chamber of Commerce (KCCI)', 'Pakistan Customs Licensing', 'State Bank of Pakistan', 'Pakistan Stock Exchange (PSX)'],
-  Quotations: ['MAK Commercial Desk', 'Docks Pvt. Ltd.', 'Truckit Pvt. Ltd.', 'Muhib International', 'Vantage Shipping Line']
+  Legal: [
+    'Police Department',
+    'Customs Enforcement',
+    'Customs Appellate Tribunal',
+    'High Court',
+    'Civil / District Court',
+    'Legal Counsel'
+  ],
+  Tax: [
+    'Federal Board of Revenue (FBR)',
+    'Sindh Revenue Board (SRB)',
+    'Labour Department',
+    'Withholding Agent'
+  ],
+  Assets: [
+    'Commercial Bank',
+    'Port Authority',
+    'Terminal Operator',
+    'Utility Provider',
+    'Property Registrar'
+  ],
+  'Company Documents': [
+    'SECP',
+    'Chamber of Commerce',
+    'Customs Licensing Authority',
+    'State Bank of Pakistan',
+    'Stock Exchange'
+  ],
+  Quotations: [
+    'Docks Pvt. Ltd.',
+    'Truckit Pvt. Ltd.',
+    'Muhib International',
+    'Vantage Shipping Line',
+    'MAK Group Commercial Desk'
+  ]
 };
 
 export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  onEnsureCustomSubFolder,
   legalCases,
   preset,
   editingDocument,
@@ -144,9 +177,12 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
     [legalCases, legalCaseId]
   );
 
+  const [useCustomLegalSubFolder, setUseCustomLegalSubFolder] = useState<boolean>(false);
+  const [customLegalSubFolderInput, setCustomLegalSubFolderInput] = useState<string>('');
+
   const legalSubFolders = useMemo(() => {
     if (selectedLegalCase && Array.isArray(selectedLegalCase.subFolders) && selectedLegalCase.subFolders.length > 0) {
-      return selectedLegalCase.subFolders;
+      return selectedLegalCase.subFolders.map((sf) => normalizeLegalSubFolderName(sf));
     }
     if (selectedLegalCase) {
       return getProvisionedLegalSubFolders(selectedLegalCase.caseTrack);
@@ -165,6 +201,8 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
     setValidationError(null);
     setAiBanner(null);
     setActivePreviewIdx(0);
+    setUseCustomLegalSubFolder(false);
+    setCustomLegalSubFolderInput('');
 
     if (editingDocument) {
       const resolved = resolveDocumentHierarchy(editingDocument);
@@ -229,10 +267,11 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
 
     if (initRoot === 'Legal') {
       const foundCase = legalCases.find((c) => c.id === initCaseId);
-      const defaultLegFolder =
+      const defaultLegFolder = normalizeLegalSubFolderName(
         preset?.subFolder ||
-        foundCase?.subFolders?.[0] ||
-        LEGAL_LOGISTICS_CRIMINAL_SUBFOLDERS[0];
+          foundCase?.subFolders?.[0] ||
+          LEGAL_LOGISTICS_CRIMINAL_SUBFOLDERS[0]
+      );
       setSubFolder(defaultLegFolder);
       if (foundCase?.recipientEntity) {
         setRecipientEntity(foundCase.recipientEntity);
@@ -414,6 +453,14 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
       setValidationError('Please select a Legal Case folder first (or create a new Legal Case).');
       return;
     }
+    const effectiveLegalSubFolder =
+      rootCategory === 'Legal' && useCustomLegalSubFolder
+        ? customLegalSubFolderInput.trim()
+        : subFolder;
+    if (rootCategory === 'Legal' && !effectiveLegalSubFolder) {
+      setValidationError('Please select or enter a Case Proceeding Sub-Folder.');
+      return;
+    }
     if (rootCategory === 'Quotations' && !quotationClientName.trim()) {
       setValidationError('Client Name is required for commercial quotations.');
       return;
@@ -421,6 +468,16 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
 
     setIsSaving(true);
     try {
+      if (
+        rootCategory === 'Legal' &&
+        useCustomLegalSubFolder &&
+        effectiveLegalSubFolder &&
+        legalCaseId &&
+        onEnsureCustomSubFolder
+      ) {
+        await onEnsureCustomSubFolder(legalCaseId, effectiveLegalSubFolder);
+      }
+
       const primaryUpload = uploadedFiles[0];
       const extraUploads = uploadedFiles.slice(1).map((f) => ({
         name: f.name,
@@ -431,7 +488,7 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
 
       const computedCategoryLabel =
         rootCategory === 'Legal'
-          ? subFolder
+          ? effectiveLegalSubFolder
           : rootCategory === 'Tax'
             ? `${taxAuthority} (${taxYear})`
             : rootCategory === 'Assets'
@@ -464,11 +521,13 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
                   ? quotationServiceType
                   : subFolder,
         subFolder:
-          rootCategory === 'Legal' || rootCategory === 'Company Documents'
-            ? subFolder
-            : rootCategory === 'Assets'
-              ? assetGroup
-              : undefined,
+          rootCategory === 'Legal'
+            ? effectiveLegalSubFolder
+            : rootCategory === 'Company Documents'
+              ? subFolder
+              : rootCategory === 'Assets'
+                ? assetGroup
+                : undefined,
         legalCaseId: rootCategory === 'Legal' ? legalCaseId : undefined,
         legalCaseTitle: rootCategory === 'Legal' ? selectedLegalCase?.identifier : undefined,
         legalCaseTrack: rootCategory === 'Legal' ? selectedLegalCase?.caseTrack : undefined,
@@ -892,20 +951,39 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
               {/* Tier-3 Sub-Folder / Specific Context Row */}
               {rootCategory === 'Legal' && (
                 <div>
-                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
-                    Case Proceeding Sub-Folder *
-                  </label>
-                  <select
-                    value={subFolder}
-                    onChange={(e) => setSubFolder(e.target.value)}
-                    className="glass-input w-full rounded-lg px-3 py-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
-                  >
-                    {legalSubFolders.map((sf) => (
-                      <option key={sf} value={sf}>
-                        {sf}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-semibold text-gray-300">
+                      Case Proceeding Sub-Folder *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setUseCustomLegalSubFolder((prev) => !prev)}
+                      className="text-[11px] font-semibold text-sky-400 hover:underline cursor-pointer"
+                    >
+                      {useCustomLegalSubFolder ? 'Select Standard Sub-Folder' : '+ Enter Custom Sub-Folder'}
+                    </button>
+                  </div>
+                  {useCustomLegalSubFolder ? (
+                    <input
+                      type="text"
+                      value={customLegalSubFolderInput}
+                      onChange={(e) => setCustomLegalSubFolderInput(e.target.value)}
+                      placeholder="e.g. Bail Proceedings / Forensic Lab Reports"
+                      className="glass-input w-full rounded-lg px-3 py-2 text-xs outline-none"
+                    />
+                  ) : (
+                    <select
+                      value={subFolder}
+                      onChange={(e) => setSubFolder(e.target.value)}
+                      className="glass-input w-full rounded-lg px-3 py-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
+                    >
+                      {legalSubFolders.map((sf) => (
+                        <option key={sf} value={sf}>
+                          {sf}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 
@@ -943,13 +1021,13 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-gray-300 mb-1">
-                      Bank / Port / Property Location
+                      Bank / Authority / Property Reference
                     </label>
                     <input
                       type="text"
                       value={assetLocationOrBank}
                       onChange={(e) => setAssetLocationOrBank(e.target.value)}
-                      placeholder="e.g. Nazimabad Flat / KPT / Meezan"
+                      placeholder="e.g. Commercial Bank / Port Terminal / Plot #"
                       className="glass-input w-full rounded-lg px-3 py-2 text-xs outline-none"
                     />
                   </div>
@@ -1023,7 +1101,7 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
                     required
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g. Form-29 Certified Copy / Income Tax Return 2025 / Customs ONO Reply"
+                    placeholder="e.g. Certified Filing / Annual Return / Official Notice"
                     className="glass-input w-full rounded-lg px-3 py-2 text-xs outline-none"
                   />
                 </div>
@@ -1035,7 +1113,7 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
                     type="text"
                     value={referenceNo}
                     onChange={(e) => setReferenceNo(e.target.value)}
-                    placeholder="e.g. FIR-42/2025 or CPR-99812"
+                    placeholder="e.g. Ref # 104/2025"
                     className="glass-input w-full rounded-lg px-3 py-2 text-xs font-mono outline-none"
                   />
                 </div>
@@ -1044,14 +1122,14 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-gray-300 mb-1">
-                    Sender / Issuer (Police, Court, FBR, Bank, Client) *
+                    Sender / Issuer (Issuing Authority, Court, Bank, or Client) *
                   </label>
                   <input
                     type="text"
                     required
                     value={senderIssuer}
                     onChange={(e) => setSenderIssuer(e.target.value)}
-                    placeholder="Who issued or sent this document?"
+                    placeholder="e.g. Issuing Authority, Police Station, Court, Bank, or Client"
                     className="glass-input w-full rounded-lg px-3 py-2 text-xs outline-none"
                   />
                   <div className="flex flex-wrap gap-1 mt-1.5">
@@ -1303,7 +1381,7 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
                     type="text"
                     value={hearingNotes}
                     onChange={(e) => setHearingNotes(e.target.value)}
-                    placeholder="e.g. SHC Bench-II / File Parawise Comments"
+                    placeholder="e.g. Courtroom # / File Written Reply"
                     className="glass-input w-full rounded-lg px-3 py-2 text-xs outline-none"
                   />
                 </div>

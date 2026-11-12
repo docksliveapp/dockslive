@@ -65,6 +65,7 @@ import {
   LEGAL_LOGISTICS_CRIMINAL_SUBFOLDERS,
   LEGAL_CIVIL_CORPORATE_SUBFOLDERS,
   getProvisionedLegalSubFolders,
+  normalizeLegalSubFolderName,
   TAX_AUTHORITIES,
   DEFAULT_FISCAL_YEARS,
   ASSETS_SUBFOLDERS,
@@ -225,8 +226,9 @@ export const CompanyDocuments: React.FC = () => {
   const [previewDoc, setPreviewDoc] = useState<CompanyDocument | null>(null);
   const [previewResolvedFile, setPreviewResolvedFile] = useState<string | null>(null);
 
-  // Dynamic Legal Case Creation & Custom Sub-Folder State
+  // Dynamic Legal Case Creation, Editing & Custom Sub-Folder State
   const [showNewLegalCaseModal, setShowNewLegalCaseModal] = useState<boolean>(false);
+  const [editingLegalCase, setEditingLegalCase] = useState<CorporateLegalCase | null>(null);
   const [newCaseIdentifier, setNewCaseIdentifier] = useState<string>('');
   const [newCaseTrack, setNewCaseTrack] = useState<LegalCaseTrack>('LOGISTICS_CRIMINAL');
   const [newCaseEntity, setNewCaseEntity] = useState<string>(defaultEntity);
@@ -236,9 +238,15 @@ export const CompanyDocuments: React.FC = () => {
   const [newCaseOpposing, setNewCaseOpposing] = useState<string>('');
   const [newCaseHearingDate, setNewCaseHearingDate] = useState<string>('');
   const [newCaseNotes, setNewCaseNotes] = useState<string>('');
+  const [modalDraftSubFolders, setModalDraftSubFolders] = useState<string[]>(() =>
+    getProvisionedLegalSubFolders('LOGISTICS_CRIMINAL')
+  );
+  const [modalCustomFolderInput, setModalCustomFolderInput] = useState<string>('');
   const [newCaseError, setNewCaseError] = useState<string | null>(null);
   const [addingCustomSubFolder, setAddingCustomSubFolder] = useState<boolean>(false);
   const [customSubFolderName, setCustomSubFolderName] = useState<string>('');
+  const [renamingSubFolderOriginal, setRenamingSubFolderOriginal] = useState<string | null>(null);
+  const [renamingSubFolderValue, setRenamingSubFolderValue] = useState<string>('');
 
   // Secure Vault Credential State
   const [showVaultModal, setShowVaultModal] = useState<boolean>(false);
@@ -300,12 +308,20 @@ export const CompanyDocuments: React.FC = () => {
 
   // Include virtual Legal Case if legacy FIR/Petition/ONO documents exist without a created case dossier
   const effectiveLegalCases = useMemo(() => {
+    const normalizedCases = legalCases.map((lc) => ({
+      ...lc,
+      subFolders:
+        lc.subFolders && lc.subFolders.length > 0
+          ? lc.subFolders.map((sf) => normalizeLegalSubFolderName(sf))
+          : getProvisionedLegalSubFolders(lc.caseTrack)
+    }));
+
     const hasLegacyLegalDocs = enrichedDocuments.some(
       (item) =>
         item.hierarchy.rootCategory === 'Legal' &&
         item.hierarchy.legalCaseId === 'legacy_general_legal_archive'
     );
-    const existsInDb = legalCases.some((c) => c.id === 'legacy_general_legal_archive');
+    const existsInDb = normalizedCases.some((c) => c.id === 'legacy_general_legal_archive');
     if (hasLegacyLegalDocs && !existsInDb) {
       const virtualArchive: CorporateLegalCase = {
         id: 'legacy_general_legal_archive',
@@ -317,9 +333,9 @@ export const CompanyDocuments: React.FC = () => {
         subFolders: [...LEGAL_LOGISTICS_CRIMINAL_SUBFOLDERS],
         createdAt: new Date(0).toISOString()
       };
-      return [...legalCases, virtualArchive];
+      return [...normalizedCases, virtualArchive];
     }
-    return legalCases;
+    return normalizedCases;
   }, [legalCases, enrichedDocuments]);
 
   const activeLegalCase = useMemo(
@@ -471,26 +487,79 @@ export const CompanyDocuments: React.FC = () => {
     pdf.save(`${docItem.title.replace(/\s+/g, '_')}_record.pdf`);
   };
 
-  // Dynamic Legal Case Creation Handler
+  // Open Clean Modal for Creating or Editing a Legal Case
+  const openCreateNewCaseModal = () => {
+    setEditingLegalCase(null);
+    setNewCaseError(null);
+    setNewCaseIdentifier('');
+    setNewCaseTrack('LOGISTICS_CRIMINAL');
+    setNewCaseEntity(defaultEntity);
+    setNewCaseRefNo('');
+    setNewCaseCourt('');
+    setNewCaseCounsel('');
+    setNewCaseOpposing('');
+    setNewCaseHearingDate('');
+    setNewCaseNotes('');
+    setModalDraftSubFolders(getProvisionedLegalSubFolders('LOGISTICS_CRIMINAL'));
+    setModalCustomFolderInput('');
+    setShowNewLegalCaseModal(true);
+  };
+
+  const openEditCaseModal = (targetCase: CorporateLegalCase) => {
+    setEditingLegalCase(targetCase);
+    setNewCaseError(null);
+    setNewCaseIdentifier(targetCase.identifier);
+    setNewCaseTrack(targetCase.caseTrack);
+    setNewCaseEntity(targetCase.recipientEntity || defaultEntity);
+    setNewCaseRefNo(targetCase.caseReferenceNo || '');
+    setNewCaseCourt(targetCase.courtOrForum || '');
+    setNewCaseCounsel(targetCase.legalCounsel || '');
+    setNewCaseOpposing(targetCase.opposingParty || '');
+    setNewCaseHearingDate(targetCase.nextHearingDate || '');
+    setNewCaseNotes(targetCase.notes || '');
+    setModalDraftSubFolders(
+      targetCase.subFolders && targetCase.subFolders.length > 0
+        ? targetCase.subFolders.map((sf) => normalizeLegalSubFolderName(sf))
+        : getProvisionedLegalSubFolders(targetCase.caseTrack)
+    );
+    setModalCustomFolderInput('');
+    setShowNewLegalCaseModal(true);
+  };
+
+  // Dynamic Legal Case Creation / Update Handler
   const handleCreateLegalCase = async (e: React.FormEvent) => {
     e.preventDefault();
     setNewCaseError(null);
     const cleanId = newCaseIdentifier.trim();
     if (!cleanId) {
-      setNewCaseError('Please enter a Unique Case Identifier (e.g., Container # MSKU1234567 or Case Title).');
+      setNewCaseError('Please enter a Unique Case Identifier or Title (e.g., Container # ABC-12345 or Suit # 412/2025).');
       return;
     }
     const duplicate = legalCases.some(
-      (c) => c.identifier.trim().toLowerCase() === cleanId.toLowerCase()
+      (c) =>
+        c.id !== editingLegalCase?.id &&
+        c.identifier.trim().toLowerCase() === cleanId.toLowerCase()
     );
     if (duplicate) {
       setNewCaseError('A legal case folder with this identifier already exists.');
       return;
     }
 
-    const provisionedFolders = getProvisionedLegalSubFolders(newCaseTrack);
-    const createdCase: CorporateLegalCase = {
-      id: `lcase_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    const cleanedSubFolders = Array.from(
+      new Set(modalDraftSubFolders.map((sf) => sf.trim()).filter(Boolean))
+    );
+    const finalSubFolders =
+      cleanedSubFolders.length > 0
+        ? cleanedSubFolders
+        : getProvisionedLegalSubFolders(newCaseTrack);
+
+    const caseId =
+      editingLegalCase?.id ||
+      `lcase_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+    const savedCase: CorporateLegalCase = {
+      ...(editingLegalCase || {}),
+      id: caseId,
       identifier: cleanId,
       caseTrack: newCaseTrack,
       recipientEntity: newCaseEntity || defaultEntity,
@@ -499,15 +568,35 @@ export const CompanyDocuments: React.FC = () => {
       legalCounsel: newCaseCounsel.trim() || undefined,
       opposingParty: newCaseOpposing.trim() || undefined,
       nextHearingDate: newCaseHearingDate || undefined,
-      status: newCaseHearingDate ? 'Pending Hearing' : 'Active',
-      subFolders: provisionedFolders,
+      status: newCaseHearingDate ? 'Pending Hearing' : editingLegalCase?.status || 'Active',
+      subFolders: finalSubFolders,
       notes: newCaseNotes.trim() || undefined,
-      createdAt: new Date().toISOString(),
-      createdBy: safeAppStorage.getItem('dpl_current_user_name') || 'Documentation Manager'
+      createdAt: editingLegalCase?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdBy:
+        editingLegalCase?.createdBy ||
+        safeAppStorage.getItem('dpl_current_user_name') ||
+        'Documentation Manager'
     };
 
-    await saveCorporateLegalCaseToFirestore(createdCase);
+    await saveCorporateLegalCaseToFirestore(savedCase);
+
+    // If editing an existing case and its identifier changed, update linked documents' case title
+    if (editingLegalCase && editingLegalCase.identifier !== cleanId) {
+      const linkedDocs = documents.filter((d) => d.legalCaseId === editingLegalCase.id);
+      await Promise.all(
+        linkedDocs.map((d) =>
+          saveCompanyDocumentToFirestore({
+            ...d,
+            legalCaseTitle: cleanId,
+            subcategory: cleanId
+          })
+        )
+      );
+    }
+
     setShowNewLegalCaseModal(false);
+    setEditingLegalCase(null);
     setNewCaseIdentifier('');
     setNewCaseRefNo('');
     setNewCaseCourt('');
@@ -516,23 +605,93 @@ export const CompanyDocuments: React.FC = () => {
     setNewCaseHearingDate('');
     setNewCaseNotes('');
     setActiveRoot('Legal');
-    setActiveLegalCaseId(createdCase.id);
-    setActiveSubFolder(null);
+    setActiveLegalCaseId(savedCase.id);
+    if (!editingLegalCase) {
+      setActiveSubFolder(null);
+    }
   };
 
   // Add Custom Sub-Folder inside an existing Legal Case
   const handleAddCustomSubFolderToCase = async () => {
     const trimmed = customSubFolderName.trim();
     if (!trimmed || !activeLegalCase) return;
-    const existing = activeLegalCase.subFolders || getProvisionedLegalSubFolders(activeLegalCase.caseTrack);
-    if (!existing.includes(trimmed)) {
+    const existing =
+      activeLegalCase.subFolders && activeLegalCase.subFolders.length > 0
+        ? activeLegalCase.subFolders.map((sf) => normalizeLegalSubFolderName(sf))
+        : getProvisionedLegalSubFolders(activeLegalCase.caseTrack);
+    if (!existing.some((sf) => sf.toLowerCase() === trimmed.toLowerCase())) {
       await saveCorporateLegalCaseToFirestore({
         ...activeLegalCase,
-        subFolders: [...existing, trimmed]
+        subFolders: [...existing, trimmed],
+        updatedAt: new Date().toISOString()
       });
     }
     setCustomSubFolderName('');
     setAddingCustomSubFolder(false);
+  };
+
+  // Rename an existing Sub-Folder inside a Legal Case & migrate any filed documents
+  const handleRenameCaseSubFolder = async (originalName: string) => {
+    const nextName = renamingSubFolderValue.trim();
+    if (!activeLegalCase || !nextName || nextName === originalName) {
+      setRenamingSubFolderOriginal(null);
+      setRenamingSubFolderValue('');
+      return;
+    }
+
+    const existing =
+      activeLegalCase.subFolders && activeLegalCase.subFolders.length > 0
+        ? activeLegalCase.subFolders.map((sf) => normalizeLegalSubFolderName(sf))
+        : getProvisionedLegalSubFolders(activeLegalCase.caseTrack);
+
+    const updatedSubFolders = Array.from(
+      new Set(existing.map((sf) => (sf === originalName ? nextName : sf)))
+    );
+
+    await saveCorporateLegalCaseToFirestore({
+      ...activeLegalCase,
+      subFolders: updatedSubFolders,
+      updatedAt: new Date().toISOString()
+    });
+
+    // Migrate any documents filed under originalName in this case
+    const affectedDocs = documents.filter(
+      (d) =>
+        d.legalCaseId === activeLegalCase.id &&
+        normalizeLegalSubFolderName(d.subFolder || d.category) === originalName
+    );
+    if (affectedDocs.length > 0) {
+      await Promise.all(
+        affectedDocs.map((d) =>
+          saveCompanyDocumentToFirestore({
+            ...d,
+            subFolder: nextName,
+            category: nextName
+          })
+        )
+      );
+    }
+
+    if (activeSubFolder === originalName) {
+      setActiveSubFolder(nextName);
+    }
+    setRenamingSubFolderOriginal(null);
+    setRenamingSubFolderValue('');
+  };
+
+  // Remove an empty Sub-Folder from a Legal Case
+  const handleRemoveEmptyCaseSubFolder = async (folderName: string) => {
+    if (!activeLegalCase) return;
+    const existing =
+      activeLegalCase.subFolders && activeLegalCase.subFolders.length > 0
+        ? activeLegalCase.subFolders.map((sf) => normalizeLegalSubFolderName(sf))
+        : getProvisionedLegalSubFolders(activeLegalCase.caseTrack);
+    if (existing.length <= 1) return;
+    await saveCorporateLegalCaseToFirestore({
+      ...activeLegalCase,
+      subFolders: existing.filter((sf) => sf !== folderName),
+      updatedAt: new Date().toISOString()
+    });
   };
 
   // Add Custom Fiscal Year in Tax
@@ -1143,14 +1302,11 @@ export const CompanyDocuments: React.FC = () => {
           {activeRoot === 'Legal' && (
             <button
               type="button"
-              onClick={() => {
-                setNewCaseEntity(defaultEntity);
-                setShowNewLegalCaseModal(true);
-              }}
+              onClick={openCreateNewCaseModal}
               className="mak-btn-secondary px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
             >
               <FolderPlus size={14} className="text-amber-400" />
-              <span>New Legal Case</span>
+              <span>Create New Case</span>
             </button>
           )}
 
@@ -1470,19 +1626,16 @@ export const CompanyDocuments: React.FC = () => {
                   Legal Case Dossiers ({effectiveLegalCases.length})
                 </h2>
                 <p className="text-xs text-gray-400">
-                  Create dynamic case folders by Container/Shipment Number or Corporate Dispute Title with auto-provisioned legal sub-folders.
+                  Create dynamic case folders by Container #, Shipment ID, or Corporate Dispute Title with auto-provisioned and customizable sub-folders.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setNewCaseEntity(defaultEntity);
-                  setShowNewLegalCaseModal(true);
-                }}
+                onClick={openCreateNewCaseModal}
                 className="mak-btn px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
               >
                 <Plus size={14} />
-                <span>Create New Legal Case</span>
+                <span>Create New Case</span>
               </button>
             </div>
 
@@ -1492,16 +1645,16 @@ export const CompanyDocuments: React.FC = () => {
                 <div className="space-y-1">
                   <h3 className="text-sm font-bold text-white">No Legal Case Folders Created Yet</h3>
                   <p className="text-xs text-gray-400 max-w-lg mx-auto">
-                    Enter a Unique Identifier such as &ldquo;Container # MSKU1234567&rdquo; (Logistics/Criminal — 7 sub-folders) or &ldquo;State Life Office Rent Dispute&rdquo; (Civil/Corporate — 5 sub-folders).
+                    Click &ldquo;Create New Case&rdquo; to enter a Unique Case Identifier (e.g., Container # ABC-12345 or Suit # 412/2025), select the internal entity, and dynamically provision Logistics/Criminal or Civil/Corporate sub-folders.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowNewLegalCaseModal(true)}
+                  onClick={openCreateNewCaseModal}
                   className="mak-btn px-4 py-2 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <FolderPlus size={14} />
-                  <span>Provision First Legal Case</span>
+                  <span>Create New Case</span>
                 </button>
               </div>
             ) : (
@@ -1530,11 +1683,14 @@ export const CompanyDocuments: React.FC = () => {
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-sky-500/15 text-sky-300 border border-sky-400/30">
                             {lc.caseTrack === 'CIVIL_CORPORATE'
                               ? 'Civil / Corporate Case'
-                              : 'Logistics / Criminal Case'}
+                              : 'Logistics / Customs / Criminal'}
                           </span>
 
                           {!isLegacy && (
-                            <div onClick={(e) => e.stopPropagation()}>
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1"
+                            >
                               {confirmDeleteCaseId === lc.id ? (
                                 <div className="inline-flex items-center gap-1">
                                   <button
@@ -1556,14 +1712,24 @@ export const CompanyDocuments: React.FC = () => {
                                   </button>
                                 </div>
                               ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteCaseId(lc.id)}
-                                  className="p-1 rounded hover:bg-rose-500/20 text-gray-400 hover:text-rose-300 cursor-pointer"
-                                  title="Remove Case Folder"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditCaseModal(lc)}
+                                    className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white cursor-pointer"
+                                    title="Edit Case Details & Sub-Folders"
+                                  >
+                                    <Edit size={13} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteCaseId(lc.id)}
+                                    className="p-1 rounded hover:bg-rose-500/20 text-gray-400 hover:text-rose-300 cursor-pointer"
+                                    title="Remove Case Folder"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </>
                               )}
                             </div>
                           )}
@@ -1609,7 +1775,7 @@ export const CompanyDocuments: React.FC = () => {
             )}
           </div>
         ) : !activeSubFolder ? (
-          /* Inside a Specific Legal Case: Provisioned Sub-Folders Grid */
+          /* Inside a Specific Legal Case: Provisioned & Customizable Sub-Folders Grid */
           <div className="space-y-4">
             <div className="bg-slate-900 border border-white/10 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
               <div className="space-y-1">
@@ -1617,7 +1783,7 @@ export const CompanyDocuments: React.FC = () => {
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-sky-500/15 text-sky-300 border border-sky-400/30">
                     {activeLegalCase.caseTrack === 'CIVIL_CORPORATE'
                       ? 'Civil / Corporate Track'
-                      : 'Logistics / Criminal Track'}
+                      : 'Logistics / Customs / Criminal Track'}
                   </span>
                   <h2 className="text-base font-extrabold text-white">
                     {activeLegalCase.identifier}
@@ -1631,13 +1797,30 @@ export const CompanyDocuments: React.FC = () => {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                {activeLegalCase.id !== 'legacy_general_legal_archive' && (
+                  <button
+                    type="button"
+                    onClick={() => openEditCaseModal(activeLegalCase)}
+                    className="mak-btn-secondary px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <Edit size={13} className="text-sky-400" />
+                    <span>Edit Case</span>
+                  </button>
+                )}
+
                 {addingCustomSubFolder ? (
                   <div className="flex items-center gap-1.5">
                     <input
                       type="text"
                       value={customSubFolderName}
                       onChange={(e) => setCustomSubFolderName(e.target.value)}
-                      placeholder="Sub-folder title..."
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomSubFolderToCase();
+                        }
+                      }}
+                      placeholder="e.g. Bail Proceedings..."
                       className="glass-input rounded-lg px-2.5 py-1.5 text-xs outline-none w-44"
                     />
                     <button
@@ -1687,34 +1870,112 @@ export const CompanyDocuments: React.FC = () => {
               {(activeLegalCase.subFolders && activeLegalCase.subFolders.length > 0
                 ? activeLegalCase.subFolders
                 : getProvisionedLegalSubFolders(activeLegalCase.caseTrack)
-              ).map((sf, idx) => {
+              ).map((sf, idx, allFolders) => {
                 const sfDocs = enrichedDocuments.filter(
                   (i) =>
                     i.hierarchy.rootCategory === 'Legal' &&
                     i.hierarchy.legalCaseId === activeLegalCase.id &&
                     i.hierarchy.subFolder === sf
                 );
+                const isRenaming = renamingSubFolderOriginal === sf;
+                const isEditableCase = activeLegalCase.id !== 'legacy_general_legal_archive';
+
                 return (
                   <div
-                    key={sf}
-                    onClick={() => setActiveSubFolder(sf)}
+                    key={`${sf}_${idx}`}
+                    onClick={() => {
+                      if (!isRenaming) setActiveSubFolder(sf);
+                    }}
                     className="bg-slate-900 hover:bg-slate-800/80 border border-white/10 hover:border-sky-400/40 rounded-xl p-4 flex flex-col justify-between gap-3 cursor-pointer transition-colors"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="w-9 h-9 rounded-lg bg-sky-500/15 border border-sky-400/30 text-sky-400 flex items-center justify-center shrink-0">
                         <FolderOpen size={17} />
                       </div>
-                      <span className="font-mono text-[11px] text-gray-500 tabular-nums">
-                        0{idx + 1}
-                      </span>
+                      <div
+                        className="inline-flex items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <span className="font-mono text-[11px] text-gray-500 tabular-nums mr-1">
+                          {String(idx + 1).padStart(2, '0')}
+                        </span>
+                        {isEditableCase && !isRenaming && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRenamingSubFolderOriginal(sf);
+                                setRenamingSubFolderValue(sf);
+                              }}
+                              className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-white cursor-pointer"
+                              title="Rename Sub-Folder"
+                            >
+                              <Edit size={12} />
+                            </button>
+                            {sfDocs.length === 0 && allFolders.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveEmptyCaseSubFolder(sf)}
+                                className="p-1 rounded hover:bg-rose-500/20 text-gray-400 hover:text-rose-300 cursor-pointer"
+                                title="Remove Empty Sub-Folder"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
 
-                    <div>
-                      <h4 className="text-sm font-bold text-white leading-snug">{sf}</h4>
-                      <p className="text-[11px] text-gray-400 mt-1 font-mono tabular-nums">
-                        {sfDocs.length} {sfDocs.length === 1 ? 'Document' : 'Documents'}
-                      </p>
-                    </div>
+                    {isRenaming ? (
+                      <div
+                        className="space-y-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="text"
+                          value={renamingSubFolderValue}
+                          onChange={(e) => setRenamingSubFolderValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleRenameCaseSubFolder(sf);
+                            } else if (e.key === 'Escape') {
+                              setRenamingSubFolderOriginal(null);
+                              setRenamingSubFolderValue('');
+                            }
+                          }}
+                          className="glass-input w-full rounded-lg px-2.5 py-1.5 text-xs font-semibold outline-none"
+                          autoFocus
+                        />
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleRenameCaseSubFolder(sf)}
+                            className="mak-btn px-2.5 py-1 rounded text-[11px] font-bold cursor-pointer"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRenamingSubFolderOriginal(null);
+                              setRenamingSubFolderValue('');
+                            }}
+                            className="mak-btn-secondary px-2.5 py-1 rounded text-[11px] cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <h4 className="text-sm font-bold text-white leading-snug">{sf}</h4>
+                        <p className="text-[11px] text-gray-400 mt-1 font-mono tabular-nums">
+                          {sfDocs.length} {sfDocs.length === 1 ? 'Document' : 'Documents'}
+                        </p>
+                      </div>
+                    )}
 
                     <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs">
                       <button
@@ -2552,6 +2813,21 @@ export const CompanyDocuments: React.FC = () => {
         onSave={async (docRecord) => {
           await saveCompanyDocumentToFirestore(docRecord);
         }}
+        onEnsureCustomSubFolder={async (targetCaseId, subFolderName) => {
+          const targetCase = legalCases.find((c) => c.id === targetCaseId);
+          if (!targetCase) return;
+          const existing =
+            targetCase.subFolders && targetCase.subFolders.length > 0
+              ? targetCase.subFolders.map((sf) => normalizeLegalSubFolderName(sf))
+              : getProvisionedLegalSubFolders(targetCase.caseTrack);
+          if (!existing.some((sf) => sf.toLowerCase() === subFolderName.trim().toLowerCase())) {
+            await saveCorporateLegalCaseToFirestore({
+              ...targetCase,
+              subFolders: [...existing, subFolderName.trim()],
+              updatedAt: new Date().toISOString()
+            });
+          }
+        }}
         legalCases={effectiveLegalCases.filter((c) => c.id !== 'legacy_general_legal_archive')}
         preset={uploadPreset}
         editingDocument={editingDocument}
@@ -2578,102 +2854,52 @@ export const CompanyDocuments: React.FC = () => {
       )}
 
       {/* ===================================================================== */}
-      {/* MODAL 3: CREATE DYNAMIC LEGAL CASE DOSSIER                            */}
+      {/* MODAL 3: CREATE / EDIT DYNAMIC LEGAL CASE DOSSIER                     */}
       {/* ===================================================================== */}
       {showNewLegalCaseModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="w-full max-w-xl bg-slate-950 border border-white/15 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl bg-slate-950 border border-white/15 rounded-2xl shadow-2xl overflow-hidden my-auto">
             <div className="px-5 py-3.5 bg-slate-900 border-b border-white/10 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <Scale size={18} className="text-sky-400" />
                 <h3 className="text-sm sm:text-base font-bold text-white">
-                  Provision Dynamic Legal Case Folder
+                  {editingLegalCase ? 'Edit Legal Case & Sub-Folders' : 'Create New Case'}
                 </h3>
               </div>
               <button
                 type="button"
-                onClick={() => setShowNewLegalCaseModal(false)}
+                onClick={() => {
+                  setShowNewLegalCaseModal(false);
+                  setEditingLegalCase(null);
+                }}
                 className="p-1.5 rounded-lg text-gray-400 hover:text-white cursor-pointer"
               >
                 <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleCreateLegalCase} className="p-5 space-y-4">
+            <form onSubmit={handleCreateLegalCase} className="p-5 space-y-4 max-h-[84vh] overflow-y-auto">
               {newCaseError && (
                 <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-xs text-rose-300">
                   {newCaseError}
                 </div>
               )}
 
-              <div>
-                <label className="block text-[11px] font-semibold text-gray-300 mb-1">
-                  Unique Case Identifier (Container / Shipment # or Corporate Case Title) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newCaseIdentifier}
-                  onChange={(e) => setNewCaseIdentifier(e.target.value)}
-                  placeholder="e.g. Container # MSKU1234567 or State Life Office Rent Dispute"
-                  className="glass-input w-full rounded-lg px-3 py-2.5 text-xs outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setNewCaseTrack('LOGISTICS_CRIMINAL')}
-                  data-custom-control="true"
-                  className={`p-3 rounded-xl border text-left cursor-pointer transition-colors ${
-                    newCaseTrack === 'LOGISTICS_CRIMINAL'
-                      ? 'bg-sky-500/15 border-sky-400/50'
-                      : 'bg-slate-900 border-white/10'
-                  }`}
-                >
-                  <div className="text-xs font-bold text-white">Logistics / Criminal Case</div>
-                  <div className="text-[11px] text-gray-400 mt-0.5">
-                    Auto-provisions 7 sub-folders (Sahiwal Police FIR, Customs FIR, ONO, Tribunals, High Courts, Follow-ups, Consignment Docs)
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setNewCaseTrack('CIVIL_CORPORATE')}
-                  data-custom-control="true"
-                  className={`p-3 rounded-xl border text-left cursor-pointer transition-colors ${
-                    newCaseTrack === 'CIVIL_CORPORATE'
-                      ? 'bg-sky-500/15 border-sky-400/50'
-                      : 'bg-slate-900 border-white/10'
-                  }`}
-                >
-                  <div className="text-xs font-bold text-white">Civil / Corporate Case</div>
-                  <div className="text-[11px] text-gray-400 mt-0.5">
-                    Auto-provisions 5 sub-folders (Original Plaint, Written Statement, Evidence &amp; Exhibits, Lower Court, Appellate)
-                  </div>
-                </button>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-white/10">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-sky-400 mb-1.5">
-                  Auto-Provisioned Sub-Folders Preview
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    Unique Case Identifier / Title *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newCaseIdentifier}
+                    onChange={(e) => setNewCaseIdentifier(e.target.value)}
+                    placeholder="e.g. Container # ABC-12345 or Suit # 412/2025"
+                    className="glass-input w-full rounded-lg px-3 py-2.5 text-xs outline-none"
+                  />
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {(newCaseTrack === 'CIVIL_CORPORATE'
-                    ? LEGAL_CIVIL_CORPORATE_SUBFOLDERS
-                    : LEGAL_LOGISTICS_CRIMINAL_SUBFOLDERS
-                  ).map((sf) => (
-                    <span
-                      key={sf}
-                      className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] text-gray-300"
-                    >
-                      {sf}
-                    </span>
-                  ))}
-                </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-gray-300 mb-1">
                     Internal Entity *
@@ -2681,7 +2907,7 @@ export const CompanyDocuments: React.FC = () => {
                   <select
                     value={newCaseEntity}
                     onChange={(e) => setNewCaseEntity(e.target.value)}
-                    className="glass-input w-full rounded-lg px-3 py-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
+                    className="glass-input w-full rounded-lg px-3 py-2.5 text-xs bg-slate-900 text-white border border-white/15 outline-none"
                   >
                     {RECIPIENT_ENTITIES.map((ent) => (
                       <option key={ent.id} value={ent.id}>
@@ -2690,7 +2916,142 @@ export const CompanyDocuments: React.FC = () => {
                     ))}
                   </select>
                 </div>
+              </div>
 
+              {/* Template Selection */}
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-300 mb-1.5">
+                  Case Template Selection *
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewCaseTrack('LOGISTICS_CRIMINAL');
+                      if (!editingLegalCase) {
+                        setModalDraftSubFolders(getProvisionedLegalSubFolders('LOGISTICS_CRIMINAL'));
+                      }
+                    }}
+                    data-custom-control="true"
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-colors ${
+                      newCaseTrack === 'LOGISTICS_CRIMINAL'
+                        ? 'bg-sky-500/15 border-sky-400/50'
+                        : 'bg-slate-900 border-white/10'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-white">
+                      Logistics / Customs / Criminal Case
+                    </div>
+                    <div className="text-[11px] text-gray-400 mt-0.5">
+                      Provisions 7 sub-folders: Police FIR &amp; Proceedings, Customs FIR &amp; Enforcement, Transit Trade &amp; ONO, Appeals &amp; Tribunals, High Courts, Follow-ups, Consignment Docs
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewCaseTrack('CIVIL_CORPORATE');
+                      if (!editingLegalCase) {
+                        setModalDraftSubFolders(getProvisionedLegalSubFolders('CIVIL_CORPORATE'));
+                      }
+                    }}
+                    data-custom-control="true"
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-colors ${
+                      newCaseTrack === 'CIVIL_CORPORATE'
+                        ? 'bg-sky-500/15 border-sky-400/50'
+                        : 'bg-slate-900 border-white/10'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-white">Civil / Corporate Case</div>
+                    <div className="text-[11px] text-gray-400 mt-0.5">
+                      Provisions 5 sub-folders: Original Plaint / Notice, Written Statement / Defense, Evidence &amp; Exhibits, Lower Court Judgments, Appellate Proceedings
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Editable & Customizable Sub-Folders List */}
+              <div className="p-3.5 rounded-xl bg-slate-900/80 border border-white/10 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-sky-400">
+                    Provisioned Case Sub-Folders ({modalDraftSubFolders.length}) — Rename or Add Custom
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setModalDraftSubFolders(getProvisionedLegalSubFolders(newCaseTrack))
+                    }
+                    className="text-[10px] font-semibold text-gray-400 hover:text-sky-400 cursor-pointer"
+                  >
+                    Reset to Standard Template
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {modalDraftSubFolders.map((folderVal, fIdx) => (
+                    <div key={`draft_sf_${fIdx}`} className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={folderVal}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setModalDraftSubFolders((prev) =>
+                            prev.map((item, idx) => (idx === fIdx ? val : item))
+                          );
+                        }}
+                        className="glass-input flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none"
+                      />
+                      {modalDraftSubFolders.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setModalDraftSubFolders((prev) => prev.filter((_, idx) => idx !== fIdx))
+                          }
+                          className="p-1.5 rounded-lg bg-white/5 hover:bg-rose-500/20 text-gray-400 hover:text-rose-300 cursor-pointer"
+                          title="Remove sub-folder"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={modalCustomFolderInput}
+                    onChange={(e) => setModalCustomFolderInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const clean = modalCustomFolderInput.trim();
+                        if (clean) {
+                          setModalDraftSubFolders((prev) => [...prev, clean]);
+                          setModalCustomFolderInput('');
+                        }
+                      }
+                    }}
+                    placeholder="Add custom sub-folder (e.g. Bail Proceedings / Lab Reports)..."
+                    className="glass-input flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clean = modalCustomFolderInput.trim();
+                      if (!clean) return;
+                      setModalDraftSubFolders((prev) => [...prev, clean]);
+                      setModalCustomFolderInput('');
+                    }}
+                    className="mak-btn-secondary px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
+                  >
+                    <Plus size={12} />
+                    <span>Add Folder</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-gray-300 mb-1">
                     FIR / Suit / Reference #
@@ -2712,7 +3073,7 @@ export const CompanyDocuments: React.FC = () => {
                     type="text"
                     value={newCaseCourt}
                     onChange={(e) => setNewCaseCourt(e.target.value)}
-                    placeholder="e.g. Sindh High Court / Customs Appraisement"
+                    placeholder="e.g. High Court / Customs Tribunal"
                     className="glass-input w-full rounded-lg px-3 py-2 text-xs outline-none"
                   />
                 </div>
@@ -2733,7 +3094,10 @@ export const CompanyDocuments: React.FC = () => {
               <div className="pt-2 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowNewLegalCaseModal(false)}
+                  onClick={() => {
+                    setShowNewLegalCaseModal(false);
+                    setEditingLegalCase(null);
+                  }}
                   className="mak-btn-secondary px-4 py-2 rounded-xl text-xs font-semibold cursor-pointer"
                 >
                   Cancel
@@ -2743,7 +3107,7 @@ export const CompanyDocuments: React.FC = () => {
                   className="mak-btn px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                 >
                   <FolderPlus size={14} />
-                  <span>Create Case &amp; Sub-Folders</span>
+                  <span>{editingLegalCase ? 'Save Case Changes' : 'Create Case & Sub-Folders'}</span>
                 </button>
               </div>
             </form>

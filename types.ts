@@ -417,7 +417,7 @@ export type CorporateRecipientEntity =
 export interface CorporateLegalCase {
   id: string;
   companyId?: string;
-  identifier: string; // e.g. "Container # MSKU1234567" or "State Life Office Rent Dispute"
+  identifier: string; // e.g. "Container # ABC-12345" or "Suit # 412/2025"
   caseTrack: LegalCaseTrack;
   recipientEntity: CorporateRecipientEntity | string;
   caseReferenceNo?: string;
