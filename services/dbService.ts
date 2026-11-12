@@ -1275,11 +1275,24 @@ export function subscribeToVehicles(
       } as Vehicle);
     });
 
-    // Deduplicate & merge global vehicles by registrationNumber (moving Docks duplicates to Truckit)
-    const { merged: finalVehicles, removedIds } = dedupeAndMergeVehicles(dedupeArrayById(firestoreItems));
+    // Deduplicate & merge global vehicles by registrationNumber + Chassis/Engine (moving Docks duplicates to Truckit)
+    const { merged: finalVehicles, removedIds, updatedRecords } = dedupeAndMergeVehicles(dedupeArrayById(firestoreItems));
 
-    // Clean up duplicate vehicle doc IDs from Firestore in background so vehicles never double
-    if (removedIds.length > 0) {
+    // Clean up duplicate Docks vehicle doc IDs and persist enriched Truckit records in Firestore
+    if (hasReceivedSnapshot && (removedIds.length > 0 || updatedRecords.length > 0)) {
+      updatedRecords.forEach((upVeh) => {
+        const cleanCopy: Record<string, any> = { ...(upVeh as any) };
+        const targetDocId = String(cleanCopy._docId || cleanCopy.id || '');
+        delete cleanCopy._docId;
+        if (targetDocId) {
+          const payload = sanitizeForFirestore({
+            ...cleanCopy,
+            companyId: cleanCopy.companyId || cleanCopy.operatingCompany || 'truckit',
+            updatedAt: new Date().toISOString()
+          });
+          setDoc(doc(db, path, targetDocId), payload, { merge: true }).catch(() => {});
+        }
+      });
       removedIds.forEach((dupId) => {
         deleteDoc(doc(db, path, String(dupId))).catch(() => {});
       });
@@ -1623,7 +1636,9 @@ export async function deleteVehicleFromFirestore(vehicleId: number | string): Pr
   const path = 'vehicles';
   try {
     const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
-    const filtered = liveVehicles.filter(v => String(v.id) !== String(vehicleId));
+    const filtered = liveVehicles.filter(
+      v => String(v.id) !== String(vehicleId) && String((v as any)._docId || '') !== String(vehicleId)
+    );
     safeAppStorage.setJSON('dpl_live_vehicles', filtered);
     safeAppStorage.setJSON('dpl_vehicles_data', filtered);
   } catch (_) {}
@@ -1632,6 +1647,112 @@ export async function deleteVehicleFromFirestore(vehicleId: number | string): Pr
   } catch (error) {
     console.warn(`Firestore deleteVehicle warning:`, error);
   }
+}
+
+/**
+ * Atomically executes one or more vehicle Merge & Delete operations in Firestore and local cache.
+ * Used by the Duplicate / Doubling Vehicle Manager so admins can merge & delete single pairs or bulk clean duplicates.
+ */
+export async function executeVehicleMergeAndDeleteBatch(
+  operations: Array<{
+    updatedPrimary?: Vehicle;
+    deleteVehicles: Vehicle[];
+  }>
+): Promise<{ updatedCount: number; deletedCount: number }> {
+  if (!operations || operations.length === 0) {
+    return { updatedCount: 0, deletedCount: 0 };
+  }
+  const path = 'vehicles';
+  const activeCompany = getActiveCompanyId();
+  const deleteIdStrings = new Set<string>();
+  const updatedById = new Map<number, Vehicle>();
+
+  for (const op of operations) {
+    if (op.updatedPrimary) {
+      const syncedBroker = (op.updatedPrimary.transporterName || op.updatedPrimary.brokerName || '').trim();
+      updatedById.set(Number(op.updatedPrimary.id), {
+        ...op.updatedPrimary,
+        transporterName: syncedBroker,
+        brokerName: syncedBroker,
+      });
+    }
+    for (const delVeh of op.deleteVehicles) {
+      if (!delVeh) continue;
+      if (op.updatedPrimary && Number(delVeh.id) === Number(op.updatedPrimary.id)) continue;
+      if (delVeh.id !== undefined && delVeh.id !== null) {
+        deleteIdStrings.add(String(delVeh.id));
+      }
+      const rawDocId = (delVeh as any)._docId;
+      if (rawDocId) {
+        deleteIdStrings.add(String(rawDocId));
+      }
+    }
+  }
+
+  // Update local storage cache immediately for instant UI responsiveness
+  try {
+    const liveVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []);
+    const nextList = liveVehicles
+      .filter((v) => !deleteIdStrings.has(String(v.id)) && !deleteIdStrings.has(String((v as any)._docId || '')))
+      .map((v) => {
+        const up = updatedById.get(Number(v.id));
+        return up ? { ...v, ...up } : v;
+      });
+    safeAppStorage.setJSON('dpl_live_vehicles', nextList);
+    safeAppStorage.setJSON('dpl_vehicles_data', nextList);
+    backupVehiclesToIndexedDB(nextList).catch(() => {});
+  } catch (_) {}
+
+  // Commit Firestore writes & deletes in chunks of 400 (Firestore batch limit is 500)
+  const writeOps: Array<{ type: 'SET'; docId: string; payload: any } | { type: 'DEL'; docId: string }> = [];
+
+  for (const [, primaryVeh] of updatedById.entries()) {
+    const rawDocId = String((primaryVeh as any)._docId || primaryVeh.id);
+    // Ensure we never delete the surviving primary's own docId
+    deleteIdStrings.delete(rawDocId);
+    deleteIdStrings.delete(String(primaryVeh.id));
+
+    const cloudReadyVeh = await offloadLargeDataUrlsToCloudChunks(
+      {
+        ...primaryVeh,
+        companyId: (primaryVeh as any).companyId || primaryVeh.operatingCompany || activeCompany,
+        updatedAt: new Date().toISOString()
+      },
+      `veh_${normalizeVehiclePlate(primaryVeh.registrationNumber) || rawDocId}`
+    );
+    const cleanCopy = { ...cloudReadyVeh };
+    delete (cleanCopy as any)._docId;
+    writeOps.push({
+      type: 'SET',
+      docId: rawDocId,
+      payload: sanitizeForFirestore(cleanCopy)
+    });
+  }
+
+  deleteIdStrings.forEach((delDocId) => {
+    if (delDocId) {
+      writeOps.push({ type: 'DEL', docId: delDocId });
+    }
+  });
+
+  for (let i = 0; i < writeOps.length; i += 400) {
+    const slice = writeOps.slice(i, i + 400);
+    const batch = writeBatch(db);
+    slice.forEach((item) => {
+      const ref = doc(db, path, item.docId);
+      if (item.type === 'SET') {
+        batch.set(ref, item.payload, { merge: true });
+      } else {
+        batch.delete(ref);
+      }
+    });
+    await batch.commit();
+  }
+
+  return {
+    updatedCount: updatedById.size,
+    deletedCount: deleteIdStrings.size
+  };
 }
 
 /**

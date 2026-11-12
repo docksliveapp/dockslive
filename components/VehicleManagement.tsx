@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Truck, Plus, Search, FileText, User, Settings, Save, MapPin, Calendar, Clock, AlertTriangle, Trash2, CheckCircle, X, ChevronRight, ChevronDown, Eye, Activity, CreditCard, Filter, AlertCircle, Download, Loader2, Ban, FileCheck, ShieldCheck, UploadCloud, CheckSquare, Square, Layers, Camera, Building, Globe, ExternalLink, Copy, DollarSign, Phone, Sparkles } from 'lucide-react';
+import { Truck, Plus, Search, FileText, User, Users, Settings, Save, MapPin, Calendar, Clock, AlertTriangle, Trash2, CheckCircle, X, ChevronRight, ChevronDown, Eye, Activity, CreditCard, Filter, AlertCircle, Download, Loader2, Ban, FileCheck, ShieldCheck, UploadCloud, CheckSquare, Square, Layers, Camera, Building, Building2, Globe, ExternalLink, Copy, DollarSign, Phone, Sparkles, ArrowLeftRight, FileSpreadsheet } from 'lucide-react';
 import { Vehicle, Transporter, VehicleCategory, VehicleType, TrackerInfo, VehicleHistory, UserRole, Case, Driver, TransporterRequest, FinanceEntry } from '../types';
 import { submitVehicleActionApproval } from '../services/approvalService';
 import { autoFillVehicleData, verifyVehicleComplianceDocumentWithAI } from '../services/geminiService';
@@ -31,7 +31,7 @@ import {
 import { AvailableVehiclesView } from './AvailableVehiclesView';
 import { VirtualizedList, VirtualizedTable } from './VirtualizedList';
 import { sendAppNotification } from '../services/notificationService';
-import { exportVehiclesToExcel, exportVehicleTripsToExcel, generateVehiclesExcelBuffer } from '../services/excelExportService';
+import { exportVehicleTripsToExcel } from '../services/excelExportService';
 import { 
   parseVehicleFile, 
   isCorruptedVehicleRecord, 
@@ -54,14 +54,20 @@ import {
   generateCompanyOwnerIdCopyDocx,
   generateWitnessesIdCopyDocx,
   resolveVehicleDocxCompany,
-  DOCKS_COMPANY,
   generateDocxBlob,
   downloadDocxBlob,
   formatDashDate
 } from '../services/vehicleDocxService';
-import { downloadCustomsVehicleListPdf } from '../services/pdfExportService';
 import { compressAndPrepareFile } from '../services/fileUtils';
-import { useActiveCompany, getActiveCompanyPrefix } from '../services/companyService';
+import { CompanyId, useActiveCompany, getActiveCompanyPrefix } from '../services/companyService';
+import { detectDuplicateVehicleGroups } from '../services/vehicleDuplicateService';
+import { VehicleDuplicateManagerModal } from './VehicleDuplicateManagerModal';
+import {
+  FleetExcelExportModal,
+  ManageWitnessesModal,
+  ManageCompanyOwnersModal,
+  CompanySignatoriesAutoBanner
+} from './VehicleSignatoriesAndExportModals';
 import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
 
 // --- Clean Live Data ---
@@ -652,6 +658,13 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   const [docsModalType, setDocsModalType] = useState<DocumentType>('REG_LETTER');
   const [selectedVehicleIds, setSelectedVehicleIds] = useState<number[]>([]);
 
+  // Fleet Excel Filter Popup, Duplicate Vehicle Manager & Persistent Witnesses / Company Owners Modals
+  const [showFleetExcelModal, setShowFleetExcelModal] = useState(false);
+  const [showDuplicateManagerModal, setShowDuplicateManagerModal] = useState(false);
+  const [showWitnessesModal, setShowWitnessesModal] = useState(false);
+  const [showCompanyOwnerModal, setShowCompanyOwnerModal] = useState(false);
+  const [companyOwnerModalInitialId, setCompanyOwnerModalInitialId] = useState<CompanyId>('truckit');
+
   // --- Helper Functions ---
 
   const openCancelNocModal = (v: Vehicle, defaultReason = 'Operational De-Registration & Contract Release') => {
@@ -835,17 +848,6 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     }
   };
 
-  // Download official Pakistan Customs Directorate General of Transit Trade Vehicle List (PDF)
-  const handleDownloadCustomsListPdf = async () => {
-    try {
-      const activeList = vehicles.filter(v => v.status !== 'CANCELLED');
-      await downloadCustomsVehicleListPdf({
-        vehicles: activeList.length > 0 ? activeList : vehicles
-      });
-    } catch (err) {
-      console.error('Failed to download Customs List PDF:', err);
-    }
-  };
 
   // Universal Read-Only Document Preview State (.docx / .pdf / .xlsx / .image)
   const [universalPreviewState, setUniversalPreviewState] = useState<{
@@ -932,34 +934,6 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     }
   };
 
-  const handlePreviewCustomsListPdf = async () => {
-    try {
-      const activeList = vehicles.filter(v => v.status !== 'CANCELLED');
-      const targetVehicles = activeList.length > 0 ? activeList : vehicles;
-      const res = await downloadCustomsVehicleListPdf({
-        vehicles: targetVehicles
-      });
-      const verificationItems: DataMappingCheckItem[] = [
-        { label: 'Issuing Authority', value: 'Directorate General of Transit Trade Karachi', status: 'verified' },
-        { label: 'Licensed Carrier', value: activeCompany?.legalTitle || activeCompany?.name || 'Docks (Pvt) Ltd', status: 'verified' },
-        { label: 'Total Permitted Fleet', value: `${targetVehicles.length} Vehicles in Registry`, status: 'verified' },
-        { label: 'Customs License NTN', value: activeCompany?.id === 'docks' ? '5064083-8 / 3997968' : '3997968', status: 'verified' }
-      ];
-
-      setUniversalPreviewState({
-        isOpen: true,
-        file: res.blobUrl,
-        filename: res.filename,
-        title: `Customs Directorate Transit Vehicle List (${targetVehicles.length} vehicles)`,
-        fileType: 'pdf',
-        verificationItems,
-        onDownload: handleDownloadCustomsListPdf
-      });
-    } catch (err: any) {
-      console.error('Failed to preview Customs list PDF:', err);
-    }
-  };
-
   const handlePreviewVehicleDetailsPdf = async (v: Vehicle) => {
     try {
       const res = await downloadVehicleDetailsPdf(v);
@@ -985,31 +959,6 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       });
     } catch (err) {
       console.error('Failed to preview vehicle dossier PDF:', err);
-    }
-  };
-
-  const handlePreviewVehiclesExcel = () => {
-    try {
-      const { buffer, filename } = generateVehiclesExcelBuffer(vehicles);
-      const verificationItems: DataMappingCheckItem[] = [
-        { label: 'Workbook Format', value: 'Master Fleet Registry (.xlsx)', status: 'verified' },
-        { label: 'Company Entity', value: activeCompany?.legalTitle || activeCompany?.name || 'Docks (Pvt) Ltd', status: 'verified' },
-        { label: 'Total Fleet Records', value: `${vehicles.length} Vehicles Mapped`, status: 'verified' },
-        { label: 'Active On Trips', value: `${vehicles.filter(v => v.status === 'ON_TRIP').length} Vehicles`, status: 'verified' },
-        { label: 'Customs License NTN', value: activeCompany?.id === 'docks' ? '5064083-8 / 3997968' : '3997968', status: 'verified' }
-      ];
-
-      setUniversalPreviewState({
-        isOpen: true,
-        file: buffer,
-        filename,
-        title: `Master Vehicles Fleet Registry (${vehicles.length} vehicles)`,
-        fileType: 'xlsx',
-        verificationItems,
-        onDownload: () => exportVehiclesToExcel(vehicles)
-      });
-    } catch (err: any) {
-      console.error('Failed to preview vehicles Excel:', err);
     }
   };
 
@@ -1259,6 +1208,13 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     };
   }, [vehicles, inTransitPlatesSet, tripCountsByPlate]);
 
+  // Real-time O(N) detection of duplicate / doubling vehicles (Truckit vs Docks & same Reg/Chassis/Engine)
+  const duplicateGroups = useMemo(() => detectDuplicateVehicleGroups(vehicles), [vehicles]);
+  const actionableDuplicateGroups = useMemo(
+    () => duplicateGroups.filter((g) => g.category !== 'SAME_BASE_PLATE_DIFF_TECH'),
+    [duplicateGroups]
+  );
+
   // Dynamic list of ONLY companies that have registered vehicles
   const registeredCompaniesList = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1424,10 +1380,6 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     }
   };
 
-  const handleExportAllVehiclesList = () => {
-    // Complete formatted export of all vehicles into professional Excel workbook (.xlsx)
-    exportVehiclesToExcel(vehicles);
-  };
 
   const trackersOnWay = vehicles.filter(v => v.tracker && v.status === 'ON_TRIP');
   const pendingTrackerPayments = vehicles.filter(v => v.tracker?.provider === 'Us' && v.tracker.paymentStatus === 'Pending');
@@ -1828,6 +1780,25 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => setShowWitnessesModal(true)}
+              className="mak-btn px-3.5 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
+              title="Configure the 2 Permanent Witnesses (Name, Father Name, CNIC, Mobile & Front/Back ID Cards)"
+            >
+              <Users size={14} /> <span>Add Witnesses</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCompanyOwnerModalInitialId((activeCompany?.id as CompanyId) || 'truckit');
+                setShowCompanyOwnerModal(true);
+              }}
+              className="mak-btn px-3.5 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
+              title="Add or update Company Owner detail & CNIC Front/Back for Docks, Truckit, Muhib, or Vantage"
+            >
+              <Building2 size={14} /> <span>Add Company Owner</span>
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 const host = (window.location.hostname || '').toLowerCase();
                 if (host.includes('makpk.online') || host.includes('mak-group.com')) {
@@ -1848,35 +1819,35 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={handlePreviewCustomsListPdf}
-              className="mak-btn px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
-              title="Preview official Pakistan Customs Vehicle List (PDF)"
+              onClick={() => setShowFleetExcelModal(true)}
+              className="mak-btn px-3.5 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
+              title="Download Fleet Excel (.xlsx) — Choose All, Valid, Expiry Soon, or Expired Vehicles"
             >
-              <Eye size={13} /> <span>Customs PDF</span>
+              <FileSpreadsheet size={14} /> <span>Fleet Excel</span>
             </button>
             <button
               type="button"
-              onClick={handleDownloadCustomsListPdf}
-              className="mak-btn px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
-              title="Download official Pakistan Customs Vehicle List (PDF)"
+              disabled={actionableDuplicateGroups.length === 0}
+              onClick={() => {
+                if (actionableDuplicateGroups.length > 0) {
+                  setShowDuplicateManagerModal(true);
+                }
+              }}
+              className={`${
+                actionableDuplicateGroups.length > 0
+                  ? 'mak-btn'
+                  : 'mak-btn-secondary opacity-50 cursor-not-allowed'
+              } px-3.5 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0`}
+              title={
+                actionableDuplicateGroups.length > 0
+                  ? `${actionableDuplicateGroups.length} duplicate vehicle group(s) detected — click to review, merge, or delete`
+                  : 'No duplicate vehicles detected in fleet'
+              }
             >
-              <Download size={13} /> <span>PDF</span>
-            </button>
-            <button
-              type="button"
-              onClick={handlePreviewVehiclesExcel}
-              className="mak-btn px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
-              title="Preview Master Fleet Excel (.xlsx)"
-            >
-              <Eye size={13} /> <span>Fleet Excel</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleExportAllVehiclesList}
-              className="mak-btn px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
-              title="Download formatted Excel (.xlsx) workbook"
-            >
-              <Download size={13} /> <span>.xlsx</span>
+              <ArrowLeftRight size={14} />
+              <span className="font-mono tabular-nums">
+                Merge Duplicate ({actionableDuplicateGroups.length})
+              </span>
             </button>
           </div>
         </div>
@@ -2562,6 +2533,11 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
           existingMraList={existingMraList}
           allCases={allCases}
           allDrivers={allDrivers}
+          onOpenCompanyOwnerModal={(cid: CompanyId) => {
+            setCompanyOwnerModalInitialId(cid);
+            setShowCompanyOwnerModal(true);
+          }}
+          onOpenWitnessesModal={() => setShowWitnessesModal(true)}
           onAutoUpdateValidity={(updatedVeh: Vehicle) => {
             const normP = normalizeVehiclePlate(updatedVeh.registrationNumber);
             const exists = vehicles.some(v => normalizeVehiclePlate(v.registrationNumber) === normP || v.id === updatedVeh.id);
@@ -2651,6 +2627,17 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                 <span className="text-white font-medium">{vehicleToCancel.ownerName || vehicleToCancel.transporterName || 'Fleet Operator'}</span>
               </div>
             </div>
+
+            {/* Matched Company Owner & Permanent 2 Witnesses (Auto-Applied to Cancellation NOC & Lease Termination) */}
+            <CompanySignatoriesAutoBanner
+              vehicle={vehicleToCancel}
+              compact
+              onEditCompanyOwner={(cid) => {
+                setCompanyOwnerModalInitialId(cid);
+                setShowCompanyOwnerModal(true);
+              }}
+              onEditWitnesses={() => setShowWitnessesModal(true)}
+            />
 
             {/* NOC Collector Name & Mobile Number */}
             <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-cyan-500/30 space-y-3">
@@ -2904,6 +2891,48 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
         vehicles={vehicles}
         preSelectedIds={selectedVehicleIds}
         initialDocType={docsModalType}
+      />
+
+      {/* Fleet Excel Scoped Export Popup (All / Valid / Expiry Soon / Expired) */}
+      <FleetExcelExportModal
+        isOpen={showFleetExcelModal}
+        onClose={() => setShowFleetExcelModal(false)}
+        allVehicles={vehicles}
+        validVehicles={vehiclesActiveValid}
+        expirySoonVehicles={vehiclesExpiringSoon}
+        expiredVehicles={vehiclesExpired}
+        tripCountsByPlate={tripCountsByPlate}
+      />
+
+      {/* Duplicate & Doubling Vehicles Merge / Delete Manager Modal */}
+      {showDuplicateManagerModal && (
+        <VehicleDuplicateManagerModal
+          vehicles={vehicles}
+          onClose={() => setShowDuplicateManagerModal(false)}
+          getVehicleTripsCount={getVehicleTripsCount}
+          onApplyLocalUpdate={({ updatedVehicles, deletedIds }) => {
+            const delSet = new Set(deletedIds);
+            const updMap = new Map(updatedVehicles.map((u) => [u.id, u]));
+            setVehicles((prev) =>
+              prev
+                .filter((v) => !delSet.has(v.id))
+                .map((v) => updMap.get(v.id) || v)
+            );
+          }}
+        />
+      )}
+
+      {/* Permanent 2 Witnesses Master Registry Modal */}
+      <ManageWitnessesModal
+        isOpen={showWitnessesModal}
+        onClose={() => setShowWitnessesModal(false)}
+      />
+
+      {/* 4-Company Owner Detail & CNIC Front/Back Registry Modal */}
+      <ManageCompanyOwnersModal
+        isOpen={showCompanyOwnerModal}
+        onClose={() => setShowCompanyOwnerModal(false)}
+        initialCompanyId={companyOwnerModalInitialId}
       />
 
       {/* Admin Approval Request Modal for Vehicle Deletion / Cancellation */}
@@ -3210,8 +3239,6 @@ const DEFAULT_VEHICLE_REGIONS = [
 ];
 
 const CUSTOM_REGIONS_STORAGE_KEY = 'dpl_custom_vehicle_regions_v1';
-const COMPANY_OWNER_ID_STORAGE_KEY = 'dpl_company_owner_id_docs_v1';
-const WITNESSES_ID_STORAGE_KEY = 'dpl_witnesses_id_docs_v1';
 
 type ModalDocGenerationKind =
   | 'REG_RENEWAL'
@@ -3221,7 +3248,6 @@ type ModalDocGenerationKind =
   | 'OWNER_ID_COPY'
   | 'COMP_OWNER_ID_COPY'
   | 'WITNESSES_ID_COPY'
-  | 'ALL_7_REG_PACK'
   | 'CANCEL_NOC_LETTERHEAD'
   | 'LEASE_TERMINATION_STAMP';
 
@@ -3232,6 +3258,8 @@ const AddVehicleModal = ({
   existingMraList = [],
   allCases = [],
   allDrivers = [],
+  onOpenCompanyOwnerModal,
+  onOpenWitnessesModal,
   onAutoUpdateValidity,
   onRequestCancelNoc,
   onClose,
@@ -3251,53 +3279,6 @@ const AddVehicleModal = ({
     mismatches?: string[];
   } | null>(null);
   const todayIso = new Date().toISOString().split('T')[0];
-
-  // Persistent Company Director / Owner ID Card copies (reused automatically across all vehicles per operating company)
-  const [companyOwnerDocs, setCompanyOwnerDocs] = useState<Record<string, { ownerName?: string; ownerCnic?: string; frontUrl?: string; fileName?: string }>>(() => {
-    try {
-      const raw = safeAppStorage.getItem(COMPANY_OWNER_ID_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') return parsed;
-      }
-    } catch (_) {}
-    return {};
-  });
-
-  // Persistent Fixed Witnesses ID Card copies (Mr. MUHAMMAD ARBAZ & Mr. SHAMS TABREZ BUKHARI)
-  const [witnessIdDocs, setWitnessIdDocs] = useState<{ w1Url?: string; w1Name?: string; w2Url?: string; w2Name?: string }>(() => {
-    try {
-      const raw = safeAppStorage.getItem(WITNESSES_ID_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') return parsed;
-      }
-    } catch (_) {}
-    return {};
-  });
-
-  const saveCompanyOwnerDocEntry = (compKey: string, patch: { ownerName?: string; ownerCnic?: string; frontUrl?: string; fileName?: string }) => {
-    setCompanyOwnerDocs(prev => {
-      const next = {
-        ...prev,
-        [compKey]: { ...(prev[compKey] || {}), ...patch }
-      };
-      try {
-        safeAppStorage.setItem(COMPANY_OWNER_ID_STORAGE_KEY, JSON.stringify(next));
-      } catch (_) {}
-      return next;
-    });
-  };
-
-  const saveWitnessIdDocEntry = (patch: { w1Url?: string; w1Name?: string; w2Url?: string; w2Name?: string }) => {
-    setWitnessIdDocs(prev => {
-      const next = { ...prev, ...patch };
-      try {
-        safeAppStorage.setItem(WITNESSES_ID_STORAGE_KEY, JSON.stringify(next));
-      } catch (_) {}
-      return next;
-    });
-  };
 
   const [savedCustomRegions, setSavedCustomRegions] = useState<string[]>(() => {
     try {
@@ -3555,36 +3536,6 @@ const AddVehicleModal = ({
     try { e.target.value = ''; } catch (_) {}
   };
 
-  const handleCompanyOwnerIdUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const compKey = String(formData.operatingCompany || 'truckit').toLowerCase();
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      saveCompanyOwnerDocEntry(compKey, {
-        frontUrl: reader.result as string,
-        fileName: file.name
-      });
-    };
-    reader.readAsDataURL(file);
-    try { e.target.value = ''; } catch (_) {}
-  };
-
-  const handleWitnessIdUpload = (which: 'W1' | 'W2') => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const dataUrl = reader.result as string;
-      if (which === 'W1') {
-        saveWitnessIdDocEntry({ w1Url: dataUrl, w1Name: file.name });
-      } else {
-        saveWitnessIdDocEntry({ w2Url: dataUrl, w2Name: file.name });
-      }
-    };
-    reader.readAsDataURL(file);
-    try { e.target.value = ''; } catch (_) {}
-  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -3645,9 +3596,6 @@ const AddVehicleModal = ({
   const resolvedExpiryDate = validityPreview.expiryDate || formData.validationExpiryDate || '';
   const requiresContainerOrTrailerSize =
     formData.type === VehicleType.FLATBED || formData.type === VehicleType.CONTAINER;
-
-  const currentCompanyKey = String(formData.operatingCompany || 'truckit').toLowerCase();
-  const currentCompOwnerDoc = companyOwnerDocs[currentCompanyKey] || {};
 
   const buildLiveVehicleRecord = (overrideDates?: { regDate: string; expDate: string }): Vehicle => {
     const cleanPlate = (formData.registrationNumber || '').trim().toUpperCase();
@@ -3795,11 +3743,7 @@ const AddVehicleModal = ({
         });
       } else if (docKind === 'COMP_OWNER_ID_COPY') {
         const liveVehicle = buildLiveVehicleRecord();
-        const doc = await generateCompanyOwnerIdCopyDocx(liveVehicle, {
-          companyOwnerName: currentCompOwnerDoc.ownerName,
-          companyOwnerCnic: currentCompOwnerDoc.ownerCnic,
-          frontImageUrl: currentCompOwnerDoc.frontUrl
-        });
+        const doc = await generateCompanyOwnerIdCopyDocx(liveVehicle);
         await downloadDocxBlob(doc, `6_Company_Owner_ID_Card_Copy_${safePlateSlug}.docx`);
         setDocFeedback({
           type: 'success',
@@ -3807,70 +3751,11 @@ const AddVehicleModal = ({
         });
       } else if (docKind === 'WITNESSES_ID_COPY') {
         const liveVehicle = buildLiveVehicleRecord();
-        const doc = await generateWitnessesIdCopyDocx(liveVehicle, {
-          witness1ImageUrl: witnessIdDocs.w1Url,
-          witness2ImageUrl: witnessIdDocs.w2Url,
-          witness1Name: DOCKS_COMPANY.witnesses.w1_arbaz.name,
-          witness1Cnic: DOCKS_COMPANY.witnesses.w1_arbaz.cnic,
-          witness2Name: DOCKS_COMPANY.witnesses.w2_shams.name,
-          witness2Cnic: DOCKS_COMPANY.witnesses.w2_shams.cnic
-        });
+        const doc = await generateWitnessesIdCopyDocx(liveVehicle);
         await downloadDocxBlob(doc, `7_Witnesses_ID_Card_Copy_${safePlateSlug}.docx`);
         setDocFeedback({
           type: 'success',
           message: `Downloaded Witnesses ID Cards Copy (${cleanPlate}) in Word (.docx).`
-        });
-      } else if (docKind === 'ALL_7_REG_PACK') {
-        const updatedVehicle = syncRegistrationDateAndSixMonthValidity(letterDateIso);
-
-        const regDoc = await generateRegistrationRenewalLetterDocx([updatedVehicle], {
-          letterDate: letterDateIso,
-          leaveLetterheadSpace: true
-        });
-        await downloadDocxBlob(regDoc, `1_Registration_Renewal_Request_${safePlateSlug}_${dateSlug}.docx`);
-
-        const leaseDoc = await generateLeaseAgreementDocx([updatedVehicle], {
-          agreementDate: letterDateIso,
-          leaveStampPaperSpace: true,
-          customLessorName: formData.ownerName?.trim() || undefined,
-          customFatherName: formData.ownerFatherName?.trim() || undefined,
-          customCnic: formData.ownerCnic?.trim() || undefined,
-          customAddress: formData.ownerAddress?.trim() || undefined
-        });
-        await downloadDocxBlob(leaseDoc, `2_Lease_Agreement_${safePlateSlug}_Stamp_Paper_${dateSlug}.docx`);
-
-        const affDoc = await generateAffidavitDocx([updatedVehicle], {
-          letterDate: letterDateIso,
-          leaveStampPaperSpace: true
-        });
-        await downloadDocxBlob(affDoc, `3_Affidavit_SRO450_${safePlateSlug}_Stamp_Paper_${dateSlug}.docx`);
-
-        const bookDoc = await generateVehicleBookCopyDocx(updatedVehicle);
-        await downloadDocxBlob(bookDoc, `4_Vehicle_Registration_Book_Copy_${safePlateSlug}.docx`);
-
-        const ownerIdDoc = await generateVehicleOwnerIdCopyDocx(updatedVehicle);
-        await downloadDocxBlob(ownerIdDoc, `5_Vehicle_Owner_ID_Card_Copy_${safePlateSlug}.docx`);
-
-        const compOwnerDoc = await generateCompanyOwnerIdCopyDocx(updatedVehicle, {
-          companyOwnerName: currentCompOwnerDoc.ownerName,
-          companyOwnerCnic: currentCompOwnerDoc.ownerCnic,
-          frontImageUrl: currentCompOwnerDoc.frontUrl
-        });
-        await downloadDocxBlob(compOwnerDoc, `6_Company_Owner_ID_Card_Copy_${safePlateSlug}.docx`);
-
-        const witDoc = await generateWitnessesIdCopyDocx(updatedVehicle, {
-          witness1ImageUrl: witnessIdDocs.w1Url,
-          witness2ImageUrl: witnessIdDocs.w2Url,
-          witness1Name: DOCKS_COMPANY.witnesses.w1_arbaz.name,
-          witness1Cnic: DOCKS_COMPANY.witnesses.w1_arbaz.cnic,
-          witness2Name: DOCKS_COMPANY.witnesses.w2_shams.name,
-          witness2Cnic: DOCKS_COMPANY.witnesses.w2_shams.cnic
-        });
-        await downloadDocxBlob(witDoc, `7_Witnesses_ID_Card_Copy_${safePlateSlug}.docx`);
-
-        setDocFeedback({
-          type: 'success',
-          message: `Complete 7-Document Registration / Renewal Pack downloaded for ${cleanPlate} & 6-month validity updated (expires ${updatedVehicle.validationExpiryDate}).`
         });
       } else if (docKind === 'CANCEL_NOC_LETTERHEAD') {
         const liveVehicle = buildLiveVehicleRecord();
@@ -4173,65 +4058,13 @@ const AddVehicleModal = ({
               />
             </div>
 
-            {/* 3. Company Owner / Director ID Card & 4. Fixed Witnesses ID Cards (Saved Once & Reused) */}
-            <div className="space-y-2 bg-black/30 p-3 rounded-xl border border-white/10">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-cyan-300">
-                  3. Company Owner ID ({resolveVehicleDocxCompany(formData).signoffName})
-                </span>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                  currentCompOwnerDoc.frontUrl
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                    : 'bg-white/10 text-gray-400'
-                }`}>
-                  {currentCompOwnerDoc.frontUrl ? '✓ Saved for Company' : 'Optional Upload'}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                <input
-                  type="text"
-                  placeholder="Director Name"
-                  className="glass-input rounded px-2 py-1 text-white text-[11px]"
-                  value={currentCompOwnerDoc.ownerName || ''}
-                  onChange={e => saveCompanyOwnerDocEntry(currentCompanyKey, { ownerName: e.target.value })}
-                />
-                <input
-                  type="text"
-                  placeholder="Director CNIC"
-                  className="glass-input rounded px-2 py-1 text-white font-mono text-[11px]"
-                  value={currentCompOwnerDoc.ownerCnic || ''}
-                  onChange={e => saveCompanyOwnerDocEntry(currentCompanyKey, { ownerCnic: e.target.value })}
-                />
-              </div>
-              <label className="block cursor-pointer border border-dashed border-cyan-500/35 hover:border-cyan-400 bg-cyan-500/5 rounded-lg p-1.5 text-center text-[11px] text-cyan-200 font-semibold">
-                <input type="file" className="hidden" accept="image/*,application/pdf" onChange={handleCompanyOwnerIdUpload} />
-                {currentCompOwnerDoc.frontUrl
-                  ? `✓ ${currentCompOwnerDoc.fileName || 'Director CNIC Saved'} (Click to Replace)`
-                  : 'Upload Company Owner CNIC (Saved Once for All Vehicles)'}
-              </label>
-            </div>
-
-            <div className="space-y-2 bg-black/30 p-3 rounded-xl border border-white/10">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-purple-300">
-                  4. Fixed Witnesses ID Cards (Standard)
-                </span>
-                <span className="text-[10px] text-gray-400">Saved for All Vehicles</span>
-              </div>
-              <div className="text-[10px] text-gray-400 leading-tight">
-                W1: {DOCKS_COMPANY.witnesses.w1_arbaz.name} ({DOCKS_COMPANY.witnesses.w1_arbaz.cnic})<br />
-                W2: {DOCKS_COMPANY.witnesses.w2_shams.name} ({DOCKS_COMPANY.witnesses.w2_shams.cnic})
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                <label className="cursor-pointer border border-dashed border-purple-500/35 hover:border-purple-400 bg-purple-500/5 rounded-lg p-1.5 text-center text-[10.5px] text-purple-200 font-semibold truncate">
-                  <input type="file" className="hidden" accept="image/*,application/pdf" onChange={handleWitnessIdUpload('W1')} />
-                  {witnessIdDocs.w1Url ? '✓ W1 CNIC Saved' : 'Upload Witness 1 CNIC'}
-                </label>
-                <label className="cursor-pointer border border-dashed border-purple-500/35 hover:border-purple-400 bg-purple-500/5 rounded-lg p-1.5 text-center text-[10.5px] text-purple-200 font-semibold truncate">
-                  <input type="file" className="hidden" accept="image/*,application/pdf" onChange={handleWitnessIdUpload('W2')} />
-                  {witnessIdDocs.w2Url ? '✓ W2 CNIC Saved' : 'Upload Witness 2 CNIC'}
-                </label>
-              </div>
+            {/* 3. Auto-Populated Company Owner Detail & Permanent 2 Witnesses (Matched by Registered Company) */}
+            <div className="sm:col-span-2">
+              <CompanySignatoriesAutoBanner
+                vehicle={formData}
+                onEditCompanyOwner={onOpenCompanyOwnerModal}
+                onEditWitnesses={onOpenWitnessesModal}
+              />
             </div>
           </div>
 
@@ -4467,26 +4300,15 @@ const AddVehicleModal = ({
               </div>
             </div>
 
-            {/* A. 7 Registration / Renewal Documents (.docx) */}
+            {/* A. Registration / Renewal Documents (.docx) */}
             <div className="pt-3 border-t border-white/10 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <span className="text-xs font-bold text-white block">
-                    A. Registration / 6-Month Renewal Pack (All 7 Official Word .docx Files)
-                  </span>
-                  <span className="text-[10.5px] text-gray-300">
-                    Populated with this vehicle&apos;s exact particulars, owner details &amp; standard witnesses (editable in Microsoft Word).
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  disabled={generatingDocType !== null}
-                  onClick={() => handleGenerateModalDoc('ALL_7_REG_PACK')}
-                  className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow whitespace-nowrap"
-                >
-                  {generatingDocType === 'ALL_7_REG_PACK' ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-                  <span>Download All 7 Registration / Renewal Docs (.docx)</span>
-                </button>
+              <div>
+                <span className="text-xs font-bold text-white block">
+                  A. Registration / 6-Month Renewal Documents (Official Word .docx Files)
+                </span>
+                <span className="text-[10.5px] text-gray-300">
+                  Populated automatically with this vehicle&apos;s particulars, vehicle owner details, matched company owner &amp; permanent 2 witnesses.
+                </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
@@ -5272,6 +5094,11 @@ const VehicleProfileModal = ({
                    </div>
                  )}
                </div>
+             </div>
+
+             {/* Matched Company Owner & Permanent 2 Witnesses */}
+             <div className="mt-4 pt-4 border-t border-white/10">
+               <CompanySignatoriesAutoBanner vehicle={vehicle} compact />
              </div>
            </div>
 

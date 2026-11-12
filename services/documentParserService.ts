@@ -2,6 +2,13 @@ import * as XLSX from 'xlsx';
 // @ts-ignore
 import mammoth from 'mammoth';
 import { Vehicle, VehicleCategory, VehicleType } from '../types';
+import {
+  extractVehicleBasePlate,
+  haveConflictingChassisAndEngine,
+  isSameRegChassisEngineTruckitDocksPair,
+  normalizeTechNumber,
+  resolveCanonicalCompanyKey,
+} from './vehicleDuplicateService';
 
 export interface ParsedVehicleRow {
   registrationNumber: string;
@@ -436,9 +443,14 @@ export function checkVehicleWorkflowReadiness(
 export type DedupeVehiclesResult<T> = T[] & {
   merged: T[];
   removedIds: (string | number)[];
+  updatedRecords: T[];
 };
 
-function attachDedupeMeta<T>(arr: T[], removedIds: (string | number)[]): DedupeVehiclesResult<T> {
+function attachDedupeMeta<T>(
+  arr: T[],
+  removedIds: (string | number)[],
+  updatedRecords: T[] = []
+): DedupeVehiclesResult<T> {
   const result = arr as DedupeVehiclesResult<T>;
   Object.defineProperty(result, 'merged', {
     value: arr,
@@ -452,26 +464,147 @@ function attachDedupeMeta<T>(arr: T[], removedIds: (string | number)[]): DedupeV
     configurable: true,
     writable: true
   });
+  Object.defineProperty(result, 'updatedRecords', {
+    value: updatedRecords,
+    enumerable: false,
+    configurable: true,
+    writable: true
+  });
   return result;
 }
 
+function pickFullerSerial(primaryVal?: string, secondaryVal?: string): string {
+  const p = String(primaryVal || '').trim();
+  const s = String(secondaryVal || '').trim();
+  const pNorm = normalizeTechNumber(p);
+  const sNorm = normalizeTechNumber(s);
+  if (!pNorm && sNorm) return s;
+  if (pNorm && !sNorm) return p;
+  if (!pNorm && !sNorm) return p || s || 'N/A';
+  if (sNorm.length > pNorm.length && sNorm.endsWith(pNorm)) return s;
+  return p;
+}
+
+function combineTwoVehicleRecords<T extends Partial<Vehicle>>(
+  keepRec: T,
+  dropRec: T,
+  removedIdsOut: (string | number)[],
+  forceTruckit = false
+): T {
+  const cleanKeepReg = String(keepRec.registrationNumber || dropRec.registrationNumber || '').trim().toUpperCase();
+  const primaryId = keepRec.id || getDeterministicVehicleId(cleanKeepReg);
+
+  if (dropRec.id && String(dropRec.id) !== String(primaryId)) {
+    removedIdsOut.push(dropRec.id);
+  }
+  const dropDocId = (dropRec as any)._docId;
+  if (dropDocId && String(dropDocId) !== String(primaryId)) {
+    removedIdsOut.push(dropDocId);
+  }
+
+  const keepRegDate = parseRobustDate(keepRec.registrationDate || keepRec.validationStartDate);
+  const dropRegDate = parseRobustDate(dropRec.registrationDate || dropRec.validationStartDate);
+  let bestRegDate = keepRegDate || dropRegDate || '';
+  if (keepRegDate && dropRegDate) {
+    bestRegDate = keepRegDate >= dropRegDate ? keepRegDate : dropRegDate;
+  }
+
+  const bestRenewalDate = keepRec.lastRenewalDate || dropRec.lastRenewalDate;
+  const mergedValidity = evaluateVehicleRegistrationValidity(
+    bestRegDate,
+    keepRec.validationExpiryDate || dropRec.validationExpiryDate,
+    bestRenewalDate
+  );
+
+  const keepTrans = String(keepRec.transporterName || keepRec.brokerName || '').trim();
+  const dropTrans = String(dropRec.transporterName || dropRec.brokerName || '').trim();
+  const mergedTransporter =
+    keepTrans && keepTrans !== 'Direct Fleet' && keepTrans !== 'DIRECT FLEET' && keepTrans !== 'Direct Broker'
+      ? keepTrans
+      : (dropTrans || keepTrans || 'DIRECT FLEET');
+
+  const mergedMaker = String(keepRec.maker || keepRec.make || dropRec.maker || dropRec.make || '').trim().toUpperCase();
+  const mergedModel = String(keepRec.model || dropRec.model || '').trim();
+  const mergedMakeModel =
+    [mergedMaker, mergedModel].filter(Boolean).join(' ') || keepRec.makeModel || dropRec.makeModel;
+
+  const keepTrips = Array.isArray(keepRec.tripsHistory) ? keepRec.tripsHistory : [];
+  const dropTrips = Array.isArray(dropRec.tripsHistory) ? dropRec.tripsHistory : [];
+  const combinedTripsMap = new Map<string, any>();
+  [...keepTrips, ...dropTrips].forEach((tr) => {
+    if (!tr) return;
+    const key = tr.id || `${tr.caseNo || ''}-${tr.date || ''}-${tr.containerNumber || ''}`;
+    if (!combinedTripsMap.has(key)) {
+      combinedTripsMap.set(key, tr);
+    }
+  });
+
+  const keepComp = resolveVehicleCompany(keepRec.companyName || keepRec.operatingCompany);
+
+  return {
+    ...dropRec,
+    ...keepRec,
+    id: primaryId,
+    registrationNumber: cleanKeepReg,
+    chassisNo: pickFullerSerial(keepRec.chassisNo, dropRec.chassisNo),
+    engineNo: pickFullerSerial(keepRec.engineNo, dropRec.engineNo),
+    maker: mergedMaker || undefined,
+    make: mergedMaker || undefined,
+    model: mergedModel || undefined,
+    makeModel: mergedMakeModel || undefined,
+    transporterName: mergedTransporter,
+    brokerName: mergedTransporter,
+    operatingCompany: forceTruckit ? 'truckit' : keepComp.operatingCompany,
+    companyName: forceTruckit ? 'TRUCKIT PVT LTD' : keepComp.companyName,
+    registrationDate: mergedValidity.registrationDate || undefined,
+    validationExpiryDate: mergedValidity.validationExpiryDate,
+    lastRenewalDate: bestRenewalDate,
+    registrationBook: keepRec.registrationBook || dropRec.registrationBook,
+    registrationBookName: keepRec.registrationBookName || dropRec.registrationBookName,
+    customsRegCertDoc: keepRec.customsRegCertDoc || dropRec.customsRegCertDoc,
+    ownerIdCardUrl: keepRec.ownerIdCardUrl || dropRec.ownerIdCardUrl,
+    ownerIdCardName: keepRec.ownerIdCardName || dropRec.ownerIdCardName,
+    ownerName: keepRec.ownerName || dropRec.ownerName,
+    ownerCnic: keepRec.ownerCnic || dropRec.ownerCnic,
+    ownerAddress: keepRec.ownerAddress || dropRec.ownerAddress,
+    driverName: keepRec.driverName || dropRec.driverName || '',
+    driverCnic: keepRec.driverCnic || dropRec.driverCnic || '',
+    driverContact: keepRec.driverContact || dropRec.driverContact || '',
+    tripsHistory: Array.from(combinedTripsMap.values()),
+    history:
+      Array.isArray(keepRec.history) && keepRec.history.length > 0
+        ? keepRec.history
+        : (dropRec.history || []),
+    status:
+      keepRec.status === 'ON_TRIP' || dropRec.status === 'ON_TRIP'
+        ? 'ON_TRIP'
+        : keepRec.status === 'CANCELLED'
+        ? 'CANCELLED'
+        : mergedValidity.status
+  };
+}
+
 /**
- * Deduplicates and merges vehicle records by normalized registrationNumber.
+ * Deduplicates and merges vehicle records by registrationNumber + Chassis/Engine verification.
  * Enforces the user's strict rules:
  * 1. Vehicles MOVE between companies, they are NEVER copied/duplicated.
- * 2. If a vehicle appears in both Docks Private Limited and Truckit Private Limited,
- *    it is shifted to Truckit Private Limited ('truckit' / 'TRUCKIT PVT LTD') and removed from Docks.
- * 3. Transporter and Broker are always kept identical.
+ * 2. If a vehicle appears in both Docks Private Limited and Truckit Private Limited with the same
+ *    Registration Number (exact OR with city/MRA suffix like LS/QT/BD/KP) AND matching Chassis & Engine,
+ *    the Truckit Private Limited record is kept and the Docks record is deleted.
+ * 3. Never silently overwrite two distinct trucks that happen to have similar plates with conflicting Chassis & Engine.
+ * 4. Transporter and Broker are always kept identical.
  */
 export function dedupeAndMergeVehicles<T extends Partial<Vehicle>>(
   records: T[],
-  options?: { preferIncomingCompany?: boolean }
+  _options?: { preferIncomingCompany?: boolean }
 ): DedupeVehiclesResult<T> {
   if (!Array.isArray(records) || records.length === 0) {
-    return attachDedupeMeta<T>([], []);
+    return attachDedupeMeta<T>([], [], []);
   }
   const map = new Map<string, T>();
+  const distinctConflictItems: T[] = [];
   const removedIds: (string | number)[] = [];
+  const updatedById = new Map<string, T>();
 
   for (const item of records) {
     if (!item || !item.registrationNumber) continue;
@@ -482,7 +615,7 @@ export function dedupeAndMergeVehicles<T extends Partial<Vehicle>>(
 
     const cleanReg = String(item.registrationNumber).trim().toUpperCase();
     const transporter = String(item.transporterName || item.brokerName || 'DIRECT FLEET').trim();
-    const broker = transporter; // Transporter and Broker are always identical per user mandate
+    const broker = transporter;
 
     const maker = String(item.maker || item.make || '').trim().toUpperCase();
     const model = String(item.model || '').trim();
@@ -495,134 +628,117 @@ export function dedupeAndMergeVehicles<T extends Partial<Vehicle>>(
       item.lastRenewalDate
     );
 
-    const existing = map.get(plateKey);
-    if (!existing) {
-      const normalizedItem: T = {
-        ...item,
-        id: item.id || getDeterministicVehicleId(cleanReg),
-        registrationNumber: cleanReg,
-        transporterName: transporter,
-        brokerName: broker,
-        maker: maker || item.maker,
-        make: maker || item.make,
-        model: model || item.model,
-        makeModel: makeModel || item.makeModel,
-        operatingCompany: compInfo.operatingCompany,
-        companyName: compInfo.companyName,
-        registrationDate: validity.registrationDate || undefined,
-        validationExpiryDate: validity.validationExpiryDate,
-        status: item.status === 'ON_TRIP' || item.status === 'CANCELLED'
+    const normalizedItem: T = {
+      ...item,
+      id: item.id || getDeterministicVehicleId(cleanReg),
+      registrationNumber: cleanReg,
+      transporterName: transporter,
+      brokerName: broker,
+      maker: maker || item.maker,
+      make: maker || item.make,
+      model: model || item.model,
+      makeModel: makeModel || item.makeModel,
+      operatingCompany: compInfo.operatingCompany,
+      companyName: compInfo.companyName,
+      registrationDate: validity.registrationDate || undefined,
+      validationExpiryDate: validity.validationExpiryDate,
+      status:
+        item.status === 'ON_TRIP' || item.status === 'CANCELLED'
           ? item.status
           : validity.status
-      };
+    };
+
+    const existing = map.get(plateKey);
+    if (!existing) {
       map.set(plateKey, normalizedItem);
+    } else if (haveConflictingChassisAndEngine(existing, normalizedItem)) {
+      // Distinct physical trucks with conflicting valid Chassis & Engine: keep both so UI Duplicate Manager can review
+      const distinctId =
+        normalizedItem.id && String(normalizedItem.id) !== String(existing.id)
+          ? normalizedItem.id
+          : getDeterministicVehicleId(`${cleanReg}_${normalizedItem.chassisNo || Date.now()}`);
+      distinctConflictItems.push({ ...normalizedItem, id: distinctId });
     } else {
-      // Merge existing and incoming without duplicating!
-      // Rule: If either record is Truckit and the other is Docks, it MUST be on Truckit (moved from Docks to Truckit).
-      const existingComp = resolveVehicleCompany(existing.companyName || existing.operatingCompany);
-      const incomingComp = compInfo;
+      const existingComp = resolveCanonicalCompanyKey(existing);
+      const incomingComp = resolveCanonicalCompanyKey(normalizedItem);
+      const isTruckitDocks =
+        (existingComp === 'truckit' && incomingComp === 'docks') ||
+        (existingComp === 'docks' && incomingComp === 'truckit');
 
-      let finalOperatingCompany = incomingComp.operatingCompany;
-      let finalCompanyName = incomingComp.companyName;
-
-      if (
-        (existingComp.operatingCompany === 'truckit' && incomingComp.operatingCompany === 'docks') ||
-        (existingComp.operatingCompany === 'docks' && incomingComp.operatingCompany === 'truckit')
-      ) {
-        finalOperatingCompany = 'truckit';
-        finalCompanyName = 'TRUCKIT PVT LTD';
-      }
-
-      // Track redundant ID so Firestore can delete duplicate document IDs
-      const primaryId = existing.id || getDeterministicVehicleId(cleanReg);
-      if (item.id && String(item.id) !== String(primaryId)) {
-        removedIds.push(item.id);
-      }
-      const docIdRaw = (item as any)._docId;
-      if (docIdRaw && String(docIdRaw) !== String(primaryId)) {
-        removedIds.push(docIdRaw);
-      }
-
-      // Pick the best registration date (if one has a date and the other is empty, keep the date; if both have dates, keep the newer one)
-      const existingRegDate = parseRobustDate(existing.registrationDate || existing.validationStartDate);
-      const incomingRegDate = parseRobustDate(item.registrationDate || item.validationStartDate);
-      let bestRegDate = incomingRegDate || existingRegDate || '';
-      if (existingRegDate && incomingRegDate) {
-        bestRegDate = incomingRegDate >= existingRegDate ? incomingRegDate : existingRegDate;
-      }
-
-      const bestRenewalDate = item.lastRenewalDate || existing.lastRenewalDate;
-      const mergedValidity = evaluateVehicleRegistrationValidity(
-        bestRegDate,
-        item.validationExpiryDate || existing.validationExpiryDate,
-        bestRenewalDate
-      );
-
-      const mergedTransporter =
-        (item.transporterName && item.transporterName !== 'Direct Fleet' && item.transporterName !== 'Direct Broker')
-          ? item.transporterName.trim()
-          : (existing.transporterName || transporter);
-
-      const mergedMaker = maker || existing.maker || existing.make || '';
-      const mergedModel = model || existing.model || '';
-      const mergedMakeModel = [mergedMaker, mergedModel].filter(Boolean).join(' ') || item.makeModel || existing.makeModel;
-
-      // Merge tripsHistory so multi-trip history is never lost when a vehicle moves company
-      const existingTrips = Array.isArray(existing.tripsHistory) ? existing.tripsHistory : [];
-      const incomingTrips = Array.isArray(item.tripsHistory) ? item.tripsHistory : [];
-      const combinedTripsMap = new Map<string, any>();
-      [...incomingTrips, ...existingTrips].forEach((tr) => {
-        if (!tr) return;
-        const key = tr.id || `${tr.caseNo || ''}-${tr.date || ''}-${tr.containerNumber || ''}`;
-        if (!combinedTripsMap.has(key)) {
-          combinedTripsMap.set(key, tr);
-        }
-      });
-
-      const merged: T = {
-        ...existing,
-        ...item,
-        id: primaryId,
-        registrationNumber: cleanReg,
-        chassisNo: (item.chassisNo && item.chassisNo !== 'N/A') ? item.chassisNo : (existing.chassisNo || 'N/A'),
-        engineNo: (item.engineNo && item.engineNo !== 'N/A') ? item.engineNo : (existing.engineNo || 'N/A'),
-        maker: mergedMaker || undefined,
-        make: mergedMaker || undefined,
-        model: mergedModel || undefined,
-        makeModel: mergedMakeModel || undefined,
-        transporterName: mergedTransporter,
-        brokerName: mergedTransporter, // Always keep broker identical to transporter
-        operatingCompany: finalOperatingCompany,
-        companyName: finalCompanyName,
-        registrationDate: mergedValidity.registrationDate || undefined,
-        validationExpiryDate: mergedValidity.validationExpiryDate,
-        lastRenewalDate: bestRenewalDate,
-        // Preserve uploaded documents and owner details across updates
-        registrationBook: item.registrationBook || existing.registrationBook,
-        registrationBookName: item.registrationBookName || existing.registrationBookName,
-        customsRegCertDoc: item.customsRegCertDoc || existing.customsRegCertDoc,
-        ownerIdCardUrl: item.ownerIdCardUrl || existing.ownerIdCardUrl,
-        ownerIdCardName: item.ownerIdCardName || existing.ownerIdCardName,
-        ownerName: item.ownerName || existing.ownerName,
-        ownerCnic: item.ownerCnic || existing.ownerCnic,
-        ownerAddress: item.ownerAddress || existing.ownerAddress,
-        driverName: item.driverName || existing.driverName || '',
-        driverCnic: item.driverCnic || existing.driverCnic || '',
-        driverContact: item.driverContact || existing.driverContact || '',
-        tripsHistory: Array.from(combinedTripsMap.values()),
-        history: Array.isArray(existing.history) && existing.history.length > 0
-          ? existing.history
-          : (item.history || []),
-        status: existing.status === 'ON_TRIP' || item.status === 'ON_TRIP'
-          ? 'ON_TRIP'
-          : (item.status === 'CANCELLED' ? 'CANCELLED' : mergedValidity.status)
-      };
+      // Prefer Truckit record as the primary keeper if merging Docks + Truckit
+      const keepFirst = incomingComp === 'truckit' && existingComp === 'docks' ? false : true;
+      const merged = keepFirst
+        ? combineTwoVehicleRecords(existing, normalizedItem, removedIds, isTruckitDocks)
+        : combineTwoVehicleRecords(normalizedItem, existing, removedIds, isTruckitDocks);
 
       map.set(plateKey, merged);
+      if (merged.id) updatedById.set(String(merged.id), merged);
     }
   }
 
-  return attachDedupeMeta(Array.from(map.values()), removedIds);
+  // Pass 2: Consolidate Truckit vs Docks duplicates where Registration has an MRA/Province suffix
+  // (e.g. TLC-880LS [Truckit] vs TLC-880 [Docks], AE-0227BD [Truckit] vs AE-0227 [Docks], TLZ-916LS vs TLZ-916, TLQ-411QT vs TLQ-411)
+  // AND Chassis & Engine match -> Keep Truckit, Delete Docks!
+  const pass1Items = [...Array.from(map.values()), ...distinctConflictItems];
+  const byBasePlate = new Map<string, number[]>();
+  pass1Items.forEach((rec, idx) => {
+    const bp = extractVehicleBasePlate(rec.registrationNumber).base;
+    if (!bp) return;
+    let bucket = byBasePlate.get(bp);
+    if (!bucket) {
+      bucket = [];
+      byBasePlate.set(bp, bucket);
+    }
+    bucket.push(idx);
+  });
+
+  const droppedIndices = new Set<number>();
+
+  byBasePlate.forEach((indices) => {
+    if (indices.length < 2) return;
+    for (let i = 0; i < indices.length; i++) {
+      const idxA = indices[i];
+      if (droppedIndices.has(idxA)) continue;
+      for (let j = i + 1; j < indices.length; j++) {
+        const idxB = indices[j];
+        if (droppedIndices.has(idxB)) continue;
+
+        const A = pass1Items[idxA];
+        const B = pass1Items[idxB];
+        if (!isSameRegChassisEngineTruckitDocksPair(A, B)) continue;
+
+        const compA = resolveCanonicalCompanyKey(A);
+        const truckitIdx = compA === 'truckit' ? idxA : idxB;
+        const docksIdx = compA === 'truckit' ? idxB : idxA;
+
+        const mergedTruckit = combineTwoVehicleRecords(
+          pass1Items[truckitIdx],
+          pass1Items[docksIdx],
+          removedIds,
+          true
+        );
+        pass1Items[truckitIdx] = mergedTruckit;
+        droppedIndices.add(docksIdx);
+        if (mergedTruckit.id) {
+          updatedById.set(String(mergedTruckit.id), mergedTruckit);
+        }
+      }
+    }
+  });
+
+  const finalArr = pass1Items.filter((_, idx) => !droppedIndices.has(idx));
+  const uniqueRemovedIds = Array.from(
+    new Set(
+      removedIds.filter(
+        (rid) => !finalArr.some((v) => String(v.id) === String(rid) || String((v as any)._docId || '') === String(rid))
+      )
+    )
+  );
+  const finalUpdatedRecords = Array.from(updatedById.values()).filter((u) =>
+    finalArr.some((f) => String(f.id) === String(u.id))
+  );
+
+  return attachDedupeMeta(finalArr, uniqueRemovedIds, finalUpdatedRecords);
 }
 
 /**

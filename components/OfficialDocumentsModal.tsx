@@ -26,6 +26,7 @@ import {
 } from '../services/vehicleDocxService';
 import { downloadCustomsVehicleListPdf } from '../services/pdfExportService';
 import { useActiveCompany } from '../services/companyService';
+import { useVehicleLegalSignatories } from '../services/vehicleLegalSignatoriesService';
 import { updateVehicleInFirestore } from '../services/dbService';
 import { evaluateVehicleRegistrationValidity } from '../services/documentParserService';
 import { UniversalDocumentPreviewModal, DataMappingCheckItem } from './UniversalDocumentPreviewModal';
@@ -59,6 +60,7 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
 }) => {
   const allVehicles = rawAllVehicles || altVehicles || [];
   const { activeCompany } = useActiveCompany();
+  const { witnesses: savedWitnesses } = useVehicleLegalSignatories();
 
   const [activeTab, setActiveTab] = useState<DocumentType>(initialDocType);
   const [searchQuery, setSearchQuery] = useState('');
@@ -119,10 +121,17 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
   const [customFatherName, setCustomFatherName] = useState<string>('');
   const [customCnic, setCustomCnic] = useState<string>('');
   const [customAddress, setCustomAddress] = useState<string>('');
-  const [witness1Name, setWitness1Name] = useState<string>(DOCKS_COMPANY.witnesses.w1_arbaz.name);
-  const [witness1Cnic, setWitness1Cnic] = useState<string>(DOCKS_COMPANY.witnesses.w1_arbaz.cnic);
-  const [witness2Name, setWitness2Name] = useState<string>(DOCKS_COMPANY.witnesses.w2_shams.name);
-  const [witness2Cnic, setWitness2Cnic] = useState<string>(DOCKS_COMPANY.witnesses.w2_shams.cnic);
+  const [witness1Name, setWitness1Name] = useState<string>(savedWitnesses[0]?.name || DOCKS_COMPANY.witnesses.w1_arbaz.name);
+  const [witness1Cnic, setWitness1Cnic] = useState<string>(savedWitnesses[0]?.cnic || DOCKS_COMPANY.witnesses.w1_arbaz.cnic);
+  const [witness2Name, setWitness2Name] = useState<string>(savedWitnesses[1]?.name || DOCKS_COMPANY.witnesses.w2_shams.name);
+  const [witness2Cnic, setWitness2Cnic] = useState<string>(savedWitnesses[1]?.cnic || DOCKS_COMPANY.witnesses.w2_shams.cnic);
+
+  useEffect(() => {
+    if (savedWitnesses[0]?.name) setWitness1Name(savedWitnesses[0].name);
+    if (savedWitnesses[0]?.cnic) setWitness1Cnic(savedWitnesses[0].cnic);
+    if (savedWitnesses[1]?.name) setWitness2Name(savedWitnesses[1].name);
+    if (savedWitnesses[1]?.cnic) setWitness2Cnic(savedWitnesses[1].cnic);
+  }, [savedWitnesses]);
 
   // Filtered vehicles pool
   const displayVehicles = useMemo(() => {
@@ -269,10 +278,10 @@ export const OfficialDocumentsModal: React.FC<OfficialDocumentsModalProps> = ({
             customLessorName: customLessorName || undefined,
             customCnic: customCnic || undefined,
             customAddress: customAddress || undefined,
-            witness1Name: DOCKS_COMPANY.witnesses.w1_hasnain.name,
-            witness1Cnic: DOCKS_COMPANY.witnesses.w1_hasnain.cnic,
-            witness2Name: DOCKS_COMPANY.witnesses.w2_shams.name,
-            witness2Cnic: DOCKS_COMPANY.witnesses.w2_shams.cnic
+            witness1Name,
+            witness1Cnic,
+            witness2Name,
+            witness2Cnic
           });
           const filename = `Lease_Cancellation_Termination_${v.registrationNumber}_Stamp_Paper.docx`;
           await downloadDocxBlob(doc, filename);

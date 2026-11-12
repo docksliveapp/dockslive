@@ -204,28 +204,52 @@ export function exportClientLedgerToExcel(
   XLSX.writeFile(wb, filename);
 }
 
-/**
- * Exports Vehicles Master List to native Excel (.xlsx)
- */
-export function exportVehiclesToExcel(vehicles: Vehicle[]) {
+import { getCompanyOwnerForVehicle } from './vehicleLegalSignatoriesService';
+import { evaluateVehicleRegistrationValidity, normalizeVehiclePlate } from './documentParserService';
+
+export interface VehicleExcelExportOptions {
+  filterLabel?: string;
+  filterSlug?: string;
+  tripCountsByPlate?: Map<string, number>;
+}
+
+function buildCompleteFleetWorksheet(
+  vehicles: Vehicle[],
+  options: VehicleExcelExportOptions = {}
+): { wb: XLSX.WorkBook; filename: string } {
   const wb = XLSX.utils.book_new();
   const today = new Date().toISOString().split('T')[0];
   const activeComp = getActiveCompany();
   const prefix = getActiveCompanyPrefix();
   const compTitle = (activeComp.legalTitle || activeComp.name).toUpperCase();
+  const filterLabel = options.filterLabel || 'All Vehicles';
+  const filterSlug = (options.filterSlug || filterLabel).replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
 
   const headers = [
     'Sr No',
     'VEHICLE NO.',
+    'FLEET SERIAL',
+    'COMPANY',
+    'COMPANY OWNER / DIRECTOR',
+    'COMPANY OWNER CNIC',
+    'CATEGORY',
+    'VEHICLE TYPE',
+    'SIZE',
+    'TARE / WEIGHT CAPACITY',
     'CHASSIS NO.',
     'ENGINE NO.',
     'MAKER',
     'MODEL',
+    'REGISTERED IN (MRA)',
     'TRANSPORTER NAME',
     'BROKER NAME',
+    'VEHICLE OWNER NAME',
+    'OWNER FATHER NAME',
+    'OWNER CNIC',
+    'OWNER ADDRESS',
     'REGISTRATION DATE',
+    'LAST RENEWAL DATE',
     'VALIDITY EXPIRY (6 MONTHS)',
-    'COMPANY',
     'CUSTOMS 6M STATUS',
     'REG BOOK',
     'OWNER ID CARD',
@@ -238,54 +262,122 @@ export function exportVehiclesToExcel(vehicles: Vehicle[]) {
   const sheetData: any[][] = [
     [`${compTitle}`],
     [activeComp.tagline || 'Customs Bonded Carrier • Bonded Fleet Registry • Directorate General of Transit Trade'],
-    [`Operations: ${activeComp.address || 'Office No. 14-B, 1st Floor, State Life Bldg No. 7, G-Allana Road Tower, Karachi'}`],
+    [`Operations: ${activeComp.address || 'Office No. 13, 1st Floor, State Life Bldg No. 7, G-Allana Road Tower, Karachi'}`],
     [`Contact: ${activeComp.phone || '+92-21-32330103'} | Web: ${activeComp.web || 'www.dockspk.com'}`],
     [],
-    ['PAKISTAN CUSTOMS BONDED FLEET - MASTER VEHICLE REGISTRY (SHARED DATABASE)'],
-    [`Export Date: ${today}`, `Total Vehicles: ${vehicles.length}`, `Customs Rule: 6-Month Registration Validity`],
+    [`PAKISTAN CUSTOMS BONDED FLEET - ${filterLabel.toUpperCase()} MASTER LIST`],
+    [
+      `Export Date: ${today}`,
+      `Selected Scope: ${filterLabel}`,
+      `Total Vehicles: ${vehicles.length}`,
+      `Customs Rule: 6-Month Registration Validity`
+    ],
     [],
     headers
   ];
 
   vehicles.forEach((v, idx) => {
     const transporter = v.transporterName || v.brokerName || '';
-    const companyDisplay = v.companyName || (v.operatingCompany === 'truckit' ? 'TRUCKIT PVT LTD' : v.operatingCompany === 'docks' ? 'DOCKS PVT LTD' : (v.operatingCompany || 'TRUCKIT PVT LTD').toUpperCase());
+    const companyDisplay =
+      v.companyName ||
+      (v.operatingCompany === 'truckit'
+        ? 'TRUCKIT PVT LTD'
+        : v.operatingCompany === 'docks'
+          ? 'DOCKS PVT LTD'
+          : v.operatingCompany === 'muhib'
+            ? 'MUHIB INTERNATIONAL'
+            : v.operatingCompany === 'vantage'
+              ? 'VANTAGE SHIPPING LINE'
+              : (v.operatingCompany || 'TRUCKIT PVT LTD').toUpperCase());
+
+    const compOwner = getCompanyOwnerForVehicle(v);
+    const compOwnerLabel = compOwner.name
+      ? `${compOwner.name}${compOwner.designation ? ` (${compOwner.designation})` : ''}`
+      : '';
+
+    const evalValidity = evaluateVehicleRegistrationValidity(v.registrationDate, v.validationExpiryDate);
+    const resolvedExpiry = v.validationExpiryDate || evalValidity.expiryDate || '';
+    let statusLabel = String(v.status || 'AVAILABLE');
+    if (v.status === 'CANCELLED') {
+      statusLabel = 'CANCELLED';
+    } else if (evalValidity.isExpired || v.status === 'EXPIRED') {
+      statusLabel = 'EXPIRED';
+    } else if (resolvedExpiry) {
+      const daysLeft = Math.ceil((new Date(resolvedExpiry).getTime() - Date.now()) / (1000 * 3600 * 24));
+      if (daysLeft >= 0 && daysLeft <= 30) {
+        statusLabel = `EXPIRY SOON (${daysLeft}d)`;
+      } else {
+        statusLabel = 'VALID (ACTIVE)';
+      }
+    }
+
+    const normPlate = normalizeVehiclePlate(v.registrationNumber || '');
+    const tripsCount =
+      (options.tripCountsByPlate && normPlate ? options.tripCountsByPlate.get(normPlate) : undefined) ??
+      (v.tripsHistory || []).length;
+
     sheetData.push([
       idx + 1,
       v.registrationNumber || '',
+      v.dplSerial || '',
+      companyDisplay,
+      compOwnerLabel,
+      compOwner.cnic || '',
+      v.category || '',
+      v.type || '',
+      v.size || '',
+      [v.tareWeight, v.weightCapacity].filter(Boolean).join(' / '),
       v.chassisNo || '',
       v.engineNo || '',
-      v.make || '',
+      v.make || v.maker || '',
       v.model || '',
+      v.mra || '',
       transporter,
-      transporter,
+      v.brokerName || transporter,
+      v.ownerName || '',
+      v.ownerFatherName || '',
+      v.ownerCnic || '',
+      v.ownerAddress || '',
       v.registrationDate || '',
-      v.validationExpiryDate || '',
-      companyDisplay,
-      v.status || 'AVAILABLE',
+      v.lastRenewalDate || v.registrationDate || '',
+      resolvedExpiry,
+      statusLabel,
       v.registrationBook ? 'Uploaded' : 'Missing',
       v.ownerIdCardUrl ? 'Uploaded' : 'Missing',
       v.driverName || '',
       v.driverCnic || '',
       v.driverContact || '',
-      (v.tripsHistory || []).length
+      tripsCount
     ]);
   });
 
   const ws = XLSX.utils.aoa_to_sheet(sheetData);
   ws['!cols'] = [
-    { wch: 8 },  // Sr
+    { wch: 8 },  // Sr No
     { wch: 20 }, // VEHICLE NO.
+    { wch: 16 }, // FLEET SERIAL
+    { wch: 24 }, // COMPANY
+    { wch: 28 }, // COMPANY OWNER
+    { wch: 20 }, // COMPANY OWNER CNIC
+    { wch: 18 }, // CATEGORY
+    { wch: 16 }, // TYPE
+    { wch: 12 }, // SIZE
+    { wch: 20 }, // TARE / WEIGHT
     { wch: 24 }, // CHASSIS NO.
-    { wch: 20 }, // ENGINE NO.
+    { wch: 22 }, // ENGINE NO.
     { wch: 16 }, // MAKER
-    { wch: 14 }, // MODEL
-    { wch: 30 }, // TRANSPORTER NAME
-    { wch: 30 }, // BROKER NAME
+    { wch: 12 }, // MODEL
+    { wch: 20 }, // MRA
+    { wch: 28 }, // TRANSPORTER NAME
+    { wch: 28 }, // BROKER NAME
+    { wch: 26 }, // VEHICLE OWNER NAME
+    { wch: 24 }, // OWNER FATHER NAME
+    { wch: 20 }, // OWNER CNIC
+    { wch: 36 }, // OWNER ADDRESS
     { wch: 18 }, // REGISTRATION DATE
+    { wch: 18 }, // LAST RENEWAL DATE
     { wch: 22 }, // VALIDITY EXPIRY
-    { wch: 22 }, // COMPANY
-    { wch: 18 }, // STATUS
+    { wch: 20 }, // STATUS
     { wch: 14 }, // REG BOOK
     { wch: 16 }, // OWNER ID
     { wch: 22 }, // DRIVER NAME
@@ -295,103 +387,27 @@ export function exportVehiclesToExcel(vehicles: Vehicle[]) {
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Fleet Master');
-  XLSX.writeFile(wb, `${prefix}_Master_Vehicles_Fleet_${today}.xlsx`);
+  const filename = `${prefix}_Fleet_${filterSlug}_${today}.xlsx`;
+  return { wb, filename };
+}
+
+/**
+ * Exports Vehicles Master List to native Excel (.xlsx) with complete vehicle & owner details
+ */
+export function exportVehiclesToExcel(vehicles: Vehicle[], options: VehicleExcelExportOptions = {}) {
+  const { wb, filename } = buildCompleteFleetWorksheet(vehicles, options);
+  XLSX.writeFile(wb, filename);
 }
 
 /**
  * Generates the raw Excel (.xlsx) buffer and filename for read-only preview before downloading
  */
-export function generateVehiclesExcelBuffer(vehicles: Vehicle[]): { buffer: ArrayBuffer; filename: string } {
-  const wb = XLSX.utils.book_new();
-  const today = new Date().toISOString().split('T')[0];
-  const activeComp = getActiveCompany();
-  const prefix = getActiveCompanyPrefix();
-  const compTitle = (activeComp.legalTitle || activeComp.name).toUpperCase();
-
-  const headers = [
-    'Sr No',
-    'VEHICLE NO.',
-    'CHASSIS NO.',
-    'ENGINE NO.',
-    'MAKER',
-    'MODEL',
-    'TRANSPORTER NAME',
-    'BROKER NAME',
-    'REGISTRATION DATE',
-    'VALIDITY EXPIRY (6 MONTHS)',
-    'COMPANY',
-    'CUSTOMS 6M STATUS',
-    'REG BOOK',
-    'OWNER ID CARD',
-    'DRIVER NAME',
-    'DRIVER CNIC',
-    'DRIVER CONTACT',
-    'TRIPS COUNT'
-  ];
-
-  const sheetData: any[][] = [
-    [`${compTitle}`],
-    [activeComp.tagline || 'Customs Bonded Carrier • Bonded Fleet Registry • Directorate General of Transit Trade'],
-    [`Operations: ${activeComp.address || 'Office No. 14-B, 1st Floor, State Life Bldg No. 7, G-Allana Road Tower, Karachi'}`],
-    [`Contact: ${activeComp.phone || '+92-21-32330103'} | Web: ${activeComp.web || 'www.dockspk.com'}`],
-    [],
-    ['PAKISTAN CUSTOMS BONDED FLEET - MASTER VEHICLE REGISTRY (SHARED DATABASE)'],
-    [`Export Date: ${today}`, `Total Vehicles: ${vehicles.length}`, `Customs Rule: 6-Month Registration Validity`],
-    [],
-    headers
-  ];
-
-  vehicles.forEach((v, idx) => {
-    const transporter = v.transporterName || v.brokerName || '';
-    const companyDisplay = v.companyName || (v.operatingCompany === 'truckit' ? 'TRUCKIT PVT LTD' : v.operatingCompany === 'docks' ? 'DOCKS PVT LTD' : (v.operatingCompany || 'TRUCKIT PVT LTD').toUpperCase());
-    sheetData.push([
-      idx + 1,
-      v.registrationNumber || '',
-      v.chassisNo || '',
-      v.engineNo || '',
-      v.make || '',
-      v.model || '',
-      transporter,
-      transporter,
-      v.registrationDate || '',
-      v.validationExpiryDate || '',
-      companyDisplay,
-      v.status || 'AVAILABLE',
-      v.registrationBook ? 'Uploaded' : 'Missing',
-      v.ownerIdCardUrl ? 'Uploaded' : 'Missing',
-      v.driverName || '',
-      v.driverCnic || '',
-      v.driverContact || '',
-      (v.tripsHistory || []).length
-    ]);
-  });
-
-  const ws = XLSX.utils.aoa_to_sheet(sheetData);
-  ws['!cols'] = [
-    { wch: 8 },  // Sr
-    { wch: 20 }, // VEHICLE NO.
-    { wch: 24 }, // CHASSIS NO.
-    { wch: 20 }, // ENGINE NO.
-    { wch: 16 }, // MAKER
-    { wch: 14 }, // MODEL
-    { wch: 30 }, // TRANSPORTER NAME
-    { wch: 30 }, // BROKER NAME
-    { wch: 18 }, // REGISTRATION DATE
-    { wch: 22 }, // VALIDITY EXPIRY
-    { wch: 22 }, // COMPANY
-    { wch: 18 }, // STATUS
-    { wch: 14 }, // REG BOOK
-    { wch: 16 }, // OWNER ID
-    { wch: 22 }, // DRIVER NAME
-    { wch: 20 }, // DRIVER CNIC
-    { wch: 18 }, // DRIVER CONTACT
-    { wch: 14 }  // TRIPS COUNT
-  ];
-
-  XLSX.utils.book_append_sheet(wb, ws, 'Fleet Master');
+export function generateVehiclesExcelBuffer(
+  vehicles: Vehicle[],
+  options: VehicleExcelExportOptions = {}
+): { buffer: ArrayBuffer; filename: string } {
+  const { wb, filename } = buildCompleteFleetWorksheet(vehicles, options);
   const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
-  const filename = `${prefix}_Master_Vehicles_Fleet_${today}.xlsx`;
-
   return { buffer, filename };
 }
 

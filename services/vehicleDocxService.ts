@@ -14,6 +14,12 @@ import {
 } from 'docx';
 import { Vehicle } from '../types';
 import { getActiveCompany } from './companyService';
+import {
+  getVehicleLegalSignatories,
+  getCompanyOwnerByCompanyId,
+  resolveCompanyOwnerWithImages,
+  resolveWitnessesWithImages
+} from './vehicleLegalSignatoriesService';
 
 // Standard company & witness registry (always consistent across Customs & Legal Word files; editable in Word anytime)
 export const DOCKS_COMPANY = {
@@ -549,12 +555,43 @@ export async function generateRegistrationRenewalLetterDocx(
           }),
           new Paragraph({
             spacing: { before: 200, line: 276 },
-            children: [
-              new TextRun({ text: 'Yours Faithfully,', bold: true, size: 22, font: calibriFont }),
-              new TextRun({ text: '', break: 2 }),
-              new TextRun({ text: '_________________________', bold: true, size: 22, font: calibriFont, break: 1 }),
-              new TextRun({ text: `For: ${comp.signoffName}`, bold: true, size: 22, font: calibriFont, break: 1 })
-            ]
+            children: (() => {
+              const compOwner = getCompanyOwnerByCompanyId(comp.id);
+              const ownerSignRuns: TextRun[] = [
+                new TextRun({ text: 'Yours Faithfully,', bold: true, size: 22, font: calibriFont }),
+                new TextRun({ text: '', break: 2 }),
+                new TextRun({ text: '_________________________', bold: true, size: 22, font: calibriFont, break: 1 })
+              ];
+              if (compOwner.name) {
+                ownerSignRuns.push(
+                  new TextRun({
+                    text: `${compOwner.name.toUpperCase()}${compOwner.designation ? ` (${compOwner.designation})` : ''}`,
+                    bold: true,
+                    size: 20,
+                    font: calibriFont,
+                    break: 1
+                  })
+                );
+              }
+              if (compOwner.cnic || compOwner.mobile) {
+                ownerSignRuns.push(
+                  new TextRun({
+                    text: [
+                      compOwner.cnic ? `CNIC: ${compOwner.cnic}` : '',
+                      compOwner.mobile ? `Cell: ${compOwner.mobile}` : ''
+                    ].filter(Boolean).join(' | '),
+                    bold: true,
+                    size: 18,
+                    font: calibriFont,
+                    break: 1
+                  })
+                );
+              }
+              ownerSignRuns.push(
+                new TextRun({ text: `For: ${comp.signoffName}`, bold: true, size: 22, font: calibriFont, break: 1 })
+              );
+              return ownerSignRuns;
+            })()
           })
         ]
       }
@@ -836,10 +873,20 @@ export async function generateLeaseAgreementDocx(
   const lessorCnicDisplay = rawLessorCnic || '___________________';
   const lessorAddressDisplay = rawLessorAddress ? rawLessorAddress.toUpperCase() : '___________________________________';
 
-  const w1Name = options.witness1Name || DOCKS_COMPANY.witnesses.w1_arbaz.name;
-  const w1Cnic = options.witness1Cnic || DOCKS_COMPANY.witnesses.w1_arbaz.cnic;
-  const w2Name = options.witness2Name || DOCKS_COMPANY.witnesses.w2_shams.name;
-  const w2Cnic = options.witness2Cnic || DOCKS_COMPANY.witnesses.w2_shams.cnic;
+  const savedSignatories = getVehicleLegalSignatories();
+  const savedW1 = savedSignatories.witnesses[0];
+  const savedW2 = savedSignatories.witnesses[1];
+  const compOwner = getCompanyOwnerByCompanyId(comp.id);
+
+  const w1Name = options.witness1Name || savedW1.name || DOCKS_COMPANY.witnesses.w1_arbaz.name;
+  const w1Father = savedW1.fatherName || '';
+  const w1Cnic = options.witness1Cnic || savedW1.cnic || DOCKS_COMPANY.witnesses.w1_arbaz.cnic;
+  const w1Mobile = savedW1.mobile || '';
+
+  const w2Name = options.witness2Name || savedW2.name || DOCKS_COMPANY.witnesses.w2_shams.name;
+  const w2Father = savedW2.fatherName || '';
+  const w2Cnic = options.witness2Cnic || savedW2.cnic || DOCKS_COMPANY.witnesses.w2_shams.cnic;
+  const w2Mobile = savedW2.mobile || '';
 
   const tableHeaderRow = new TableRow({
     tableHeader: true,
@@ -946,10 +993,24 @@ export async function generateLeaseAgreementDocx(
               }),
               new Paragraph({
                 spacing: { after: 20 },
-                children: [new TextRun({ text: w1Name, bold: true, size: 20, font: calibriFont })]
+                children: [
+                  new TextRun({
+                    text: `${w1Name}${w1Father ? ` S/O ${w1Father}` : ''}`,
+                    bold: true,
+                    size: 20,
+                    font: calibriFont
+                  })
+                ]
               }),
               new Paragraph({
-                children: [new TextRun({ text: `CNIC NO. ${w1Cnic}`, bold: true, size: 20, font: calibriFont })]
+                children: [
+                  new TextRun({
+                    text: `CNIC NO. ${w1Cnic}${w1Mobile ? ` | Cell: ${w1Mobile}` : ''}`,
+                    bold: true,
+                    size: 19,
+                    font: calibriFont
+                  })
+                ]
               })
             ]
           }),
@@ -969,6 +1030,39 @@ export async function generateLeaseAgreementDocx(
                 spacing: { after: 20 },
                 children: [new TextRun({ text: comp.legalMixed, bold: true, size: 20, font: calibriFont })]
               }),
+              ...(compOwner.name
+                ? [
+                    new Paragraph({
+                      spacing: { after: 20 },
+                      children: [
+                        new TextRun({
+                          text: `${compOwner.name.toUpperCase()}${compOwner.fatherName ? ` S/O ${compOwner.fatherName.toUpperCase()}` : ''}${compOwner.designation ? ` (${compOwner.designation})` : ''}`,
+                          bold: true,
+                          size: 19,
+                          font: calibriFont
+                        })
+                      ]
+                    }),
+                    ...(compOwner.cnic || compOwner.mobile
+                      ? [
+                          new Paragraph({
+                            spacing: { after: 20 },
+                            children: [
+                              new TextRun({
+                                text: [
+                                  compOwner.cnic ? `CNIC: ${compOwner.cnic}` : '',
+                                  compOwner.mobile ? `Cell: ${compOwner.mobile}` : ''
+                                ].filter(Boolean).join(' | '),
+                                bold: true,
+                                size: 18,
+                                font: calibriFont
+                              })
+                            ]
+                          })
+                        ]
+                      : [])
+                  ]
+                : []),
               new Paragraph({
                 spacing: { after: 140 },
                 children: [
@@ -986,10 +1080,24 @@ export async function generateLeaseAgreementDocx(
               }),
               new Paragraph({
                 spacing: { after: 20 },
-                children: [new TextRun({ text: w2Name, bold: true, size: 20, font: calibriFont })]
+                children: [
+                  new TextRun({
+                    text: `${w2Name}${w2Father ? ` S/O ${w2Father}` : ''}`,
+                    bold: true,
+                    size: 20,
+                    font: calibriFont
+                  })
+                ]
               }),
               new Paragraph({
-                children: [new TextRun({ text: `CNIC NO. ${w2Cnic}`, bold: true, size: 20, font: calibriFont })]
+                children: [
+                  new TextRun({
+                    text: `CNIC NO. ${w2Cnic}${w2Mobile ? ` | Cell: ${w2Mobile}` : ''}`,
+                    bold: true,
+                    size: 19,
+                    font: calibriFont
+                  })
+                ]
               })
             ]
           })
@@ -1235,10 +1343,20 @@ export async function generateLeaseTerminationAgreementDocx(
   const realLessorCnic = (options.customCnic || ownerCnic || '').trim();
   const realLessorAddress = (options.customAddress || ownerAddress || '').trim();
 
-  const w1Name = options.witness1Name || DOCKS_COMPANY.witnesses.w1_hasnain.name;
-  const w1Cnic = options.witness1Cnic || DOCKS_COMPANY.witnesses.w1_hasnain.cnic;
-  const w2Name = options.witness2Name || DOCKS_COMPANY.witnesses.w2_shams.name;
-  const w2Cnic = options.witness2Cnic || DOCKS_COMPANY.witnesses.w2_shams.cnic;
+  const savedSignatories = getVehicleLegalSignatories();
+  const savedW1 = savedSignatories.witnesses[0];
+  const savedW2 = savedSignatories.witnesses[1];
+  const compOwner = getCompanyOwnerByCompanyId(comp.id);
+
+  const w1Name = options.witness1Name || savedW1.name || DOCKS_COMPANY.witnesses.w1_arbaz.name;
+  const w1Father = savedW1.fatherName || '';
+  const w1Cnic = options.witness1Cnic || savedW1.cnic || DOCKS_COMPANY.witnesses.w1_arbaz.cnic;
+  const w1Mobile = savedW1.mobile || '';
+
+  const w2Name = options.witness2Name || savedW2.name || DOCKS_COMPANY.witnesses.w2_shams.name;
+  const w2Father = savedW2.fatherName || '';
+  const w2Cnic = options.witness2Cnic || savedW2.cnic || DOCKS_COMPANY.witnesses.w2_shams.cnic;
+  const w2Mobile = savedW2.mobile || '';
 
   const tableHeaderRow = new TableRow({
     tableHeader: true,
@@ -1322,10 +1440,24 @@ export async function generateLeaseTerminationAgreementDocx(
               }),
               new Paragraph({
                 spacing: { after: 20 },
-                children: [new TextRun({ text: w1Name, bold: true, size: 20, font: calibriFont })]
+                children: [
+                  new TextRun({
+                    text: `${w1Name}${w1Father ? ` S/O ${w1Father}` : ''}`,
+                    bold: true,
+                    size: 20,
+                    font: calibriFont
+                  })
+                ]
               }),
               new Paragraph({
-                children: [new TextRun({ text: `CNIC NO. ${w1Cnic}`, bold: true, size: 20, font: calibriFont })]
+                children: [
+                  new TextRun({
+                    text: `CNIC NO. ${w1Cnic}${w1Mobile ? ` | Cell: ${w1Mobile}` : ''}`,
+                    bold: true,
+                    size: 19,
+                    font: calibriFont
+                  })
+                ]
               })
             ]
           }),
@@ -1339,10 +1471,24 @@ export async function generateLeaseTerminationAgreementDocx(
               }),
               new Paragraph({
                 spacing: { after: 20 },
-                children: [new TextRun({ text: w2Name, bold: true, size: 20, font: calibriFont })]
+                children: [
+                  new TextRun({
+                    text: `${w2Name}${w2Father ? ` S/O ${w2Father}` : ''}`,
+                    bold: true,
+                    size: 20,
+                    font: calibriFont
+                  })
+                ]
               }),
               new Paragraph({
-                children: [new TextRun({ text: `CNIC NO. ${w2Cnic}`, bold: true, size: 20, font: calibriFont })]
+                children: [
+                  new TextRun({
+                    text: `CNIC NO. ${w2Cnic}${w2Mobile ? ` | Cell: ${w2Mobile}` : ''}`,
+                    bold: true,
+                    size: 19,
+                    font: calibriFont
+                  })
+                ]
               })
             ]
           })
@@ -1452,11 +1598,38 @@ export async function generateLeaseTerminationAgreementDocx(
               new TextRun({ text: '', break: 1 }),
               new TextRun({ text: 'M/S. ', bold: true, size: 21, font: calibriFont, break: 1 }),
               new TextRun({ text: comp.legalCapsDot, bold: true, underline: {}, size: 21, font: calibriFont }),
+              ...(compOwner.name
+                ? [
+                    new TextRun({
+                      text: `${compOwner.name.toUpperCase()}${compOwner.fatherName ? ` S/O ${compOwner.fatherName.toUpperCase()}` : ''}${compOwner.designation ? ` (${compOwner.designation})` : ''}`,
+                      bold: true,
+                      size: 20,
+                      font: calibriFont,
+                      break: 1
+                    })
+                  ]
+                : []),
               new TextRun({ text: 'CNIC No. / NTN No. ', bold: true, size: 20, font: calibriFont, break: 1 }),
-              new TextRun({ text: comp.customsNtn, bold: true, underline: {}, size: 20, font: calibriFont }),
+              new TextRun({
+                text: compOwner.cnic ? `${compOwner.cnic} / NTN: ${comp.customsNtn}` : comp.customsNtn,
+                bold: true,
+                underline: {},
+                size: 20,
+                font: calibriFont
+              }),
+              ...(compOwner.mobile
+                ? [
+                    new TextRun({ text: `   Cell: ${compOwner.mobile}`, bold: true, size: 19, font: calibriFont })
+                  ]
+                : []),
               new TextRun({ text: 'Address: ', bold: true, size: 20, font: calibriFont, break: 1 }),
-              new TextRun({ text: comp.addressLine1, bold: true, underline: {}, size: 20, font: calibriFont }),
-              new TextRun({ text: comp.addressLine2, bold: true, underline: {}, size: 20, font: calibriFont, break: 1 })
+              new TextRun({
+                text: compOwner.address || `${comp.addressLine1} ${comp.addressLine2}`,
+                bold: true,
+                underline: {},
+                size: 20,
+                font: calibriFont
+              })
             ]
           }),
           witnessesTable
@@ -1652,12 +1825,43 @@ export async function generateCancellationLetterLetterheadDocx(
           }),
           new Paragraph({
             spacing: { line: 270, after: 240 },
-            children: [
-              new TextRun({ text: 'Yours Faithfully,', bold: true, size: 22, font: calibriFont }),
-              new TextRun({ text: '', break: 2 }),
-              new TextRun({ text: '_________________________', bold: true, size: 22, font: calibriFont, break: 1 }),
-              new TextRun({ text: `For: ${comp.signoffName}`, bold: true, size: 22, font: calibriFont, break: 1 })
-            ]
+            children: (() => {
+              const compOwner = getCompanyOwnerByCompanyId(comp.id);
+              const runs: TextRun[] = [
+                new TextRun({ text: 'Yours Faithfully,', bold: true, size: 22, font: calibriFont }),
+                new TextRun({ text: '', break: 2 }),
+                new TextRun({ text: '_________________________', bold: true, size: 22, font: calibriFont, break: 1 })
+              ];
+              if (compOwner.name) {
+                runs.push(
+                  new TextRun({
+                    text: `${compOwner.name.toUpperCase()}${compOwner.designation ? ` (${compOwner.designation})` : ''}`,
+                    bold: true,
+                    size: 20,
+                    font: calibriFont,
+                    break: 1
+                  })
+                );
+              }
+              if (compOwner.cnic || compOwner.mobile) {
+                runs.push(
+                  new TextRun({
+                    text: [
+                      compOwner.cnic ? `CNIC: ${compOwner.cnic}` : '',
+                      compOwner.mobile ? `Cell: ${compOwner.mobile}` : ''
+                    ].filter(Boolean).join(' | '),
+                    bold: true,
+                    size: 18,
+                    font: calibriFont,
+                    break: 1
+                  })
+                );
+              }
+              runs.push(
+                new TextRun({ text: `For: ${comp.signoffName}`, bold: true, size: 22, font: calibriFont, break: 1 })
+              );
+              return runs;
+            })()
           })
         ]
       }
@@ -1744,6 +1948,16 @@ export async function generateAffidavitDocx(
     });
   });
 
+  const savedSignatories = getVehicleLegalSignatories();
+  const savedW1 = savedSignatories.witnesses[0];
+  const savedW2 = savedSignatories.witnesses[1];
+  const compOwner = getCompanyOwnerByCompanyId(comp.id);
+
+  const affW1Name = savedW1.name || DOCKS_COMPANY.witnesses.w1_arbaz.name;
+  const affW1Cnic = savedW1.cnic || DOCKS_COMPANY.witnesses.w1_arbaz.cnic;
+  const affW2Name = savedW2.name || DOCKS_COMPANY.witnesses.w2_shams.name;
+  const affW2Cnic = savedW2.cnic || DOCKS_COMPANY.witnesses.w2_shams.cnic;
+
   const signWitnessTable = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: [
@@ -1782,7 +1996,7 @@ export async function generateAffidavitDocx(
                 spacing: { after: 160 },
                 children: [
                   new TextRun({
-                    text: `${DOCKS_COMPANY.witnesses.w1_arbaz.name} (${DOCKS_COMPANY.witnesses.w1_arbaz.cnic})`,
+                    text: `${affW1Name}${savedW1.fatherName ? ` S/O ${savedW1.fatherName}` : ''} (${affW1Cnic})${savedW1.mobile ? ` | ${savedW1.mobile}` : ''}`,
                     bold: true,
                     size: 18,
                     font: calibriFont
@@ -1796,7 +2010,7 @@ export async function generateAffidavitDocx(
               new Paragraph({
                 children: [
                   new TextRun({
-                    text: `${DOCKS_COMPANY.witnesses.w2_shams.name} (${DOCKS_COMPANY.witnesses.w2_shams.cnic})`,
+                    text: `${affW2Name}${savedW2.fatherName ? ` S/O ${savedW2.fatherName}` : ''} (${affW2Cnic})${savedW2.mobile ? ` | ${savedW2.mobile}` : ''}`,
                     bold: true,
                     size: 18,
                     font: calibriFont
@@ -1814,9 +2028,31 @@ export async function generateAffidavitDocx(
                 children: [new TextRun({ text: 'LESSEES', bold: true, underline: {}, size: 21, font: calibriFont })]
               }),
               new Paragraph({
-                spacing: { before: 100 },
+                spacing: { before: 100, after: 20 },
                 children: [new TextRun({ text: '_________________________', bold: true, size: 21, font: calibriFont })]
-              })
+              }),
+              ...(compOwner.name
+                ? [
+                    new Paragraph({
+                      spacing: { after: 20 },
+                      children: [
+                        new TextRun({
+                          text: `${compOwner.name.toUpperCase()}${compOwner.designation ? ` (${compOwner.designation})` : ''}`,
+                          bold: true,
+                          size: 19,
+                          font: calibriFont
+                        })
+                      ]
+                    }),
+                    ...(compOwner.cnic
+                      ? [
+                          new Paragraph({
+                            children: [new TextRun({ text: `CNIC: ${compOwner.cnic}`, bold: true, size: 18, font: calibriFont })]
+                          })
+                        ]
+                      : [])
+                  ]
+                : [])
             ]
           })
         ]
@@ -2238,7 +2474,11 @@ export async function generateVehicleOwnerIdCopyDocx(vehicle: Vehicle): Promise<
 
 export interface CompanyOwnerIdCopyOptions {
   companyOwnerName?: string;
+  companyOwnerFatherName?: string;
   companyOwnerCnic?: string;
+  companyOwnerAddress?: string;
+  companyOwnerMobile?: string;
+  companyOwnerDesignation?: string;
   frontImageUrl?: string;
   backImageUrl?: string;
 }
@@ -2248,8 +2488,20 @@ export async function generateCompanyOwnerIdCopyDocx(
   options: CompanyOwnerIdCopyOptions = {}
 ): Promise<Document> {
   const comp = resolveVehicleDocxCompany(vehicle);
-  const frontImgs = options.frontImageUrl ? await convertDataUrlToPngImages(options.frontImageUrl, 480, 310) : [];
-  const backImgs = options.backImageUrl ? await convertDataUrlToPngImages(options.backImageUrl, 480, 310) : [];
+  const resolvedOwner = await resolveCompanyOwnerWithImages(comp.id);
+
+  const ownerName = options.companyOwnerName || resolvedOwner.name;
+  const ownerFather = options.companyOwnerFatherName || resolvedOwner.fatherName;
+  const ownerCnic = options.companyOwnerCnic || resolvedOwner.cnic;
+  const ownerAddress = options.companyOwnerAddress || resolvedOwner.address;
+  const ownerMobile = options.companyOwnerMobile || resolvedOwner.mobile;
+  const ownerDesignation = options.companyOwnerDesignation || resolvedOwner.designation || 'Director';
+
+  const frontUrl = options.frontImageUrl || resolvedOwner.cnicFrontUrl;
+  const backUrl = options.backImageUrl || resolvedOwner.cnicBackUrl;
+
+  const frontImgs = frontUrl ? await convertDataUrlToPngImages(frontUrl, 470, 295) : [];
+  const backImgs = backUrl ? await convertDataUrlToPngImages(backUrl, 470, 295) : [];
 
   const bodyChildren: (Paragraph | Table)[] = [
     ...buildVehicleAttachmentHeaderBlock(
@@ -2259,14 +2511,14 @@ export async function generateCompanyOwnerIdCopyDocx(
     )
   ];
 
-  if (options.companyOwnerName || options.companyOwnerCnic) {
+  if (ownerName || ownerCnic || ownerAddress) {
     bodyChildren.push(
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        spacing: { after: 140 },
+        spacing: { after: 60 },
         children: [
           new TextRun({
-            text: `Director / Company Owner: ${(options.companyOwnerName || '').toUpperCase()}${options.companyOwnerCnic ? ` — CNIC: ${options.companyOwnerCnic}` : ''}`,
+            text: `${ownerDesignation}: ${(ownerName || '-').toUpperCase()}${ownerFather ? ` S/O ${ownerFather.toUpperCase()}` : ''}${ownerCnic ? ` — CNIC: ${ownerCnic}` : ''}${ownerMobile ? ` — Cell: ${ownerMobile}` : ''}`,
             bold: true,
             size: 20,
             font: calibriFont
@@ -2274,24 +2526,73 @@ export async function generateCompanyOwnerIdCopyDocx(
         ]
       })
     );
-  }
-
-  if (frontImgs.length > 0 || backImgs.length > 0) {
-    [...frontImgs, ...backImgs].forEach((img) => {
+    if (ownerAddress) {
       bodyChildren.push(
         new Paragraph({
           alignment: AlignmentType.CENTER,
-          spacing: { before: 100, after: 140 },
+          spacing: { after: 140 },
           children: [
-            new ImageRun({
-              type: 'png',
-              data: img.data,
-              transformation: { width: img.width, height: img.height }
+            new TextRun({
+              text: `Address: ${ownerAddress}`,
+              bold: true,
+              size: 18,
+              font: calibriFont
             })
           ]
         })
       );
-    });
+    }
+  }
+
+  if (frontImgs.length > 0 || backImgs.length > 0) {
+    if (frontImgs.length > 0) {
+      bodyChildren.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 60, after: 40 },
+          children: [new TextRun({ text: 'CNIC — FRONT SIDE', bold: true, underline: {}, size: 19, font: calibriFont })]
+        })
+      );
+      frontImgs.forEach((img) => {
+        bodyChildren.push(
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 140 },
+            children: [
+              new ImageRun({
+                type: 'png',
+                data: img.data,
+                transformation: { width: img.width, height: img.height }
+              })
+            ]
+          })
+        );
+      });
+    }
+    if (backImgs.length > 0) {
+      bodyChildren.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 80, after: 40 },
+          children: [new TextRun({ text: 'CNIC — BACK SIDE', bold: true, underline: {}, size: 19, font: calibriFont })]
+        })
+      );
+      backImgs.forEach((img) => {
+        bodyChildren.push(
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 140 },
+            children: [
+              new ImageRun({
+                type: 'png',
+                data: img.data,
+                transformation: { width: img.width, height: img.height }
+              })
+            ]
+          })
+        );
+      });
+    }
   } else {
     bodyChildren.push(
       new Table({
@@ -2307,7 +2608,7 @@ export async function generateCompanyOwnerIdCopyDocx(
                     spacing: { before: 900, after: 900 },
                     children: [
                       new TextRun({
-                        text: `[ COMPANY OWNER / DIRECTOR CNIC COPY FOR ${comp.signoffName} — UPLOAD ONCE IN REGISTRATION PACK OR PASTE HERE ]`,
+                        text: `[ COMPANY OWNER / DIRECTOR CNIC COPY FOR ${comp.signoffName} — UPLOAD VIA "ADD COMPANY OWNER" BUTTON ]`,
                         bold: true,
                         size: 20,
                         font: calibriFont
@@ -2344,24 +2645,155 @@ export async function generateCompanyOwnerIdCopyDocx(
 
 export interface WitnessesIdCopyOptions {
   witness1ImageUrl?: string;
+  witness1BackImageUrl?: string;
   witness2ImageUrl?: string;
+  witness2BackImageUrl?: string;
   witness1Name?: string;
+  witness1FatherName?: string;
   witness1Cnic?: string;
+  witness1Mobile?: string;
   witness2Name?: string;
+  witness2FatherName?: string;
   witness2Cnic?: string;
+  witness2Mobile?: string;
 }
 
 export async function generateWitnessesIdCopyDocx(
   vehicle: Vehicle,
   options: WitnessesIdCopyOptions = {}
 ): Promise<Document> {
-  const w1Name = options.witness1Name || DOCKS_COMPANY.witnesses.w1_arbaz.name;
-  const w1Cnic = options.witness1Cnic || DOCKS_COMPANY.witnesses.w1_arbaz.cnic;
-  const w2Name = options.witness2Name || DOCKS_COMPANY.witnesses.w2_shams.name;
-  const w2Cnic = options.witness2Cnic || DOCKS_COMPANY.witnesses.w2_shams.cnic;
+  const [resolvedW1, resolvedW2] = await resolveWitnessesWithImages();
 
-  const w1Imgs = options.witness1ImageUrl ? await convertDataUrlToPngImages(options.witness1ImageUrl, 470, 295) : [];
-  const w2Imgs = options.witness2ImageUrl ? await convertDataUrlToPngImages(options.witness2ImageUrl, 470, 295) : [];
+  const w1Name = options.witness1Name || resolvedW1.name || DOCKS_COMPANY.witnesses.w1_arbaz.name;
+  const w1Father = options.witness1FatherName || resolvedW1.fatherName || '';
+  const w1Cnic = options.witness1Cnic || resolvedW1.cnic || DOCKS_COMPANY.witnesses.w1_arbaz.cnic;
+  const w1Mobile = options.witness1Mobile || resolvedW1.mobile || '';
+  const w1FrontUrl = options.witness1ImageUrl || resolvedW1.cnicFrontUrl;
+  const w1BackUrl = options.witness1BackImageUrl || resolvedW1.cnicBackUrl;
+
+  const w2Name = options.witness2Name || resolvedW2.name || DOCKS_COMPANY.witnesses.w2_shams.name;
+  const w2Father = options.witness2FatherName || resolvedW2.fatherName || '';
+  const w2Cnic = options.witness2Cnic || resolvedW2.cnic || DOCKS_COMPANY.witnesses.w2_shams.cnic;
+  const w2Mobile = options.witness2Mobile || resolvedW2.mobile || '';
+  const w2FrontUrl = options.witness2ImageUrl || resolvedW2.cnicFrontUrl;
+  const w2BackUrl = options.witness2BackImageUrl || resolvedW2.cnicBackUrl;
+
+  const [w1FrontImgs, w1BackImgs, w2FrontImgs, w2BackImgs] = await Promise.all([
+    w1FrontUrl ? convertDataUrlToPngImages(w1FrontUrl, 265, 195) : Promise.resolve([]),
+    w1BackUrl ? convertDataUrlToPngImages(w1BackUrl, 265, 195) : Promise.resolve([]),
+    w2FrontUrl ? convertDataUrlToPngImages(w2FrontUrl, 265, 195) : Promise.resolve([]),
+    w2BackUrl ? convertDataUrlToPngImages(w2BackUrl, 265, 195) : Promise.resolve([])
+  ]);
+
+  const buildWitnessImagesBlock = (
+    frontList: Array<{ data: Uint8Array; width: number; height: number }>,
+    backList: Array<{ data: Uint8Array; width: number; height: number }>,
+    placeholderText: string
+  ): (Paragraph | Table)[] => {
+    if (frontList.length > 0 && backList.length > 0) {
+      return [
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({
+                  width: { size: 50, type: WidthType.PERCENTAGE },
+                  borders: tableBorders,
+                  children: [
+                    new Paragraph({
+                      alignment: AlignmentType.CENTER,
+                      spacing: { before: 40, after: 40 },
+                      children: [new TextRun({ text: 'CNIC FRONT', bold: true, size: 17, font: calibriFont })]
+                    }),
+                    ...frontList.map(
+                      (img) =>
+                        new Paragraph({
+                          alignment: AlignmentType.CENTER,
+                          spacing: { after: 60 },
+                          children: [
+                            new ImageRun({
+                              type: 'png',
+                              data: img.data,
+                              transformation: { width: img.width, height: img.height }
+                            })
+                          ]
+                        })
+                    )
+                  ]
+                }),
+                new TableCell({
+                  width: { size: 50, type: WidthType.PERCENTAGE },
+                  borders: tableBorders,
+                  children: [
+                    new Paragraph({
+                      alignment: AlignmentType.CENTER,
+                      spacing: { before: 40, after: 40 },
+                      children: [new TextRun({ text: 'CNIC BACK', bold: true, size: 17, font: calibriFont })]
+                    }),
+                    ...backList.map(
+                      (img) =>
+                        new Paragraph({
+                          alignment: AlignmentType.CENTER,
+                          spacing: { after: 60 },
+                          children: [
+                            new ImageRun({
+                              type: 'png',
+                              data: img.data,
+                              transformation: { width: img.width, height: img.height }
+                            })
+                          ]
+                        })
+                    )
+                  ]
+                })
+              ]
+            })
+          ]
+        })
+      ];
+    }
+
+    const combined = [...frontList, ...backList];
+    if (combined.length > 0) {
+      return combined.map(
+        (img) =>
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 120 },
+            children: [
+              new ImageRun({
+                type: 'png',
+                data: img.data,
+                transformation: { width: img.width, height: img.height }
+              })
+            ]
+          })
+      );
+    }
+
+    return [
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                borders: tableBorders,
+                children: [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    spacing: { before: 420, after: 420 },
+                    children: [new TextRun({ text: placeholderText, bold: true, size: 19, font: calibriFont })]
+                  })
+                ]
+              })
+            ]
+          })
+        ]
+      })
+    ];
+  };
 
   const bodyChildren: (Paragraph | Table)[] = [
     ...buildVehicleAttachmentHeaderBlock(vehicle, 'COPIES OF WITNESSES ID CARDS (CNIC)'),
@@ -2369,124 +2801,37 @@ export async function generateWitnessesIdCopyDocx(
       spacing: { before: 60, after: 80 },
       children: [
         new TextRun({
-          text: `Witness 1: ${w1Name} — CNIC NO. ${w1Cnic}`,
+          text: `Witness 1: ${w1Name}${w1Father ? ` S/O ${w1Father}` : ''} — CNIC NO. ${w1Cnic}${w1Mobile ? ` — Mobile: ${w1Mobile}` : ''}`,
           bold: true,
           underline: {},
-          size: 21,
+          size: 20,
           font: calibriFont
         })
       ]
-    })
-  ];
-
-  if (w1Imgs.length > 0) {
-    w1Imgs.forEach((img) => {
-      bodyChildren.push(
-        new Paragraph({
-          alignment: AlignmentType.CENTER,
-          spacing: { after: 140 },
-          children: [
-            new ImageRun({
-              type: 'png',
-              data: img.data,
-              transformation: { width: img.width, height: img.height }
-            })
-          ]
-        })
-      );
-    });
-  } else {
-    bodyChildren.push(
-      new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: [
-          new TableRow({
-            children: [
-              new TableCell({
-                borders: tableBorders,
-                children: [
-                  new Paragraph({
-                    alignment: AlignmentType.CENTER,
-                    spacing: { before: 520, after: 520 },
-                    children: [
-                      new TextRun({
-                        text: `[ WITNESS 1 CNIC COPY: ${w1Name} (${w1Cnic}) ]`,
-                        bold: true,
-                        size: 19,
-                        font: calibriFont
-                      })
-                    ]
-                  })
-                ]
-              })
-            ]
-          })
-        ]
-      })
-    );
-  }
-
-  bodyChildren.push(
+    }),
+    ...buildWitnessImagesBlock(
+      w1FrontImgs,
+      w1BackImgs,
+      `[ WITNESS 1 CNIC FRONT & BACK COPY: ${w1Name} (${w1Cnic}) ]`
+    ),
     new Paragraph({
-      spacing: { before: 180, after: 80 },
+      spacing: { before: 160, after: 80 },
       children: [
         new TextRun({
-          text: `Witness 2: ${w2Name} — CNIC NO. ${w2Cnic}`,
+          text: `Witness 2: ${w2Name}${w2Father ? ` S/O ${w2Father}` : ''} — CNIC NO. ${w2Cnic}${w2Mobile ? ` — Mobile: ${w2Mobile}` : ''}`,
           bold: true,
           underline: {},
-          size: 21,
+          size: 20,
           font: calibriFont
         })
       ]
-    })
-  );
-
-  if (w2Imgs.length > 0) {
-    w2Imgs.forEach((img) => {
-      bodyChildren.push(
-        new Paragraph({
-          alignment: AlignmentType.CENTER,
-          spacing: { after: 100 },
-          children: [
-            new ImageRun({
-              type: 'png',
-              data: img.data,
-              transformation: { width: img.width, height: img.height }
-            })
-          ]
-        })
-      );
-    });
-  } else {
-    bodyChildren.push(
-      new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: [
-          new TableRow({
-            children: [
-              new TableCell({
-                borders: tableBorders,
-                children: [
-                  new Paragraph({
-                    alignment: AlignmentType.CENTER,
-                    spacing: { before: 520, after: 520 },
-                    children: [
-                      new TextRun({
-                        text: `[ WITNESS 2 CNIC COPY: ${w2Name} (${w2Cnic}) ]`,
-                        bold: true,
-                        size: 19,
-                        font: calibriFont
-                      })
-                    ]
-                  })
-                ]
-              })
-            ]
-          })
-        ]
-      })
-    );
-  }
+    }),
+    ...buildWitnessImagesBlock(
+      w2FrontImgs,
+      w2BackImgs,
+      `[ WITNESS 2 CNIC FRONT & BACK COPY: ${w2Name} (${w2Cnic}) ]`
+    )
+  ];
 
   return new Document({
     sections: [
@@ -2494,10 +2839,10 @@ export async function generateWitnessesIdCopyDocx(
         properties: {
           page: {
             margin: {
-              top: convertInchesToTwip(0.65),
-              bottom: convertInchesToTwip(0.65),
-              left: convertInchesToTwip(0.75),
-              right: convertInchesToTwip(0.75)
+              top: convertInchesToTwip(0.6),
+              bottom: convertInchesToTwip(0.6),
+              left: convertInchesToTwip(0.7),
+              right: convertInchesToTwip(0.7)
             }
           }
         },

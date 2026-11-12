@@ -17,6 +17,7 @@ import {
 import { Vehicle, Transporter } from '../types';
 import { parseVehicleFile, parseTextOrCsvVehicles, dedupeAndMergeVehicles } from '../services/documentParserService';
 import { downloadBulkVehicleExcelTemplate } from '../services/excelExportService';
+import { CompanySignatoriesAutoBanner } from './VehicleSignatoriesAndExportModals';
 
 // ==========================================
 // 1. BULK VEHICLE IMPORT MODAL (Excel / Word / CSV)
@@ -563,6 +564,9 @@ export const VehicleRenewalModal: React.FC<VehicleRenewalModalProps> = ({
               <span className="font-mono text-emerald-400 font-bold">{newExpiryDate}</span>
             </div>
           </div>
+
+          {/* Matched Company Owner & Permanent Witnesses */}
+          <CompanySignatoriesAutoBanner vehicle={vehicle} compact />
 
           <div>
             <label className="block text-gray-300 font-semibold mb-1">Attach Vehicle Fitness / Route Permit / Tax Token:</label>
