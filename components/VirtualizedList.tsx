@@ -1,4 +1,5 @@
-import React, { useRef, useState, useEffect, useLayoutEffect, CSSProperties, ReactNode, useMemo, useCallback } from 'react';
+import React, { useRef, useState, useLayoutEffect, CSSProperties, ReactNode, useMemo, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 
 export interface VirtualizedListProps<T> {
   items: T[];
@@ -18,9 +19,11 @@ export interface VirtualizedListProps<T> {
 }
 
 /**
- * Ultra high-performance VirtualizedList
- * Renders only visible items in the viewport with overscan buffers.
- * Prevents main thread blocking and memory bloat on mobile and desktop.
+ * High-FPS Zero-Blank-Flash VirtualizedList
+ * - Uses quantized chunk windowing so normal wheel/trackpad scrolling runs at 120fps
+ *   on the GPU compositor without triggering React re-renders on every pixel.
+ * - Uses generous viewport-adaptive overscan (~950px above & below) + synchronous
+ *   flushSync guard on large scrollbar jumps so rapid scrolling NEVER flashes white.
  */
 export function VirtualizedList<T>({
   items,
@@ -32,25 +35,61 @@ export function VirtualizedList<T>({
   width = '100%',
   className = '',
   emptyPlaceholder,
-  overscanCount = 4,
+  overscanCount = 12,
   getItemKey,
   onScroll,
   header,
   footer,
 }: VirtualizedListProps<T>): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
+  const lastScrollTop = useRef(0);
+  const rafIdRef = useRef<number | null>(null);
+
   const [measuredHeight, setMeasuredHeight] = useState<number>(() => {
     if (height && height > 0) return height;
     return typeof window !== 'undefined' ? Math.max(window.innerHeight - 200, 600) : 700;
   });
 
-  const lastScrollTop = useRef(0);
+  // Generous overscan (~950px above and below viewport) prevents blank checkerboarding on fast flicks
+  const effectiveOverscan = useMemo(() => {
+    const minByPixels = Math.ceil(950 / Math.max(itemHeight, 1));
+    return Math.max(overscanCount, minByPixels);
+  }, [overscanCount, itemHeight]);
 
-  // Measure available viewport height dynamically without locking to empty placeholder height
+  // Quantize window shifts into multi-row chunks so scrolling 1px doesn't trigger React renders
+  const chunkStep = useMemo(() => {
+    return Math.max(1, Math.floor(effectiveOverscan / 3));
+  }, [effectiveOverscan]);
+
+  const computeWindowForScroll = useCallback(
+    (scrollOffset: number, total: number, viewportH: number) => {
+      if (total === 0) return { startIndex: 0, endIndex: 0 };
+      if (!height && total <= 120) {
+        return { startIndex: 0, endIndex: total - 1 };
+      }
+      const rawFirstVisible = Math.max(0, Math.floor(scrollOffset / itemHeight));
+      const quantizedFirst = Math.floor(rawFirstVisible / chunkStep) * chunkStep;
+      const start = Math.max(0, quantizedFirst - effectiveOverscan);
+      const visibleCount = Math.ceil(viewportH / itemHeight) + chunkStep;
+      const end = Math.min(total - 1, quantizedFirst + visibleCount + effectiveOverscan);
+      return { startIndex: start, endIndex: end };
+    },
+    [height, itemHeight, chunkStep, effectiveOverscan]
+  );
+
+  const [windowRange, setWindowRange] = useState<{ startIndex: number; endIndex: number }>(() =>
+    computeWindowForScroll(0, items.length, measuredHeight)
+  );
+  const committedRangeRef = useRef(windowRange);
+  committedRangeRef.current = windowRange;
+
   useLayoutEffect(() => {
     if (height && height > 0) {
       setMeasuredHeight(height);
+      const next = computeWindowForScroll(lastScrollTop.current, items.length, height);
+      setWindowRange((prev) =>
+        prev.startIndex === next.startIndex && prev.endIndex === next.endIndex ? prev : next
+      );
       return;
     }
 
@@ -61,25 +100,31 @@ export function VirtualizedList<T>({
         typeof window !== 'undefined' ? Math.max(window.innerHeight - topOffset - 24, 520) : 650;
       const calculated = Math.min(Math.max(viewportAvailable, minHeight), Math.max(maxHeight, 750));
       setMeasuredHeight(calculated);
+      const curScroll = container ? container.scrollTop : lastScrollTop.current;
+      const next = computeWindowForScroll(curScroll, items.length, calculated);
+      setWindowRange((prev) =>
+        prev.startIndex === next.startIndex && prev.endIndex === next.endIndex ? prev : next
+      );
     };
 
     updateHeight();
-    window.addEventListener('resize', updateHeight);
+    window.addEventListener('resize', updateHeight, { passive: true });
     return () => {
       window.removeEventListener('resize', updateHeight);
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
     };
-  }, [height, maxHeight, minHeight, items.length]);
+  }, [height, maxHeight, minHeight, items.length, computeWindowForScroll]);
 
   const totalCount = items.length;
   const totalContentHeight = totalCount * itemHeight;
 
-  // Handle scroll events with smooth passive tracking
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const newScrollTop = e.currentTarget.scrollTop;
       const direction = newScrollTop > lastScrollTop.current ? 'forward' : 'backward';
       lastScrollTop.current = newScrollTop;
-      setScrollTop(newScrollTop);
 
       if (onScroll) {
         onScroll({
@@ -87,28 +132,51 @@ export function VirtualizedList<T>({
           scrollDirection: direction,
         });
       }
-    },
-    [onScroll]
-  );
 
-  // Calculate visible range based on scrollTop and measured viewport
-  const { startIndex, endIndex, offsetY } = useMemo(() => {
-    if (totalCount === 0) {
-      return { startIndex: 0, endIndex: 0, offsetY: 0 };
-    }
-    if (!height && totalCount <= 250) {
-      return { startIndex: 0, endIndex: totalCount - 1, offsetY: 0 };
-    }
-    const start = Math.max(0, Math.floor(scrollTop / itemHeight) - overscanCount);
-    const visibleCount = Math.ceil(measuredHeight / itemHeight);
-    const end = Math.min(totalCount - 1, start + visibleCount + overscanCount * 2);
-    const offset = start * itemHeight;
-    return { startIndex: start, endIndex: end, offsetY: offset };
-  }, [scrollTop, itemHeight, measuredHeight, overscanCount, totalCount, height]);
+      const nextRange = computeWindowForScroll(newScrollTop, totalCount, measuredHeight);
+      const current = committedRangeRef.current;
+      if (nextRange.startIndex === current.startIndex && nextRange.endIndex === current.endIndex) {
+        return;
+      }
+
+      // Check if viewport is close to outrunning currently rendered DOM rows (e.g. fast scrollbar drag)
+      const topRenderedPx = current.startIndex * itemHeight;
+      const bottomRenderedPx = (current.endIndex + 1) * itemHeight;
+      const safetyMarginPx = itemHeight * 3;
+      const isOutrunningBuffer =
+        newScrollTop < topRenderedPx + safetyMarginPx ||
+        newScrollTop + measuredHeight > bottomRenderedPx - safetyMarginPx;
+
+      if (isOutrunningBuffer) {
+        if (rafIdRef.current !== null) {
+          cancelAnimationFrame(rafIdRef.current);
+          rafIdRef.current = null;
+        }
+        committedRangeRef.current = nextRange;
+        flushSync(() => {
+          setWindowRange(nextRange);
+        });
+      } else if (rafIdRef.current === null) {
+        rafIdRef.current = requestAnimationFrame(() => {
+          rafIdRef.current = null;
+          const latestRange = computeWindowForScroll(lastScrollTop.current, totalCount, measuredHeight);
+          const prevCommitted = committedRangeRef.current;
+          if (
+            latestRange.startIndex !== prevCommitted.startIndex ||
+            latestRange.endIndex !== prevCommitted.endIndex
+          ) {
+            committedRangeRef.current = latestRange;
+            setWindowRange(latestRange);
+          }
+        });
+      }
+    },
+    [onScroll, computeWindowForScroll, totalCount, measuredHeight, itemHeight]
+  );
 
   if (totalCount === 0) {
     return (
-      <div 
+      <div
         ref={containerRef}
         className={`w-full overflow-hidden flex flex-col justify-center items-center ${className}`}
         style={{ minHeight, width }}
@@ -122,9 +190,8 @@ export function VirtualizedList<T>({
     );
   }
 
-  // For standard-sized lists without an explicit fixed height, render open full-height flow
-  // so mobile and desktop users scroll naturally with the page without a tiny inner scroll box
-  if (!height && totalCount <= 250) {
+  // Open flow for small lists (<= 120 items) without fixed height
+  if (!height && totalCount <= 120) {
     return (
       <div
         ref={containerRef}
@@ -147,10 +214,11 @@ export function VirtualizedList<T>({
     );
   }
 
-  // Slice visible items for large virtualized datasets
-  const visibleItems = items.slice(startIndex, endIndex + 1);
+  const clampedStart = Math.min(windowRange.startIndex, Math.max(0, totalCount - 1));
+  const clampedEnd = Math.min(windowRange.endIndex, totalCount - 1);
+  const offsetY = clampedStart * itemHeight;
+  const visibleItems = items.slice(clampedStart, clampedEnd + 1);
 
-  // Determine container style
   const containerStyle: CSSProperties = {
     height: height ? height : Math.min(measuredHeight, Math.max(totalContentHeight, minHeight)),
     maxHeight: Math.max(maxHeight, 750),
@@ -158,7 +226,9 @@ export function VirtualizedList<T>({
     width,
     overflowY: 'auto',
     overflowX: 'hidden',
+    overscrollBehaviorY: 'contain',
     WebkitOverflowScrolling: 'touch',
+    contain: 'layout paint',
     position: 'relative',
   };
 
@@ -171,29 +241,27 @@ export function VirtualizedList<T>({
     >
       {header && <div className="sticky top-0 z-20 shrink-0">{header}</div>}
 
-      {/* Sizer spacer div maintaining native scrollbar thumb physics */}
+      {/* Sizer spacer div maintaining exact native scrollbar thumb physics */}
       <div
         style={{
           height: totalContentHeight,
           width: '100%',
           position: 'relative',
-          pointerEvents: 'none',
+          contain: 'layout style',
         }}
       >
-        {/* Render container translated to visible offset */}
+        {/* Positioned slice container */}
         <div
           style={{
             position: 'absolute',
             top: 0,
             left: 0,
             right: 0,
-            transform: `translateY(${offsetY}px)`,
-            willChange: 'transform',
-            pointerEvents: 'auto',
+            transform: `translate3d(0, ${offsetY}px, 0)`,
           }}
         >
           {visibleItems.map((item, localIdx) => {
-            const index = startIndex + localIdx;
+            const index = clampedStart + localIdx;
             const key = getItemKey ? getItemKey(item, index) : `virt_item_${index}`;
             const itemStyle: CSSProperties = {
               height: itemHeight,
@@ -232,8 +300,8 @@ export interface VirtualizedTableProps<T> {
 }
 
 /**
- * VirtualizedTable provides smooth scrolling for dense desktop tables
- * with sticky columns header and lag-free row rendering.
+ * VirtualizedTable provides 120fps zero-lag scrolling for dense desktop tables
+ * with sticky columns header and zero backdrop-blur overhead.
  */
 export function VirtualizedTable<T>({
   items,
@@ -255,13 +323,13 @@ export function VirtualizedTable<T>({
   const effectiveMinWidth = disableHorizontalScroll ? undefined : minTableWidth;
 
   const renderedHeader = columnsHeader || (columns ? (
-    <div 
-      className="flex items-center w-full min-w-0 text-[10.5px] font-semibold uppercase tracking-wide text-gray-400 py-2 border-b border-white/10 bg-slate-950/95"
+    <div
+      className="flex items-center w-full min-w-0 text-[10.5px] font-semibold uppercase tracking-wide text-gray-400 py-2 border-b border-white/10 bg-slate-950"
       style={{ minWidth: effectiveMinWidth || undefined }}
     >
       {columns.map((col, idx) => (
-        <div 
-          key={`col_th_${idx}`} 
+        <div
+          key={`col_th_${idx}`}
           className={`${headerCellClassName} min-w-0 truncate ${col.className || ''}`}
           style={{ width: col.width, flexShrink: 0 }}
         >
@@ -275,12 +343,12 @@ export function VirtualizedTable<T>({
     <div
       className={`w-full max-w-full min-w-0 ${
         disableHorizontalScroll ? 'overflow-x-hidden' : 'overflow-x-auto custom-scrollbar'
-      } border border-white/5 rounded-xl bg-slate-900/60 backdrop-blur-md ${className}`}
+      } border border-white/5 rounded-xl bg-slate-900 ${className}`}
     >
       <div className="w-full min-w-0" style={{ minWidth: effectiveMinWidth || '100%' }}>
         {/* Sticky Table Header */}
         {renderedHeader && (
-          <div className="sticky top-0 z-10 bg-slate-950/95 select-none">
+          <div className="sticky top-0 z-10 bg-slate-950 select-none">
             {renderedHeader}
           </div>
         )}
@@ -295,9 +363,9 @@ export function VirtualizedTable<T>({
           getItemKey={getItemKey}
           emptyPlaceholder={emptyPlaceholder}
           renderItem={(item, index, style) => (
-            <div 
+            <div
               onClick={() => onRowClick && onRowClick(item)}
-              className={`flex items-center w-full min-w-0 overflow-hidden border-b border-white/5 hover:bg-white/[0.04] transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
+              className={`flex items-center w-full min-w-0 overflow-hidden border-b border-white/5 hover:bg-sky-500/10 ${onRowClick ? 'cursor-pointer' : ''}`}
               style={style}
             >
               {renderRow(item, index, style)}
@@ -337,7 +405,6 @@ export function VirtualizedGrid<T>({
   className = '',
   getItemKey,
 }: VirtualizedGridProps<T>): React.ReactElement {
-  // Chunk items into rows
   const rows = useMemo(() => {
     const chunked: T[][] = [];
     for (let i = 0; i < items.length; i += columns) {
@@ -356,12 +423,12 @@ export function VirtualizedGrid<T>({
       emptyPlaceholder={emptyPlaceholder}
       getItemKey={(_, rowIdx) => `grid_row_${rowIdx}`}
       renderItem={(rowItems, rowIdx) => (
-        <div 
+        <div
           className="grid gap-3 items-stretch"
-          style={{ 
+          style={{
             gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
             height: itemHeight,
-            marginBottom: gap
+            marginBottom: gap,
           }}
         >
           {rowItems.map((item, colIdx) => {

@@ -167,6 +167,7 @@ export const ThemeToggleSwitch: React.FC<ThemeToggleSwitchProps> = ({
     return (
       <button
         type="button"
+        data-custom-control="true"
         onClick={handleToggle}
         className={`relative inline-flex items-center h-8 w-16 rounded-full p-1 transition-all duration-300 cursor-pointer select-none border shadow-sm ${
           isPearl
@@ -199,6 +200,7 @@ export const ThemeToggleSwitch: React.FC<ThemeToggleSwitchProps> = ({
   return (
     <button
       type="button"
+      data-custom-control="true"
       onClick={handleToggle}
       className={`relative inline-flex items-center h-7 w-[88px] sm:h-8 sm:w-[148px] rounded-full p-0.5 sm:p-1 transition-all duration-300 cursor-pointer select-none border shadow-sm shrink-0 ${
         isPearl

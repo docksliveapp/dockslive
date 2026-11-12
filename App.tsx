@@ -1165,7 +1165,7 @@ const App: React.FC = () => {
       />
 
       {/* Main Sidebar */}
-      <aside className={`fixed top-0 left-0 h-full bg-slate-950/98 backdrop-blur-2xl border-r border-white/10 transition-all duration-300 flex flex-col z-40 shadow-2xl ${mobileSidebarOpen ? 'w-72 sm:w-80 translate-x-0' : 'w-72 sm:w-80 -translate-x-full'} lg:static lg:translate-x-0 lg:h-auto ${desktopSidebarExpanded ? 'lg:w-64' : 'lg:w-20'} overflow-hidden select-none`}>
+      <aside className={`fixed top-0 left-0 h-full bg-slate-950 border-r border-white/10 transition-colors duration-200 flex flex-col z-40 shadow-2xl ${mobileSidebarOpen ? 'w-72 sm:w-80 translate-x-0' : 'w-72 sm:w-80 -translate-x-full'} lg:static lg:translate-x-0 lg:h-auto ${desktopSidebarExpanded ? 'lg:w-64' : 'lg:w-20'} overflow-hidden select-none`}>
         
         {/* Mobile Safe-Area Header with Close Button */}
         <div className="pt-3 pb-2.5 px-4 border-b border-white/10 flex items-center justify-between lg:hidden bg-slate-900/90 shrink-0">
@@ -1438,6 +1438,7 @@ const App: React.FC = () => {
             <button
               type="button"
               id="header-center-company-logo-btn"
+              data-custom-control="true"
               onClick={() => setIsCompanyModalOpen(true)}
               className="flex items-center justify-center px-1.5 py-1 min-h-[2.25rem] min-w-[3rem] rounded-xl hover:bg-black/5 dark:hover:bg-white/5 border border-transparent transition-all duration-200 cursor-pointer group shrink-0 max-w-full"
               title={`${activeCompany.name} (Click to switch company)`}
@@ -1558,7 +1559,7 @@ const App: React.FC = () => {
 
         <div 
           id="main-scroll-container"
-          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 md:p-6 lg:p-8 2xl:p-10 pb-28 sm:pb-14 custom-scrollbar"
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain p-3 sm:p-5 md:p-6 lg:p-8 2xl:p-10 pb-28 sm:pb-14 custom-scrollbar"
           style={{ WebkitOverflowScrolling: 'touch' }}
         >
           <div className="w-full max-w-[1920px] mx-auto">

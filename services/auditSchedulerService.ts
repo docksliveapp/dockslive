@@ -375,6 +375,10 @@ export async function runDailyCompanyDocExpiryCheck(): Promise<void> {
 export async function runMonthlySalaryRolloverCheck(): Promise<void> {
   try {
     const now = new Date();
+    const todayYmd = formatDateYmdLocal(now);
+    // Current month (Nov 2026) is Invoices & Case Registrations ONLY; Payables & Salaries start 2026-12-01
+    if (todayYmd < '2026-12-01') return;
+
     const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const activeCompany = getActiveCompanyId();
 

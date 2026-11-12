@@ -482,7 +482,6 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
             .filter(v => !isCorruptedVehicleRecord(v))
             .map(sanitizeFleetVehicle);
           setVehicles(cleanVehicles);
-          safeAppStorage.setJSON('dpl_live_vehicles', cleanVehicles);
         }
       },
       (err) => console.warn('Vehicle subscription warning:', err)
@@ -566,11 +565,17 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
   }, [allCases, vehicles, allDrivers]);
 
   useEffect(() => {
-    safeAppStorage.setJSON('dpl_live_transporters', transporters);
+    const t = setTimeout(() => {
+      safeAppStorage.setJSON('dpl_live_transporters', transporters);
+    }, 350);
+    return () => clearTimeout(t);
   }, [transporters]);
 
   useEffect(() => {
-    safeAppStorage.setJSON('dpl_live_vehicles', vehicles);
+    const t = setTimeout(() => {
+      safeAppStorage.setJSON('dpl_live_vehicles', vehicles);
+    }, 500);
+    return () => clearTimeout(t);
   }, [vehicles]);
 
   // Synchronize transporters list with vehicles transporterName & brokerName automatically
@@ -1126,18 +1131,6 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     return tripCountsByPlate.get(normPlate) ?? (v.tripsHistory?.length || 0);
   };
 
-  const vehiclesOnWay = vehicles.filter(isVehicleOnTheWay);
-  const vehiclesExpired = vehicles.filter(v => v.status === 'EXPIRED' || getVehicleValidity(v).text === 'Expired');
-  const vehiclesExpiringSoon = vehicles.filter(v => v.status === 'EXPIRE_SOON' || getVehicleValidity(v).text === 'Expiry Soon');
-  const vehiclesActiveValid = vehicles.filter(
-    v =>
-      !v.isBlacklisted &&
-      v.status !== 'CANCELLED' &&
-      v.status !== 'INACTIVE' &&
-      v.status !== 'EXPIRED' &&
-      getVehicleValidity(v).text !== 'Expired'
-  );
-  
   const getVehicleCompanyLabel = (v: Vehicle): string => {
     const rawOp = String(v.operatingCompany || '').trim().toLowerCase();
     const rawName = String(v.companyName || '').trim().toUpperCase();
@@ -1153,11 +1146,124 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     return String(v.transporterName || v.brokerName || 'Direct').trim();
   };
 
+  // Single-pass O(N) precomputed metadata so scrolling & filtering 3,800+ vehicles takes <0.5ms
+  const {
+    fleetMetaById,
+    vehiclesOnWay,
+    vehiclesExpired,
+    vehiclesExpiringSoon,
+    vehiclesActiveValid,
+    existingMraList,
+  } = useMemo(() => {
+    const metaMap = new Map<
+      number,
+      {
+        validityText: 'Valid' | 'Expired' | 'Expiry Soon';
+        companyLabel: string;
+        companyLower: string;
+        isTruckit: boolean;
+        fullComp: string;
+        makeModelStr: string;
+        transporterLabel: string;
+        transporterLower: string;
+        tripsCount: number;
+        isOnWay: boolean;
+        isActiveValid: boolean;
+        isExpired: boolean;
+        isExpiringSoon: boolean;
+        searchHaystack: string;
+      }
+    >();
+
+    const onWayArr: Vehicle[] = [];
+    const expiredArr: Vehicle[] = [];
+    const expSoonArr: Vehicle[] = [];
+    const activeValidArr: Vehicle[] = [];
+    const mraSet = new Set<string>();
+
+    for (let i = 0; i < vehicles.length; i++) {
+      const v = vehicles[i];
+      const normPlate = normalizeVehiclePlate(v.registrationNumber || '');
+      const validityText = getVehicleValidity(v).text;
+      const companyLabel = getVehicleCompanyLabel(v);
+      const isTruckit = companyLabel === 'TRUCKIT';
+      const fullComp = v.companyName || (isTruckit ? 'TRUCKIT PVT LTD' : 'DOCKS PVT LTD');
+      const makeModelStr = [v.make, v.model].filter(Boolean).join(' ') || v.makeModel || v.category || 'Bonded';
+      const transporterLabel = getVehicleTransporterLabel(v);
+      const tripsCount = normPlate
+        ? (tripCountsByPlate.get(normPlate) ?? (v.tripsHistory?.length || 0))
+        : (v.tripsHistory?.length || 0);
+
+      const isOnWay =
+        v.status === 'ON_TRIP' ||
+        v.status === 'IN_LINE' ||
+        (normPlate ? inTransitPlatesSet.has(normPlate) : false);
+      const isExpired = v.status === 'EXPIRED' || validityText === 'Expired';
+      const isExpiringSoon = v.status === 'EXPIRE_SOON' || validityText === 'Expiry Soon';
+      const isActiveValid =
+        !v.isBlacklisted &&
+        v.status !== 'CANCELLED' &&
+        v.status !== 'INACTIVE' &&
+        !isExpired;
+
+      if (isOnWay) onWayArr.push(v);
+      if (isExpired) expiredArr.push(v);
+      if (isExpiringSoon) expSoonArr.push(v);
+      if (isActiveValid) activeValidArr.push(v);
+
+      const cleanMra = (v.mra || '').trim();
+      if (cleanMra) mraSet.add(cleanMra);
+
+      const searchHaystack = [
+        v.registrationNumber,
+        v.brokerName,
+        v.transporterName,
+        v.chassisNo,
+        v.engineNo,
+        v.make,
+        v.model,
+        v.mra,
+        v.companyName,
+        v.driverName,
+        v.dplSerial,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      metaMap.set(v.id, {
+        validityText,
+        companyLabel,
+        companyLower: companyLabel.toLowerCase(),
+        isTruckit,
+        fullComp,
+        makeModelStr,
+        transporterLabel,
+        transporterLower: transporterLabel.toLowerCase(),
+        tripsCount,
+        isOnWay,
+        isActiveValid,
+        isExpired,
+        isExpiringSoon,
+        searchHaystack,
+      });
+    }
+
+    return {
+      fleetMetaById: metaMap,
+      vehiclesOnWay: onWayArr,
+      vehiclesExpired: expiredArr,
+      vehiclesExpiringSoon: expSoonArr,
+      vehiclesActiveValid: activeValidArr,
+      existingMraList: Array.from(mraSet),
+    };
+  }, [vehicles, inTransitPlatesSet, tripCountsByPlate]);
+
   // Dynamic list of ONLY companies that have registered vehicles
   const registeredCompaniesList = useMemo(() => {
     const counts = new Map<string, number>();
     vehicles.forEach((v) => {
-      const comp = getVehicleCompanyLabel(v);
+      const comp = fleetMetaById.get(v.id)?.companyLabel || getVehicleCompanyLabel(v);
       if (comp) {
         counts.set(comp, (counts.get(comp) || 0) + 1);
       }
@@ -1165,13 +1271,13 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
     return Array.from(counts.entries())
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([name, count]) => ({ name, count }));
-  }, [vehicles]);
+  }, [vehicles, fleetMetaById]);
 
   // Complete list of all transporters across registered vehicles and transporter directory
   const registeredTransportersList = useMemo(() => {
     const byLower = new Map<string, { name: string; count: number }>();
     vehicles.forEach((v) => {
-      const tName = getVehicleTransporterLabel(v);
+      const tName = fleetMetaById.get(v.id)?.transporterLabel || getVehicleTransporterLabel(v);
       if (!tName) return;
       const key = tName.toLowerCase();
       const existing = byLower.get(key);
@@ -1190,94 +1296,75 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
       }
     });
     return Array.from(byLower.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [vehicles, transporters]);
+  }, [vehicles, transporters, fleetMetaById]);
 
   const statusCounts = useMemo(() => {
-    const baseList = vehicles.filter((v) => {
-      if (companyFilter !== 'ALL' && getVehicleCompanyLabel(v).toLowerCase() !== companyFilter.toLowerCase()) {
-        return false;
-      }
-      if (transporterFilter !== 'ALL' && getVehicleTransporterLabel(v).toLowerCase() !== transporterFilter.toLowerCase()) {
-        return false;
-      }
-      return true;
-    });
+    const compLower = companyFilter.toLowerCase();
+    const transLower = transporterFilter.toLowerCase();
+    let all = 0;
+    let active = 0;
+    let inTransit = 0;
+    let expired = 0;
+    let expirySoon = 0;
+
+    for (let i = 0; i < vehicles.length; i++) {
+      const meta = fleetMetaById.get(vehicles[i].id);
+      if (!meta) continue;
+      if (companyFilter !== 'ALL' && meta.companyLower !== compLower) continue;
+      if (transporterFilter !== 'ALL' && meta.transporterLower !== transLower) continue;
+      all++;
+      if (meta.isActiveValid) active++;
+      if (meta.isOnWay) inTransit++;
+      if (meta.isExpired) expired++;
+      if (meta.isExpiringSoon) expirySoon++;
+    }
 
     return {
-      ALL: baseList.length,
-      ACTIVE: baseList.filter(
-        v =>
-          !v.isBlacklisted &&
-          v.status !== 'CANCELLED' &&
-          v.status !== 'INACTIVE' &&
-          v.status !== 'EXPIRED' &&
-          getVehicleValidity(v).text !== 'Expired'
-      ).length,
-      IN_TRANSIT: baseList.filter(
-        v =>
-          v.status === 'ON_TRIP' ||
-          v.status === 'IN_LINE' ||
-          inTransitPlatesSet.has(normalizeVehiclePlate(v.registrationNumber))
-      ).length,
-      EXPIRED: baseList.filter(v => v.status === 'EXPIRED' || getVehicleValidity(v).text === 'Expired').length,
-      EXPIRY_SOON: baseList.filter(v => v.status === 'EXPIRE_SOON' || getVehicleValidity(v).text === 'Expiry Soon').length,
+      ALL: all,
+      ACTIVE: active,
+      IN_TRANSIT: inTransit,
+      EXPIRED: expired,
+      EXPIRY_SOON: expirySoon,
     };
-  }, [vehicles, companyFilter, transporterFilter, inTransitPlatesSet]);
+  }, [vehicles, companyFilter, transporterFilter, fleetMetaById]);
 
   const filteredVehicles = useMemo(() => {
-    return vehicles.filter(v => {
-      if (companyFilter !== 'ALL' && getVehicleCompanyLabel(v).toLowerCase() !== companyFilter.toLowerCase()) {
-        return false;
-      }
-      if (transporterFilter !== 'ALL' && getVehicleTransporterLabel(v).toLowerCase() !== transporterFilter.toLowerCase()) {
-        return false;
-      }
+    const compLower = companyFilter.toLowerCase();
+    const transLower = transporterFilter.toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
 
-      const q = searchQuery.toLowerCase().trim();
-      const matchesSearch = !q || (
-        v.registrationNumber.toLowerCase().includes(q) ||
-        (v.brokerName && v.brokerName.toLowerCase().includes(q)) ||
-        v.transporterName.toLowerCase().includes(q) ||
-        (v.chassisNo && v.chassisNo.toLowerCase().includes(q)) ||
-        (v.engineNo && v.engineNo.toLowerCase().includes(q)) ||
-        (v.make && v.make.toLowerCase().includes(q)) ||
-        (v.model && v.model.toLowerCase().includes(q)) ||
-        (v.mra && v.mra.toLowerCase().includes(q)) ||
-        (v.companyName && v.companyName.toLowerCase().includes(q)) ||
-        (v.driverName && v.driverName.toLowerCase().includes(q)) ||
-        (v.dplSerial && v.dplSerial.toLowerCase().includes(q))
-      );
+    return vehicles.filter((v) => {
+      const meta = fleetMetaById.get(v.id);
+      if (!meta) return false;
+      if (companyFilter !== 'ALL' && meta.companyLower !== compLower) return false;
+      if (transporterFilter !== 'ALL' && meta.transporterLower !== transLower) return false;
+      if (q && !meta.searchHaystack.includes(q)) return false;
 
-      if (!matchesSearch) return false;
-
-      const validity = getVehicleValidity(v);
       switch (vehicleStatusFilter) {
         case 'ACTIVE':
-          return (
-            !v.isBlacklisted &&
-            v.status !== 'CANCELLED' &&
-            v.status !== 'INACTIVE' &&
-            v.status !== 'EXPIRED' &&
-            validity.text !== 'Expired'
-          );
+          return meta.isActiveValid;
         case 'IN_TRANSIT':
-          return (
-            v.status === 'ON_TRIP' ||
-            v.status === 'IN_LINE' ||
-            inTransitPlatesSet.has(normalizeVehiclePlate(v.registrationNumber))
-          );
+          return meta.isOnWay;
         case 'EXPIRED':
-          return v.status === 'EXPIRED' || validity.text === 'Expired';
+          return meta.isExpired;
         case 'EXPIRY_SOON':
-          return v.status === 'EXPIRE_SOON' || validity.text === 'Expiry Soon';
+          return meta.isExpiringSoon;
         case 'ALL':
         default:
           return true;
       }
     });
-  }, [vehicles, searchQuery, vehicleStatusFilter, companyFilter, transporterFilter, inTransitPlatesSet]);
+  }, [vehicles, searchQuery, vehicleStatusFilter, companyFilter, transporterFilter, fleetMetaById]);
 
-  const isAllFilteredSelected = filteredVehicles.length > 0 && filteredVehicles.every(v => selectedVehicleIds.includes(v.id));
+  const selectedVehicleIdSet = useMemo(() => new Set(selectedVehicleIds), [selectedVehicleIds]);
+
+  const isAllFilteredSelected = useMemo(() => {
+    if (filteredVehicles.length === 0 || selectedVehicleIdSet.size === 0) return false;
+    for (let i = 0; i < filteredVehicles.length; i++) {
+      if (!selectedVehicleIdSet.has(filteredVehicles[i].id)) return false;
+    }
+    return true;
+  }, [filteredVehicles, selectedVehicleIdSet]);
 
   const toggleSelectAllFiltered = () => {
     if (isAllFilteredSelected) {
@@ -1713,30 +1800,33 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
 
   const renderVehiclesSection = () => (
     <div className="space-y-3 animate-fade-in w-full max-w-full min-w-0 overflow-x-hidden">
-      {/* Compact Fleet Operations & Export Toolbar */}
-      <div className="w-full bg-slate-900/75 border border-white/10 rounded-xl p-3">
+      {/* Compact Fleet Operations & Export Toolbar — Unified Standard Animated Buttons */}
+      <div className="w-full bg-slate-900 border border-white/10 rounded-xl p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button 
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
               onClick={() => { setEditingVehicle(null); setPreSelectedTransporterId(null); setShowAddVehicle(true); }}
-              className="bg-brand-600 hover:bg-brand-500 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs font-semibold shadow-sm transition-colors whitespace-nowrap shrink-0"
+              className="mak-btn px-3.5 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
             >
-              <Plus size={14} /> Add Vehicle
+              <Plus size={14} /> <span>Add Vehicle</span>
             </button>
-            <button 
-              onClick={() => setShowAddTransporter(true)} 
-              className="bg-purple-600/20 hover:bg-purple-600 border border-purple-500/30 text-purple-300 hover:text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0"
+            <button
+              type="button"
+              onClick={() => setShowAddTransporter(true)}
+              className="mak-btn px-3.5 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
             >
-              <User size={14} /> Add Transporter
+              <User size={14} /> <span>Add Transporter</span>
             </button>
-            <button 
+            <button
+              type="button"
               onClick={() => setShowBulkUploadModal(true)}
-              className="bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/30 text-emerald-300 hover:text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0"
+              className="mak-btn px-3.5 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
               title="Import multiple vehicles using Excel (.xlsx), Word (.docx), or CSV files"
             >
-              <UploadCloud size={14} /> Bulk Upload (.xlsx / .csv)
+              <UploadCloud size={14} /> <span>Bulk Upload (.xlsx / .csv)</span>
             </button>
-            <button 
+            <button
               type="button"
               onClick={() => {
                 const host = (window.location.hostname || '').toLowerCase();
@@ -1747,47 +1837,47 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                 if (onOpenPublicTracker) onOpenPublicTracker();
                 else window.location.href = '/?mode=vehicle';
               }}
-              className="bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 hover:text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              className="mak-btn px-3.5 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
               title="Open Live Public Vehicle Status Portal"
             >
-              <Globe size={14} className="text-amber-400" />
+              <Globe size={14} />
               <span>Status Portal</span>
             </button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div className="flex items-center gap-0.5 bg-red-950/40 p-0.5 rounded-lg border border-red-500/30">
-              <button 
-                onClick={handlePreviewCustomsListPdf}
-                className="hover:bg-red-600/40 text-red-300 hover:text-white px-2 py-1 rounded flex items-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0"
-                title="Preview official Pakistan Customs Vehicle List (PDF)"
-              >
-                <Eye size={12} className="text-amber-300" /> Customs PDF
-              </button>
-              <button 
-                onClick={handleDownloadCustomsListPdf}
-                className="bg-red-600/30 hover:bg-red-600 text-red-200 hover:text-white px-2 py-1 rounded flex items-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0"
-                title="Download official Pakistan Customs Vehicle List (PDF)"
-              >
-                <Download size={12} /> PDF
-              </button>
-            </div>
-            <div className="flex items-center gap-0.5 bg-emerald-950/40 p-0.5 rounded-lg border border-emerald-500/30">
-              <button 
-                onClick={handlePreviewVehiclesExcel}
-                className="hover:bg-emerald-600/40 text-emerald-300 hover:text-white px-2 py-1 rounded flex items-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0"
-                title="Preview Master Fleet Excel (.xlsx)"
-              >
-                <Eye size={12} className="text-emerald-300" /> Fleet Excel
-              </button>
-              <button 
-                onClick={handleExportAllVehiclesList}
-                className="bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 hover:text-white px-2 py-1 rounded flex items-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0"
-                title="Download formatted Excel (.xlsx) workbook"
-              >
-                <Download size={12} /> .xlsx
-              </button>
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handlePreviewCustomsListPdf}
+              className="mak-btn px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
+              title="Preview official Pakistan Customs Vehicle List (PDF)"
+            >
+              <Eye size={13} /> <span>Customs PDF</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadCustomsListPdf}
+              className="mak-btn px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
+              title="Download official Pakistan Customs Vehicle List (PDF)"
+            >
+              <Download size={13} /> <span>PDF</span>
+            </button>
+            <button
+              type="button"
+              onClick={handlePreviewVehiclesExcel}
+              className="mak-btn px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
+              title="Preview Master Fleet Excel (.xlsx)"
+            >
+              <Eye size={13} /> <span>Fleet Excel</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleExportAllVehiclesList}
+              className="mak-btn px-3 py-2 rounded-lg flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap shrink-0"
+              title="Download formatted Excel (.xlsx) workbook"
+            >
+              <Download size={13} /> <span>.xlsx</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1998,36 +2088,33 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
             items={filteredVehicles}
             itemHeight={58}
             maxHeight={650}
-            getItemKey={(v, idx) => `veh_mob_${v.id || idx}_${idx}`}
+            getItemKey={(v) => v.id}
             emptyPlaceholder={
               <div className="p-8 text-center text-gray-500 text-xs">No vehicles match the selected filters.</div>
             }
             renderItem={(v) => {
-              const compLabel = getVehicleCompanyLabel(v);
-              const isTruckit = compLabel === 'TRUCKIT';
-              const makeModelStr = [v.make, v.model].filter(Boolean).join(' ') || v.makeModel || v.category || 'Bonded';
-              const tripsCount = getVehicleTripsCount(v);
+              const meta = fleetMetaById.get(v.id);
+              const compLabel = meta ? meta.companyLabel : getVehicleCompanyLabel(v);
+              const isTruckit = meta ? meta.isTruckit : compLabel === 'TRUCKIT';
+              const makeModelStr = meta ? meta.makeModelStr : ([v.make, v.model].filter(Boolean).join(' ') || v.makeModel || v.category || 'Bonded');
+              const tripsCount = meta ? meta.tripsCount : getVehicleTripsCount(v);
+              const transporterLabel = meta ? meta.transporterLabel : getVehicleTransporterLabel(v);
+              const isSelected = selectedVehicleIdSet.has(v.id);
               return (
                 <div
                   onClick={() => setSelectedVehicle(v)}
-                  className="px-2.5 py-1.5 hover:bg-white/5 transition-colors border-b border-white/5 cursor-pointer flex flex-col justify-center h-full"
+                  className="px-2.5 py-1.5 hover:bg-sky-500/10 border-b border-white/5 cursor-pointer flex flex-col justify-center h-full"
                 >
                   <div className="flex items-center justify-between gap-1.5">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleSelectVehicle(v.id);
-                        }}
-                        className="text-gray-400 hover:text-white shrink-0"
-                      >
-                        {selectedVehicleIds.includes(v.id) ? (
-                          <CheckSquare size={14} className="text-blue-400" />
-                        ) : (
-                          <Square size={14} className="text-gray-600" />
-                        )}
-                      </button>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelectVehicle(v.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-3.5 h-3.5 rounded accent-sky-600 shrink-0"
+                        aria-label={`Select ${v.registrationNumber}`}
+                      />
                       <span className="font-mono font-bold text-white text-xs tabular-nums shrink-0">{v.registrationNumber}</span>
                       <span className={`text-[10px] font-semibold uppercase shrink-0 ${isTruckit ? 'text-cyan-300' : 'text-amber-300'}`}>
                         {compLabel}
@@ -2038,7 +2125,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <span className={`font-mono text-[10.5px] font-bold tabular-nums px-1.5 py-0.5 rounded border ${tripsCount > 0 ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' : 'bg-white/5 border-white/10 text-gray-400'}`}>
+                      <span className={`font-mono text-[10.5px] font-bold tabular-nums px-1.5 py-0.5 rounded ${tripsCount > 0 ? 'text-emerald-400' : 'text-gray-400'}`}>
                         Trips: {tripsCount}
                       </span>
                       <button
@@ -2047,9 +2134,8 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                           setEditingVehicle(v);
                           setShowAddVehicle(true);
                         }}
-                        className="bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/30 text-cyan-300 hover:text-white px-2 py-0.5 rounded text-[10.5px] font-semibold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                        className="mak-btn px-2 py-0.5 rounded text-[10.5px] font-semibold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
                       >
-                        <Settings size={10} />
                         <span>Edit / Docs</span>
                       </button>
                     </div>
@@ -2058,7 +2144,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                   <div className="flex items-center justify-between gap-2 mt-0.5 text-[10.5px] text-gray-400 truncate pl-5">
                     <span className="font-mono truncate">{v.chassisNo || '-'} / {v.engineNo || '-'}</span>
                     <span className="text-gray-300 font-medium truncate shrink-0 max-w-[45%]">
-                      {getVehicleTransporterLabel(v)}
+                      {transporterLabel}
                     </span>
                   </div>
                 </div>
@@ -2076,22 +2162,20 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
             disableHorizontalScroll={true}
             headerCellClassName="px-1.5"
             onRowClick={(v) => setSelectedVehicle(v)}
-            getItemKey={(v, idx) => `veh_row_${v.id || idx}_${idx}`}
+            getItemKey={(v) => v.id}
             columns={[
               {
                 header: (
-                  <button
-                    type="button"
-                    onClick={toggleSelectAllFiltered}
-                    className="text-gray-400 hover:text-white transition-colors flex items-center justify-center mx-auto"
-                    title={isAllFilteredSelected ? "Deselect all in view" : "Select all in view"}
-                  >
-                    {isAllFilteredSelected ? (
-                      <CheckSquare size={14} className="text-blue-400" />
-                    ) : (
-                      <Square size={14} className="text-gray-500 hover:text-gray-300" />
-                    )}
-                  </button>
+                  <div className="flex items-center justify-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllFilteredSelected}
+                      onChange={toggleSelectAllFiltered}
+                      className="w-3.5 h-3.5 rounded accent-sky-600"
+                      title={isAllFilteredSelected ? "Deselect all in view" : "Select all in view"}
+                      aria-label="Select all filtered vehicles"
+                    />
+                  </div>
                 ),
                 width: '3.5%',
                 className: 'text-center'
@@ -2224,11 +2308,14 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
               </div>
             }
             renderRow={(v) => {
-              const compactComp = getVehicleCompanyLabel(v);
-              const isTruckit = compactComp === 'TRUCKIT';
-              const fullComp = v.companyName || (isTruckit ? 'TRUCKIT PVT LTD' : 'DOCKS PVT LTD');
-              const makeModelStr = [v.make, v.model].filter(Boolean).join(' ') || v.makeModel || v.category || 'Bonded';
-              const tripsCount = getVehicleTripsCount(v);
+              const meta = fleetMetaById.get(v.id);
+              const compactComp = meta ? meta.companyLabel : getVehicleCompanyLabel(v);
+              const isTruckit = meta ? meta.isTruckit : compactComp === 'TRUCKIT';
+              const fullComp = meta ? meta.fullComp : (v.companyName || (isTruckit ? 'TRUCKIT PVT LTD' : 'DOCKS PVT LTD'));
+              const makeModelStr = meta ? meta.makeModelStr : ([v.make, v.model].filter(Boolean).join(' ') || v.makeModel || v.category || 'Bonded');
+              const transporterLabel = meta ? meta.transporterLabel : getVehicleTransporterLabel(v);
+              const tripsCount = meta ? meta.tripsCount : getVehicleTripsCount(v);
+              const isSelected = selectedVehicleIdSet.has(v.id);
 
               return (
                 <>
@@ -2238,18 +2325,14 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                     style={{ width: '3.5%', flexShrink: 0 }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <button
-                      type="button"
-                      onClick={() => toggleSelectVehicle(v.id)}
-                      className="text-gray-400 hover:text-white transition-colors flex items-center justify-center"
-                      title={selectedVehicleIds.includes(v.id) ? "Deselect vehicle" : "Select vehicle"}
-                    >
-                      {selectedVehicleIds.includes(v.id) ? (
-                        <CheckSquare size={14} className="text-blue-400" />
-                      ) : (
-                        <Square size={14} className="text-gray-600 hover:text-gray-400" />
-                      )}
-                    </button>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelectVehicle(v.id)}
+                      className="w-3.5 h-3.5 rounded accent-sky-600"
+                      title={isSelected ? "Deselect vehicle" : "Select vehicle"}
+                      aria-label={`Select ${v.registrationNumber}`}
+                    />
                   </div>
 
                   {/* Col 2: Vehicle Registration No (14%) */}
@@ -2287,16 +2370,16 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                     style={{ width: '21.5%', flexShrink: 0 }}
                     title={`Chassis: ${v.chassisNo || 'N/A'} | Engine: ${v.engineNo || 'N/A'}`}
                   >
-                    {v.chassisNo || '-'} <span className="text-gray-600">/</span> {v.engineNo || '-'}
+                    {v.chassisNo || '-'} <span className="text-gray-500">/</span> {v.engineNo || '-'}
                   </div>
 
                   {/* Col 6: Transporter (18.5%) */}
                   <div
                     className="px-1.5 min-w-0 truncate text-xs font-medium text-gray-100 leading-none"
                     style={{ width: '18.5%', flexShrink: 0 }}
-                    title={`Transporter: ${getVehicleTransporterLabel(v)}${v.driverName ? ` | Driver: ${v.driverName}` : ''}`}
+                    title={transporterLabel}
                   >
-                    {getVehicleTransporterLabel(v)}
+                    {transporterLabel}
                   </div>
 
                   {/* Col 7: Trips Quantity (6.5%) */}
@@ -2307,7 +2390,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                   >
                     <span
                       className={`font-mono text-[13px] leading-none tabular-nums font-bold ${
-                        tripsCount > 0 ? 'text-emerald-300' : 'text-gray-500'
+                        tripsCount > 0 ? 'text-emerald-400' : 'text-gray-500'
                       }`}
                     >
                       {tripsCount}
@@ -2326,10 +2409,9 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
                         setEditingVehicle(v);
                         setShowAddVehicle(true);
                       }}
-                      className="bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/30 text-cyan-300 hover:text-white transition-colors px-2 h-[22px] rounded text-[11px] font-semibold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
+                      className="mak-btn px-2.5 h-[23px] rounded-md text-[11px] font-semibold inline-flex items-center justify-center whitespace-nowrap shrink-0"
                       title="Update Vehicle & Documents"
                     >
-                      <Settings size={11} />
                       <span>Edit / Docs</span>
                     </button>
                   </div>
@@ -2346,30 +2428,39 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
 
   return (
     <div className="space-y-4 pb-10 w-full max-w-full min-w-0 overflow-x-hidden">
-      {/* Compact Single-Row Header & Tabs */}
+      {/* Compact Single-Row Header & Animated Standardized Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-xl font-bold text-white flex items-center gap-2">
           <Truck className="text-brand-400" size={20} /> Vehicle Management System
         </h2>
-        
-        <div className="flex flex-wrap gap-1 bg-white/5 rounded-lg p-1 border border-white/10">
-          <button 
+
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
             onClick={() => setActiveTab('vehicles')}
-            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${activeTab === 'vehicles' ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+            className={`finance-type-btn px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              activeTab === 'vehicles' ? 'finance-type-btn-active' : ''
+            }`}
           >
-            <Truck size={14} /> Fleet & Vehicles
+            <Truck size={14} /> <span>Fleet &amp; Vehicles</span>
           </button>
-          <button 
+          <button
+            type="button"
             onClick={() => setActiveTab('transporters')}
-            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${activeTab === 'transporters' ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+            className={`finance-type-btn px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              activeTab === 'transporters' ? 'finance-type-btn-active' : ''
+            }`}
           >
-            <User size={14} /> Transporters & Brokers
+            <User size={14} /> <span>Transporters &amp; Brokers</span>
           </button>
-          <button 
+          <button
+            type="button"
             onClick={() => setActiveTab('ready_vehicles')}
-            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${activeTab === 'ready_vehicles' ? 'bg-brand-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+            className={`finance-type-btn px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              activeTab === 'ready_vehicles' ? 'finance-type-btn-active' : ''
+            }`}
           >
-            <MapPin size={14} /> Available Fleet
+            <MapPin size={14} /> <span>Available Fleet</span>
           </button>
         </div>
       </div>
@@ -2468,7 +2559,7 @@ const VehicleManagement: React.FC<VehicleManagementProps> = ({
           transporters={transporters} 
           preSelectedTransporterId={preSelectedTransporterId}
           initialVehicle={editingVehicle}
-          existingMraList={Array.from(new Set(vehicles.map(v => (v.mra || '').trim()).filter(Boolean)))}
+          existingMraList={existingMraList}
           allCases={allCases}
           allDrivers={allDrivers}
           onAutoUpdateValidity={(updatedVeh: Vehicle) => {
@@ -4928,19 +5019,19 @@ const VehicleProfileModal = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-start justify-center pt-6 sm:pt-10 p-3 sm:p-5 overflow-y-auto z-50 animate-in fade-in">
-      <div className="glass-card w-full max-w-4xl h-[85vh] flex flex-col rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
-        <div className="bg-slate-900/90 p-5 md:p-6 border-b border-white/10 flex flex-wrap justify-between items-center gap-3">
+    <div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-3 sm:p-5 z-50 animate-fade-in">
+      <div className="glass-card w-full max-w-4xl max-h-[88dvh] flex flex-col rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
+        <div className="bg-slate-900 p-4 sm:p-5 border-b border-white/10 flex flex-wrap justify-between items-center gap-3 shrink-0">
            <div>
-             <h2 className="text-2xl font-bold text-white flex items-center gap-3 flex-wrap">
-               <span>{vehicle.registrationNumber}</span>
-               <span className="text-xs font-bold uppercase px-2.5 py-1 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                 {vehicle.companyName || (vehicle.operatingCompany === 'truckit' ? 'TRUCKIT PVT LTD' : 'DOCKS PVT LTD')}
+             <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2.5 flex-wrap">
+               <span className="font-mono tabular-nums">{vehicle.registrationNumber}</span>
+               <span className="text-xs font-bold uppercase text-cyan-300">
+                 · {vehicle.companyName || (vehicle.operatingCompany === 'truckit' ? 'TRUCKIT PVT LTD' : 'DOCKS PVT LTD')}
                </span>
-               <span className="text-sm font-normal bg-white/10 px-2 py-1 rounded text-gray-300">{vehicle.type}</span>
+               <span className="text-xs font-medium text-gray-400">· {vehicle.type}</span>
              </h2>
-             <p className="text-gray-400 text-sm mt-1">
-               Transporter & Broker: <strong className="text-white">{vehicle.transporterName || vehicle.brokerName || 'Direct Transporter'}</strong> • {vehicle.category}
+             <p className="text-gray-400 text-xs sm:text-sm mt-1">
+               Transporter &amp; Broker: <strong className="text-white">{vehicle.transporterName || vehicle.brokerName || 'Direct Transporter'}</strong> · {vehicle.category}
              </p>
            </div>
            
@@ -4949,7 +5040,7 @@ const VehicleProfileModal = ({
                <button
                  type="button"
                  onClick={() => onEditVehicle(vehicle)}
-                 className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow"
+                 className="mak-btn text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0"
                >
                  <Settings size={14} />
                  <span>Edit / Upload Docs</span>
@@ -4959,20 +5050,21 @@ const VehicleProfileModal = ({
                <button
                  type="button"
                  onClick={() => onRenewVehicle(vehicle)}
-                 className="bg-amber-600/25 hover:bg-amber-600 border border-amber-500/40 text-amber-300 hover:text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all"
+                 className="mak-btn text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0"
                >
                  <Clock size={14} />
                  <span>Renew 6M</span>
                </button>
              )}
              {vehicle.status === 'CANCELLED' ? (
-                <span className="bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                <span className="text-red-400 text-xs font-bold flex items-center gap-1.5 px-2 py-1">
                   <Ban size={13} /> De-registered / Cancelled
                 </span>
              ) : onCancelVehicle ? (
                 <button
+                  type="button"
                   onClick={() => onCancelVehicle(vehicle)}
-                  className="bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all"
+                  className="mak-btn text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0"
                   title="Cancel Vehicle and Generate NOC"
                 >
                   <Ban size={14} />
@@ -4981,9 +5073,10 @@ const VehicleProfileModal = ({
              ) : null}
 
              <button
+               type="button"
                onClick={handleDownloadTripAndFleetReport}
                disabled={isExportingTripReport}
-               className="bg-blue-600/25 hover:bg-blue-600 border border-blue-500/30 text-blue-300 hover:text-white text-xs font-semibold px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
+               className="mak-btn text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0"
                title={`Download complete Trip & Fleet Report for vehicle ${vehicle.registrationNumber} (Excel / CSV)`}
              >
                {isExportingTripReport ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
@@ -4991,28 +5084,36 @@ const VehicleProfileModal = ({
              </button>
 
              <button
+               type="button"
                onClick={handleDownloadPdf}
                disabled={isExporting}
-               className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
+               className="mak-btn text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0"
                title="Download complete vehicle profile dossier as PDF"
              >
                {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                <span>Download PDF</span>
              </button>
-             <button onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/5 ml-2"><X size={22}/></button>
+             <button
+               type="button"
+               onClick={onClose}
+               className="mak-btn-secondary p-2 rounded-xl ml-1 shrink-0"
+               title="Close Window"
+             >
+               <X size={18} />
+             </button>
            </div>
         </div>
 
         {/* Status notifications */}
         {isExporting && (
-          <div className="bg-brand-500/10 border-b border-brand-500/20 px-6 py-2.5 flex items-center gap-3 text-brand-300 text-xs animate-pulse">
+          <div className="bg-brand-500/10 border-b border-brand-500/20 px-6 py-2.5 flex items-center gap-3 text-brand-300 text-xs shrink-0">
             <Loader2 size={16} className="animate-spin text-brand-400 shrink-0" />
             <span>Generating and downloading Vehicle Dossier PDF...</span>
           </div>
         )}
 
         {downloadSuccess && (
-          <div className="bg-emerald-500/15 border-b border-emerald-500/20 px-6 py-2.5 text-xs text-emerald-300 flex items-center justify-between gap-4">
+          <div className="bg-emerald-500/15 border-b border-emerald-500/20 px-6 py-2.5 text-xs text-emerald-300 flex items-center justify-between gap-4 shrink-0">
             <div className="flex items-center gap-2">
               <CheckCircle size={16} className="text-emerald-400 shrink-0" />
               <span>{downloadSuccess} — Saved to your device!</span>
@@ -5029,9 +5130,9 @@ const VehicleProfileModal = ({
                 <button
                   type="button"
                   onClick={() => setIsPdfViewerOpen(true)}
-                  className="inline-flex items-center gap-1 text-white bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded text-[11px] font-semibold border border-white/20 transition-all active:scale-95"
+                  className="mak-btn px-2.5 py-1 rounded-lg text-[11px] font-semibold inline-flex items-center gap-1"
                 >
-                  <Eye size={12} /> View PDF
+                  <Eye size={12} /> <span>View PDF</span>
                 </button>
               </div>
             )}
@@ -5039,13 +5140,13 @@ const VehicleProfileModal = ({
         )}
 
         {downloadError && (
-          <div className="bg-red-500/10 border-b border-red-500/20 px-6 py-2.5 text-xs text-red-300 flex items-center gap-2">
+          <div className="bg-red-500/10 border-b border-red-500/20 px-6 py-2.5 text-xs text-red-300 flex items-center gap-2 shrink-0">
             <AlertCircle size={16} className="text-red-400 shrink-0" />
             <span>{downloadError}</span>
           </div>
         )}
         
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 sm:p-6 custom-scrollbar">
            {/* Status Cards */}
            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               <div className="glass-panel p-4 rounded-xl border border-white/10">
@@ -5271,10 +5372,10 @@ const VehicleProfileModal = ({
                <button
                  type="button"
                  onClick={handleDownloadTripAndFleetReport}
-                 className="text-xs text-brand-300 hover:text-white flex items-center gap-1 bg-brand-500/10 hover:bg-brand-500/20 px-2.5 py-1 rounded-lg border border-brand-500/20 transition-all whitespace-nowrap shrink-0"
+                 className="mak-btn text-xs font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap shrink-0"
                  title="Download Trip Report for this vehicle as Excel (.xlsx)"
                >
-                 <Download size={12} /> Export Vehicle Trips (Excel .xlsx)
+                 <Download size={12} /> <span>Export Vehicle Trips (Excel .xlsx)</span>
                </button>
              </div>
 

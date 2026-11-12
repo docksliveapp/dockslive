@@ -48,7 +48,7 @@ body {
   user-select: none;
   -webkit-user-select: none;
   -webkit-overflow-scrolling: touch;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   margin: 0;
   padding: 0;
   font-size: 15px;
@@ -216,7 +216,6 @@ body.theme-charcoal {
     radial-gradient(circle at 85% 100%, rgba(99, 102, 241, 0.06) 0%, transparent 45%),
     linear-gradient(180deg, #0B0F17 0%, #111827 100%);
   color: #F8FAFC;
-  background-attachment: fixed;
 }
 
 /* NOTE: Do NOT apply backdrop-filter to general containers that may wrap `.fixed` modals,
@@ -275,15 +274,21 @@ body.theme-pearl {
     radial-gradient(circle at 50% 100%, rgba(254, 243, 199, 0.35) 0%, transparent 50%),
     linear-gradient(180deg, #FAFBFD 0%, #F1F5F9 100%) !important;
   color: #0F172A !important;
-  background-attachment: fixed;
+}
+
+/* Disable GPU-heavy backdrop-filter across scrollable containers, modals & sidebars
+   to prevent High-DPI compositor tearing/ghosting and scroll frame drops */
+[class*="backdrop-blur"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 /* Primary Cards & Panels in Pearl White Glassy */
 body.theme-pearl .glass-panel,
 body.theme-pearl .glass-card {
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.94) 100%) !important;
+  background: linear-gradient(145deg, #FFFFFF 0%, #F8FAFC 100%) !important;
   border: 1px solid rgba(226, 232, 240, 0.95) !important;
-  box-shadow: 0 10px 30px -6px rgba(15, 23, 42, 0.055), 0 2px 8px -2px rgba(15, 23, 42, 0.03), inset 0 1px 0 0 rgba(255, 255, 255, 0.98) !important;
+  box-shadow: 0 8px 24px -6px rgba(15, 23, 42, 0.055), 0 2px 6px -2px rgba(15, 23, 42, 0.03) !important;
   color: #0F172A;
 }
 
@@ -292,17 +297,24 @@ body.theme-pearl aside,
 body.theme-pearl aside.glass-panel,
 body.theme-pearl header,
 body.theme-pearl header.glass-panel {
-  background: rgba(255, 255, 255, 0.95) !important;
+  background: #FFFFFF !important;
   border-color: rgba(226, 232, 240, 0.95) !important;
-  box-shadow: 0 4px 24px -4px rgba(15, 23, 42, 0.045), inset 0 1px 0 0 rgba(255, 255, 255, 0.95) !important;
+  box-shadow: 0 4px 20px -4px rgba(15, 23, 42, 0.045) !important;
 }
 
-/* Modal Backdrops in Pearl White Glassy */
+/* Modal Backdrops in Pearl White & Charcoal (Crisp Scrim, Zero Scroll Ghosting) */
+.fixed.inset-0[class*="bg-black/"],
+.fixed.inset-0[class*="bg-slate-950/"] {
+  background-color: rgba(2, 6, 23, 0.80) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 body.theme-pearl .fixed.inset-0[class*="bg-black/"],
 body.theme-pearl .fixed.inset-0[class*="bg-slate-950/"] {
-  background-color: rgba(15, 23, 42, 0.44) !important;
-  backdrop-filter: blur(6px) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(6px) saturate(140%) !important;
+  background-color: rgba(15, 23, 42, 0.52) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 /* Dark Slate, Hex & Dark Gradient Containers Adapted to Crisp Pearl Glassy Surfaces
@@ -547,15 +559,25 @@ body.theme-pearl table th {
 body.theme-pearl table td {
   border-color: #F1F5F9 !important;
   color: #0F172A !important;
-  transition: background-color 0.15s ease;
+  transition: none;
 }
 
 body.theme-pearl table tbody tr {
-  transition: background-color 0.18s ease;
+  transition: none;
 }
 
 body.theme-pearl table tbody tr:hover {
   background-color: #F1F5F9 !important;
+}
+
+body.theme-pearl table tfoot tr {
+  background-color: #F8FAFC !important;
+}
+
+body.theme-pearl table tfoot td {
+  background-color: #F8FAFC !important;
+  border-color: #CBD5E1 !important;
+  color: #0F172A !important;
 }
 
 /* Typography Hierarchy in Pearl White Glassy */
@@ -757,37 +779,360 @@ body.theme-pearl .from-red-600 * {
 }
 
 /* ==========================================================================
-   5. LUXURY INTERACTIVE BUTTONS, CARDS & SCROLLBARS
+   5. GLOBAL UNIFIED INTERACTIVE BUTTON SYSTEM (ALL PAGES & ALL POP-UP MODALS)
+      - Consistent Hand Pointer Cursor everywhere
+      - Unified Executive Brand Blue (#0284C7 -> #0369A1) across all action buttons
+      - Identical Tactile Hover Lift & Click Press Animation everywhere
    ========================================================================== */
-button,
-[role="button"] {
-  transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+a[href],
+select:not(:disabled),
+summary,
+label[for],
+input[type="checkbox"]:not(:disabled),
+input[type="radio"]:not(:disabled),
+input[type="submit"]:not(:disabled),
+input[type="button"]:not(:disabled) {
+  cursor: pointer !important;
 }
 
-.btn-charcoal-primary {
-  background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+button:disabled,
+[aria-disabled="true"],
+select:disabled,
+input:disabled {
+  cursor: not-allowed !important;
+}
+
+/* Base animated transition for all interactive buttons across pages & modals */
+button:not([data-custom-control="true"]),
+[role="button"]:not([data-custom-control="true"]),
+a[class*="px-"]:not([data-custom-control="true"]) {
+  transition:
+    transform 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    background-image 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.16s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Tactile hover & press physics for all buttons (excluding multi-line layout cards & sidebar nav items) */
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left):hover,
+a[class*="px-"]:not([data-custom-control="true"]):hover {
+  transform: translateY(-1.5px);
+}
+
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left):active,
+a[class*="px-"]:not([data-custom-control="true"]):active {
+  transform: translateY(0px) scale(0.96) !important;
+}
+
+aside nav button:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+/* UNIFIED STANDARD ACTION BUTTON COLOR (Same Executive Brand Blue Across Entire App & All Modals)
+   Normalizes legacy rainbow buttons (purple, emerald, green, teal, amber, orange, red, rose, cyan, sky, blue, indigo, brand)
+   into a single cohesive corporate action button style in BOTH Charcoal Dark & Pearl Light themes. */
+.mak-btn,
+.btn-charcoal-primary,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-brand-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-blue-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-sky-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-cyan-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-indigo-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-purple-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-violet-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-emerald-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-green-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-teal-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-amber-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-orange-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-red-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-rose-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-brand-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-blue-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-emerald-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-indigo-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-purple-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-amber-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-rose-"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-red-"],
+a[class*="px-"]:not([data-custom-control="true"])[class*="bg-brand-"],
+a[class*="px-"]:not([data-custom-control="true"])[class*="bg-blue-"],
+a[class*="px-"]:not([data-custom-control="true"])[class*="bg-sky-"],
+a[class*="px-"]:not([data-custom-control="true"])[class*="bg-cyan-"],
+a[class*="px-"]:not([data-custom-control="true"])[class*="bg-emerald-"],
+a[class*="px-"]:not([data-custom-control="true"])[class*="bg-green-"],
+a[class*="px-"]:not([data-custom-control="true"])[class*="bg-amber-"],
+a[class*="px-"]:not([data-custom-control="true"])[class*="bg-indigo-"],
+a[class*="px-"]:not([data-custom-control="true"])[class*="bg-purple-"],
+a[class*="px-"]:not([data-custom-control="true"])[class*="bg-red-"],
+a[class*="px-"]:not([data-custom-control="true"])[class*="bg-rose-"] {
+  background-color: #0284C7 !important;
+  background-image: linear-gradient(135deg, #0284C7 0%, #0369A1 100%) !important;
+  border: 1px solid rgba(56, 189, 248, 0.55) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 3px 10px -2px rgba(2, 132, 199, 0.30), inset 0 1px 0 0 rgba(255, 255, 255, 0.22) !important;
+}
+
+body.theme-pearl .mak-btn,
+body.theme-pearl .btn-charcoal-primary,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-brand-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-blue-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-sky-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-cyan-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-indigo-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-purple-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-violet-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-emerald-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-green-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-teal-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-amber-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-orange-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-red-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-rose-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-brand-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-blue-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-emerald-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-indigo-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-purple-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-amber-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-rose-"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="from-red-"],
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-brand-"],
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-blue-"],
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-sky-"],
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-cyan-"],
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-emerald-"],
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-green-"],
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-amber-"],
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-indigo-"],
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-purple-"],
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-red-"],
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-rose-"] {
+  background-color: #0284C7 !important;
+  background-image: linear-gradient(135deg, #0284C7 0%, #0369A1 100%) !important;
+  border: 1px solid #0284C7 !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 3px 10px -2px rgba(2, 132, 199, 0.28), inset 0 1px 0 0 rgba(255, 255, 255, 0.28) !important;
+}
+
+/* Guarantee crisp pure-white text & icons inside all standardized action buttons */
+.mak-btn *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-brand-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-blue-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-sky-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-cyan-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-indigo-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-purple-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-violet-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-emerald-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-green-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-teal-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-amber-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-orange-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-red-"] *,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-rose-"] *,
+body.theme-pearl .mak-btn *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-brand-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-blue-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-sky-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-cyan-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-indigo-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-purple-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-violet-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-emerald-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-green-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-teal-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-amber-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-orange-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-red-"] *,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-rose-"] *,
+body.theme-pearl a[class*="px-"]:not([data-custom-control="true"])[class*="bg-"] * {
+  color: #FFFFFF !important;
+}
+
+/* Hover illumination for all standardized action buttons */
+.mak-btn:hover:not(:disabled),
+.btn-charcoal-primary:hover:not(:disabled),
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-brand-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-blue-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-sky-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-cyan-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-indigo-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-purple-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-violet-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-emerald-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-green-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-teal-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-amber-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-orange-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-red-"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-rose-"]:hover,
+body.theme-pearl .mak-btn:hover:not(:disabled),
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-brand-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-blue-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-sky-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-cyan-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-indigo-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-purple-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-violet-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-emerald-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-green-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-teal-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-amber-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-orange-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-red-"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-rose-"]:hover {
+  background-color: #0EA5E9 !important;
+  background-image: linear-gradient(135deg, #0EA5E9 0%, #0284C7 100%) !important;
+  border-color: #38BDF8 !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 7px 18px -4px rgba(2, 132, 199, 0.42), inset 0 1px 0 0 rgba(255, 255, 255, 0.30) !important;
+}
+
+/* Secondary / Neutral / Ghost / Inactive Tab / Cancel Buttons (Same Brand-Blue Hover & Click Feel) */
+.mak-btn-secondary,
+.btn-pearl-light,
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-white/5"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-white/10"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-slate-800"],
+button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-slate-100"] {
+  background: rgba(30, 41, 59, 0.85) !important;
+  border: 1px solid rgba(148, 163, 184, 0.25) !important;
+  color: #E2E8F0 !important;
+}
+
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-white/5"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-white/10"]:hover,
+button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-slate-800"]:hover,
+.mak-btn-secondary:hover:not(:disabled) {
+  background: rgba(14, 165, 233, 0.16) !important;
+  border-color: #38BDF8 !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 6px 16px -4px rgba(14, 165, 233, 0.28) !important;
+}
+
+body.theme-pearl .mak-btn-secondary,
+body.theme-pearl .btn-pearl-light,
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-white/5"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-white/10"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-slate-800"],
+body.theme-pearl button:not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-slate-100"] {
+  background: linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 100%) !important;
+  border: 1px solid #CBD5E1 !important;
+  color: #1E293B !important;
+  box-shadow: 0 2px 5px -1px rgba(15, 23, 42, 0.06) !important;
+}
+
+body.theme-pearl .mak-btn-secondary:hover:not(:disabled),
+body.theme-pearl .btn-pearl-light:hover:not(:disabled),
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-white/5"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-white/10"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-slate-800"]:hover,
+body.theme-pearl button:not(:disabled):not([data-custom-control="true"]):not(.flex-col):not(.text-left)[class*="bg-slate-100"]:hover {
+  background: linear-gradient(180deg, #F0F9FF 0%, #E0F2FE 100%) !important;
+  border-color: #0284C7 !important;
+  color: #0369A1 !important;
+  box-shadow: 0 6px 16px -4px rgba(2, 132, 199, 0.22) !important;
+}
+
+/* Interactive Animated Finance Type Buttons (Charcoal Dark + Pearl Light) */
+.finance-type-btn {
+  position: relative;
+  background: rgba(30, 41, 59, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  color: #CBD5E1;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+}
+
+.finance-type-btn:hover {
+  transform: translateY(-1.5px);
+  background: rgba(14, 165, 233, 0.14);
+  border-color: rgba(56, 189, 248, 0.5);
   color: #FFFFFF;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  box-shadow: 0 6px 18px -3px rgba(15, 23, 42, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 6px 16px -4px rgba(14, 165, 233, 0.28);
 }
 
-.btn-charcoal-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #334155 0%, #1E293B 100%);
-  box-shadow: 0 10px 24px -4px rgba(15, 23, 42, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
+.finance-type-btn:active {
+  transform: translateY(0px) scale(0.96);
 }
 
-.btn-pearl-light {
-  background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
-  color: #0F172A;
-  border: 1px solid #CBD5E1;
-  box-shadow: 0 2px 6px -1px rgba(15, 23, 42, 0.05), inset 0 1px 0 0 #FFFFFF;
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+.finance-type-btn-active {
+  background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%) !important;
+  border: 1px solid #38BDF8 !important;
+  color: #FFFFFF !important;
+  box-shadow:
+    0 6px 18px -4px rgba(2, 132, 199, 0.42),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.25) !important;
+  transform: translateY(-1px);
 }
 
-.btn-pearl-light:hover:not(:disabled) {
-  background: #F8FAFC;
-  border-color: #94A3B8;
+.finance-type-btn-active * {
+  color: #FFFFFF !important;
+}
+
+.finance-type-count {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #E2E8F0;
+}
+
+.finance-type-btn-active .finance-type-count {
+  background: rgba(255, 255, 255, 0.22) !important;
+  border-color: rgba(255, 255, 255, 0.32) !important;
+  color: #FFFFFF !important;
+}
+
+body.theme-pearl .finance-type-btn:not(.finance-type-btn-active) {
+  background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%) !important;
+  border: 1px solid #CBD5E1 !important;
+  color: #334155 !important;
+  box-shadow: 0 2px 6px -2px rgba(15, 23, 42, 0.06) !important;
+}
+
+body.theme-pearl .finance-type-btn:not(.finance-type-btn-active) .finance-type-count {
+  background: #F1F5F9 !important;
+  border-color: #CBD5E1 !important;
+  color: #334155 !important;
+}
+
+body.theme-pearl .finance-type-btn:not(.finance-type-btn-active):hover {
+  transform: translateY(-1.5px);
+  background: linear-gradient(180deg, #F0F9FF 0%, #E0F2FE 100%) !important;
+  border-color: #0284C7 !important;
+  color: #0369A1 !important;
+  box-shadow: 0 6px 16px -4px rgba(2, 132, 199, 0.22) !important;
+}
+
+body.theme-pearl .finance-type-btn:not(.finance-type-btn-active):hover .finance-type-count {
+  background: #E0F2FE !important;
+  border-color: #7DD3FC !important;
+  color: #0369A1 !important;
+}
+
+body.theme-pearl .finance-type-btn-active {
+  background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%) !important;
+  border: 1px solid #0284C7 !important;
+  color: #FFFFFF !important;
+  box-shadow:
+    0 6px 18px -4px rgba(2, 132, 199, 0.35),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.3) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  [role="button"],
+  a[class*="px-"],
+  .finance-type-btn,
+  .finance-type-btn:hover,
+  .finance-type-btn:active,
+  .finance-type-btn-active {
+    transition: none !important;
+    transform: none !important;
+  }
 }
 
 .custom-scrollbar {
