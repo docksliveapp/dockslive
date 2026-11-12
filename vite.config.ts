@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'path';
 import { createRequire } from 'node:module';
 import { defineConfig, loadEnv } from 'vite';
@@ -209,6 +210,12 @@ Carefully read EVERY page of the attached document(s) — including multi-page P
                 }
               });
             });
+          },
+          closeBundle() {
+            const tempChatAssetsDir = path.resolve(__dirname, 'dist', 'assets', 'aistudio');
+            if (fs.existsSync(tempChatAssetsDir)) {
+              fs.rmSync(tempChatAssetsDir, { recursive: true, force: true });
+            }
           }
         }
       ],
