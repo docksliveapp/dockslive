@@ -511,6 +511,8 @@ const App: React.FC = () => {
       currentRoles.includes(UserRole.VEHICLE_MANAGER);
 
     const hasCasesAccess = isDocManager ||
+                           currentRole === UserRole.FINANCE_MANAGER ||
+                           currentRoles.includes(UserRole.FINANCE_MANAGER) ||
                            currentRoles.includes(UserRole.OPERATIONS_MANAGER) || 
                            currentRoles.includes(UserRole.CASE_MANAGER) ||
                            currentRoles.includes(UserRole.LOADING_PORT_STAFF) || 

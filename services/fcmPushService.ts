@@ -624,9 +624,6 @@ export async function enablePushNotificationsForCurrentUser(
   safeAppStorage.setItem(LOCAL_FCM_TOKEN_KEY, fcmToken);
   safeAppStorage.setItem(LOCAL_PUSH_PREF_KEY, 'true');
 
-  const identity = resolveCurrentIdentity(identityOverride);
-  await syncTokenToUserDatabaseRecord(fcmToken, identity, 'ADD', previousToken, webPushSubJson);
-
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('mak_push_status_changed', {
@@ -634,6 +631,12 @@ export async function enablePushNotificationsForCurrentUser(
       })
     );
   }
+
+  const identity = resolveCurrentIdentity(identityOverride);
+  await Promise.race([
+    syncTokenToUserDatabaseRecord(fcmToken, identity, 'ADD', previousToken, webPushSubJson),
+    new Promise<void>((resolve) => setTimeout(resolve, 1800))
+  ]);
 
   return {
     enabled: true,
@@ -654,6 +657,14 @@ export async function disablePushNotificationsForCurrentDevice(
   safeAppStorage.setItem(LOCAL_PUSH_PREF_KEY, 'false');
   safeAppStorage.removeItem(LOCAL_FCM_TOKEN_KEY);
 
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('mak_push_status_changed', {
+        detail: { enabled: false, permission: getBrowserNotificationPermission() }
+      })
+    );
+  }
+
   try {
     const messaging = await getFirebaseMessagingSafe();
     if (messaging) {
@@ -663,15 +674,10 @@ export async function disablePushNotificationsForCurrentDevice(
 
   if (currentToken) {
     const identity = resolveCurrentIdentity(identityOverride);
-    await syncTokenToUserDatabaseRecord(currentToken, identity, 'REMOVE');
-  }
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(
-      new CustomEvent('mak_push_status_changed', {
-        detail: { enabled: false, permission: getBrowserNotificationPermission() }
-      })
-    );
+    await Promise.race([
+      syncTokenToUserDatabaseRecord(currentToken, identity, 'REMOVE'),
+      new Promise<void>((resolve) => setTimeout(resolve, 1800))
+    ]);
   }
 }
 
@@ -718,21 +724,114 @@ function doesUserMatchNotificationTarget(
       .filter(Boolean)
       .map(normalizeRoleKey)
   );
-  const isAdmin = roleSet.has('ADMIN') || Boolean(candidate.isAdmin);
+  const isAdmin = roleSet.has('ADMIN') || roleSet.has('SUPERADMIN') || Boolean(candidate.isAdmin);
+  const subType = String(notif.notificationSubType || '');
+  const actionType = String(notif.approvalData?.actionType || '');
+  const approvalStage = notif.approvalData?.approvalStage;
 
-  const targetClient = String(notif.targetClientName || '').trim().toLowerCase();
-  if (targetClient) {
-    const candidateClient = String(candidate.clientName || candidate.name || '').trim().toLowerCase();
-    if (
-      candidateClient &&
-      (candidateClient === targetClient ||
-        candidateClient.includes(targetClient) ||
-        targetClient.includes(candidateClient))
-    ) {
-      return true;
-    }
+  const rawTargets: string[] = [];
+  if (Array.isArray((notif as any).targetRoles)) {
+    (notif as any).targetRoles.forEach((r: any) => rawTargets.push(String(r)));
+  }
+  if (Array.isArray(notif.targetRole)) {
+    notif.targetRole.forEach((r: any) => rawTargets.push(String(r)));
+  } else if (typeof notif.targetRole === 'string' && notif.targetRole.trim()) {
+    notif.targetRole.split(',').forEach((part) => rawTargets.push(part.trim()));
+  }
+  const normalizedTargets = rawTargets.map(normalizeRoleKey).filter(Boolean);
+
+  // 1. Strict Admin Push Discipline: ONLY 12 PM Gate-Out Summary, Expense Paid / Payment Received,
+  //    Company Document Expiry, and Direct Admin Final Approvals (Edit/Cancel/Delete/Urgent/NOC/Client Reg)
+  if (isAdmin) {
+    if (approvalStage === 'MANAGER_REVIEW') return false;
+
+    const explicitlyTargetsAdmin =
+      normalizedTargets.includes('ADMIN') || normalizedTargets.includes('SUPERADMIN');
+
+    const isDailyGateOutReport =
+      subType === 'DAILY_GATE_OUT_SUMMARY' || Boolean((notif as any).gateOutReport);
+
+    const isFinancePaidOrReceived =
+      subType === 'FINANCE_RECORDED' && explicitlyTargetsAdmin;
+
+    const isCompanyDocExpiry =
+      subType === 'DOC_EXPIRY_ALERT' && notif.targetView === 'company_documents';
+
+    const isAdminApprovalRequest =
+      explicitlyTargetsAdmin &&
+      (subType === 'EDIT_APPROVAL' ||
+        subType === 'CANCELLATION_APPROVAL' ||
+        subType === 'DELETION_APPROVAL' ||
+        subType === 'URGENT_PAYABLE_APPROVAL' ||
+        subType === 'NOC_REQUEST' ||
+        subType === 'CLIENT_REGISTRATION_APPROVAL' ||
+        actionType === 'EDIT' ||
+        actionType === 'CANCEL' ||
+        actionType === 'DELETE' ||
+        actionType === 'APPROVE_URGENT_PAYABLE' ||
+        actionType === 'APPROVE_NOC' ||
+        actionType === 'APPROVE_CLIENT');
+
+    return (
+      isDailyGateOutReport ||
+      isFinancePaidOrReceived ||
+      isCompanyDocExpiry ||
+      isAdminApprovalRequest
+    );
   }
 
+  // 2. Strict Client Account Push Matching
+  if (
+    roleSet.has('CLIENT') &&
+    !roleSet.has('OPERATIONSMANAGER') &&
+    !roleSet.has('DOCUMENTATIONMANAGER') &&
+    !roleSet.has('FINANCEMANAGER')
+  ) {
+    if (
+      subType === 'DELETION_APPROVAL' ||
+      subType === 'CANCELLATION_APPROVAL' ||
+      subType === 'EDIT_APPROVAL' ||
+      subType === 'URGENT_PAYABLE_APPROVAL' ||
+      subType === 'PAYMENT_APPROVAL'
+    ) {
+      return false;
+    }
+    const targetClient = String(notif.targetClientName || '').trim().toLowerCase();
+    if (!targetClient) return false;
+    const candidateClient = String(candidate.clientName || candidate.name || '').trim().toLowerCase();
+    return Boolean(
+      candidateClient &&
+        (candidateClient === targetClient ||
+          candidateClient.includes(targetClient) ||
+          targetClient.includes(candidateClient))
+    );
+  }
+
+  // 3. Strict Transporter Push Matching
+  if (
+    roleSet.has('TRANSPORTER') &&
+    !roleSet.has('DOCUMENTATIONMANAGER') &&
+    !roleSet.has('VEHICLEMANAGER') &&
+    !roleSet.has('OPERATIONSMANAGER') &&
+    !roleSet.has('FINANCEMANAGER')
+  ) {
+    if (!normalizedTargets.includes('TRANSPORTER') && notif.category !== 'TRANSPORTER') {
+      return false;
+    }
+    const targetClient = String(notif.targetClientName || '').trim().toLowerCase();
+    if (targetClient) {
+      const candidateClient = String(candidate.clientName || candidate.name || '').trim().toLowerCase();
+      return Boolean(
+        candidateClient &&
+          (candidateClient === targetClient ||
+            candidateClient.includes(targetClient) ||
+            targetClient.includes(candidateClient))
+      );
+    }
+    return true;
+  }
+
+  // 4. Staff User ID Direct Targeting (e.g., Payslip / HR alert)
   const targetStaffId = notif.approvalData?.staffUserId
     ? String(notif.approvalData.staffUserId).trim().toLowerCase()
     : '';
@@ -743,42 +842,26 @@ function doesUserMatchNotificationTarget(
     }
   }
 
-  const rawTargets = Array.isArray((notif as any).targetRoles)
-    ? (notif as any).targetRoles
-    : notif.targetRole
-      ? Array.isArray(notif.targetRole)
-        ? notif.targetRole
-        : [notif.targetRole]
-      : ['ALL'];
-
-  const normalizedTargets = rawTargets.map(normalizeRoleKey).filter(Boolean);
-
-  if (normalizedTargets.includes('ALL')) {
-    return (
-      !roleSet.has('CLIENT') &&
-      !roleSet.has('TRANSPORTER') &&
-      !roleSet.has('VENDOR') &&
-      !roleSet.has('DRIVER')
-    );
+  // 5. Strict Role Matching for Internal Managers & Port Staff (No blanket ALL catch-all)
+  if (approvalStage === 'ADMIN_FINAL' && normalizedTargets.every((t) => t === 'ADMIN' || t === 'SUPERADMIN')) {
+    return false;
   }
 
   for (const t of normalizedTargets) {
+    if (t === 'ALL') continue;
     if (roleSet.has(t)) return true;
-    // Documentation Manager handles all former Fleet/Vehicle Manager workflows
     if (
       (t === 'VEHICLEMANAGER' || t === 'FLEETANDVEHICLEMANAGER') &&
       roleSet.has('DOCUMENTATIONMANAGER')
     ) {
       return true;
     }
-  }
-
-  if (
-    isAdmin &&
-    normalizedTargets.length > 0 &&
-    !normalizedTargets.every((t: string) => t === 'CLIENT' || t === 'TRANSPORTER' || t === 'VENDOR')
-  ) {
-    return true;
+    if (t === 'CASEMANAGER' && roleSet.has('OPERATIONSMANAGER')) {
+      return true;
+    }
+    if (t === 'UNLOADINGSTAFF' && roleSet.has('DESTINATIONPORTSTAFF')) {
+      return true;
+    }
   }
 
   return false;
@@ -884,9 +967,10 @@ export async function dispatchPushForNotification(notif: AppNotification): Promi
 
     const caseNo = notif.targetFilter?.caseNo ? String(notif.targetFilter.caseNo) : '';
     const targetView = notif.targetView ? String(notif.targetView) : caseNo ? 'cases' : 'dashboard';
+    const notifIdParam = notif.id ? `&openNotificationId=${encodeURIComponent(String(notif.id))}` : '';
     const deepLinkUrl = caseNo
-      ? `/?view=cases&caseNo=${encodeURIComponent(caseNo)}`
-      : `/?view=${encodeURIComponent(targetView)}`;
+      ? `/?view=cases&caseNo=${encodeURIComponent(caseNo)}${notifIdParam}`
+      : `/?view=${encodeURIComponent(targetView)}${notifIdParam}`;
 
     await fetch('/api/push/send', {
       method: 'POST',

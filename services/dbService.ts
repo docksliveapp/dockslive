@@ -25,6 +25,7 @@ import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
 import { dedupeAndMergeVehicles, normalizeVehiclePlate, getDeterministicVehicleId } from './documentParserService';
 import { getActiveCompanyId, subscribeToActiveCompany, CompanyId, PARENT_GROUP, GROUP_COMPANIES } from './companyService';
+import { hasCaseCompletedLoadingGateOut, hasCaseArrivedAtDestination } from './workflowConfig';
 import { 
   saveDocumentToIndexedDB, 
   saveDocumentToCloudChunks,
@@ -242,7 +243,7 @@ export function subscribeToCases(
   };
 }
 
-function dispatchCaseLifecycleNotifications(caseItem: Case, prevCase?: Case | null, isNew?: boolean) {
+function dispatchCaseLifecycleNotifications(caseItem: Case, prevCase?: Case | null, _isNew?: boolean) {
   try {
     const clientName = (
       caseItem.clientName ||
@@ -256,33 +257,14 @@ function dispatchCaseLifecycleNotifications(caseItem: Case, prevCase?: Case | nu
     if (!caseNo) return;
 
     const nowTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const polName = caseItem.pol || (caseItem.extractedData as any)?.pol || 'Port of Loading';
+    const podName = caseItem.pod || (caseItem.extractedData as any)?.pod || 'Destination';
+    const containerNosStr =
+      Array.isArray(caseItem.containers) && caseItem.containers.length > 0
+        ? caseItem.containers.map(c => c.number).filter(Boolean).join(', ') || caseItem.containerNumber || 'Container'
+        : caseItem.containerNumber || (caseItem.extractedData as any)?.containerNo || 'Container';
 
-    // 1. Case Number Generated (New Case) -> Client
-    if (isNew && clientName) {
-      const genKey = `notif_case_gen_${caseItem.id || caseNo}`;
-      if (!safeAppStorage.getItem(genKey)) {
-        safeAppStorage.setItem(genKey, 'true');
-        saveNotificationToFirestore({
-          id: Date.now() + Math.floor(Math.random() * 1000),
-          title: `Case Registered & Number Generated: ${caseNo}`,
-          description: `Your consignment Case ${caseNo} (${caseItem.category || 'Transit'}) has been registered for ${clientName}. Route: ${caseItem.pol || 'POL'} → ${caseItem.pod || 'POD'}. You will receive live notifications for every workflow step until completion.`,
-          details: `Case Number: ${caseNo}\nClient: ${clientName}\nCategory: ${caseItem.category || 'N/A'}\nRoute: ${caseItem.pol || 'POL'} → ${caseItem.pod || 'POD'}\nCurrent Status: ${caseItem.status || 'Registered'}`,
-          timestamp: nowTimeStr,
-          type: 'INFO',
-          notificationSubType: 'WORKFLOW_UPDATE',
-          status: 'PENDING',
-          actionLabel: 'Track Case Workflow',
-          priority: 'HIGH',
-          targetRole: 'CLIENT',
-          targetClientName: clientName,
-          category: 'CASE',
-          targetView: 'cases',
-          targetFilter: { caseId: caseItem.id, caseNo }
-        }).catch(() => {});
-      }
-    }
-
-    // 2. Case Cancelled Status Marked -> Client
+    // 1. Case Cancelled -> Informative Notification to Client ONLY
     const isNowCancelled = String(caseItem.status || '').toUpperCase() === 'CANCELLED';
     const wasCancelled = prevCase ? String(prevCase.status || '').toUpperCase() === 'CANCELLED' : false;
     if (isNowCancelled && !wasCancelled && clientName) {
@@ -293,9 +275,9 @@ function dispatchCaseLifecycleNotifications(caseItem: Case, prevCase?: Case | nu
           id: Date.now() + Math.floor(Math.random() * 1000) + 1,
           title: `Case Cancelled: ${caseNo}`,
           description: `Your Case ${caseNo} (${clientName}) has been marked as CANCELLED.`,
-          details: `Case No: ${caseNo}\nClient: ${clientName}\nStatus: CANCELLED\nRoute: ${caseItem.pol || 'N/A'} → ${caseItem.pod || 'N/A'}`,
+          details: `Case No: ${caseNo}\nClient: ${clientName}\nStatus: CANCELLED\nRoute: ${polName} → ${podName}`,
           timestamp: nowTimeStr,
-          type: 'ALERT',
+          type: 'INFO',
           notificationSubType: 'CASE_CANCELLED_ALERT',
           status: 'PENDING',
           actionLabel: 'View Case Details',
@@ -307,41 +289,46 @@ function dispatchCaseLifecycleNotifications(caseItem: Case, prevCase?: Case | nu
           targetFilter: { caseId: caseItem.id, caseNo }
         }).catch(() => {});
       }
+      return;
     }
 
-    // 3. Workflow Progress / Step Update (From Case Generation to Finish) -> Client
-    if (!isNew && !isNowCancelled && clientName) {
-      const prevStatus = prevCase?.status || '';
-      const prevStep = prevCase?.currentStep ?? -1;
-      const currStatus = caseItem.status || '';
-      const currStep = caseItem.currentStep ?? -1;
-      const prevWfJson = JSON.stringify(prevCase?.workflowDetails || {});
-      const currWfJson = JSON.stringify(caseItem.workflowDetails || {});
+    if (isNowCancelled) return;
 
-      if (prevStatus !== currStatus || prevStep !== currStep || prevWfJson !== currWfJson) {
-        const wfKey = `notif_case_wf_${caseItem.id}_${currStatus}_${currStep}_${currWfJson.length}`;
-        if (!safeAppStorage.getItem(wfKey)) {
-          safeAppStorage.setItem(wfKey, 'true');
-          const isFinished =
-            currStatus.toUpperCase() === 'COMPLETED' ||
-            currStatus.toUpperCase() === 'DELIVERED' ||
-            currStatus.toUpperCase() === 'FINISHED';
+    // Auto-sync Destination Staff Default Per-Container Charges (Internal Company Transaction, silent)
+    syncDestinationStaffContainerCharges({ cases: [caseItem] }).catch(() => {});
 
+    // 2. Action-Required Demand ONLY if Client explicitly manages items requiring Client upload
+    if (clientName) {
+      const clientManagedItems: string[] = [];
+      if (caseItem.serviceArrangements && typeof caseItem.serviceArrangements === 'object') {
+        Object.entries(caseItem.serviceArrangements).forEach(([key, item]: [string, any]) => {
+          if (item && item.arrangedBy === 'Client') {
+            clientManagedItems.push(item.label || key.replace(/_/g, ' '));
+          }
+        });
+      }
+      if (Array.isArray(caseItem.charges)) {
+        caseItem.charges.forEach((ch) => {
+          if (ch && ch.description && ch.arrangedBy === 'Client' && !clientManagedItems.includes(ch.description)) {
+            clientManagedItems.push(ch.description);
+          }
+        });
+      }
+      if (clientManagedItems.length > 0) {
+        const demandKey = `notif_client_demand_${caseItem.id || caseNo}_${clientManagedItems.join('|')}`;
+        if (!safeAppStorage.getItem(demandKey)) {
+          safeAppStorage.setItem(demandKey, 'true');
           saveNotificationToFirestore({
-            id: Date.now() + Math.floor(Math.random() * 1000) + 2,
-            title: isFinished
-              ? `Case Completed / Finished: ${caseNo}`
-              : `Case Workflow Update (${currStatus || `Step ${Number(currStep) + 1}`}): ${caseNo}`,
-            description: isFinished
-              ? `All workflows for your Case ${caseNo} (${clientName}) have been completed and finished.`
-              : `Workflow updated for Case ${caseNo}: Status is now "${currStatus}" (Step ${Number(currStep) + 1}).`,
-            details: `Case No: ${caseNo}\nClient: ${clientName}\nUpdated Status: ${currStatus}\nWorkflow Step: ${Number(currStep) + 1}\nRoute: ${caseItem.pol || 'POL'} → ${caseItem.pod || 'POD'}`,
+            id: Date.now() + Math.floor(Math.random() * 1000) + 4,
+            title: `Action Required: Update Client-Managed Items (${caseNo})`,
+            description: `Please provide/update documents for items managed by you in Case ${caseNo}: ${clientManagedItems.join(', ')}.`,
+            details: `Case No: ${caseNo}\nClient: ${clientName}\nItems Managed by Client:\n• ${clientManagedItems.join('\n• ')}`,
             timestamp: nowTimeStr,
-            type: 'INFO',
-            notificationSubType: 'WORKFLOW_UPDATE',
+            type: 'ACTION',
+            notificationSubType: 'CLIENT_MANAGED_DEMAND',
             status: 'PENDING',
-            actionLabel: 'View Workflow Status',
-            priority: isFinished ? 'HIGH' : 'MEDIUM',
+            actionLabel: 'Update Client Items',
+            priority: 'HIGH',
             targetRole: 'CLIENT',
             targetClientName: clientName,
             category: 'CASE',
@@ -352,212 +339,157 @@ function dispatchCaseLifecycleNotifications(caseItem: Case, prevCase?: Case | nu
       }
     }
 
-    // 3b. Port of Loading Gate-Out Complete & Workflow In Transit -> Notify Finance Manager ("This case completed from your end")
-    const loadingStepDetail =
-      caseItem.workflowDetails?.['Loading Port Processing'] ||
-      caseItem.workflowDetails?.['LOADING_PORT_PROCESSING'] ||
-      (caseItem.workflowDetails as any)?.['Port Loading & Sealing'];
-    const isNowInTransitOrGatedOutFromPol =
-      !isNowCancelled &&
-      (String(caseItem.status || '').toUpperCase() === 'IN TRANSIT' ||
-        String(caseItem.status || '').toUpperCase() === 'IN_TRANSIT' ||
-        Boolean(caseItem.loadingPortGateOutTime) ||
-        Boolean(loadingStepDetail?.gateOutToggled) ||
-        Boolean(loadingStepDetail?.completed && String(caseItem.status || '').toUpperCase().includes('TRANSIT')));
+    // 3. LOADING GATE-OUT MILESTONE:
+    //    Invoice is generated ONLY when vehicle completes Loading Gate-Out!
+    //    Client receives In-Transit + Invoice Generated notification WITHOUT any Driver, Transporter, or Vehicle details (Conflict-of-Interest Shield).
+    const isGatedOutNow = hasCaseCompletedLoadingGateOut(caseItem);
+    if (isGatedOutNow) {
+      const explicitCharges = Array.isArray(caseItem.charges)
+        ? caseItem.charges.filter(ch => ch && ch.arrangedBy !== 'Client' && (Number(ch.amount) || 0) > 0)
+        : [];
+      const totalCharged = explicitCharges.length > 0
+        ? explicitCharges.reduce((s, c) => s + (Number(c.amount) || 0), 0)
+        : Number(caseItem.totalAmount || (caseItem.extractedData as any)?.totalAmount || 0);
 
-    if (isNowInTransitOrGatedOutFromPol) {
-      const polDoneKey = `notif_fin_pol_completed_${caseItem.caseNo || caseItem.id}`;
-      if (!safeAppStorage.getItem(polDoneKey)) {
-        safeAppStorage.setItem(polDoneKey, 'true');
-        const polName = caseItem.pol || (caseItem.extractedData as any)?.pol || 'Port of Loading (Karachi)';
-        const podName = caseItem.pod || (caseItem.extractedData as any)?.pod || 'Destination';
-        saveNotificationToFirestore({
-          id: Date.now() + Math.floor(Math.random() * 1000) + 77,
-          title: `This case completed from your end: #${caseNo}`,
-          description: `This case (#${caseNo} - ${clientName || 'Karachi Forwarder / Client'}) is completed from your end! Port of Loading (${polName}) loading & vehicle gate-out is complete and workflow is now In Transit. You can now issue the invoice to the Karachi forwarder/client and collect your payment.`,
-          details: `Case No: ${caseNo}\nClient / Karachi Forwarder: ${clientName || 'N/A'}\nPort of Loading: ${polName}\nDestination: ${podName}\nStatus: Loading Complete & Vehicle Gate-Out Confirmed (In Transit)\nFinance Action: Issue Invoice to Karachi Forwarder & Collect Payment`,
-          timestamp: nowTimeStr,
-          type: 'ACTION',
-          notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
-          status: 'PENDING',
-          actionLabel: 'Issue Invoice & Collect Payment',
-          priority: 'HIGH',
-          targetRole: 'FINANCE_MANAGER,ADMIN',
-          targetClientName: clientName || undefined,
-          category: 'FINANCE',
-          targetView: 'finance',
-          targetFilter: { caseId: caseItem.id, caseNo }
-        }).catch(() => {});
-      }
-    }
+      const gateOutKey = `notif_gateout_inv_${caseItem.caseNo || caseItem.id}`;
+      if (!safeAppStorage.getItem(gateOutKey)) {
+        safeAppStorage.setItem(gateOutKey, 'true');
 
-    // 3c. Auto-sync Destination Staff Default Per-Container Charges to Destination Staff Ledger (Internal Company Transaction)
-    if (!isNowCancelled) {
-      syncDestinationStaffContainerCharges({ cases: [caseItem] }).catch(() => {});
-    }
+        // Auto-ensure Receivable Invoice exists in Finance at Loading Gate-Out
+        if (totalCharged > 0) {
+          const breakdownStr = explicitCharges.length > 0
+            ? explicitCharges.map(c => `${c.description}: PKR ${Number(c.amount).toLocaleString()}`).join(', ')
+            : `Case Invoice Total: PKR ${totalCharged.toLocaleString()}`;
 
-    // 4. Company-Managed vs Client-Managed Arrangements Notification & Demand -> Client
-    if (clientName) {
-      const companyManagedItems: string[] = [];
-      const clientManagedItems: string[] = [];
+          const detInvId = parseNumericDocId(undefined, `GATEOUT_REC_INV_${caseNo}`, 0);
+          const recEntry: FinanceEntry & { _silentNotification?: boolean; caseNo?: string } = {
+            id: detInvId,
+            date: new Date().toISOString().split('T')[0],
+            description: `Case Gate-Out Invoice (#${caseNo}) — ${containerNosStr} (${polName} → ${podName})`,
+            amount: totalCharged,
+            type: 'RECEIVABLE',
+            status: 'APPROVED',
+            party: clientName || 'Client',
+            category: 'Case Freight & Clearance Invoice',
+            reference: `INV-${caseNo}`,
+            caseNo,
+            _silentNotification: true
+          };
+          saveFinanceToFirestore(recEntry as FinanceEntry).catch(() => {});
 
-      if (caseItem.serviceArrangements && typeof caseItem.serviceArrangements === 'object') {
-        Object.entries(caseItem.serviceArrangements).forEach(([key, item]: [string, any]) => {
-          if (!item) return;
-          const label = item.label || key.replace(/_/g, ' ');
-          if (item.arrangedBy === 'Client') {
-            clientManagedItems.push(label);
-          } else if (item.arrangedBy === 'DPL' || item.arrangedBy === 'Company') {
-            companyManagedItems.push(label);
-          }
-        });
-      }
+          // Finance Manager ONLY (Informative — NOT Admin!)
+          saveNotificationToFirestore({
+            id: Date.now() + Math.floor(Math.random() * 1000) + 5,
+            title: `Gate-Out Invoice Generated (#${caseNo}): PKR ${totalCharged.toLocaleString()}`,
+            description: `Vehicle completed Loading Gate-Out from ${polName} (Now In Transit). Receivable Invoice of PKR ${totalCharged.toLocaleString()} generated for ${clientName || 'Client'}.`,
+            details: `Case / Invoice No: ${caseNo}\nClient: ${clientName || 'N/A'}\nContainers: ${containerNosStr}\nRoute: ${polName} → ${podName}\nTotal Invoice: PKR ${totalCharged.toLocaleString()}\nBreakdown: ${breakdownStr}`,
+            timestamp: nowTimeStr,
+            type: 'INFO',
+            notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
+            status: 'PENDING',
+            actionLabel: 'View Invoice & Ledger',
+            priority: 'HIGH',
+            targetRole: 'FINANCE_MANAGER',
+            category: 'FINANCE',
+            targetView: 'finance',
+            targetFilter: { caseId: caseItem.id, caseNo }
+          }).catch(() => {});
+        }
 
-      if (Array.isArray(caseItem.charges)) {
-        caseItem.charges.forEach((ch) => {
-          if (!ch || !ch.description) return;
-          if (ch.arrangedBy === 'Client') {
-            if (!clientManagedItems.includes(ch.description)) clientManagedItems.push(ch.description);
-          } else if ((Number(ch.amount) || 0) > 0) {
-            if (!companyManagedItems.includes(ch.description)) companyManagedItems.push(ch.description);
-          }
-        });
-      }
-
-      if (companyManagedItems.length > 0 || clientManagedItems.length > 0) {
-        const arrSig = `${companyManagedItems.join('|')}__${clientManagedItems.join('|')}`;
-        const arrKey = `notif_case_arr_${caseItem.id}_${arrSig}`;
-        if (!safeAppStorage.getItem(arrKey)) {
-          safeAppStorage.setItem(arrKey, 'true');
-
-          if (companyManagedItems.length > 0) {
-            saveNotificationToFirestore({
-              id: Date.now() + Math.floor(Math.random() * 1000) + 3,
-              title: `Company Managed Services (${caseNo})`,
-              description: `Company is managing the following items in Case ${caseNo}: ${companyManagedItems.join(', ')}.`,
-              details: `Case No: ${caseNo}\nClient: ${clientName}\nManaged by Company:\n• ${companyManagedItems.join('\n• ')}`,
-              timestamp: nowTimeStr,
-              type: 'INFO',
-              notificationSubType: 'COMPANY_MANAGED_UPDATE',
-              status: 'PENDING',
-              actionLabel: 'View Case Services',
-              priority: 'MEDIUM',
-              targetRole: 'CLIENT',
-              targetClientName: clientName,
-              category: 'CASE',
-              targetView: 'cases',
-              targetFilter: { caseId: caseItem.id, caseNo }
-            }).catch(() => {});
-          }
-
-          if (clientManagedItems.length > 0) {
-            saveNotificationToFirestore({
-              id: Date.now() + Math.floor(Math.random() * 1000) + 4,
-              title: `Action Required: Update Client-Managed Items (${caseNo})`,
-              description: `Demand for Update: Please provide/update details & documents for items managed by you in Case ${caseNo}: ${clientManagedItems.join(', ')}.`,
-              details: `Case No: ${caseNo}\nClient: ${clientName}\nItems Managed by Client (Update Required):\n• ${clientManagedItems.join('\n• ')}\nPlease update these particulars in your Client Portal.`,
-              timestamp: nowTimeStr,
-              type: 'ACTION',
-              notificationSubType: 'CLIENT_MANAGED_DEMAND',
-              status: 'PENDING',
-              actionLabel: 'Update Client Items',
-              priority: 'HIGH',
-              targetRole: 'CLIENT',
-              targetClientName: clientName,
-              category: 'CASE',
-              targetView: 'cases',
-              targetFilter: { caseId: caseItem.id, caseNo }
-            }).catch(() => {});
-          }
+        // Client Notification: Container Loaded, Vehicle Gate-Out Completed, Now In Transit + Invoice Generated
+        // STRICT PRIVACY: ZERO vehicleNo, ZERO driverName, ZERO transporterName!
+        if (clientName) {
+          const invSuffix = totalCharged > 0
+            ? ` Official Case Invoice (PKR ${totalCharged.toLocaleString()}) has been generated.`
+            : ` Official Case Invoice is now generated in your portal.`;
+          saveNotificationToFirestore({
+            id: Date.now() + Math.floor(Math.random() * 1000) + 9,
+            title: `Container Loaded & In Transit (Invoice Generated): #${caseNo}`,
+            description: `Your container (${containerNosStr}) has been loaded and the vehicle has completed port gate-out from ${polName}. Shipment status is now In Transit towards ${podName}.${invSuffix}`,
+            details: `Case No: ${caseNo}\nClient: ${clientName}\nContainer(s): ${containerNosStr}\nPort of Loading: ${polName}\nDestination: ${podName}\nCurrent Status: In Transit (Gate-Out Completed)${totalCharged > 0 ? `\nInvoice Amount: PKR ${totalCharged.toLocaleString()}` : ''}`,
+            timestamp: nowTimeStr,
+            type: 'INFO',
+            notificationSubType: 'GATE_OUT_INVOICE',
+            status: 'PENDING',
+            actionLabel: 'View Case & Invoice',
+            priority: 'HIGH',
+            targetRole: 'CLIENT',
+            targetClientName: clientName,
+            category: 'CASE',
+            targetView: 'cases',
+            targetFilter: { caseId: caseItem.id, caseNo }
+          }).catch(() => {});
         }
       }
-    }
 
-    // 5. Case Receivable Invoice / Charges Notification -> Finance Manager & Charged Client ONLY
-    const explicitCharges = Array.isArray(caseItem.charges)
-      ? caseItem.charges.filter(ch => ch && ch.arrangedBy !== 'Client' && (Number(ch.amount) || 0) > 0)
-      : [];
-    const totalCharged = explicitCharges.length > 0
-      ? explicitCharges.reduce((s, c) => s + (Number(c.amount) || 0), 0)
-      : Number(caseItem.totalAmount || (caseItem.extractedData as any)?.totalAmount || 0);
-
-    if (totalCharged > 0 && !isNowCancelled) {
-      const chargeKey = `notif_case_charge_${caseItem.id}_${totalCharged}`;
-      if (!safeAppStorage.getItem(chargeKey)) {
-        safeAppStorage.setItem(chargeKey, 'true');
-        const breakdownStr = explicitCharges.length > 0
-          ? explicitCharges.map(c => `${c.description}: PKR ${Number(c.amount).toLocaleString()}`).join(', ')
-          : `Case Invoice Total: PKR ${totalCharged.toLocaleString()}`;
-
-        saveNotificationToFirestore({
-          id: Date.now() + Math.floor(Math.random() * 1000) + 5,
-          title: `Case Invoice / Ledger Charge (${caseNo}): PKR ${totalCharged.toLocaleString()}`,
-          description: `Invoice & ledger charge of PKR ${totalCharged.toLocaleString()} generated for ${clientName || 'Client'} on Case ${caseNo} (${breakdownStr}).`,
-          details: `Case / Invoice No: ${caseNo}\nCharged Client: ${clientName || 'N/A'}\nTotal Amount Charged: PKR ${totalCharged.toLocaleString()}\nBreakdown: ${breakdownStr}`,
-          timestamp: nowTimeStr,
-          type: 'INFO',
-          notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
-          status: 'PENDING',
-          actionLabel: 'View Invoice & Ledger',
-          priority: 'HIGH',
-          targetRole: clientName ? 'FINANCE_MANAGER,CLIENT' : 'FINANCE_MANAGER',
-          targetClientName: clientName || undefined,
-          category: 'FINANCE',
-          targetView: 'finance',
-          targetFilter: { caseId: caseItem.id, caseNo }
-        }).catch(() => {});
-      }
-    }
-
-    // 6. Transporter Freight Invoice Generated Notification -> Specific Transporter & Finance Manager (& Client if rentPaymentBy === 'Client')
-    if (Array.isArray(caseItem.containers) && !isNowCancelled) {
-      caseItem.containers.forEach((cntr, cIdx) => {
-        const tName = (cntr.transporterName || (caseItem as any).transporterName || '').trim();
-        const rentAmt = Number(cntr.rentAmount || 0);
-        if (tName && rentAmt > 0) {
-          const transInvKey = `notif_trans_inv_${caseItem.id}_${cntr.number || cIdx}_${rentAmt}`;
-          if (!safeAppStorage.getItem(transInvKey)) {
-            safeAppStorage.setItem(transInvKey, 'true');
-            saveNotificationToFirestore({
-              id: Date.now() + Math.floor(Math.random() * 1000) + 16 + cIdx,
-              title: `Invoice Generated (${caseNo}): PKR ${rentAmt.toLocaleString()}`,
-              description: `Freight / Vehicle Rent invoice of PKR ${rentAmt.toLocaleString()} generated for Transporter "${tName}" (Container: ${cntr.number || 'N/A'}, Vehicle: ${cntr.vehicleNo || 'Assigned'}, Paid By: ${cntr.rentPaymentBy || 'Client'}).`,
-              details: `Case No: ${caseNo}\nTransporter: ${tName}\nContainer No: ${cntr.number || 'N/A'}\nVehicle No: ${cntr.vehicleNo || 'N/A'}\nInvoice Amount: PKR ${rentAmt.toLocaleString()}\nPayable By: ${cntr.rentPaymentBy || 'Client'}\nClient: ${clientName || 'N/A'}`,
-              timestamp: nowTimeStr,
-              type: 'INFO',
-              notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
-              status: 'PENDING',
-              actionLabel: 'View Freight Invoice',
-              priority: 'HIGH',
-              targetRole: 'TRANSPORTER,FINANCE_MANAGER',
-              targetClientName: tName,
-              category: 'TRANSPORTER',
-              targetView: 'finance',
-              targetFilter: { caseId: caseItem.id, caseNo }
-            }).catch(() => {});
-
-            if (cntr.rentPaymentBy === 'Client' && clientName) {
+      // Transporter Freight Invoice -> Transporter & Finance Manager ONLY (NEVER Client!)
+      if (Array.isArray(caseItem.containers)) {
+        caseItem.containers.forEach((cntr, cIdx) => {
+          const tName = (cntr.transporterName || (caseItem as any).transporterName || '').trim();
+          const rentAmt = Number(cntr.rentAmount || 0);
+          if (tName && rentAmt > 0) {
+            const transInvKey = `notif_trans_inv_${caseItem.id}_${cntr.number || cIdx}_${rentAmt}`;
+            if (!safeAppStorage.getItem(transInvKey)) {
+              safeAppStorage.setItem(transInvKey, 'true');
               saveNotificationToFirestore({
-                id: Date.now() + Math.floor(Math.random() * 1000) + 26 + cIdx,
-                title: `Transporter Freight Charge (${caseNo}): PKR ${rentAmt.toLocaleString()}`,
-                description: `Transporter (${tName}) freight invoice of PKR ${rentAmt.toLocaleString()} generated on your ledger for Container ${cntr.number || 'N/A'} (Vehicle: ${cntr.vehicleNo || 'Assigned'}).`,
-                details: `Case No: ${caseNo}\nCharged Client: ${clientName}\nTransporter: ${tName}\nContainer: ${cntr.number || 'N/A'}\nVehicle: ${cntr.vehicleNo || 'N/A'}\nAmount: PKR ${rentAmt.toLocaleString()}`,
+                id: Date.now() + Math.floor(Math.random() * 1000) + 16 + cIdx,
+                title: `Freight Invoice Generated (${caseNo}): PKR ${rentAmt.toLocaleString()}`,
+                description: `Freight / Vehicle Rent invoice of PKR ${rentAmt.toLocaleString()} generated for Transporter "${tName}" (Container: ${cntr.number || 'N/A'}, Vehicle: ${cntr.vehicleNo || 'Assigned'}).`,
+                details: `Case No: ${caseNo}\nTransporter: ${tName}\nContainer No: ${cntr.number || 'N/A'}\nVehicle No: ${cntr.vehicleNo || 'N/A'}\nInvoice Amount: PKR ${rentAmt.toLocaleString()}`,
                 timestamp: nowTimeStr,
                 type: 'INFO',
                 notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
                 status: 'PENDING',
-                actionLabel: 'View Client Ledger',
+                actionLabel: 'View Freight Invoice',
                 priority: 'HIGH',
-                targetRole: 'CLIENT,FINANCE_MANAGER',
-                targetClientName: clientName,
-                category: 'FINANCE',
+                targetRole: 'TRANSPORTER,FINANCE_MANAGER',
+                targetClientName: tName,
+                category: 'TRANSPORTER',
                 targetView: 'finance',
                 targetFilter: { caseId: caseItem.id, caseNo }
               }).catch(() => {});
             }
           }
-        }
-      });
+        });
+      }
+    }
+
+    // 4. DESTINATION ARRIVAL MILESTONE:
+    //    As soon as Destination Staff marks Vehicle Arrived at Destination:
+    //    Notify Client (now revealing Vehicle Number — still NO Driver or Transporter details!), Operations Manager, and Documentation Manager.
+    if (hasCaseArrivedAtDestination(caseItem)) {
+      const destArrivedKey = `notif_dest_arrived_${caseItem.caseNo || caseItem.id}`;
+      if (!safeAppStorage.getItem(destArrivedKey)) {
+        safeAppStorage.setItem(destArrivedKey, 'true');
+        const vehicleNosStr =
+          Array.isArray(caseItem.containers) && caseItem.containers.length > 0
+            ? caseItem.containers.map(c => c.vehicleNo).filter(Boolean).join(', ') ||
+              caseItem.workflowDetails?.['Vehicle Assignment']?.assignedVehicleNo ||
+              'Assigned Vehicle'
+            : caseItem.workflowDetails?.['Vehicle Assignment']?.assignedVehicleNo ||
+              caseItem.extractedData?.vehicleNumber ||
+              'Assigned Vehicle';
+
+        saveNotificationToFirestore({
+          id: Date.now() + Math.floor(Math.random() * 1000) + 33,
+          title: `Vehicle Arrived at Destination: #${caseNo} (${vehicleNosStr})`,
+          description: `Vehicle ${vehicleNosStr} carrying Container ${containerNosStr} for Case #${caseNo} has arrived at destination (${podName}).`,
+          details: `Case No: ${caseNo}\nClient: ${clientName || 'N/A'}\nContainer(s): ${containerNosStr}\nArrived Vehicle No: ${vehicleNosStr}\nDestination: ${podName}\nStatus: Arrived at Destination`,
+          timestamp: nowTimeStr,
+          type: 'INFO',
+          notificationSubType: 'DESTINATION_ARRIVAL',
+          status: 'PENDING',
+          actionLabel: 'View Shipment Details',
+          priority: 'HIGH',
+          targetRole: clientName
+            ? 'CLIENT,OPERATIONS_MANAGER,DOCUMENTATION_MANAGER'
+            : 'OPERATIONS_MANAGER,DOCUMENTATION_MANAGER',
+          targetClientName: clientName || undefined,
+          category: 'CASE',
+          targetView: 'cases',
+          targetFilter: { caseId: caseItem.id, caseNo }
+        }).catch(() => {});
+      }
     }
   } catch (err) {
     console.warn('Case lifecycle notification dispatch notice:', err);
@@ -919,8 +851,8 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
     });
     await setDoc(doc(db, path, docId), payload);
 
-    // Notify Finance Manager, Admin, and Client according to strict notification rules
-    if (entryToSave.amount && Number(entryToSave.amount) > 0) {
+    // Notify Finance Manager, Admin, and Client according to strict role-specific notification rules
+    if (entryToSave.amount && Number(entryToSave.amount) > 0 && !(entry as any)._silentNotification) {
       const notifId = Date.now() + Math.floor(Math.random() * 1000);
 
       const isClientDepositUpload = 
@@ -930,12 +862,12 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
       let notif: AppNotification;
 
       if (isMonthlyOrRecurring) {
-        // Monthly fixed amounts and salaries: AUTOMATIC, NO approval required -> Finance Manager
+        // Automatic monthly payable entries -> Finance Manager ONLY (Informative)
         notif = {
           id: notifId,
-          title: `Monthly Fixed Expense: PKR ${Number(entryToSave.amount).toLocaleString()} (Auto-Approved)`,
-          description: `${entryToSave.description || 'Monthly Fixed Expense'} for ${entryToSave.party || 'Account'} has been automatically approved and recorded to Finance Payables.`,
-          details: `${entryToSave.category || 'Finance'} • Reference: ${entryToSave.reference || 'N/A'} • Status: AUTO-APPROVED • Payment Method: ${entryToSave.paymentMethod || 'BANK'}`,
+          title: `Monthly Auto-Payable Recorded: PKR ${Number(entryToSave.amount).toLocaleString()}`,
+          description: `${entryToSave.description || 'Monthly Fixed Payable'} for ${entryToSave.party || 'Account'} has been automatically recorded in Finance Payables.`,
+          details: `${entryToSave.category || 'Finance'} • Reference: ${entryToSave.reference || 'N/A'} • Status: AUTO-RECORDED`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           type: 'INFO',
           notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
@@ -946,17 +878,17 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
           category: 'FINANCE'
         };
       } else if (isClientDepositUpload) {
-        // Rule 9: Payment submitted from client ID -> Confirmation request coming to Finance Manager Notification Center
+        // Client uploaded payment screenshot -> Action-Required notification to Finance Manager ONLY (Admin receives informative alert ONLY after Finance Manager approves!)
         notif = {
           id: notifId,
           title: `Payment Verification Required: PKR ${Number(entry.amount).toLocaleString()}`,
-          description: `Payment submitted from Client ID (${entry.party || 'Client'}) for ${entry.category || 'Payment'}. Finance Manager verification & confirmation required before adding to Received Payments, Client Ledger & Cashbook.`,
+          description: `Client "${entry.party || 'Client'}" uploaded a payment screenshot (${entry.category || 'Payment'}). Finance Manager verification & approval required.`,
           details: `Client / Party: ${entry.party} • Bank: ${entry.bankName || 'Direct'} • Ref: ${entry.reference || 'N/A'} • Amount: PKR ${Number(entry.amount).toLocaleString()}`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           type: 'ACTION',
           notificationSubType: 'PAYMENT_APPROVAL',
           status: 'PENDING',
-          actionLabel: 'Verify & Confirm Payment',
+          actionLabel: 'Verify & Approve Payment',
           targetRole: UserRole.FINANCE_MANAGER,
           targetView: 'finance',
           category: 'FINANCE',
@@ -986,16 +918,16 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
           descLower.includes('transporter');
         const transporterTarget = (entry as any).targetTransporter || entry.party || 'Transporter';
 
-        // Rule 9 & Transporter Rule: Payable invoice by vendor / transporter -> Notification coming in Finance Manager (& Transporter if freight/vehicle rent)
+        // Payable entry -> Finance Manager (& Transporter if freight) ONLY (Informative — NOT Admin)
         notif = {
           id: notifId,
           title: isTransporterInvoice
-            ? `Invoice Generated: PKR ${Number(entry.amount).toLocaleString()}`
-            : `Payable Invoice Charge (Vendor): PKR ${Number(entry.amount).toLocaleString()}`,
+            ? `Freight Payable Recorded: PKR ${Number(entry.amount).toLocaleString()}`
+            : `Payable Recorded: PKR ${Number(entry.amount).toLocaleString()}`,
           description: isTransporterInvoice
-            ? `Freight / Vehicle Rent invoice of PKR ${Number(entry.amount).toLocaleString()} generated for Transporter "${transporterTarget}": ${entry.description || entry.category || 'Freight Invoice'}.`
-            : `Payable invoice / charge recorded for Vendor "${entry.party || 'Vendor'}": ${entry.description || entry.category || 'Payable Invoice'}.`,
-          details: `Party: ${transporterTarget}\nCategory: ${entry.category || 'Payable'}\nReference: ${entry.reference || 'N/A'}\nAmount: PKR ${Number(entry.amount).toLocaleString()}\nStatus: ${entryToSave.status || 'PENDING'}`,
+            ? `Freight / Vehicle Rent payable of PKR ${Number(entry.amount).toLocaleString()} recorded for Transporter "${transporterTarget}".`
+            : `Payable recorded for "${entry.party || 'Vendor'}": ${entry.description || entry.category || 'Payable'}.`,
+          details: `Party: ${transporterTarget}\nCategory: ${entry.category || 'Payable'}\nReference: ${entry.reference || 'N/A'}\nAmount: PKR ${Number(entry.amount).toLocaleString()}`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           type: 'INFO',
           notificationSubType: 'INVOICE_CHARGE_NOTIFICATION',
@@ -1007,12 +939,12 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
           category: isTransporterInvoice ? 'TRANSPORTER' : 'FINANCE'
         };
       } else if (entryToSave.type === 'RECEIVABLE') {
-        // Rule 9 & Rule 11: Receivable invoice / company ledger charge -> Finance Manager AND specific Client being charged
+        // Manual Receivable invoice -> Finance Manager & specific Client (NOT Admin)
         const clientParty = entry.party || 'Client';
         notif = {
           id: notifId,
-          title: `Receivable Invoice / Ledger Charge: PKR ${Number(entry.amount).toLocaleString()}`,
-          description: `Company invoice / ledger charge of PKR ${Number(entry.amount).toLocaleString()} generated for ${clientParty}: ${entry.description || entry.category || 'Invoice Charge'}.`,
+          title: `Receivable Invoice Recorded: PKR ${Number(entry.amount).toLocaleString()}`,
+          description: `Invoice / ledger charge of PKR ${Number(entry.amount).toLocaleString()} generated for ${clientParty}: ${entry.description || entry.category || 'Invoice Charge'}.`,
           details: `Client: ${clientParty}\nDescription: ${entry.description || entry.category || 'Receivable Invoice'}\nReference: ${entry.reference || 'N/A'}\nAmount Charged: PKR ${Number(entry.amount).toLocaleString()}`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           type: 'INFO',
@@ -1025,9 +957,9 @@ export async function saveFinanceToFirestore(entry: FinanceEntry): Promise<void>
           category: 'FINANCE'
         };
       } else {
-        // INCOME (Payment Received) or EXPENSE (Payment Paid) -> Admin & Finance Manager (Rule 7: Any payment paid and received notification)
+        // EXPENSE (Expense Paid) or direct confirmed INCOME (Payment Received) -> Informative notification to Admin & Finance Manager
         const isPaidOut = entryToSave.type === 'EXPENSE';
-        const label = isPaidOut ? 'Payment Paid' : 'Payment Received';
+        const label = isPaidOut ? 'Expense Paid' : 'Payment Received';
         notif = {
           id: notifId,
           title: `${label}: PKR ${Number(entry.amount).toLocaleString()}`,
@@ -2714,6 +2646,86 @@ function isOrphanedNotification(n: AppNotification): boolean {
   return false;
 }
 
+const READ_NOTIF_KEYS_STORAGE = 'dpl_read_notification_keys';
+const DELETED_NOTIF_KEYS_STORAGE = 'dpl_deleted_notification_keys';
+
+function getNotificationReadSignature(n: Partial<AppNotification>): string {
+  const approvalAction = (n.approvalData as any)?.actionType || '';
+  const approvalEntity = (n.approvalData as any)?.entityId || '';
+  return `${n.notificationSubType || ''}__${n.title || ''}__${n.description || ''}__${n.targetFilter?.caseNo || ''}__${n.targetFilter?.vehicleNo || ''}__${approvalAction}__${approvalEntity}`;
+}
+
+function getStoredKeySet(storageKey: string): Set<string> {
+  try {
+    const arr = safeAppStorage.getJSON<string[]>(storageKey, []);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function addKeysToStoredSet(storageKey: string, keys: string[]): void {
+  if (!keys || keys.length === 0) return;
+  try {
+    const existing = safeAppStorage.getJSON<string[]>(storageKey, []) || [];
+    const merged = Array.from(new Set([...(Array.isArray(existing) ? existing : []), ...keys.filter(Boolean)]));
+    // Cap stored keys at 2500 most recent entries to keep storage lightweight
+    const bounded = merged.length > 2500 ? merged.slice(merged.length - 2500) : merged;
+    safeAppStorage.setJSON(storageKey, bounded);
+  } catch {}
+}
+
+function normalizeNotificationsList(rawItems: AppNotification[]): AppNotification[] {
+  const readSet = getStoredKeySet(READ_NOTIF_KEYS_STORAGE);
+  const deletedSet = getStoredKeySet(DELETED_NOTIF_KEYS_STORAGE);
+  const seenContentSig = new Set<string>();
+  const result: AppNotification[] = [];
+
+  // Sort newest first before deduplicating so newest record wins while preserving RESOLVED/read state
+  const sorted = [...dedupeArrayById(rawItems)].sort((a, b) => {
+    const tA = (a as any).updatedAt ? new Date((a as any).updatedAt).getTime() : 0;
+    const tB = (b as any).updatedAt ? new Date((b as any).updatedAt).getTime() : 0;
+    if (tA && tB && tA !== tB) return tB - tA;
+    return (Number(b.id) || 0) - (Number(a.id) || 0);
+  });
+
+  for (const n of sorted) {
+    if (isOrphanedNotification(n)) continue;
+    const idKey = `id:${String(n.id)}`;
+    const docKey = `doc:${String((n as any)._docId || n.id)}`;
+    const sig = getNotificationReadSignature(n);
+    const sigKey = `sig:${sig}`;
+
+    if (deletedSet.has(idKey) || deletedSet.has(docKey) || deletedSet.has(sigKey)) {
+      continue;
+    }
+
+    const wasMarkedRead =
+      Boolean(n.read) ||
+      n.status === 'RESOLVED' ||
+      n.status === 'REJECTED' ||
+      readSet.has(idKey) ||
+      readSet.has(docKey) ||
+      readSet.has(sigKey);
+
+    const normalizedItem: AppNotification = wasMarkedRead
+      ? {
+          ...n,
+          status: n.status === 'REJECTED' ? 'REJECTED' : 'RESOLVED',
+          read: true
+        }
+      : n;
+
+    // Deduplicate identical notifications regardless of PENDING/RESOLVED status so duplicates never resurface
+    if (!seenContentSig.has(sig)) {
+      seenContentSig.add(sig);
+      result.push(normalizedItem);
+    }
+  }
+
+  return result;
+}
+
 export function subscribeToNotifications(
   onData: (items: AppNotification[]) => void,
   onError?: (err: any) => void
@@ -2723,8 +2735,7 @@ export function subscribeToNotifications(
   // 1. Immediately emit valid local cached notifications
   const cached = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []);
   if (cached && cached.length > 0) {
-    const validCached = dedupeArrayById(cached).filter(n => !isOrphanedNotification(n));
-    onData(validCached);
+    onData(normalizeNotificationsList(cached));
   } else {
     onData([]);
   }
@@ -2732,8 +2743,7 @@ export function subscribeToNotifications(
   // 2. Intra-window broadcast listener
   const handleLocalUpdate = () => {
     const fresh = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []);
-    const validFresh = fresh ? dedupeArrayById(fresh).filter(n => !isOrphanedNotification(n)) : [];
-    onData(validFresh);
+    onData(fresh ? normalizeNotificationsList(fresh) : []);
   };
   if (typeof window !== 'undefined') {
     window.addEventListener('dpl_notification_updated', handleLocalUpdate);
@@ -2772,25 +2782,7 @@ export function subscribeToNotifications(
         })();
       }
 
-      // Deduplicate by both id and title+description+status+caseNo signature so identical notifications never stack
-      const seenSig = new Set<string>();
-      const uniqueItems: AppNotification[] = [];
-      for (const item of dedupeArrayById(items)) {
-        const sig = `${item.title || ''}__${item.description || ''}__${item.status || ''}__${item.targetFilter?.caseNo || ''}__${item.targetFilter?.vehicleNo || ''}`;
-        if (!seenSig.has(sig)) {
-          seenSig.add(sig);
-          uniqueItems.push(item);
-        }
-      }
-
-      // Sort newest first (by updatedAt ISO timestamp if available, otherwise numeric id)
-      uniqueItems.sort((a, b) => {
-        const tA = (a as any).updatedAt ? new Date((a as any).updatedAt).getTime() : 0;
-        const tB = (b as any).updatedAt ? new Date((b as any).updatedAt).getTime() : 0;
-        if (tA && tB && tA !== tB) return tB - tA;
-        return (Number(b.id) || 0) - (Number(a.id) || 0);
-      });
-
+      const uniqueItems = normalizeNotificationsList(items);
       safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, uniqueItems);
       onData(uniqueItems);
     },
@@ -2810,10 +2802,37 @@ export function subscribeToNotifications(
 
 export async function saveNotificationToFirestore(notif: AppNotification): Promise<void> {
   const path = 'notifications';
-  // Use deterministic ID if not provided or if based on title+entity so identical notifications never duplicate
+  // Use deterministic ID based on subtype+title+entity so identical auto-notifications never create duplicate docs
   const deterministicKey = `${notif.notificationSubType || 'GEN'}_${notif.title || ''}_${notif.targetFilter?.caseNo || notif.targetFilter?.vehicleNo || notif.approvalData?.entityId || ''}`;
-  const numId = notif.id || parseNumericDocId(undefined, deterministicKey, 0);
+  const isAutoAlert =
+    notif.notificationSubType === 'INVOICE_CHARGE_NOTIFICATION' ||
+    notif.notificationSubType === 'GATE_OUT_INVOICE' ||
+    notif.notificationSubType === 'DESTINATION_ARRIVAL' ||
+    notif.notificationSubType === 'DAILY_GATE_OUT_SUMMARY' ||
+    notif.notificationSubType === 'DOC_EXPIRY_ALERT' ||
+    notif.notificationSubType === 'HEARING_NOTICE_REMINDER' ||
+    notif.notificationSubType === 'IDLE_VEHICLE_ALERT' ||
+    notif.notificationSubType === 'TRANSIT_DELAY_ALERT';
+  const numId = isAutoAlert
+    ? parseNumericDocId(undefined, deterministicKey, 0)
+    : (notif.id || parseNumericDocId(undefined, deterministicKey, 0));
   const docId = String(numId);
+  const sig = getNotificationReadSignature(notif);
+
+  // If this exact auto-generated notification was already marked read or deleted by the user, do not re-emit as unread
+  if (isAutoAlert) {
+    const readSet = getStoredKeySet(READ_NOTIF_KEYS_STORAGE);
+    const deletedSet = getStoredKeySet(DELETED_NOTIF_KEYS_STORAGE);
+    if (
+      readSet.has(`sig:${sig}`) ||
+      readSet.has(`doc:${docId}`) ||
+      deletedSet.has(`sig:${sig}`) ||
+      deletedSet.has(`doc:${docId}`)
+    ) {
+      return;
+    }
+  }
+
   const activeCompany = getActiveCompanyId();
   const nowIso = new Date().toISOString();
   const normalizedTargetRoles = Array.isArray((notif as any).targetRoles)
@@ -2835,7 +2854,7 @@ export async function saveNotificationToFirestore(notif: AppNotification): Promi
   try {
     const current = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []) || [];
     const filtered = current.filter(n => Number(n.id) !== Number(numId) && String(n.id) !== docId);
-    const updated = dedupeArrayById([payload as AppNotification, ...filtered]);
+    const updated = normalizeNotificationsList([payload as AppNotification, ...filtered]);
     safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, updated);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('dpl_notification_updated', { detail: payload }));
@@ -2844,12 +2863,10 @@ export async function saveNotificationToFirestore(notif: AppNotification): Promi
     console.warn("Storage sync error on saveNotification:", storageErr);
   }
 
-  // Persist to Firestore
-  try {
-    await setDoc(doc(db, path, docId), payload, { merge: true });
-  } catch (error) {
+  // Persist to Firestore without blocking caller on slow network
+  setDoc(doc(db, path, docId), payload, { merge: true }).catch((error) => {
     console.warn(`Firestore saveNotification warning:`, error);
-  }
+  });
 
   // Automatically dispatch FCM Web Push to target User IDs / Roles / Clients across mobile & desktop
   if (payload.status !== 'RESOLVED' && payload.status !== 'REJECTED' && !payload.read) {
@@ -2865,6 +2882,8 @@ export async function updateNotificationInFirestore(notif: AppNotification): Pro
   const docId = String((notif as any)._docId || numId);
   const nowIso = new Date().toISOString();
   const isResolved =
+    notif.status === 'RESOLVED' ||
+    notif.status === 'REJECTED' ||
     (notif.approvalData as any)?.status === 'APPROVED' ||
     (notif.approvalData as any)?.status === 'REJECTED' ||
     (notif as any).actionStatus === 'COMPLETED';
@@ -2874,11 +2893,28 @@ export async function updateNotificationInFirestore(notif: AppNotification): Pro
     updatedAt: nowIso,
     ...(isResolved ? { resolvedAt: (notif as any).resolvedAt || nowIso } : {})
   });
+  delete (payload as any)._docId;
 
-  // Update local storage cache immediately
+  // Update local storage cache and read-keys ledger immediately (0ms)
   try {
+    if (isResolved || payload.read) {
+      addKeysToStoredSet(READ_NOTIF_KEYS_STORAGE, [
+        `id:${String(notif.id)}`,
+        `doc:${docId}`,
+        `sig:${getNotificationReadSignature(notif)}`
+      ]);
+    }
+    const targetSig = getNotificationReadSignature(notif);
     const current = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []) || [];
-    const updated = dedupeArrayById(current.map(n => Number(n.id) === numId ? { ...n, ...payload } : n));
+    const updated = dedupeArrayById(
+      current.map((n) => {
+        const sameId = String(n.id) === String(notif.id) || String((n as any)._docId || '') === docId;
+        const sameSig = isResolved && getNotificationReadSignature(n) === targetSig;
+        if (sameId) return { ...n, ...payload, _docId: (n as any)._docId || docId } as AppNotification;
+        if (sameSig) return { ...n, status: 'RESOLVED', read: true, updatedAt: nowIso };
+        return n;
+      })
+    );
     safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, updated);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('dpl_notification_updated', { detail: payload }));
@@ -2887,12 +2923,99 @@ export async function updateNotificationInFirestore(notif: AppNotification): Pro
     console.warn("Storage sync error on updateNotification:", storageErr);
   }
 
-  // Persist to Firestore
-  try {
-    await setDoc(doc(db, path, docId), payload, { merge: true });
-  } catch (error) {
+  // Persist to Firestore without blocking UI on slow network
+  const writeOp = setDoc(doc(db, path, docId), payload, { merge: true }).catch((error) => {
     console.warn(`Firestore updateNotification warning:`, error);
+  });
+  await Promise.race([writeOp, new Promise<void>((resolve) => setTimeout(resolve, 1500))]);
+}
+
+/**
+ * Marks one or many notifications (e.g. "Mark all read" across 100+ items) as RESOLVED & read=true
+ * instantaneously in local state/storage, then commits to Firestore in chunked writeBatches (including duplicate docs).
+ */
+export async function markNotificationsAsReadInFirestore(items: AppNotification[]): Promise<void> {
+  if (!items || items.length === 0) return;
+  const path = 'notifications';
+  const nowIso = new Date().toISOString();
+
+  const keysToRecord: string[] = [];
+  const targetIdSet = new Set<string>();
+  const targetDocSet = new Set<string>();
+  const targetSigSet = new Set<string>();
+
+  for (const item of items) {
+    const idStr = String(item.id);
+    const docId = String((item as any)._docId || item.id);
+    const sig = getNotificationReadSignature(item);
+    targetIdSet.add(idStr);
+    targetDocSet.add(docId);
+    targetSigSet.add(sig);
+    keysToRecord.push(`id:${idStr}`, `doc:${docId}`, `sig:${sig}`);
   }
+
+  // 1. Synchronous 0ms local persistence & UI broadcast
+  try {
+    addKeysToStoredSet(READ_NOTIF_KEYS_STORAGE, keysToRecord);
+    const current = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []) || [];
+    const updated = current.map((n) => {
+      const idStr = String(n.id);
+      const docId = String((n as any)._docId || n.id);
+      const sig = getNotificationReadSignature(n);
+      if (targetIdSet.has(idStr) || targetDocSet.has(docId) || targetSigSet.has(sig)) {
+        return { ...n, status: 'RESOLVED' as const, read: true, resolvedAt: nowIso, updatedAt: nowIso };
+      }
+      return n;
+    });
+    safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, updated);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dpl_notification_updated'));
+    }
+  } catch (_) {}
+
+  // 2. Non-blocking chunked Firestore writeBatch (also sweeps any duplicate PENDING docs with matching signatures)
+  (async () => {
+    try {
+      const docIdsToResolve = new Set<string>(Array.from(targetDocSet));
+      try {
+        const snap = await Promise.race([
+          getDocs(collection(db, path)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))
+        ]);
+        if (snap) {
+          snap.forEach((docSnap) => {
+            const d = docSnap.data() as Partial<AppNotification>;
+            const sig = getNotificationReadSignature(d);
+            if (
+              targetDocSet.has(docSnap.id) ||
+              targetIdSet.has(String(d.id || '')) ||
+              targetSigSet.has(sig)
+            ) {
+              if (d.status !== 'RESOLVED' || !d.read) {
+                docIdsToResolve.add(docSnap.id);
+              }
+            }
+          });
+        }
+      } catch (_) {}
+
+      const allDocIds = Array.from(docIdsToResolve).filter(Boolean);
+      for (let i = 0; i < allDocIds.length; i += 400) {
+        const chunk = allDocIds.slice(i, i + 400);
+        const batch = writeBatch(db);
+        for (const dId of chunk) {
+          batch.set(
+            doc(db, path, dId),
+            { status: 'RESOLVED', read: true, resolvedAt: nowIso, updatedAt: nowIso },
+            { merge: true }
+          );
+        }
+        await batch.commit();
+      }
+    } catch (err) {
+      console.warn('Firestore batch markNotificationsAsRead warning:', err);
+    }
+  })();
 }
 
 export async function deleteNotificationFromFirestore(notifId: number | string, rawDocId?: string): Promise<void> {
@@ -2900,6 +3023,15 @@ export async function deleteNotificationFromFirestore(notifId: number | string, 
   const docId = String(rawDocId || notifId);
   try {
     const current = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []) || [];
+    const targetItem = current.find(
+      (n) => String(n.id) === String(notifId) || String((n as any)._docId || '') === docId
+    );
+    const keys = [`id:${String(notifId)}`, `doc:${docId}`];
+    if (targetItem) {
+      keys.push(`sig:${getNotificationReadSignature(targetItem)}`);
+    }
+    addKeysToStoredSet(DELETED_NOTIF_KEYS_STORAGE, keys);
+
     const updated = current.filter(n => String(n.id) !== String(notifId) && String((n as any)._docId || '') !== docId);
     safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, updated);
     if (typeof window !== 'undefined') {
@@ -2907,14 +3039,67 @@ export async function deleteNotificationFromFirestore(notifId: number | string, 
     }
   } catch (_) {}
 
-  try {
-    await deleteDoc(doc(db, path, docId));
-    if (rawDocId && String(notifId) !== rawDocId) {
-      await deleteDoc(doc(db, path, String(notifId))).catch(() => {});
+  (async () => {
+    try {
+      await deleteDoc(doc(db, path, docId));
+      if (rawDocId && String(notifId) !== rawDocId) {
+        await deleteDoc(doc(db, path, String(notifId))).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('Firestore deleteNotification warning:', err);
     }
-  } catch (err) {
-    console.warn('Firestore deleteNotification warning:', err);
+  })();
+}
+
+export async function deleteNotificationsBatchFromFirestore(items: AppNotification[]): Promise<void> {
+  if (!items || items.length === 0) return;
+  const path = 'notifications';
+
+  const keysToDelete: string[] = [];
+  const idSet = new Set<string>();
+  const docSet = new Set<string>();
+  const sigSet = new Set<string>();
+
+  for (const item of items) {
+    const idStr = String(item.id);
+    const docId = String((item as any)._docId || item.id);
+    const sig = getNotificationReadSignature(item);
+    idSet.add(idStr);
+    docSet.add(docId);
+    sigSet.add(sig);
+    keysToDelete.push(`id:${idStr}`, `doc:${docId}`, `sig:${sig}`);
   }
+
+  try {
+    addKeysToStoredSet(DELETED_NOTIF_KEYS_STORAGE, keysToDelete);
+    const current = safeAppStorage.getJSON<AppNotification[]>(NOTIFICATIONS_STORAGE_KEY, []) || [];
+    const remaining = current.filter((n) => {
+      const idStr = String(n.id);
+      const docId = String((n as any)._docId || n.id);
+      const sig = getNotificationReadSignature(n);
+      return !idSet.has(idStr) && !docSet.has(docId) && !sigSet.has(sig);
+    });
+    safeAppStorage.setJSON(NOTIFICATIONS_STORAGE_KEY, remaining);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dpl_notification_updated'));
+    }
+  } catch (_) {}
+
+  (async () => {
+    try {
+      const docIds = Array.from(docSet).filter(Boolean);
+      for (let i = 0; i < docIds.length; i += 400) {
+        const chunk = docIds.slice(i, i + 400);
+        const batch = writeBatch(db);
+        for (const dId of chunk) {
+          batch.delete(doc(db, path, dId));
+        }
+        await batch.commit();
+      }
+    } catch (err) {
+      console.warn('Firestore batch deleteNotifications warning:', err);
+    }
+  })();
 }
 
 export async function clearAllNotificationsInFirestore(companyId?: CompanyId): Promise<void> {
@@ -3232,73 +3417,132 @@ export async function authenticateDatabaseUser(
       return adminMasterUser;
     }
 
-    // 1. Query Firestore users collection (with safe 3.5s timeout to prevent network hangs)
-    let matchedUser: AppUser | null = null;
-    try {
-      const snapPromise = getDocs(collection(db, 'users'));
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Firestore getDocs timeout')), 3500)
+    const withAuthTimeout = <T>(p: Promise<T>, ms = 2200): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Firestore auth query timeout')), ms))
+      ]);
+
+    const doesPassMatch = (storedRaw: string | undefined): boolean => {
+      const sp = (storedRaw || '').trim();
+      if (!sp) return false;
+      return (
+        sp === cleanPass ||
+        sp.toLowerCase() === cleanPass.toLowerCase() ||
+        sp.toLowerCase().replace(/[\s\-_.]/g, '') === cleanPass.toLowerCase().replace(/[\s\-_.]/g, '')
       );
-      const snap = await Promise.race([snapPromise, timeoutPromise]);
-      snap.forEach((docSnap) => {
-        const u = docSnap.data() as AppUser;
-        const uIdLower = (u.userId || '').toLowerCase();
-        const uIdNoSpaces = uIdLower.replace(/[\s\-_.]/g, '');
-        const uEmailLower = (u.email || '').toLowerCase();
-        const uNameLower = (u.name || '').toLowerCase();
+    };
 
-        const matchUserId = 
-          uIdLower === cleanId || 
-          uIdNoSpaces === cleanIdNoSpaces ||
-          (cleanId.length >= 4 && (uIdLower.includes(cleanId) || cleanId.includes(uIdLower)));
-        const matchEmail = uEmailLower === cleanId;
-        const matchName = 
-          uNameLower === cleanId || 
-          (cleanId.length >= 3 && uNameLower.includes(cleanId));
+    const scoreUserMatch = (u: Partial<AppUser>): number => {
+      const uIdLower = (u.userId || '').toLowerCase().trim();
+      const uIdNoSpaces = uIdLower.replace(/[\s\-_.]/g, '');
+      const uEmailLower = (u.email || '').toLowerCase().trim();
+      const uContactClean = (u.contact || '').toLowerCase().replace(/[\s\-_.]/g, '');
+      const uNameLower = (u.name || '').toLowerCase().trim();
 
-        if (matchUserId || matchEmail || matchName) {
-          matchedUser = { ...u, id: parseNumericDocId(u.id, docSnap.id, 0), _docId: docSnap.id } as any;
+      let idScore = 0;
+      if (uIdLower && (uIdLower === cleanId || (cleanIdNoSpaces && uIdNoSpaces === cleanIdNoSpaces))) {
+        idScore = 100;
+      } else if (uEmailLower && uEmailLower === cleanId) {
+        idScore = 95;
+      } else if (uContactClean && cleanIdNoSpaces.length >= 7 && uContactClean === cleanIdNoSpaces) {
+        idScore = 90;
+      } else if (uNameLower && uNameLower === cleanId) {
+        idScore = 85;
+      } else if (cleanId.length >= 4 && uIdLower && (uIdLower.includes(cleanId) || cleanId.includes(uIdLower))) {
+        idScore = 60;
+      } else if (cleanId.length >= 4 && uNameLower && uNameLower.includes(cleanId)) {
+        idScore = 50;
+      }
+
+      if (idScore === 0) return 0;
+      const passBonus = doesPassMatch(u.password) ? 200 : 0;
+      const updatedTs = (u as any).updatedAt ? Math.min(10, Math.floor(new Date((u as any).updatedAt).getTime() / 1e12)) : 0;
+      return idScore + passBonus + updatedTs;
+    };
+
+    // 1. Collect candidate users from BOTH Firestore `users` (with fast 2.2s timeout) AND synced local `dpl_live_users`
+    let matchedUser: AppUser | null = null;
+    let bestScore = 0;
+
+    const considerCandidate = (candidate: AppUser) => {
+      const sc = scoreUserMatch(candidate);
+      if (sc > 0 && sc >= bestScore) {
+        const existingTs = matchedUser && (matchedUser as any).updatedAt
+          ? new Date((matchedUser as any).updatedAt).getTime()
+          : 0;
+        const candTs = (candidate as any).updatedAt
+          ? new Date((candidate as any).updatedAt).getTime()
+          : 0;
+        if (sc > bestScore || candTs >= existingTs) {
+          bestScore = sc;
+          matchedUser = candidate;
         }
-      });
-    } catch (dbErr: any) {
-      console.log('Firestore offline / unreachable, falling back to local credentials catalog.');
+      }
+    };
+
+    // Check local synced `dpl_live_users` immediately (shared across tabs on same origin, 0ms)
+    const localLiveUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || [];
+    for (const lu of localLiveUsers) {
+      considerCandidate(lu);
     }
 
-    // 1.5. If not matched, query Firestore clients collection
+    // Also query live Firestore `users` (2.2s bounded timeout) so cloud updates from other devices always win
+    try {
+      const snap = await withAuthTimeout(getDocs(collection(db, 'users')), 2200);
+      snap.forEach((docSnap) => {
+        const u = docSnap.data() as AppUser;
+        considerCandidate({ ...u, id: parseNumericDocId(u.id, docSnap.id, 0), _docId: docSnap.id } as any);
+      });
+    } catch (_) {
+      console.log('Firestore users query timed out or offline, using synced local credentials.');
+    }
+
+    // 1.5. If not matched, query local + Firestore `clients` collection (bounded 2s timeout)
     if (!matchedUser) {
-      try {
-        const clientSnap = await getDocs(collection(db, 'clients'));
-        clientSnap.forEach((docSnap) => {
-          const client = docSnap.data();
-          if (client.loginEnabled || (client.userId && client.password)) {
-            const cUserId = (client.userId || '').toLowerCase();
-            const cEmail = (client.email || '').toLowerCase();
-            const cName = (client.name || '').toLowerCase();
+      const checkClientObj = (client: any, fallbackId: string) => {
+        if (client && (client.loginEnabled || (client.userId && client.password))) {
+          const cUserId = (client.userId || '').toLowerCase().trim();
+          const cEmail = (client.email || '').toLowerCase().trim();
+          const cName = (client.name || '').toLowerCase().trim();
 
-            const matchUserId = cUserId === cleanId || cUserId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces;
-            const matchEmail = cEmail === cleanId;
-            const matchName = cName === cleanId || (cleanId.length >= 3 && cName.includes(cleanId));
+          const matchUserId = cUserId && (cUserId === cleanId || cUserId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
+          const matchEmail = cEmail && cEmail === cleanId;
+          const matchName = cName && (cName === cleanId || (cleanId.length >= 4 && cName.includes(cleanId)));
 
-            if (matchUserId || matchEmail || matchName) {
-              matchedUser = {
-                id: docSnap.id as any,
-                userId: client.userId,
-                password: client.password,
-                name: client.name,
-                role: client.role || UserRole.CLIENT,
-                roles: client.roles || [UserRole.CLIENT],
-                designation: 'Corporate Importer',
-                contact: client.contact || client.mobileNumber || '',
-                email: client.email || '',
-                status: 'ACTIVE',
-                clientName: client.name,
-                lastLogin: client.lastLogin || ''
-              } as unknown as AppUser;
-            }
+          if (matchUserId || matchEmail || matchName) {
+            matchedUser = {
+              id: (client.id || fallbackId) as any,
+              userId: client.userId,
+              password: client.password,
+              name: client.name,
+              role: client.role || UserRole.CLIENT,
+              roles: client.roles || [UserRole.CLIENT],
+              designation: 'Corporate Importer',
+              contact: client.contact || client.mobileNumber || '',
+              email: client.email || '',
+              status: 'ACTIVE',
+              clientName: client.name,
+              lastLogin: client.lastLogin || ''
+            } as unknown as AppUser;
           }
-        });
-      } catch (dbErr: any) {
-        console.log('Error querying clients from Firestore:', dbErr);
+        }
+      };
+
+      const localClients = safeAppStorage.getJSON<any[]>('dpl_live_clients', []) || [];
+      for (const lc of localClients) {
+        if (!matchedUser) checkClientObj(lc, String(lc.id || lc.name || 'client'));
+      }
+
+      if (!matchedUser) {
+        try {
+          const clientSnap = await withAuthTimeout(getDocs(collection(db, 'clients')), 2000);
+          clientSnap.forEach((docSnap) => {
+            if (!matchedUser) checkClientObj(docSnap.data(), docSnap.id);
+          });
+        } catch (dbErr: any) {
+          console.log('Firestore clients query timed out or offline.');
+        }
       }
     }
 
@@ -3410,10 +3654,10 @@ export async function authenticateDatabaseUser(
         }
       }
 
-      // Also check Firestore drivers collection
+      // Also check Firestore drivers collection (bounded 2s timeout)
       if (!matchedUser && !expiredTripIdNotice) {
         try {
-          const drvSnap = await getDocs(collection(db, 'drivers'));
+          const drvSnap = await withAuthTimeout(getDocs(collection(db, 'drivers')), 2000);
           drvSnap.forEach((docSnap) => {
             if (!matchedUser) {
               const m = checkDriverMatch(docSnap.data(), docSnap.id);
@@ -3421,7 +3665,7 @@ export async function authenticateDatabaseUser(
             }
           });
         } catch (drvErr) {
-          console.log('Error querying drivers from Firestore:', drvErr);
+          console.log('Firestore drivers query timed out or offline.');
         }
       }
 
@@ -3523,28 +3767,28 @@ export async function authenticateDatabaseUser(
       authProvider: 'database'
     };
 
-    try {
-      if (updatedUser.role === UserRole.CLIENT) {
-        await setDoc(
-          doc(db, 'clients', String(updatedUser.id)),
-          sanitizeForFirestore({
-            lastLogin: updatedUser.lastLogin
-          }),
-          { merge: true }
-        );
-      } else {
-        const targetDocId = String((matchedUser as any)._docId || updatedUser.id);
-        await setDoc(
-          doc(db, 'users', targetDocId),
-          sanitizeForFirestore(updatedUser),
-          { merge: true }
-        );
-      }
-    } catch (saveErr) {
-      console.warn('Could not record lastLogin in Firestore:', saveErr);
-    }
-
     saveActiveDbUserSession(updatedUser);
+
+    // Record lastLogin asynchronously in background — NEVER block user sign-in transition
+    (async () => {
+      try {
+        if (updatedUser.role === UserRole.CLIENT) {
+          await setDoc(
+            doc(db, 'clients', String(updatedUser.id)),
+            sanitizeForFirestore({ lastLogin: updatedUser.lastLogin }),
+            { merge: true }
+          );
+        } else {
+          const targetDocId = String((matchedUser as any)._docId || updatedUser.id);
+          const cleanRecord = sanitizeForFirestore({ ...updatedUser });
+          delete (cleanRecord as any)._docId;
+          await setDoc(doc(db, 'users', targetDocId), cleanRecord, { merge: true });
+        }
+      } catch (saveErr) {
+        console.warn('Could not record lastLogin in Firestore:', saveErr);
+      }
+    })();
+
     return updatedUser;
   } catch (err: any) {
     console.error('Database authentication error:', err);
@@ -3635,11 +3879,10 @@ export async function saveUserToFirestore(user: AppUser): Promise<void> {
     }
   } catch (_) {}
 
-  try {
-    await setDoc(doc(db, path, docId), payload, { merge: true });
-  } catch (error) {
+  const writeUserOp = setDoc(doc(db, path, docId), payload, { merge: true }).catch((error) => {
     console.warn(`Firestore saveUser warning:`, error);
-  }
+  });
+  await Promise.race([writeUserOp, new Promise<void>((resolve) => setTimeout(resolve, 1800))]);
 }
 
 export async function deleteUserFromFirestore(
@@ -5410,35 +5653,8 @@ export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocume
     const payload = sanitizeForFirestore(cloudReadyDoc);
     await setDoc(doc(db, path, docId), payload, { merge: true });
 
-    // Rule 7 & 8: Notify Admin immediately if Hearing Notice or Document Expired / Expiring Soon
-    const catLower = (documentItem.category || '').toLowerCase();
-    const titleLower = (documentItem.title || '').toLowerCase();
-    const isHearing =
-      catLower.includes('hearing') ||
-      catLower.includes('show cause') ||
-      catLower.includes('adjudication') ||
-      titleLower.includes('hearing') ||
-      titleLower.includes('show cause') ||
-      titleLower.includes('notice');
-
-    if (isHearing) {
-      const hearingDate = (documentItem as any).hearingDate || documentItem.expiryDate || documentItem.issueDate || 'Scheduled';
-      saveNotificationToFirestore({
-        id: Date.now() + Math.floor(Math.random() * 1000),
-        title: `Hearing Notice Reminder: ${documentItem.title}`,
-        description: `Legal / Customs Hearing Notice "${documentItem.title}" recorded. Scheduled Date: ${hearingDate}.`,
-        details: `Document: ${documentItem.title}\nCategory: ${documentItem.category}\nReference: ${documentItem.referenceNo || 'N/A'}\nDate: ${hearingDate}\nNotes: ${documentItem.notes || 'N/A'}`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        type: 'ALERT',
-        notificationSubType: 'HEARING_NOTICE_REMINDER',
-        status: 'PENDING',
-        actionLabel: 'Open Hearing Notice',
-        priority: 'HIGH',
-        targetRole: 'ADMIN',
-        category: 'GENERAL',
-        targetView: 'company_documents'
-      }).catch(() => {});
-    } else if (documentItem.hasExpiry && documentItem.expiryDate) {
+    // Notify Admin & Documentation Manager ONLY if a Company Document is Expiring Soon (<= 10 days) or Expired
+    if (!documentItem.unlimitedValidity && documentItem.hasExpiry && documentItem.expiryDate) {
       const todayTime = new Date(new Date().toISOString().split('T')[0]).getTime();
       const expTime = new Date(documentItem.expiryDate).getTime();
       if (!isNaN(expTime)) {
@@ -5446,18 +5662,18 @@ export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocume
         if (diffDays <= 10) {
           saveNotificationToFirestore({
             id: Date.now() + Math.floor(Math.random() * 1000),
-            title: diffDays <= 0 ? `Document Expired: ${documentItem.title}` : `Document Expiring Soon (${diffDays} Days): ${documentItem.title}`,
+            title: diffDays <= 0 ? `Company Document Expired: ${documentItem.title}` : `Company Document Expiring Soon (${diffDays}d): ${documentItem.title}`,
             description: diffDays <= 0
               ? `Company document "${documentItem.title}" expired on ${documentItem.expiryDate}.`
               : `Company document "${documentItem.title}" will expire in ${diffDays} day(s) on ${documentItem.expiryDate}.`,
-            details: `Document: ${documentItem.title}\nCategory: ${documentItem.category}\nExpiry Date: ${documentItem.expiryDate}`,
+            details: `Document: ${documentItem.title}\nCategory: ${documentItem.category || 'Company Document'}\nExpiry Date: ${documentItem.expiryDate}`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            type: 'ALERT',
+            type: 'INFO',
             notificationSubType: 'DOC_EXPIRY_ALERT',
             status: 'PENDING',
             actionLabel: 'Open Company Documents',
             priority: 'HIGH',
-            targetRole: 'ADMIN',
+            targetRole: 'ADMIN,DOCUMENTATION_MANAGER',
             category: 'GENERAL',
             targetView: 'company_documents'
           }).catch(() => {});

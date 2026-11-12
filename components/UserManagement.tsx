@@ -338,8 +338,11 @@ const UserManagement: React.FC = () => {
     const effectiveIsGlobal = assignedRoles.includes(UserRole.ADMIN) && formData.isGlobalAdmin;
 
     if (isEditing && editingId) {
+      const existingUser = users.find(u => String(u.id) === String(editingId));
       const updatedUser: AppUser = {
+        ...(existingUser || {}),
         id: Number(editingId) || Date.now(),
+        ...((existingUser as any)?._docId ? { _docId: (existingUser as any)._docId } : {}),
         name: formData.name.trim(),
         email: formData.email.trim(),
         contact: formData.contact.trim(),
@@ -385,7 +388,7 @@ const UserManagement: React.FC = () => {
       try {
         await saveUserToFirestore(updatedUser);
         if (Number(updatedUser.defaultPerContainerCharge) > 0) {
-          await syncDestinationStaffContainerCharges({ users: nextUsers, cases: casesList, destinationStaff: destinationStaffList });
+          syncDestinationStaffContainerCharges({ users: nextUsers, cases: casesList, destinationStaff: destinationStaffList }).catch(() => {});
         }
       } catch (err) {
         console.warn("Notice: User saved locally", err);

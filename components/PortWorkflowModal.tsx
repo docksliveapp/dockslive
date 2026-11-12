@@ -193,10 +193,13 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
       const updatedWf = { ...wfDetails };
 
       if (!isDestinationStaff) {
-        // Loading step completion
+        // Loading step completion & Vehicle Gate-Out
         updatedWf[CaseStatus.LOADING_PORT_PROCESSING] = {
           status: 'COMPLETED',
           completed: true,
+          gateOutToggled: true,
+          loadingGateOutAt: nowIso,
+          completedAt: nowIso,
           date: nowIso,
           officer: staffName,
           staffUserId,
@@ -211,6 +214,7 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
         updatedWf[CaseStatus.DESTINATION_PORT_ARRIVAL] = {
           status: 'COMPLETED',
           completed: true,
+          destinationGateInToggled: true,
           date: nowIso,
           officer: staffName,
           staffUserId,
@@ -240,12 +244,20 @@ export const PortWorkflowModal: React.FC<PortWorkflowModalProps> = ({
         containers: updatedContainers,
         workflowDetails: updatedWf,
         documents: newDocs,
-        ...(nextStatus === CaseStatus.COMPLETED
+        ...(!isDestinationStaff
           ? {
+              loadingPortGateOutTime: targetCase.loadingPortGateOutTime || nowIso,
+              loadingGateOutAt: (targetCase as any).loadingGateOutAt || nowIso,
+              gateOutToggled: true,
+              invoiceGeneratedAtGateOut: true
+            }
+          : {
+              destinationPortArrivalTime: targetCase.destinationPortArrivalTime || nowIso,
+              destinationUnloadAndGateOutTime: nowIso,
+              destinationGateInToggled: true,
               completedAt: (targetCase as any).completedAt || nowIso,
               permanentlyArchived: true
-            }
-          : {})
+            })
       };
 
       await saveCaseToFirestore(updatedCase);

@@ -503,35 +503,6 @@ export const CompanyDocuments: React.FC = () => {
 
     await saveCompanyDocumentToFirestore(newDoc);
 
-    // If document has expiry, check if expiring soon (<= 10 days) or expired, and notify Documentation Manager, Admin, Finance Manager, Operations Manager
-    if (hasExpiry && expiryDate) {
-      const today = new Date().toISOString().split('T')[0];
-      const diffDays = Math.ceil((new Date(expiryDate).getTime() - new Date(today).getTime()) / (24 * 60 * 60 * 1000));
-      if (diffDays <= 0) {
-        await sendAppNotification({
-          title: `Document Expired: ${docTitle.trim()}`,
-          description: `Company document "${docTitle.trim()}" expired on ${expiryDate}.`,
-          details: `Document: ${docTitle.trim()}\nCategory: ${docCategory}\nExpired On: ${expiryDate}\nAction: Please upload renewal certificate.`,
-          targetRole: 'ADMIN,DOCUMENTATION_MANAGER,FINANCE_MANAGER,OPERATIONS_MANAGER',
-          type: 'ALERT',
-          notificationSubType: 'DOC_EXPIRY_ALERT',
-          category: 'GENERAL',
-          priority: 'HIGH'
-        });
-      } else if (diffDays <= 10) {
-        await sendAppNotification({
-          title: `Document Expiring Soon (${diffDays} Days): ${docTitle.trim()}`,
-          description: `Company document "${docTitle.trim()}" will expire in ${diffDays} days on ${expiryDate}.`,
-          details: `Document: ${docTitle.trim()}\nCategory: ${docCategory}\nExpiry Date: ${expiryDate}\nDays Remaining: ${diffDays} days\nPrepare renewal paperwork.`,
-          targetRole: 'ADMIN,DOCUMENTATION_MANAGER,FINANCE_MANAGER,OPERATIONS_MANAGER',
-          type: 'INFO',
-          notificationSubType: 'DOC_EXPIRY_ALERT',
-          category: 'GENERAL',
-          priority: 'HIGH'
-        });
-      }
-    }
-
     // Reset Form
     setShowAddModal(false);
     setDocTitle('');

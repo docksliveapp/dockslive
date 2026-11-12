@@ -1086,61 +1086,38 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
     onSaveCase(updatedCase);
 
-    // Dispatch real-time workflow notifications to Operations Manager, Client, and responsible role
-    const currentStepObj = categoryWorkflow.steps[stepIndex] || { id: String(stepStatus), title: String(stepStatus) };
-    const currentStepArrangedBy = getStepArrangedBy(updatedCase, String(stepStatus), stepIndex);
+    // Dispatch ONLY actionable next-step task notifications to the specific responsible role (NO step-by-step spam or vehicle leaks to Client/Admin)
+    if (isCompleted && finalStatus !== CaseStatus.COMPLETED && stepIndex < categoryWorkflow.totalSteps - 1) {
+      const nextStep = categoryWorkflow.steps[stepIndex + 1];
+      const nextArrangedBy = getStepArrangedBy(updatedCase, nextStep.id, stepIndex + 1);
+      const primaryTargetRole = getStepTargetRole(targetCase.category, nextStep.id, stepIndex + 1, updatedCase);
 
-    // 1. Notify Operations Manager & Client about current step update / completion
-    sendAppNotification({
-      title: isCompleted
-        ? `Workflow Step ${stepIndex + 1} Completed: #${updatedCase.caseNo} (${currentStepObj.title})`
-        : `Workflow Step ${stepIndex + 1} Updated: #${updatedCase.caseNo} (${currentStepObj.title})`,
-      description: `Case #${updatedCase.caseNo} (${updatedCase.clientName || 'Client'}) - Step ${stepIndex + 1} (${currentStepObj.title}, Managed by ${currentStepArrangedBy === 'Client' ? 'Client' : 'Company / Operations Manager'}) has been ${isCompleted ? 'completed' : 'updated'} by ${String(userRole).replace(/_/g, ' ')}.${formData.assignedVehicleNo ? ` Assigned Vehicle: ${formData.assignedVehicleNo}.` : ''}`,
-      details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName || 'N/A'}\nService: ${updatedCase.category}\nStep ${stepIndex + 1}: ${currentStepObj.title}\nManaged By: ${currentStepArrangedBy === 'Client' ? 'Client' : 'Company (Operations Manager)'}\nStatus: ${isCompleted ? 'COMPLETED' : 'UPDATED'}${formData.assignedVehicleNo ? `\nAssigned Vehicle: ${formData.assignedVehicleNo}` : ''}`,
-      targetRole: 'OPERATIONS_MANAGER,CASE_MANAGER,CLIENT',
-      targetClientName: updatedCase.clientName,
-      targetView: 'cases',
-      targetFilter: {
-        caseNo: updatedCase.caseNo,
-        stepId: String(stepStatus),
-        stepIndex: stepIndex
-      },
-      type: 'INFO',
-      notificationSubType: 'WORKFLOW_TASK',
-      actionLabel: 'View Case Workflow',
-      category: 'CASE',
-      performedBy: String(userRole)
-    }).catch(e => console.warn('Could not dispatch step update notification:', e));
-
-    // 2. If completing this step, dispatch Action Required notification for Next Step (or Case Finish)
-    if (isCompleted) {
-      const totalSteps = categoryWorkflow.totalSteps;
-      if (finalStatus !== CaseStatus.COMPLETED && stepIndex < totalSteps - 1) {
-        const nextStep = categoryWorkflow.steps[stepIndex + 1];
-        const nextArrangedBy = getStepArrangedBy(updatedCase, nextStep.id, stepIndex + 1);
-        const primaryTargetRole = getStepTargetRole(targetCase.category, nextStep.id, stepIndex + 1, updatedCase);
-        const nextRoleLabel = nextArrangedBy === 'Client'
-          ? 'Client (Managed by Client)'
-          : `Operations Manager / ${String(primaryTargetRole).replace(/_/g, ' ')} (Managed by Company)`;
-
-        // Always include OPERATIONS_MANAGER and CLIENT in targetRole so Operations Manager gets every workflow notification from start to finish
-        const combinedRoles = Array.from(new Set([
-          'OPERATIONS_MANAGER',
-          'CASE_MANAGER',
-          'CLIENT',
-          String(primaryTargetRole)
-        ])).join(',');
-
+      if (nextArrangedBy === 'Client' && updatedCase.clientName) {
         sendAppNotification({
-          title: nextArrangedBy === 'Client'
-            ? `Action Required by Client: #${updatedCase.caseNo} - Step ${stepIndex + 2}: ${nextStep.title}`
-            : `Action Required (Managed by Company): #${updatedCase.caseNo} - Step ${stepIndex + 2}: ${nextStep.title}`,
-          description: nextArrangedBy === 'Client'
-            ? `Case #${updatedCase.caseNo} (${updatedCase.clientName}) reached Step ${stepIndex + 2}: ${nextStep.title}. Managed by Client — Client is requested to update this workflow step.`
-            : `Case #${updatedCase.caseNo} (${updatedCase.clientName}) reached Step ${stepIndex + 2}: ${nextStep.title}. Managed by Company — Operations Manager to update and advance workflow.`,
-          details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName || 'N/A'}\nService: ${updatedCase.category}\nNext Step: Step ${stepIndex + 2} - ${nextStep.title}\nArrangement: ${nextArrangedBy === 'Client' ? 'Managed by Client (Demand sent to Client)' : 'Managed by Company (Operations Manager updates)'}\nAssigned Role: ${nextRoleLabel}`,
-          targetRole: combinedRoles,
+          title: `Action Required: #${updatedCase.caseNo} — ${nextStep.title}`,
+          description: `Case #${updatedCase.caseNo} requires Client update for Step ${stepIndex + 2}: ${nextStep.title}.`,
+          details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName}\nStep Required: ${nextStep.title}`,
+          targetRole: 'CLIENT',
           targetClientName: updatedCase.clientName,
+          targetView: 'cases',
+          targetFilter: {
+            caseNo: updatedCase.caseNo,
+            stepId: nextStep.id,
+            stepIndex: stepIndex + 1,
+            action: 'UPDATE_STEP'
+          },
+          type: 'ACTION',
+          notificationSubType: 'CLIENT_MANAGED_DEMAND',
+          actionLabel: 'Update Step',
+          category: 'CASE',
+          performedBy: String(userRole)
+        }).catch(() => {});
+      } else if (primaryTargetRole && String(primaryTargetRole) !== 'ADMIN' && String(primaryTargetRole) !== 'CLIENT') {
+        sendAppNotification({
+          title: `Workflow Task Assigned: #${updatedCase.caseNo} — ${nextStep.title}`,
+          description: `Case #${updatedCase.caseNo} (${updatedCase.clientName || 'Client'}) is ready for ${nextStep.title}.`,
+          details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName || 'N/A'}\nAssigned Step: ${nextStep.title}\nAssigned Role: ${String(primaryTargetRole).replace(/_/g, ' ')}`,
+          targetRole: String(primaryTargetRole),
           targetView: 'cases',
           targetFilter: {
             caseNo: updatedCase.caseNo,
@@ -1153,33 +1130,18 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
           actionLabel: 'Open Step Workflow',
           category: 'CASE',
           performedBy: String(userRole)
-        }).catch(e => console.warn('Could not dispatch workflow step notification:', e));
-      } else {
-        // All steps completed (Case Finish) - Notify Operations Manager, Client, and Finance Manager
-        sendAppNotification({
-          title: `Case Workflow Finished & Permanently Archived: #${updatedCase.caseNo}`,
-          description: `All workflow steps for Case #${updatedCase.caseNo} (${updatedCase.clientName}) are 100% completed. All case data, bills, ledgers, and documents are permanently saved and available for download.`,
-          details: `Case No: ${updatedCase.caseNo}\nClient: ${updatedCase.clientName || 'N/A'}\nService: ${updatedCase.category}\nStatus: CASE FINISHED & PERMANENTLY ARCHIVED (ALL STEPS COMPLETED)`,
-          targetRole: 'OPERATIONS_MANAGER,CASE_MANAGER,FINANCE_MANAGER,CLIENT,ADMIN',
-          targetClientName: updatedCase.clientName,
-          targetView: 'cases',
-          targetFilter: { caseNo: updatedCase.caseNo },
-          type: 'INFO',
-          notificationSubType: 'WORKFLOW_TASK',
-          actionLabel: 'View Completed Case Dossier',
-          category: 'CASE',
-          performedBy: String(userRole)
-        }).catch(e => console.warn('Could not dispatch workflow completed notification:', e));
+        }).catch(() => {});
       }
     }
 
     onClose();
   };
 
-  // Destination Staff Vehicle Reception Trigger (Completes Transit & Starts Destination Unloading without requiring truck photo)
+  // Destination Staff Vehicle Reception Trigger (Completes Transit & Starts Destination Unloading; triggers Destination Arrival notification via saveCaseToFirestore)
   const handleDestinationArrivalPhotoUploaded = (photoUrl?: string) => {
     const nowDate = new Date().toISOString().split('T')[0];
     const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const nowIso = new Date().toISOString();
 
     setFormData(prev => ({
       ...prev,
@@ -1217,7 +1179,7 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
         name: `Destination_Vehicle_Reception_${targetCase.caseNo}.pdf`,
         url: photoUrl,
         type: 'Destination Vehicle Reception',
-        uploadedAt: new Date().toISOString()
+        uploadedAt: nowIso
       });
     }
 
@@ -1229,6 +1191,8 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
     let updatedCase: Case = {
       ...targetCase,
       status: nextCaseStatus,
+      destinationPortArrivalTime: targetCase.destinationPortArrivalTime || nowIso,
+      destinationGateInToggled: true,
       documents: existingDocs,
       workflowDetails: {
         ...(targetCase.workflowDetails || {}),
@@ -1239,21 +1203,6 @@ export const WorkflowStepModal: React.FC<WorkflowStepModalProps> = ({
 
     updatedCase = enrichCaseWithTripTimings(updatedCase, CaseStatus.DESTINATION_PORT_ARRIVAL, updatedDest);
     onSaveCase(updatedCase);
-
-    sendAppNotification({
-      title: `Vehicle Received at Destination (Transit Completed): #${targetCase.caseNo}`,
-      description: `Destination Staff received vehicle ${targetCase.containers?.[0]?.vehicleNo || ''} for Case #${targetCase.caseNo}. Transit is now COMPLETED and Destination Unloading workflow has started.`,
-      details: `Case No: ${targetCase.caseNo}\nClient: ${targetCase.clientName || 'N/A'}\nVehicle: ${targetCase.containers?.[0]?.vehicleNo || 'N/A'}\nTransit Status: COMPLETED\nActive Stage: Destination Port Unloading Workflow`,
-      targetRole: 'OPERATIONS_MANAGER,CASE_MANAGER,CLIENT,DESTINATION_PORT_STAFF',
-      targetClientName: targetCase.clientName,
-      targetView: 'cases',
-      targetFilter: { caseNo: updatedCase.caseNo, stepId: CaseStatus.DESTINATION_PORT_ARRIVAL },
-      type: 'INFO',
-      notificationSubType: 'WORKFLOW_TASK',
-      actionLabel: 'Open Destination Workflow',
-      category: 'CASE',
-      performedBy: String(userRole)
-    }).catch(e => console.warn('Could not dispatch destination arrival notification:', e));
   };
 
   const handleTriggerIncident = () => {

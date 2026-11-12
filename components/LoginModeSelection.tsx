@@ -119,7 +119,15 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
     setErrorMessage(null);
 
     try {
-      const user = await authenticateDatabaseUser(cleanIdentifier, cleanPassword);
+      const user = await Promise.race([
+        authenticateDatabaseUser(cleanIdentifier, cleanPassword),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Network connection is slow. Please tap Sign In once more.')),
+            8000
+          )
+        )
+      ]);
 
       // Reset brute-force counter on successful authentication
       setFailedAttempts(0);

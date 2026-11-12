@@ -254,7 +254,7 @@ export const PushNotificationToggle: React.FC<PushNotificationToggleProps> = ({
 
 interface ForegroundPushToastHostProps {
   theme?: 'charcoal' | 'pearl';
-  onNavigate?: (payload: { caseNo?: string; targetView?: string; url?: string }) => void;
+  onNavigate?: (payload: { notificationId?: string; caseNo?: string; targetView?: string; url?: string }) => void;
 }
 
 export const ForegroundPushToastHost: React.FC<ForegroundPushToastHostProps> = ({
@@ -277,7 +277,7 @@ export const ForegroundPushToastHost: React.FC<ForegroundPushToastHostProps> = (
     };
 
     const handleSwNavigate = (event: Event) => {
-      const custom = event as CustomEvent<{ caseNo?: string; targetView?: string; url?: string }>;
+      const custom = event as CustomEvent<{ notificationId?: string; caseNo?: string; targetView?: string; url?: string }>;
       if (custom.detail && onNavigate) {
         onNavigate(custom.detail);
       }
@@ -315,6 +315,7 @@ export const ForegroundPushToastHost: React.FC<ForegroundPushToastHostProps> = (
           onClick={() => {
             if (onNavigate) {
               onNavigate({
+                notificationId: toast.id,
                 caseNo: toast.caseNo,
                 targetView: toast.targetView,
                 url: toast.url

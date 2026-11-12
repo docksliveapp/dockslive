@@ -12,7 +12,8 @@ import {
   getWorkflowStepIndex, 
   getUnifiedCaseStageLabel, 
   isClientPortalApprovalPending, 
-  isDocumentationProcessingCase 
+  isDocumentationProcessingCase,
+  hasCaseArrivedAtDestination
 } from '../services/workflowConfig';
 import { 
   fetchAllTrackingCases, 
@@ -278,15 +279,22 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(100, 116, 139);
       doc.text('ASSIGNED TRUCK / TRAILER', col1, boxY);
-      doc.text('DRIVER & TRANSPORTER', col2, boxY);
+      doc.text('CARRIER TRANSIT SHIELD', col2, boxY);
       doc.text('OPERATING SUBSIDIARY', col3, boxY);
 
       boxY += 4.5;
       doc.setFontSize(9);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(30, 41, 59);
-      doc.text(targetContainer.vehicleNo || 'Awaiting Haulage', col1, boxY);
-      doc.text(`${targetContainer.driverName || 'Designated Driver'} (${targetContainer.transporterName || 'Fleet Network'})`, col2, boxY);
+      const arrivedForPdf = hasCaseArrivedAtDestination(targetContainer.caseItem);
+      doc.text(
+        arrivedForPdf && targetContainer.vehicleNo
+          ? targetContainer.vehicleNo
+          : 'Visible Upon Destination Arrival',
+        col1,
+        boxY
+      );
+      doc.text('MAK Bonded Carrier Fleet', col2, boxY);
       doc.text(targetContainer.companyName, col3, boxY);
 
       y += 54;
@@ -622,11 +630,10 @@ const SingleContainerDossierCard: React.FC<SingleContainerDossierCardProps> = ({
             <span>Routing: <strong className="text-white">{item.pol}</strong> → <strong className="text-white">{item.pod}</strong></span>
             <span>·</span>
             <span>Registered On: <strong className="text-slate-200">{item.registrationDate}</strong></span>
-            {item.vehicleNo && (
+            {hasCaseArrivedAtDestination(caseItem) && item.vehicleNo && (
               <>
                 <span>·</span>
-                <span>Assigned Truck: <strong className="text-amber-300 font-mono">{item.vehicleNo}</strong></span>
-                {item.driverName && <span>({item.driverName})</span>}
+                <span>Arrived Truck: <strong className="text-emerald-300 font-mono">{item.vehicleNo}</strong></span>
               </>
             )}
           </div>
@@ -773,13 +780,15 @@ const SingleContainerDossierCard: React.FC<SingleContainerDossierCardProps> = ({
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
               <Truck size={13} className="text-amber-600" />
-              <span>Assigned Haulage Truck</span>
+              <span>Bonded Haulage Status</span>
             </span>
             <p className="text-sm font-bold text-slate-900 font-mono">
-              {item.vehicleNo || 'Awaiting Haulage'}
+              {hasCaseArrivedAtDestination(caseItem) && item.vehicleNo
+                ? item.vehicleNo
+                : 'Visible at Destination'}
             </p>
             <p className="text-[11px] text-slate-500 truncate">
-              {item.transporterName || 'Fleet Network'}
+              {hasCaseArrivedAtDestination(caseItem) ? 'Arrived at Destination Terminal' : 'MAK Bonded Carrier Transit'}
             </p>
           </div>
 

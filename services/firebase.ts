@@ -12,8 +12,6 @@ import {
 import { 
   getFirestore, 
   initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
   setLogLevel,
   doc, 
   collection, 
@@ -44,18 +42,9 @@ function createFirestoreInstance() {
   try {
     return initializeFirestore(app, {
       experimentalAutoDetectLongPolling: true,
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager()
-      })
     }, firestoreDbId);
   } catch {
-    try {
-      return initializeFirestore(app, {
-        experimentalAutoDetectLongPolling: true,
-      }, firestoreDbId);
-    } catch {
-      return getFirestore(app, firestoreDbId);
-    }
+    return getFirestore(app, firestoreDbId);
   }
 }
 

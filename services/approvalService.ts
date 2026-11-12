@@ -78,11 +78,11 @@ export async function submitCaseActionApproval(params: {
     id: notifId,
     title: isExternal
       ? `[Step 1/2 Manager Review] Case ${actionLabel} Request: ${caseNo}`
-      : `Case ${actionLabel} Request: ${caseNo}`,
+      : `Case ${actionLabel} Request from ${params.requestedByRole || 'Manager'}: ${caseNo}`,
     description: isExternal
       ? `${params.requestedBy} (${params.requestedByRole}) requested ${actionLabel.toLowerCase()} for Case ${caseNo}. Step 1: Operations / Documentation Manager must review & approve before forwarding to Admin. Reason: "${params.reason}"`
-      : `${params.requestedBy} (${params.requestedByRole || 'Operations / Documentation Manager'}) requested Admin approval to ${params.actionType} Case ${caseNo}. Reason: "${params.reason}"`,
-    details: `Entity: Case ${caseNo}\nClient: ${params.caseItem.clientName || 'N/A'}\nAction: ${params.actionType} (${actionLabel})\nApproval Stage: ${isExternal ? 'Step 1 (Operations / Documentation Manager Review)' : 'Final Admin Approval'}\nRequester: ${params.requestedBy} (${params.requestedByRole || 'Staff'})\nReason: ${params.reason}${params.proposedChanges ? '\nProposed Changes: ' + JSON.stringify(params.proposedChanges, null, 2) : ''}`,
+      : `${params.requestedBy} (${params.requestedByRole || 'Manager'}) sent a request to Admin to ${params.actionType} Case ${caseNo}. Tap to Accept or Reject. Reason: "${params.reason}"`,
+    details: `Entity: Case ${caseNo}\nClient: ${params.caseItem.clientName || 'N/A'}\nAction Requested: ${params.actionType} (${actionLabel})\nRequester: ${params.requestedBy} (${params.requestedByRole || 'Manager'})\nReason: ${params.reason}${params.proposedChanges ? '\nProposed Changes: ' + JSON.stringify(params.proposedChanges, null, 2) : ''}`,
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     type: 'ACTION',
     notificationSubType: params.actionType === 'DELETE' 
@@ -91,7 +91,7 @@ export async function submitCaseActionApproval(params: {
         ? 'CANCELLATION_APPROVAL' 
         : 'EDIT_APPROVAL',
     status: 'PENDING',
-    actionLabel: isExternal ? `Approve & Forward to Admin` : `Review ${actionLabel}`,
+    actionLabel: isExternal ? `Approve & Forward to Admin` : `Accept / Reject Request`,
     priority: 'HIGH',
     targetRole,
     category: 'CASE',
@@ -414,32 +414,40 @@ export async function approveActionRequest(notification: AppNotification): Promi
       const casePayload = {
         ...(proposedChanges || {}),
         id: String(entityId),
+        adminEditAuthorized: true,
         pendingApproval: null
       } as any;
       await updateCaseInFirestore(casePayload);
       try {
         const liveCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
-        const nextCases = liveCases.map(c => String(c.id) === String(entityId) ? { ...c, ...(proposedChanges || {}), pendingApproval: undefined } : c);
+        const nextCases = liveCases.map(c => String(c.id) === String(entityId) ? { ...c, ...(proposedChanges || {}), adminEditAuthorized: true, pendingApproval: undefined } : c);
         safeAppStorage.setJSON('dpl_live_cases', nextCases);
         if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dpl_cases_updated', { detail: nextCases }));
       } catch (_) {}
     }
 
-    // Notify Operations Manager, Vehicle Manager & Client/Transporter of Admin's approval
-    const actionLabel = actionType === 'CANCEL' ? 'Cancelled' : actionType === 'EDIT' ? 'Modified / Edited' : 'Deleted';
+    // Notify ONLY the relevant manager role(s) (or external requester if initiated externally) of Admin's decision (Informative)
+    const actionLabel = actionType === 'CANCEL' ? 'Cancelled' : actionType === 'EDIT' ? 'Edit Authorized' : 'Deleted';
+    const isExtOrig = isExternalRequesterRole(originalRequesterRole || requestedByRole);
+    const outcomeTargetRole = isExtOrig
+      ? 'OPERATIONS_MANAGER,DOCUMENTATION_MANAGER,CLIENT'
+      : 'OPERATIONS_MANAGER,DOCUMENTATION_MANAGER,FINANCE_MANAGER';
     await saveNotificationToFirestore({
       id: Date.now() + 25,
       title: `Case ${actionLabel} by Admin: ${caseNoLabel}`,
-      description: `Administrator approved the ${actionType.toLowerCase()} request for ${caseNoLabel}. Case status is now updated.`,
-      details: `Case: ${caseNoLabel}\nAction Executed: ${actionLabel}\nApproved By: Administrator`,
+      description: actionType === 'EDIT'
+        ? `Administrator accepted the Edit request for ${caseNoLabel}. You may now edit and save the case.`
+        : `Administrator approved the ${actionType.toLowerCase()} request for ${caseNoLabel}.`,
+      details: `Case: ${caseNoLabel}\nAction Approved: ${actionLabel}\nApproved By: Administrator`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       type: 'INFO',
       notificationSubType: 'GENERAL',
       status: 'PENDING',
-      targetRole: 'OPERATIONS_MANAGER,DOCUMENTATION_MANAGER,CLIENT,TRANSPORTER',
-      targetClientName: originalRequester || requestedBy,
+      targetRole: outcomeTargetRole,
+      targetClientName: isExtOrig ? (originalRequester || requestedBy) : undefined,
       category: 'CASE',
-      targetView: 'cases'
+      targetView: 'cases',
+      targetFilter: { caseId: entityId, caseNo: caseNoLabel }
     });
   } else if (entityType === 'vehicle') {
     const vehNoLabel = entityName || `Vehicle #${entityId}`;
@@ -685,12 +693,12 @@ export async function approveActionRequest(notification: AppNotification): Promi
         window.dispatchEvent(new CustomEvent('dpl_finance_updated'));
       }
 
-      // Notify Admin of Payment Received (Admin Rule: Any payment paid and received notification)
+      // Notify Admin ONLY after Finance Manager approves the Client's uploaded payment screenshot (Informative — auto-read upon opening Notification Center!)
       await saveNotificationToFirestore({
         id: Date.now() + 35,
-        title: `Payment Received & Verified: PKR ${amount.toLocaleString()}`,
-        description: `Finance Manager verified and confirmed payment of PKR ${amount.toLocaleString()} from "${clientParty}". Credited to Received Payments, Client Ledger & Cashbook.`,
-        details: `Client: ${clientParty}\nAmount Received: PKR ${amount.toLocaleString()}\nBank / Mode: ${bankName}${caseNo ? `\nCase No: ${caseNo}` : ''}\nStatus: Verified & Posted to Cashbook & Client Ledger`,
+        title: `Payment Received: PKR ${amount.toLocaleString()} (${clientParty})`,
+        description: `Finance Manager approved payment of PKR ${amount.toLocaleString()} from "${clientParty}". Credited to Received Payments, Client Ledger & Cashbook.`,
+        details: `Client: ${clientParty}\nAmount Received: PKR ${amount.toLocaleString()}\nBank / Mode: ${bankName}${caseNo ? `\nCase No: ${caseNo}` : ''}\nStatus: Approved by Finance Manager`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         type: 'INFO',
         notificationSubType: 'FINANCE_RECORDED',
@@ -698,10 +706,29 @@ export async function approveActionRequest(notification: AppNotification): Promi
         actionLabel: 'View Cashbook',
         priority: 'MEDIUM',
         targetRole: 'ADMIN',
-        targetClientName: clientParty,
         category: 'FINANCE',
         targetView: 'finance'
       });
+
+      // Also notify the paying Client (Informative)
+      if (clientParty) {
+        await saveNotificationToFirestore({
+          id: Date.now() + 36,
+          title: `Payment Approved & Credited: PKR ${amount.toLocaleString()}`,
+          description: `Your payment of PKR ${amount.toLocaleString()} has been verified and credited to your ledger.`,
+          details: `Client: ${clientParty}\nAmount Credited: PKR ${amount.toLocaleString()}\nBank / Mode: ${bankName}${caseNo ? `\nCase No: ${caseNo}` : ''}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: 'INFO',
+          notificationSubType: 'FINANCE_RECORDED',
+          status: 'PENDING',
+          actionLabel: 'View Passbook',
+          priority: 'MEDIUM',
+          targetRole: 'CLIENT',
+          targetClientName: clientParty,
+          category: 'FINANCE',
+          targetView: 'finance'
+        });
+      }
 
       logActivity(
         `Payment Receipt Verified & Approved: PKR ${amount.toLocaleString()}`,
@@ -893,16 +920,19 @@ export async function rejectActionRequest(notification: AppNotification, rejectR
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dpl_cases_updated', { detail: nextCases }));
     } catch (_) {}
 
+    const isExtReject = isExternalRequesterRole(notification.approvalData.originalRequesterRole || notification.approvalData.requestedByRole);
     await saveNotificationToFirestore({
       id: Date.now() + 40,
-      title: `Case ${actionType === 'CANCEL' ? 'Cancellation' : 'Modification'} Rejected: ${entityName || entityId}`,
-      description: `The request to ${actionType.toLowerCase()} Case ${entityName || entityId} was rejected by ${rejectedByWho}. Case status remains unchanged.`,
+      title: `Case ${actionType === 'CANCEL' ? 'Cancellation' : actionType === 'DELETE' ? 'Deletion' : 'Edit'} Request Rejected: ${entityName || entityId}`,
+      description: `The request to ${actionType.toLowerCase()} Case ${entityName || entityId} was rejected by ${rejectedByWho}. Case remains unchanged.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type: 'ALERT',
+      type: 'INFO',
       notificationSubType: 'GENERAL',
       status: 'PENDING',
-      targetRole: 'OPERATIONS_MANAGER,DOCUMENTATION_MANAGER,CLIENT,TRANSPORTER',
-      targetClientName: originalRequester || requestedBy,
+      targetRole: isExtReject
+        ? 'OPERATIONS_MANAGER,DOCUMENTATION_MANAGER,CLIENT'
+        : 'OPERATIONS_MANAGER,DOCUMENTATION_MANAGER,FINANCE_MANAGER',
+      targetClientName: isExtReject ? (originalRequester || requestedBy) : undefined,
       category: 'CASE',
       targetView: 'cases'
     });

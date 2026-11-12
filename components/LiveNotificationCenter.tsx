@@ -9,8 +9,9 @@ import { AppNotification, UserRole } from '../types';
 import { 
   subscribeToNotifications, 
   updateNotificationInFirestore,
+  markNotificationsAsReadInFirestore,
   deleteNotificationFromFirestore,
-  clearAllNotificationsInFirestore,
+  deleteNotificationsBatchFromFirestore,
   matchesActiveCompany
 } from '../services/dbService';
 import { useActiveCompany } from '../services/companyService';
@@ -171,64 +172,57 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       const declaredTargetRoles = extractTargetRoles(n.targetRole, (n as any).targetRoles);
 
       // =======================================================================
-      // 1. ADMIN FILTER:
-      //    - All Admin-targeted notifications, approvals, finance alerts, document/vehicle expiries, and hearing notices
-      //    - Hide Step 1 Manager Review items until Manager approves Step 1
+      // 1. STRICT ADMIN FILTER:
+      //    Admin receives ONLY:
+      //    (a) Daily 12:00 PM Loading Gate-Out Summary & Table (DAILY_GATE_OUT_SUMMARY)
+      //    (b) Expense Paid & Payment Received (FINANCE_RECORDED targeting ADMIN)
+      //    (c) Company Documents Expiring Soon / Expired (DOC_EXPIRY_ALERT for company_documents)
+      //    (d) Direct Admin Final Approvals (Case Edit / Cancel / Delete, Urgent Payable, NOC, Client Reg)
       // =======================================================================
       if (isAdmin) {
         if (approvalStage === 'MANAGER_REVIEW') return false;
 
-        const targetsAdminOrAll =
+        const explicitlyTargetsAdmin =
           declaredTargetRoles.includes('ADMIN') ||
-          declaredTargetRoles.includes('SUPERADMIN') ||
-          declaredTargetRoles.includes('ALL');
+          declaredTargetRoles.includes('SUPERADMIN');
 
-        const isDocOrVehicleExpiry =
-          subType === 'DOC_EXPIRY_ALERT' ||
-          titleLower.includes('expired') ||
-          titleLower.includes('expiring soon') ||
-          titleLower.includes('expire soon');
+        const isDailyGateOutSummary =
+          subType === 'DAILY_GATE_OUT_SUMMARY' ||
+          Boolean((n as any).gateOutReport);
 
-        const isPaymentPaidOrReceived =
-          subType === 'FINANCE_RECORDED' ||
-          subType === 'PAYMENT_APPROVAL' ||
-          subType === 'INVOICE_CHARGE_NOTIFICATION' ||
-          titleLower.startsWith('payment paid') ||
-          titleLower.startsWith('payment received');
+        const isExpensePaidOrPaymentReceived =
+          subType === 'FINANCE_RECORDED' && explicitlyTargetsAdmin;
 
-        const isAdminApproval =
-          subType === 'CANCELLATION_APPROVAL' ||
-          subType === 'EDIT_APPROVAL' ||
-          subType === 'DELETION_APPROVAL' ||
-          subType === 'CLIENT_REGISTRATION_APPROVAL' ||
-          subType === 'CASE_APPROVAL' ||
-          subType === 'URGENT_PAYABLE_APPROVAL' ||
-          actionType === 'CANCEL' ||
-          actionType === 'EDIT' ||
-          actionType === 'DELETE' ||
-          actionType === 'APPROVE_NOC' ||
-          actionType === 'APPROVE_CLIENT' ||
-          actionType === 'VERIFY_PAYMENT' ||
-          actionType === 'APPROVE_URGENT_PAYABLE';
+        const isCompanyDocumentExpiry =
+          subType === 'DOC_EXPIRY_ALERT' && n.targetView === 'company_documents';
 
-        const isHearingNoticeReminder =
-          subType === 'HEARING_NOTICE_REMINDER' ||
-          titleLower.includes('hearing notice') ||
-          descLower.includes('hearing notice');
+        const isAdminFinalApproval =
+          explicitlyTargetsAdmin &&
+          (subType === 'CANCELLATION_APPROVAL' ||
+            subType === 'EDIT_APPROVAL' ||
+            subType === 'DELETION_APPROVAL' ||
+            subType === 'CLIENT_REGISTRATION_APPROVAL' ||
+            subType === 'URGENT_PAYABLE_APPROVAL' ||
+            subType === 'NOC_REQUEST' ||
+            actionType === 'CANCEL' ||
+            actionType === 'EDIT' ||
+            actionType === 'DELETE' ||
+            actionType === 'APPROVE_NOC' ||
+            actionType === 'APPROVE_CLIENT' ||
+            actionType === 'APPROVE_URGENT_PAYABLE');
 
         return (
-          targetsAdminOrAll ||
-          isDocOrVehicleExpiry ||
-          isPaymentPaidOrReceived ||
-          isAdminApproval ||
-          isHearingNoticeReminder
+          isDailyGateOutSummary ||
+          isExpensePaidOrPaymentReceived ||
+          isCompanyDocumentExpiry ||
+          isAdminFinalApproval
         );
       }
 
       // =======================================================================
       // 2. STRICT CLIENT FILTER:
       //    - Only notifications explicitly addressed to THIS Client account
-      //    - Hide internal approval requests (MANAGER_REVIEW / ADMIN_FINAL)
+      //    - Never show internal manager/admin approval requests
       // =======================================================================
       if (isClient && !isOperationsManager && !isFinanceManager && !isVehicleManager && !isCaseManager) {
         if (
@@ -236,21 +230,18 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
           subType === 'CANCELLATION_APPROVAL' ||
           subType === 'EDIT_APPROVAL' ||
           subType === 'URGENT_PAYABLE_APPROVAL' ||
-          subType === 'PAYMENT_APPROVAL'
+          subType === 'PAYMENT_APPROVAL' ||
+          subType === 'DAILY_GATE_OUT_SUMMARY'
         ) {
           return false;
         }
-        // Client must ONLY see notifications where targetClientName matches their identity
         if (!n.targetClientName) return false;
         return matchesNamedEntity(n.targetClientName);
       }
 
       // =======================================================================
       // 3. STRICT TRANSPORTER FILTER:
-      //    - Vehicle registration confirmed marked
-      //    - Vehicle cancelled marked & NOC generated
-      //    - Vehicle expire soon, expired, renewed
-      //    - Decisions on transporter requests
+      //    - Only fleet/transporter notifications for THIS Transporter
       // =======================================================================
       if (isTransporter && !isVehicleManager && !isOperationsManager && !isFinanceManager) {
         if (
@@ -258,7 +249,9 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
           subType === 'CANCELLATION_APPROVAL' ||
           subType === 'EDIT_APPROVAL' ||
           subType === 'URGENT_PAYABLE_APPROVAL' ||
-          subType === 'PAYMENT_APPROVAL'
+          subType === 'PAYMENT_APPROVAL' ||
+          subType === 'CASE_APPROVAL' ||
+          subType === 'DAILY_GATE_OUT_SUMMARY'
         ) {
           return false;
         }
@@ -271,84 +264,180 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       }
 
       // =======================================================================
-      // 4. OPERATIONS MANAGER & VEHICLE MANAGER:
-      //    - Step 1 Manager Review requests from Client/Transporter
-      //    - Admin approval/rejection outcomes for cases & vehicles
-      //    - Fleet expiry, idle vehicle, and transit delay alerts
+      // 4. GUARD ADMIN-ONLY FINAL APPROVALS FROM LEAKING TO OTHER ROLES
       // =======================================================================
-      if (n.targetClientName && matchesNamedEntity(n.targetClientName)) {
+      if (subType === 'DAILY_GATE_OUT_SUMMARY' || Boolean((n as any).gateOutReport)) {
+        return false;
+      }
+      if (
+        approvalStage === 'ADMIN_FINAL' &&
+        declaredTargetRoles.length > 0 &&
+        declaredTargetRoles.every(tr => tr === 'ADMIN' || tr === 'SUPERADMIN')
+      ) {
+        return false;
+      }
+
+      // Named entity direct match (e.g., individual staff payslip / HR alert)
+      if (n.targetClientName && !declaredTargetRoles.includes('CLIENT') && matchesNamedEntity(n.targetClientName)) {
         return true;
       }
 
-      const matchesDirectRole = declaredTargetRoles.some(tr => 
-        tr === currentNorm || userRolesNorm.includes(tr) || tr === 'ALL'
+      // =======================================================================
+      // 5. STRICT DIRECT ROLE MATCHING (NO BLANKET 'ALL' SPAM)
+      // =======================================================================
+      const matchesDirectRole = declaredTargetRoles.some(tr =>
+        tr !== 'ALL' && (tr === currentNorm || userRolesNorm.includes(tr))
       );
       if (matchesDirectRole) return true;
 
-      // Port Staff (Loading / Destination / Unloading) matching
-      const isPortStaff =
-        currentNorm.includes('PORT') ||
-        currentNorm.includes('LOADING') ||
-        currentNorm.includes('DESTINATION') ||
-        userRolesNorm.some(r => r.includes('PORT') || r.includes('LOADING') || r.includes('DESTINATION'));
-      if (isPortStaff) {
+      // Loading Port Staff vs Destination Port Staff strict separation
+      const isLoadingPortStaff =
+        currentNorm === 'LOADINGPORTSTAFF' ||
+        userRolesNorm.includes('LOADINGPORTSTAFF');
+      const isDestinationPortStaff =
+        currentNorm === 'DESTINATIONPORTSTAFF' ||
+        currentNorm === 'UNLOADINGSTAFF' ||
+        userRolesNorm.includes('DESTINATIONPORTSTAFF') ||
+        userRolesNorm.includes('UNLOADINGSTAFF');
+
+      if (isLoadingPortStaff && declaredTargetRoles.includes('LOADINGPORTSTAFF')) {
+        return true;
+      }
+      if (
+        isDestinationPortStaff &&
+        (declaredTargetRoles.includes('DESTINATIONPORTSTAFF') || declaredTargetRoles.includes('UNLOADINGSTAFF'))
+      ) {
+        return true;
+      }
+
+      // Documentation Manager (handles Documentation & Fleet/Vehicle workflows)
+      if (isVehicleManager) {
         if (
-          declaredTargetRoles.some(tr => tr.includes('PORT') || tr.includes('LOADING') || tr.includes('DESTINATION')) ||
-          subType === 'WORKFLOW_TASK'
+          declaredTargetRoles.some(tr => tr === 'DOCUMENTATIONMANAGER' || tr === 'VEHICLEMANAGER' || tr === 'FLEETANDVEHICLEMANAGER') ||
+          (n.category === 'TRANSPORTER' && approvalStage !== 'ADMIN_FINAL')
         ) {
           return true;
         }
       }
 
-      if (isVehicleManager) {
-        if (approvalStage === 'ADMIN_FINAL' && !declaredTargetRoles.some(tr => tr.includes('VEHICLE') || tr.includes('DOCUMENTATION'))) {
-          return false;
-        }
-        if (
-          n.category === 'TRANSPORTER' || 
-          declaredTargetRoles.some(tr => tr.includes('VEHICLE') || tr.includes('FLEET') || tr.includes('DOCUMENTATION'))
-        ) return true;
-      }
-
+      // Operations Manager / Case Manager
       if (isOperationsManager || isCaseManager) {
-        if (approvalStage === 'ADMIN_FINAL' && !declaredTargetRoles.some(tr => tr.includes('OPERATION') || tr.includes('CASE'))) {
-          return false;
-        }
         if (
-          declaredTargetRoles.some(tr => tr.includes('OPERATION') || tr.includes('CASE')) ||
+          declaredTargetRoles.some(tr => tr === 'OPERATIONSMANAGER' || tr === 'CASEMANAGER') ||
           subType === 'TRANSIT_DELAY_ALERT' ||
           subType === 'IDLE_VEHICLE_ALERT'
-        ) return true;
+        ) {
+          return true;
+        }
       }
 
-      // =======================================================================
-      // 5. FINANCE MANAGER:
-      //    - Client payment verification requests (PAYMENT_APPROVAL / VERIFY_PAYMENT)
-      //    - Any invoice charges anywhere: payable invoice by vendor, receivable invoices in cases (INVOICE_CHARGE_NOTIFICATION)
-      //    - Admin decision confirmation on urgent payable requests
-      //    - Payment paid / received records
-      // =======================================================================
+      // Finance Manager:
+      // - Client payment verification requests (PAYMENT_APPROVAL / VERIFY_PAYMENT) [ACTION]
+      // - Monthly automatic payables & Gate-Out receivable invoices (INVOICE_CHARGE_NOTIFICATION) [INFO]
+      // - Expense Paid / Payment Received records targeting FINANCE_MANAGER [INFO]
+      // - Admin decisions on Finance Manager's requests
       if (isFinanceManager) {
-        if (subType === 'URGENT_PAYABLE_APPROVAL' && declaredTargetRoles.includes('ADMIN') && !declaredTargetRoles.includes('FINANCEMANAGER')) {
-          return false;
-        }
         if (
-          n.category === 'FINANCE' ||
           subType === 'PAYMENT_APPROVAL' ||
           subType === 'INVOICE_CHARGE_NOTIFICATION' ||
-          subType === 'FINANCE_RECORDED' ||
           actionType === 'VERIFY_PAYMENT' ||
-          declaredTargetRoles.some(tr => tr.includes('FINANCE'))
-        ) return true;
+          declaredTargetRoles.some(tr => tr === 'FINANCEMANAGER' || tr === 'FINANCE')
+        ) {
+          return true;
+        }
       }
 
       return false;
     });
   }, [notifications, currentRole, currentRoles, clientName, userIdentifier, activeCompany?.id]);
 
-  // Unread Count
+  const isApprovalNotification = (n: AppNotification): boolean => {
+    if (n.status !== 'PENDING') return false;
+    const sub = String(n.notificationSubType || '');
+    const act = String(n.approvalData?.actionType || '');
+    return (
+      n.type === 'APPROVAL' ||
+      Boolean(act) ||
+      sub === 'PAYMENT_APPROVAL' ||
+      sub === 'URGENT_PAYABLE_APPROVAL' ||
+      sub === 'CLIENT_REGISTRATION_APPROVAL' ||
+      sub === 'CASE_APPROVAL' ||
+      sub === 'DELETION_APPROVAL' ||
+      sub === 'CANCELLATION_APPROVAL' ||
+      sub === 'EDIT_APPROVAL' ||
+      sub === 'NOC_REQUEST' ||
+      sub === 'TRANSPORTER_PAYMENT_CONFIRMATION'
+    );
+  };
+
+  const isActionRequiredNotification = (n: AppNotification): boolean => {
+    if (n.status !== 'PENDING') return false;
+    if (isApprovalNotification(n)) return true;
+    const sub = String(n.notificationSubType || '');
+    return (
+      n.type === 'ACTION' ||
+      sub === 'WORKFLOW_TASK' ||
+      sub === 'CLIENT_MANAGED_DEMAND' ||
+      sub === 'SALARY_READY'
+    );
+  };
+
+  const isNotificationUnread = (n: AppNotification): boolean =>
+    n.status === 'PENDING' && (isActionRequiredNotification(n) || !n.read);
+
+  // Unread Count (Action-Required stay unread until action; Informative auto-read on opening Notification Center)
   const unreadCount = useMemo(() => {
-    return relevantNotifications.filter(n => n.status === 'PENDING').length;
+    return relevantNotifications.filter(isNotificationUnread).length;
+  }, [relevantNotifications]);
+
+  const unreadInformativeCount = useMemo(() => {
+    return relevantNotifications.filter(n => isNotificationUnread(n) && !isActionRequiredNotification(n)).length;
+  }, [relevantNotifications]);
+
+  // Auto-mark ALL Informative (non-action) notifications as Read upon opening the Notification Center
+  useEffect(() => {
+    if (!isOpen) return;
+    const unreadInformative = relevantNotifications.filter(
+      (n) => isNotificationUnread(n) && !isActionRequiredNotification(n)
+    );
+    if (unreadInformative.length === 0) return;
+
+    const timer = setTimeout(() => {
+      const infoIdSet = new Set(unreadInformative.map((i) => String(i.id)));
+      const infoDocSet = new Set(unreadInformative.map((i) => String((i as any)._docId || i.id)));
+      setNotifications((prev) =>
+        prev.map((item) =>
+          infoIdSet.has(String(item.id)) || infoDocSet.has(String((item as any)._docId || item.id))
+            ? { ...item, status: 'RESOLVED', read: true }
+            : item
+        )
+      );
+      markNotificationsAsReadInFirestore(unreadInformative).catch((err) =>
+        console.warn('Auto-read informative notifications warning:', err)
+      );
+    }, 650);
+
+    return () => clearTimeout(timer);
+  }, [isOpen, relevantNotifications]);
+
+  // Deep-link: Open NotificationModal directly when launched via Web Push (?openNotificationId=...)
+  useEffect(() => {
+    if (typeof window === 'undefined' || relevantNotifications.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const openNotifId = params.get('openNotificationId');
+    if (!openNotifId) return;
+
+    const found = relevantNotifications.find(
+      (n) => String(n.id) === openNotifId || String((n as any)._docId || '') === openNotifId
+    );
+    if (found) {
+      setSelectedNotification(found);
+      setIsModalOpen(true);
+      params.delete('openNotificationId');
+      const nextSearch = params.toString();
+      const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
+      window.history.replaceState({}, '', nextUrl);
+    }
   }, [relevantNotifications]);
 
   // Foreground FCM + Real-time targeted notification toast & chime
@@ -409,7 +498,7 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
   // Filtered Notifications based on selected tab
   const filteredNotifications = useMemo(() => {
     if (activeFilter === 'UNREAD') {
-      return relevantNotifications.filter(n => n.status === 'PENDING');
+      return relevantNotifications.filter(isNotificationUnread);
     }
     if (activeFilter === 'APPROVALS') {
       return relevantNotifications.filter(n => {
@@ -435,32 +524,58 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
 
   const handleMarkAsRead = async (n: AppNotification, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    if (isActionRequiredNotification(n)) return;
+    const targetId = String(n.id);
+    const targetDocId = String((n as any)._docId || n.id);
+    setNotifications(prev =>
+      prev.map(item =>
+        String(item.id) === targetId || String((item as any)._docId || item.id) === targetDocId
+          ? { ...item, status: 'RESOLVED', read: true }
+          : item
+      )
+    );
     try {
-      await updateNotificationInFirestore({
-        ...n,
-        status: 'RESOLVED'
-      });
+      await markNotificationsAsReadInFirestore([n]);
     } catch (err) {
       console.warn("Could not mark as read:", err);
     }
   };
 
   const handleMarkAllRead = async () => {
+    // Only mark Informative notifications as read — Action-Required notifications MUST remain unread until action is completed!
+    const pendingItems = relevantNotifications.filter(
+      n => (n.status === 'PENDING' || !n.read) && !isActionRequiredNotification(n)
+    );
+    if (pendingItems.length === 0) return;
+
+    const pendingIdSet = new Set(pendingItems.map(i => String(i.id)));
+    const pendingDocSet = new Set(pendingItems.map(i => String((i as any)._docId || i.id)));
+
+    setNotifications(prev =>
+      prev.map(item =>
+        pendingIdSet.has(String(item.id)) || pendingDocSet.has(String((item as any)._docId || item.id))
+          ? { ...item, status: 'RESOLVED', read: true }
+          : item
+      )
+    );
+
     try {
-      const pendingItems = relevantNotifications.filter(n => n.status === 'PENDING');
-      for (const item of pendingItems) {
-        await updateNotificationInFirestore({
-          ...item,
-          status: 'RESOLVED'
-        });
-      }
+      await markNotificationsAsReadInFirestore(pendingItems);
     } catch (err) {
-      console.warn("Could not mark all as read:", err);
+      console.warn("Could not mark informative notifications as read:", err);
     }
   };
 
   const handleDeleteNotification = async (n: AppNotification, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    if (isActionRequiredNotification(n)) return;
+    const targetId = String(n.id);
+    const targetDocId = String((n as any)._docId || n.id);
+    setNotifications(prev =>
+      prev.filter(
+        item => String(item.id) !== targetId && String((item as any)._docId || item.id) !== targetDocId
+      )
+    );
     try {
       await deleteNotificationFromFirestore(n.id, (n as any)._docId);
     } catch (err) {
@@ -469,20 +584,47 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
   };
 
   const handleClearAllNotifications = async () => {
+    // Preserve pending Action-Required notifications until their required action is completed
+    const itemsToDelete = relevantNotifications.filter(n => !isActionRequiredNotification(n));
+    if (itemsToDelete.length === 0) return;
+
+    const delIdSet = new Set(itemsToDelete.map(i => String(i.id)));
+    const delDocSet = new Set(itemsToDelete.map(i => String((i as any)._docId || i.id)));
+    setNotifications(prev =>
+      prev.filter(
+        item => !delIdSet.has(String(item.id)) && !delDocSet.has(String((item as any)._docId || item.id))
+      )
+    );
+
     try {
-      const itemsToDelete = [...relevantNotifications];
-      await Promise.all(
-        itemsToDelete.map((item) => deleteNotificationFromFirestore(item.id, (item as any)._docId))
-      );
+      await deleteNotificationsBatchFromFirestore(itemsToDelete);
     } catch (err) {
       console.warn("Could not clear role notifications:", err);
     }
   };
 
+  const resolveWorkflowTaskOnExecute = async (n: AppNotification) => {
+    const targetId = String(n.id);
+    const targetDocId = String((n as any)._docId || n.id);
+    setNotifications(prev =>
+      prev.map(item =>
+        String(item.id) === targetId || String((item as any)._docId || item.id) === targetDocId
+          ? { ...item, status: 'RESOLVED', read: true }
+          : item
+      )
+    );
+    try {
+      await markNotificationsAsReadInFirestore([n]);
+    } catch (err) {
+      console.warn("Could not resolve task notification:", err);
+    }
+  };
+
   const handleDirectNavigate = (n: AppNotification, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (n.status === 'PENDING') {
-      handleMarkAsRead(n);
+    // Approval items stay unread until Accept/Reject; Workflow Task items resolve when user clicks CTA to execute task
+    if (n.status === 'PENDING' && !isApprovalNotification(n)) {
+      resolveWorkflowTaskOnExecute(n);
     }
     if (n.targetFilter?.caseNo && onNavigateToCase) {
       onNavigateToCase(n.targetFilter.caseNo, n.targetFilter);
@@ -499,22 +641,12 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
   };
 
   const handleCardClick = async (n: AppNotification) => {
-    // 1. Mark non-approval notifications as read on tap (keep approval notifications pending until decision)
-    const isApprovalItem =
-      n.notificationSubType === 'PAYMENT_APPROVAL' ||
-      n.notificationSubType === 'URGENT_PAYABLE_APPROVAL' ||
-      n.notificationSubType === 'CLIENT_REGISTRATION_APPROVAL' ||
-      n.notificationSubType === 'CASE_APPROVAL' ||
-      n.notificationSubType === 'DELETION_APPROVAL' ||
-      n.notificationSubType === 'CANCELLATION_APPROVAL' ||
-      n.notificationSubType === 'EDIT_APPROVAL' ||
-      Boolean(n.approvalData?.actionType);
-
-    if (n.status === 'PENDING' && !isApprovalItem) {
+    // 1. Mark ONLY Informative notifications as read on tap; Action-Required notifications remain unread until action is completed!
+    if (n.status === 'PENDING' && !isActionRequiredNotification(n)) {
       handleMarkAsRead(n);
     }
 
-    // 2. Always open the Notification Detail & Action Modal so user can inspect full details, approve/reject, or jump to view
+    // 2. Open the Notification Detail & Action Modal (shows Gate-Out Table or Accept/Reject buttons)
     setSelectedNotification(n);
     setIsModalOpen(true);
   };
@@ -525,7 +657,8 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       await approveActionRequest(n);
       await updateNotificationInFirestore({
         ...n,
-        status: 'RESOLVED'
+        status: 'RESOLVED',
+        read: true
       });
     } catch (err) {
       console.error("Failed to approve notification action:", err);
@@ -538,7 +671,8 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       await rejectActionRequest(n);
       await updateNotificationInFirestore({
         ...n,
-        status: 'RESOLVED'
+        status: 'RESOLVED',
+        read: true
       });
     } catch (err) {
       console.error("Failed to reject notification action:", err);
@@ -555,8 +689,8 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     }
 
     if (action === 'VIEW') {
-      if (selectedNotification.status === 'PENDING') {
-        handleMarkAsRead(selectedNotification);
+      if (selectedNotification.status === 'PENDING' && !isApprovalNotification(selectedNotification)) {
+        resolveWorkflowTaskOnExecute(selectedNotification);
       }
       if (selectedNotification.targetFilter?.caseNo && onNavigateToCase) {
         onNavigateToCase(selectedNotification.targetFilter.caseNo, selectedNotification.targetFilter);
@@ -642,6 +776,14 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
     }
 
     switch (subType) {
+      case 'DAILY_GATE_OUT_SUMMARY':
+      case 'DESTINATION_ARRIVAL':
+        return {
+          bg: isPearl ? 'bg-amber-100 border-amber-200 text-amber-600' : 'bg-amber-500/20 border-amber-500/30 text-amber-400',
+          badgeBg: 'bg-amber-500',
+          icon: <Truck size={20} />
+        };
+      case 'GATE_OUT_INVOICE':
       case 'PAYMENT_APPROVAL':
       case 'INVOICE_CHARGE_NOTIFICATION':
       case 'BUYING':
@@ -692,17 +834,17 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
   };
 
   const newNotifications = useMemo(
-    () => filteredNotifications.filter(n => n.status === 'PENDING'),
+    () => filteredNotifications.filter(isNotificationUnread),
     [filteredNotifications]
   );
 
   const earlierNotifications = useMemo(
-    () => filteredNotifications.filter(n => n.status !== 'PENDING'),
+    () => filteredNotifications.filter(n => !isNotificationUnread(n)),
     [filteredNotifications]
   );
 
   const renderNotificationRow = (n: AppNotification, idx: number) => {
-    const isPending = n.status === 'PENDING';
+    const isPending = isNotificationUnread(n);
     const avatarStyle = getNotificationAvatarStyle(n);
     const isPaymentApproval =
       n.notificationSubType === 'PAYMENT_APPROVAL' ||
@@ -789,10 +931,19 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                 {n.targetFilter.vehicleNo}
               </span>
             )}
+            {isActionRequiredNotification(n) && (
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                isPearl
+                  ? 'bg-amber-50 text-amber-800 border-amber-300'
+                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+              }`}>
+                Action Required
+              </span>
+            )}
           </div>
 
           {/* Facebook/Instagram Style Inline Action Buttons */}
-          {(isApproval && isPending) || n.targetView || n.targetFilter?.caseNo ? (
+          {(isApproval && isPending) || n.targetView || n.targetFilter?.caseNo || (n as any).gateOutReport ? (
             <div className="flex items-center flex-wrap gap-2 mt-2.5">
               {isApproval && isPending && (
                 <>
@@ -819,7 +970,20 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                   </button>
                 </>
               )}
-              {(n.targetView || n.targetFilter?.caseNo) && !(isApproval && isPending) && (
+              {(n as any).gateOutReport && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCardClick(n);
+                  }}
+                  className="px-3 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-xs"
+                >
+                  <span>{n.actionLabel || 'Open Gate-Out Table'}</span>
+                  <ArrowRight size={11} />
+                </button>
+              )}
+              {(n.targetView || n.targetFilter?.caseNo) && !(isApproval && isPending) && !(n as any).gateOutReport && (
                 <button
                   type="button"
                   onClick={(e) => handleDirectNavigate(n, e)}
@@ -842,14 +1006,14 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
           {isPending ? (
             <span
               className="w-2.5 h-2.5 rounded-full bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.6)] shrink-0"
-              title="Unread notification"
+              title={isActionRequiredNotification(n) ? "Action required to mark read" : "Unread notification"}
             />
           ) : (
             <span className="w-2.5 h-2.5 shrink-0" />
           )}
 
           <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-            {isPending && (
+            {isPending && !isActionRequiredNotification(n) && (
               <button
                 type="button"
                 onClick={(e) => handleMarkAsRead(n, e)}
@@ -863,18 +1027,20 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                 <Check size={14} />
               </button>
             )}
-            <button
-              type="button"
-              onClick={(e) => handleDeleteNotification(n, e)}
-              className={`p-1 rounded-lg transition cursor-pointer ${
-                isPearl
-                  ? 'text-slate-400 hover:text-rose-600 hover:bg-white'
-                  : 'text-slate-400 hover:text-rose-400 hover:bg-white/10'
-              }`}
-              title="Remove notification"
-            >
-              <Trash2 size={13} />
-            </button>
+            {!isActionRequiredNotification(n) && (
+              <button
+                type="button"
+                onClick={(e) => handleDeleteNotification(n, e)}
+                className={`p-1 rounded-lg transition cursor-pointer ${
+                  isPearl
+                    ? 'text-slate-400 hover:text-rose-600 hover:bg-white'
+                    : 'text-slate-400 hover:text-rose-400 hover:bg-white/10'
+                }`}
+                title="Remove notification"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -946,7 +1112,7 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
               </div>
 
               <div className="flex items-center gap-1">
-                {unreadCount > 0 && (
+                {unreadInformativeCount > 0 && (
                   <button
                     type="button"
                     onClick={handleMarkAllRead}
@@ -955,7 +1121,7 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
                         ? 'text-blue-600 hover:bg-blue-50' 
                         : 'text-blue-400 hover:bg-white/10'
                     }`}
-                    title="Mark all as read"
+                    title="Mark informative notifications as read"
                   >
                     <CheckCheck size={15} />
                     <span>Mark all read</span>
@@ -1109,6 +1275,27 @@ export const LiveNotificationCenter: React.FC<LiveNotificationCenterProps> = ({
       <ForegroundPushToastHost
         theme={isPearl ? 'pearl' : 'charcoal'}
         onNavigate={(payload) => {
+          let targetNotifId = payload.notificationId || '';
+          if (!targetNotifId && payload.url) {
+            try {
+              const parsedUrl = new URL(payload.url, window.location.origin);
+              targetNotifId = parsedUrl.searchParams.get('openNotificationId') || '';
+            } catch {
+              // ignore URL parse error
+            }
+          }
+
+          if (targetNotifId) {
+            const matched = relevantNotifications.find(
+              (n) => String(n.id) === targetNotifId || String((n as any)._docId || '') === targetNotifId
+            );
+            if (matched) {
+              setSelectedNotification(matched);
+              setIsModalOpen(true);
+              return;
+            }
+          }
+
           if (payload.caseNo && onNavigateToCase) {
             onNavigateToCase(payload.caseNo, { caseNo: payload.caseNo });
           } else if (payload.targetView && onNavigateToTab) {

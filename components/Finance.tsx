@@ -1933,12 +1933,6 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
     saveFinanceToFirestore(entry).catch((e) => console.warn("Firestore saveFinance error:", e));
     logActivity(`${entry.type}: ${entry.reference} - PKR ${entry.amount.toLocaleString()} for ${entry.party}`, 'FINANCE');
-    
-    // Live finance notification dispatch
-    notifyLiveFinanceTransaction({
-      ...entry,
-      direction: entry.type === 'INCOME' || entry.type === 'RECEIVABLE' ? 'RECEIVED' : 'PAID'
-    } as any).catch(() => {});
 
     setShowAddModal(false);
     setIsOtherClient(false);

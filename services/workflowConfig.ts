@@ -897,4 +897,129 @@ export function getUnifiedCaseStageLabel(c?: any): string {
   return 'Documentation Processing';
 }
 
+/**
+ * Extracts the ISO / parseable timestamp when Loading Gate-Out occurred for a Case, if completed.
+ */
+export function getCaseLoadingGateOutTimestamp(c?: any): string | null {
+  if (!c) return null;
+  const wf = c.workflowDetails || {};
+  const loadingStep =
+    wf[CaseStatus.LOADING_PORT_PROCESSING] ||
+    wf['Loading Port Processing'] ||
+    wf['LOADING_PORT_PROCESSING'] ||
+    wf['Port Loading & Sealing'] ||
+    wf['Port Loading & Mandatory GPS Tracking'] ||
+    wf['Terminal Gate Out & Delivery'];
+
+  const directTs =
+    c.loadingGateOutAt ||
+    c.loadingPortGateOutTime ||
+    loadingStep?.loadingGateOutAt ||
+    loadingStep?.gateOutTimestamp ||
+    (loadingStep?.completed || loadingStep?.gateOutToggled ? (loadingStep?.completedAt || loadingStep?.date) : null);
+
+  if (directTs && typeof directTs === 'string') {
+    const parsed = new Date(directTs).getTime();
+    if (!isNaN(parsed) && parsed > 0) {
+      return new Date(parsed).toISOString();
+    }
+  }
+
+  return null;
+}
+
+/**
+ * True ONLY once the vehicle has completed Loading Port Gate-Out (In Transit / Destination / Completed).
+ * Used to gate Case Invoice generation and Client Gate-Out notifications.
+ */
+export function hasCaseCompletedLoadingGateOut(c?: any): boolean {
+  if (!c) return false;
+  const rawStatus = String(c.status || '').trim();
+  const lower = rawStatus.toLowerCase();
+  if (lower === 'cancelled' || isClientPortalApprovalPending(c)) return false;
+
+  if (
+    Boolean(c.loadingGateOutAt) ||
+    Boolean(c.loadingPortGateOutTime) ||
+    Boolean(c.gateOutToggled)
+  ) {
+    return true;
+  }
+
+  const wf = c.workflowDetails || {};
+  const loadingStep =
+    wf[CaseStatus.LOADING_PORT_PROCESSING] ||
+    wf['Loading Port Processing'] ||
+    wf['LOADING_PORT_PROCESSING'] ||
+    wf['Port Loading & Sealing'] ||
+    wf['Port Loading & Mandatory GPS Tracking'] ||
+    wf['Terminal Gate Out & Delivery'];
+
+  if (loadingStep && (loadingStep.gateOutToggled || loadingStep.completed)) {
+    return true;
+  }
+
+  if (
+    rawStatus === CaseStatus.IN_TRANSIT ||
+    rawStatus === CaseStatus.DESTINATION_PORT_ARRIVAL ||
+    rawStatus === CaseStatus.COMPLETED ||
+    lower.includes('in transit') ||
+    lower.includes('highway transit') ||
+    lower.includes('destination') ||
+    lower.includes('completed') ||
+    lower.includes('delivered')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Conflict-of-Interest Privacy Gate:
+ * Returns true ONLY when the vehicle has physically arrived at Destination
+ * (marked Arrived by Destination Staff or Case Completed/Delivered).
+ * Before this point, Vehicle Number MUST remain hidden from Client / Importer / Public Status.
+ */
+export function hasCaseArrivedAtDestination(c?: any): boolean {
+  if (!c) return false;
+  const rawStatus = String(c.status || '').trim();
+  const lower = rawStatus.toLowerCase();
+  if (lower === 'cancelled') return false;
+
+  if (
+    rawStatus === CaseStatus.DESTINATION_PORT_ARRIVAL ||
+    rawStatus === CaseStatus.COMPLETED ||
+    lower.includes('destination port arrival') ||
+    lower.includes('completed') ||
+    lower.includes('delivered') ||
+    Boolean(c.destinationPortArrivalTime) ||
+    Boolean(c.destinationUnloadAndGateOutTime) ||
+    Boolean(c.destinationGateInToggled)
+  ) {
+    return true;
+  }
+
+  const wf = c.workflowDetails || {};
+  const destStep =
+    wf[CaseStatus.DESTINATION_PORT_ARRIVAL] ||
+    wf['Destination Port Arrival & Auto DO Generation'] ||
+    wf['DESTINATION_PORT_ARRIVAL'] ||
+    wf['Border Crossing & Custom Clearance'];
+
+  if (
+    destStep &&
+    (destStep.destinationGateInToggled ||
+      destStep.completed ||
+      destStep.unloaded ||
+      destStep.gateOutVehicle ||
+      Boolean(destStep.portGateArrivalPhotoUrl))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+
 

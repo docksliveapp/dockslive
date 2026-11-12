@@ -25,6 +25,7 @@ export const AvailableVehiclesView: React.FC<AvailableVehiclesViewProps> = ({
   const [liveVehicles, setLiveVehicles] = useState<Vehicle[]>([]);
   const [searchVehicleQuery, setSearchVehicleQuery] = useState('');
   const [selectedTransporter, setSelectedTransporter] = useState('ALL');
+  const isClientViewer = String(userRole || '').toUpperCase() === 'CLIENT';
 
   useEffect(() => {
     const unsubAvail = subscribeToAvailableVehicles((items) => {
@@ -130,6 +131,18 @@ export const AvailableVehiclesView: React.FC<AvailableVehiclesViewProps> = ({
       return true;
     });
   }, [allReadyVehicles, selectedTransporter, searchVehicleQuery]);
+
+  if (isClientViewer) {
+    return (
+      <div className="bg-slate-900/80 border border-white/10 rounded-2xl p-8 text-center text-gray-300 space-y-2">
+        <ShieldCheck size={36} className="mx-auto text-emerald-400" />
+        <h3 className="text-sm font-bold text-white">Bonded Carrier Privacy Shield Active</h3>
+        <p className="text-xs text-gray-400 max-w-md mx-auto">
+          Carrier allocation is managed centrally by Operations &amp; Documentation. Vehicle registration becomes visible on your case once the shipment arrives at the destination terminal.
+        </p>
+      </div>
+    );
+  }
 
   const content = (
     <div className="space-y-5">

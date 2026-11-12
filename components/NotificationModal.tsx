@@ -23,12 +23,17 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
   const [enlargedSlip, setEnlargedSlip] = useState(false);
   if (!isOpen || !notification) return null;
 
+  const isGateOutSummary =
+    notification.notificationSubType === 'DAILY_GATE_OUT_SUMMARY' ||
+    Boolean(notification.gateOutReport);
+
   const isMonthlyExpense = 
-    notification.notificationSubType === 'FINANCE_RECORDED' ||
     notification.description?.toLowerCase().includes('monthly salary') ||
+    notification.description?.toLowerCase().includes('monthly recurring payable') ||
     notification.description?.toLowerCase().includes('fixed expense') ||
     notification.title?.toLowerCase().includes('monthly salary') ||
-    notification.title?.toLowerCase().includes('monthly fixed');
+    notification.title?.toLowerCase().includes('monthly fixed') ||
+    notification.title?.toLowerCase().includes('monthly auto');
 
   const isPaymentApproval = 
     notification.notificationSubType === 'PAYMENT_APPROVAL' ||
@@ -114,30 +119,43 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
   };
 
   const getHeaderBadge = () => {
-    if (isMonthlyExpense) {
-      return { label: 'Monthly Fixed Expense (Auto-Recorded)', bg: 'bg-teal-500/20 text-teal-300 border-teal-500/30' };
+    if (isGateOutSummary) {
+      return { label: 'Daily 12:00 PM Loading Gate-Out Report', bg: 'bg-amber-500/20 text-amber-300 border-amber-500/30' };
     }
+    if (isMonthlyExpense) {
+      return { label: 'Monthly Auto-Payable (Finance)', bg: 'bg-teal-500/20 text-teal-300 border-teal-500/30' };
+    }
+    const titleLow = (notification.title || '').toLowerCase();
     switch (notification.notificationSubType as string) {
       case 'PAYMENT_APPROVAL':
-        return { label: 'Payment Receipt Verification Required', bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+        return { label: 'Payment Verification Required', bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
       case 'CLIENT_REGISTRATION_APPROVAL':
         return { label: 'Client Registration Approval', bg: 'bg-purple-500/20 text-purple-300 border-purple-500/30' };
       case 'WORKFLOW_TASK':
         return { label: 'Workflow Action Required', bg: 'bg-amber-500/20 text-amber-300 border-amber-500/30' };
+      case 'GATE_OUT_INVOICE':
+        return { label: 'Container Loaded & In Transit (Invoice Generated)', bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+      case 'DESTINATION_ARRIVAL':
+        return { label: 'Vehicle Arrived at Destination', bg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' };
+      case 'DOC_EXPIRY_ALERT':
+        return { label: 'Company Document Expiry Alert', bg: 'bg-rose-500/20 text-rose-300 border-rose-500/30' };
       case 'FINANCE_RECORDED':
-        return { label: 'Monthly Fixed Expense (Auto-Recorded)', bg: 'bg-teal-500/20 text-teal-300 border-teal-500/30' };
+        return {
+          label: titleLow.includes('paid') || titleLow.includes('expense') ? 'Expense Paid' : 'Payment Received',
+          bg: 'bg-teal-500/20 text-teal-300 border-teal-500/30'
+        };
       case 'DELETION_APPROVAL':
-        return { label: 'Deletion Request', bg: 'bg-red-500/20 text-red-300 border-red-500/30' };
+        return { label: 'Case / Record Deletion Request', bg: 'bg-red-500/20 text-red-300 border-red-500/30' };
       case 'CANCELLATION_APPROVAL':
-        return { label: 'Cancellation Request', bg: 'bg-amber-500/20 text-amber-300 border-amber-500/30' };
+        return { label: 'Cancellation Approval Request', bg: 'bg-amber-500/20 text-amber-300 border-amber-500/30' };
       case 'EDIT_APPROVAL':
-        return { label: 'Edit Authorization', bg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' };
+        return { label: 'Edit Authorization Request', bg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' };
       case 'CASE_APPROVAL':
-        return { label: 'Case Approval', bg: 'bg-blue-500/20 text-blue-300 border-blue-500/30' };
+        return { label: 'Client Case Approval Required', bg: 'bg-blue-500/20 text-blue-300 border-blue-500/30' };
       case 'BUYING':
         return { label: 'Finance Record', bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
       default:
-        return { label: notification.notificationSubType?.replace(/_/g, ' ') || 'SYSTEM ALERT', bg: 'bg-sky-500/20 text-sky-300 border-sky-500/30' };
+        return { label: notification.notificationSubType?.replace(/_/g, ' ') || 'NOTIFICATION', bg: 'bg-sky-500/20 text-sky-300 border-sky-500/30' };
     }
   };
 
@@ -154,7 +172,7 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
       onClick={onClose}
     >
       <div 
-        className={`border rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all flex flex-col max-h-[92vh] select-none ${
+        className={`border rounded-3xl shadow-2xl w-full ${isGateOutSummary ? 'max-w-5xl' : 'max-w-lg'} overflow-hidden transform transition-all flex flex-col max-h-[92vh] select-none ${
           isPearl 
             ? 'bg-white border-slate-200 text-slate-800' 
             : 'bg-slate-900 border-slate-700/80 text-white'
@@ -233,6 +251,92 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
               {notification.description || 'No additional details.'}
             </p>
           </div>
+
+          {/* Daily 12:00 PM Loading Gate-Out Vehicle Table for Admin */}
+          {notification.gateOutReport && (
+            <div className={`rounded-2xl border overflow-hidden ${
+              isPearl ? 'bg-white border-slate-200' : 'bg-slate-950/80 border-white/10'
+            }`}>
+              <div className={`p-3.5 border-b flex flex-wrap items-center justify-between gap-3 ${
+                isPearl ? 'bg-amber-50/70 border-slate-200' : 'bg-amber-500/10 border-white/10'
+              }`}>
+                <div>
+                  <span className={`text-xs font-extrabold uppercase tracking-wider block ${
+                    isPearl ? 'text-amber-900' : 'text-amber-300'
+                  }`}>
+                    Loading Gate-Out Vehicles ({notification.gateOutReport.windowLabel})
+                  </span>
+                  <span className={`text-[11px] ${isPearl ? 'text-slate-600' : 'text-gray-400'}`}>
+                    All Ports Combined • Yesterday 12:00 PM to Today 12:00 PM
+                  </span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className={`px-3 py-1 rounded-xl text-xs font-bold font-mono border ${
+                    isPearl ? 'bg-white text-slate-900 border-slate-200' : 'bg-slate-900 text-white border-white/10'
+                  }`}>
+                    Vehicles: {notification.gateOutReport.totalVehicles}
+                  </span>
+                  <span className={`px-3 py-1 rounded-xl text-xs font-bold font-mono border ${
+                    isPearl ? 'bg-rose-50 text-rose-800 border-rose-200' : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                  }`}>
+                    Total Payable: PKR {Number(notification.gateOutReport.totalPayable || 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {notification.gateOutReport.rows.length === 0 ? (
+                <div className={`p-8 text-center text-xs ${isPearl ? 'text-slate-500' : 'text-gray-400'}`}>
+                  No vehicles completed Loading Gate-Out during this 24-hour window (12:00 PM to 12:00 PM).
+                </div>
+              ) : (
+                <div className="overflow-x-auto max-h-[46vh] custom-scrollbar">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className={`sticky top-0 z-10 font-mono uppercase text-[11px] border-b ${
+                      isPearl ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-slate-900 text-gray-300 border-white/10'
+                    }`}>
+                      <tr>
+                        <th className="p-3">#</th>
+                        <th className="p-3">Vehicle Number</th>
+                        <th className="p-3">Container Number</th>
+                        <th className="p-3">Client Name</th>
+                        <th className="p-3">Importer Name</th>
+                        <th className="p-3">Port of Loading</th>
+                        <th className="p-3">Port of Unloading / Destination</th>
+                        <th className="p-3 text-right">Amount Payable So Far</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y ${isPearl ? 'divide-slate-200' : 'divide-white/5'}`}>
+                      {notification.gateOutReport.rows.map((row, rIdx) => (
+                        <tr
+                          key={`${row.caseNo}_${row.containerNo}_${rIdx}`}
+                          className={isPearl ? 'hover:bg-slate-50' : 'hover:bg-white/5'}
+                        >
+                          <td className="p-3 font-mono text-gray-400">{rIdx + 1}</td>
+                          <td className={`p-3 font-mono font-bold ${isPearl ? 'text-amber-700' : 'text-amber-300'}`}>
+                            {row.vehicleNo || 'N/A'}
+                          </td>
+                          <td className={`p-3 font-mono font-semibold ${isPearl ? 'text-slate-900' : 'text-white'}`}>
+                            {row.containerNo || 'N/A'}
+                          </td>
+                          <td className="p-3 font-semibold">{row.clientName || 'N/A'}</td>
+                          <td className="p-3">{row.importerName || 'N/A'}</td>
+                          <td className="p-3">{row.pol || 'N/A'}</td>
+                          <td className="p-3">{row.pod || 'N/A'}</td>
+                          <td className={`p-3 text-right font-mono font-bold ${
+                            row.amountPayable > 0
+                              ? (isPearl ? 'text-rose-700' : 'text-rose-400')
+                              : (isPearl ? 'text-emerald-700' : 'text-emerald-400')
+                          }`}>
+                            PKR {Number(row.amountPayable || 0).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Concise Approval Context if present */}
           {approval && (
@@ -492,7 +596,7 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
               </button>
             )}
 
-            {isPending && (
+            {isPending && !isApprovalAction && notification.type !== 'ACTION' && (
               <button 
                 type="button"
                 onClick={() => onAction('MARK_READ')}

@@ -75,7 +75,8 @@ import {
   isDocumentationProcessingCase,
   isLoadingPortProcessingCase,
   isInTransitCase,
-  getUnifiedCaseStageLabel
+  getUnifiedCaseStageLabel,
+  hasCaseArrivedAtDestination
 } from '../services/workflowConfig';
 import {
   getCategoryArrangements,
@@ -606,11 +607,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   const hasLoadingRole = hasAdminRole || effectiveRoles.includes(UserRole.LOADING_PORT_STAFF);
   const hasUnloadingRole = hasAdminRole || effectiveRoles.includes(UserRole.UNLOADING_PORT_STAFF) || effectiveRoles.includes(UserRole.DESTINATION_PORT_STAFF);
 
-  // Approval request state for finished cases
+  // Approval request state for non-admin Case Edit / Cancel / Delete ("Send Request to Admin")
   const [showApprovalPromptModal, setShowApprovalPromptModal] = useState(false);
   const [approvalTargetAction, setApprovalTargetAction] = useState<'DELETE' | 'CANCEL' | 'EDIT'>('EDIT');
   const [approvalReason, setApprovalReason] = useState('');
   const [isSubmittingApproval, setIsSubmittingApproval] = useState(false);
+  const [approvalSubmittedToast, setApprovalSubmittedToast] = useState<string | null>(null);
 
   const effectiveClientName = propClientName || safeAppStorage.getItem('dpl_client_name') || 'Global Traders Ltd';
   const isClientUser = effectiveRole === UserRole.CLIENT;
@@ -2403,18 +2405,17 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       window.dispatchEvent(new CustomEvent('dpl_cases_updated', { detail: updatedCases }));
       saveCaseToFirestore(newCase).catch((e) => console.warn("Firestore saveCase error:", e));
 
-      // Dispatch notification ONLY for Client registrations (target: Admin, Operations Manager, Case Manager)
-      // When registered by Operation Manager, Case Manager, Admin, or Finance Manager: NO notification is sent! ("Koi notification ki zarurat nhy")
+      // Dispatch notification ONLY for Client Portal registrations -> Operations Manager & Documentation Manager ONLY (NOT Admin!)
       if (requiresApproval) {
         sendAppNotification({
-          title: `Client Case Approval Required: #${newCase.caseNo}`,
-          description: `Client "${newCase.clientName}" registered new case #${newCase.caseNo}. Needs Operation Manager, Case Manager, or Admin approval to activate.`,
-          targetRole: 'ADMIN, OPERATIONS_MANAGER, CASE_MANAGER',
+          title: `Client Case Request: #${newCase.caseNo}`,
+          description: `Client "${newCase.clientName}" registered new case #${newCase.caseNo} from Client Portal. Operations / Documentation Manager approval required.`,
+          targetRole: 'OPERATIONS_MANAGER,DOCUMENTATION_MANAGER',
           targetView: 'cases',
           targetFilter: { caseNo: newCase.caseNo },
           type: 'ACTION',
           notificationSubType: 'CASE_APPROVAL',
-          actionLabel: 'Review & Approve',
+          actionLabel: 'Review & Approve Case',
           performedBy: effectiveRole,
           performedByRole: String(effectiveRole),
           category: 'CASE',
@@ -2536,21 +2537,25 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   const handleSaveEditedCase = () => {
       if (!selectedCase || !editedCase) return;
 
+      const isAdminEditUnlocked = Boolean(selectedCase.adminEditAuthorized || editedCase.adminEditAuthorized);
       const isOverOneHour = (() => {
         const createdTime = new Date(selectedCase.createdAt || selectedCase.registrationDate || 0).getTime();
         if (isNaN(createdTime) || createdTime === 0) return false;
         return (Date.now() - createdTime) > 60 * 60 * 1000;
       })();
 
-      let finalToSave = editedCase;
+      let finalToSave: Case = {
+        ...editedCase,
+        adminEditAuthorized: false
+      };
 
-      // 1-Hour Compliance Lock: Non-admin can only fill in empty fields, cannot overwrite or delete previously entered data
-      if (isOverOneHour && !hasAdminRole) {
-        const merged: any = { ...editedCase };
+      // 1-Hour Compliance Lock unless Admin or Admin-Authorized Edit
+      if (isOverOneHour && !hasAdminRole && !isAdminEditUnlocked) {
+        const merged: any = { ...finalToSave };
         const coreKeys: (keyof Case)[] = ['clientName', 'category', 'pol', 'pod', 'blNumber', 'containerNumber', 'igmNo'];
         for (const k of coreKeys) {
           if (selectedCase[k] && selectedCase[k] !== editedCase[k]) {
-            merged[k] = selectedCase[k]; // Revert populated field
+            merged[k] = selectedCase[k];
           }
         }
         if (selectedCase.documents && selectedCase.documents.length > 0) {
@@ -2575,45 +2580,33 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     const target = isEditingCase ? editedCase : selectedCase;
     if (!target) return;
 
-    const isOverOneHour = (() => {
-      const createdTime = new Date(target.createdAt || target.registrationDate || 0).getTime();
-      if (isNaN(createdTime) || createdTime === 0) return false;
-      return (Date.now() - createdTime) > 60 * 60 * 1000;
-    })();
-
-    // 1-Hour Compliance Lock: Only Admin can delete or cancel after 1 hour
-    if (isOverOneHour && !hasAdminRole) {
-      if (action === 'DELETE' || action === 'CANCEL') {
-        alert("Compliance Policy: This consignment was registered more than 1 hour ago and is locked. Only Corporate Administrators have authorization to delete or cancel locked records.");
-        return;
-      }
-    }
-
-    const isCaseFinished = target.status === CaseStatus.COMPLETED || target.status === ('Delivered' as any) || target.status === ('Completed' as any);
-
-    if (!isCaseFinished || hasAdminRole) {
+    // Admin can directly Edit, Cancel, or Delete
+    if (hasAdminRole) {
       if (action === 'EDIT') {
         handleEditCaseToggle();
       } else if (action === 'DELETE') {
-        if (window.confirm("Are you sure you want to delete this case?")) {
-          if (target?.id) {
-            deleteCaseFromFirestore(target.id).catch(() => {});
-          }
-          setCases(cases.filter(c => c.id !== target?.id));
-          setView('list');
+        if (target?.id) {
+          deleteCaseFromFirestore(target.id).catch(() => {});
         }
+        setCases(cases.filter(c => c.id !== target?.id));
+        setView('list');
       } else if (action === 'CANCEL') {
-        if (window.confirm("Are you sure you want to cancel this case?")) {
-          const cancelledCase = { ...target, status: 'Cancelled' as any };
-          setCases(cases.map(c => c.id === target.id ? cancelledCase : c));
-          setSelectedCase(cancelledCase);
-          updateCaseInFirestore(cancelledCase).catch(() => {});
-        }
+        const cancelledCase = { ...target, status: 'CANCELLED' as any };
+        setCases(cases.map(c => c.id === target.id ? cancelledCase : c));
+        setSelectedCase(cancelledCase);
+        updateCaseInFirestore(cancelledCase).catch(() => {});
       }
       return;
     }
 
-    // Finished case & non-admin -> requires Admin approval notification!
+    // If Admin already approved this Manager's Edit request, allow opening Edit mode once!
+    if (action === 'EDIT' && target.adminEditAuthorized) {
+      handleEditCaseToggle();
+      return;
+    }
+
+    // Documentation Manager, Finance Manager, or Operations Manager attempting ANY Edit, Cancel, or Delete:
+    // Immediately open "Send Request to Admin" popup window!
     setApprovalTargetAction(action);
     setApprovalReason('');
     setShowApprovalPromptModal(true);
@@ -2622,13 +2615,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   const handleSubmitFinishedCaseApproval = async () => {
     const target = isEditingCase ? editedCase : selectedCase;
     if (!target) return;
-    if (!approvalReason.trim()) {
-      alert("Please enter a reason or justification for this action.");
-      return;
-    }
+    if (!approvalReason.trim()) return;
     setIsSubmittingApproval(true);
     try {
-      const requesterName = safeAppStorage.getItem('dpl_user_name') || 'Staff User';
+      const requesterName =
+        safeAppStorage.getItem('dpl_current_user_name') ||
+        safeAppStorage.getItem('dpl_user_name') ||
+        'Manager';
       const requesterRole = effectiveRoles.map(r => r.replace(/_/g, ' ')).join(', ');
       const res = await submitCaseActionApproval({
         actionType: approvalTargetAction,
@@ -2641,10 +2634,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       setCases(prev => prev.map(c => c.id === res.updatedCase.id ? res.updatedCase : c));
       setSelectedCase(res.updatedCase);
       setShowApprovalPromptModal(false);
-      alert(`Your request to ${approvalTargetAction} this finished case has been submitted to Super Admin for approval.`);
+      setApprovalSubmittedToast(`Request sent to Admin for ${approvalTargetAction} on Case ${target.caseNo}. Push notification dispatched to Admin.`);
+      setTimeout(() => setApprovalSubmittedToast(null), 5000);
     } catch (err) {
       console.error("Failed to submit approval request:", err);
-      alert("Could not submit approval request. Please try again.");
     } finally {
       setIsSubmittingApproval(false);
     }
@@ -3202,22 +3195,29 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                         <th className="p-3">Size / Type</th>
                         <th className="p-3">Seal No</th>
                         <th className="p-3">Vehicle No</th>
-                        <th className="p-3">Driver Name & Phone</th>
+                        {!isClientUser && <th className="p-3">Driver Name & Phone</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5 bg-slate-900/50">
-                      {containers.map((cn: Container, cIdx: number) => (
-                        <tr key={cIdx} className="hover:bg-white/5">
-                          <td className="p-3 text-gray-500 font-mono">{cIdx + 1}</td>
-                          <td className="p-3 font-mono font-bold text-amber-300">{cn.number || '-'}</td>
-                          <td className="p-3 text-gray-300 font-mono">{cn.size || '40ft'}</td>
-                          <td className="p-3 font-mono text-cyan-300">{cn.sealNo || '-'}</td>
-                          <td className="p-3 font-mono font-semibold text-white">{cn.vehicleNo || '-'}</td>
-                          <td className="p-3 text-gray-300">
-                            {cn.driverName ? `${cn.driverName} (${cn.driverContact || 'No Phone'})` : '-'}
-                          </td>
-                        </tr>
-                      ))}
+                      {containers.map((cn: Container, cIdx: number) => {
+                        const canClientSeeVehicle = !isClientUser || hasCaseArrivedAtDestination(c);
+                        return (
+                          <tr key={cIdx} className="hover:bg-white/5">
+                            <td className="p-3 text-gray-500 font-mono">{cIdx + 1}</td>
+                            <td className="p-3 font-mono font-bold text-amber-300">{cn.number || '-'}</td>
+                            <td className="p-3 text-gray-300 font-mono">{cn.size || '40ft'}</td>
+                            <td className="p-3 font-mono text-cyan-300">{cn.sealNo || '-'}</td>
+                            <td className="p-3 font-mono font-semibold text-white">
+                              {canClientSeeVehicle ? (cn.vehicleNo || '-') : 'In Transit — Visible at Destination'}
+                            </td>
+                            {!isClientUser && (
+                              <td className="p-3 text-gray-300">
+                                {cn.driverName ? `${cn.driverName} (${cn.driverContact || 'No Phone'})` : '-'}
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -4185,18 +4185,18 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                         </button>
                       )}
 
-                      {isClientPortalApprovalPending(targetCase) && isOfficeStaffRole(effectiveRole) && (
+                      {isClientPortalApprovalPending(targetCase) && (hasOpsRole || hasAdminRole) && (
                           <button onClick={handleApproveCase} className="bg-green-600 hover:bg-green-500 text-white px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 text-xs sm:text-sm shadow-lg shadow-green-600/20 animate-pulse font-medium">
                               <CheckCircle size={15} /> Approve & Process (Client Case)
                           </button>
                       )}
                       
-                      {(hasOpsRole || hasAdminRole) && (
+                      {(hasOpsRole || hasFinanceRole || hasAdminRole) && (
                         <>
                           {targetCase?.pendingApproval ? (
                             <div className="bg-amber-500/20 border border-amber-500/40 text-amber-300 px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs font-semibold">
                               <Clock size={14} className="animate-spin text-amber-400" />
-                              <span>Pending Admin Approval ({targetCase.pendingApproval.action})</span>
+                              <span>Pending Admin Approval ({targetCase.pendingApproval.type || (targetCase.pendingApproval as any).action})</span>
                             </div>
                           ) : (
                             <>
@@ -4204,7 +4204,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                                 onClick={() => handleInitiateFinishedCaseAction('EDIT')} 
                                 className="bg-brand-600/20 hover:bg-brand-600/30 text-brand-400 border border-brand-500/30 px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-xs sm:text-sm font-medium"
                               >
-                                <Edit size={15} /> Edit Case
+                                <Edit size={15} /> {targetCase?.adminEditAuthorized ? 'Edit Case (Admin Approved)' : 'Edit Case'}
                               </button>
                               <button 
                                 onClick={() => handleInitiateFinishedCaseAction('CANCEL')} 
@@ -4235,15 +4235,28 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </div>
          </div>
 
+         {/* In-App Confirmation Toast when Request is Sent to Admin */}
+         {approvalSubmittedToast && (
+           <div className="mb-4 p-3.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-between gap-3 text-emerald-200 text-xs sm:text-sm shadow-lg animate-fade-in">
+             <div className="flex items-center gap-2.5">
+               <ShieldCheck size={18} className="text-emerald-400 shrink-0" />
+               <span>{approvalSubmittedToast}</span>
+             </div>
+             <button onClick={() => setApprovalSubmittedToast(null)} className="text-emerald-300 hover:text-white">
+               <X size={15} />
+             </button>
+           </div>
+         )}
+
          {/* Pending Approval Banner on Detail View */}
          {targetCase?.pendingApproval && (
            <div className="mb-4 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start sm:items-center justify-between gap-3 text-amber-200 text-xs sm:text-sm shadow-xl">
              <div className="flex items-center gap-2.5">
                <AlertTriangle size={18} className="text-amber-400 shrink-0" />
                <div>
-                 <span className="font-bold text-amber-300">Approval Pending from Super Admin: </span>
+                 <span className="font-bold text-amber-300">Request Sent to Admin: </span>
                  <span>
-                   A request to <strong>{targetCase.pendingApproval.action}</strong> this completed case was submitted by <strong>{targetCase.pendingApproval.requestedBy}</strong>. Reason: &quot;{targetCase.pendingApproval.reason}&quot;.
+                   A request to <strong>{targetCase.pendingApproval.type || (targetCase.pendingApproval as any).action}</strong> this case was submitted by <strong>{targetCase.pendingApproval.requestedBy}</strong>. Reason: &quot;{targetCase.pendingApproval.reason}&quot;.
                  </span>
                </div>
              </div>
@@ -10019,34 +10032,36 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         title={printOptions.onlyInvoice ? "Invoice" : "Case Details"}
       />
 
-      {/* Admin Approval Request Modal for Finished Cases */}
+      {/* Send Request to Admin Popup Modal for Case Edit / Cancel / Delete */}
       {showApprovalPromptModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-start justify-center pt-8 sm:pt-14 p-4 overflow-y-auto animate-in fade-in duration-200">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100050] flex items-start justify-center pt-8 sm:pt-14 p-4 overflow-y-auto animate-in fade-in duration-200">
           <div className="glass-card p-6 rounded-2xl w-full max-w-lg border border-amber-500/30 shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5 text-amber-400 font-bold text-base">
                 <ShieldCheck size={20} className="text-amber-400" />
-                <span>Admin Approval Required</span>
+                <span>Send Request to Admin</span>
               </div>
-              <button onClick={() => setShowApprovalPromptModal(false)} className="text-gray-400 hover:text-white p-1">
+              <button onClick={() => setShowApprovalPromptModal(false)} className="text-gray-400 hover:text-white p-1 cursor-pointer">
                 <X size={18} />
               </button>
             </div>
 
             <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-200 space-y-1">
-              <p className="font-semibold text-white">This case has finished its operational lifecycle.</p>
+              <p className="font-semibold text-white">
+                Admin Authorization Required for Case {approvalTargetAction === 'EDIT' ? 'Editing' : approvalTargetAction === 'CANCEL' ? 'Cancellation' : 'Deletion'}
+              </p>
               <p className="text-gray-300 leading-relaxed">
-                Under company operating rules, any <span className="text-amber-300 font-bold uppercase">{approvalTargetAction}</span> action on a completed case requires Super Admin review and authorization.
+                Send a request to Admin to <span className="text-amber-300 font-bold uppercase">{approvalTargetAction}</span> Case <span className="font-mono font-bold text-white">{(isEditingCase ? editedCase : selectedCase)?.caseNo}</span>. Admin will receive an instant push notification to Accept or Reject.
               </p>
             </div>
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-gray-300 block">
-                Reason / Justification for {approvalTargetAction} *
+                Reason / Details for {approvalTargetAction} Request *
               </label>
               <textarea
                 rows={3}
-                placeholder={`Explain why this completed case needs to be ${approvalTargetAction.toLowerCase()}ed...`}
+                placeholder={`Enter reason or details for ${approvalTargetAction.toLowerCase()}ing this case...`}
                 value={approvalReason}
                 onChange={(e) => setApprovalReason(e.target.value)}
                 className="w-full bg-black/40 border border-white/15 rounded-xl p-3 text-white text-xs sm:text-sm outline-none focus:border-amber-400 placeholder:text-gray-500"
@@ -10057,7 +10072,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
               <button
                 type="button"
                 onClick={() => setShowApprovalPromptModal(false)}
-                className="px-4 py-2 rounded-xl text-xs sm:text-sm text-gray-300 hover:text-white hover:bg-white/5 transition"
+                className="px-4 py-2 rounded-xl text-xs sm:text-sm text-gray-300 hover:text-white hover:bg-white/5 transition cursor-pointer"
               >
                 Cancel
               </button>
@@ -10065,10 +10080,10 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                 type="button"
                 disabled={!approvalReason.trim() || isSubmittingApproval}
                 onClick={handleSubmitFinishedCaseApproval}
-                className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shadow-lg shadow-amber-600/30 flex items-center gap-1.5"
+                className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shadow-lg shadow-amber-600/30 flex items-center gap-1.5 cursor-pointer"
               >
                 {isSubmittingApproval ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
-                <span>Submit for Approval</span>
+                <span>Send Request to Admin</span>
               </button>
             </div>
           </div>

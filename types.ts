@@ -986,6 +986,8 @@ export interface Case {
     proposedChanges?: any;
     stage?: 'MANAGER_REVIEW' | 'ADMIN_FINAL';
   };
+  adminEditAuthorized?: boolean;
+  invoiceGeneratedAtGateOut?: boolean;
 }
 
 export interface LogEntry {
@@ -1437,6 +1439,18 @@ export const UNIVERSAL_CHARGE_TYPES = [
   { id: 'tir_charges', name: 'TIR Charges', defaultAmount: 0 }
 ];
 
+export interface DailyGateOutVehicleRow {
+  caseNo: string;
+  vehicleNo: string;
+  containerNo: string;
+  clientName: string;
+  importerName: string;
+  pol: string;
+  pod: string;
+  amountPayable: number;
+  gateOutTime?: string;
+}
+
 export interface AppNotification {
   id: number;
   title: string;
@@ -1460,6 +1474,9 @@ export interface AppNotification {
     | 'CLIENT_MANAGED_DEMAND'
     | 'FINANCE_RECORDED'
     | 'INVOICE_CHARGE_NOTIFICATION'
+    | 'GATE_OUT_INVOICE'
+    | 'DESTINATION_ARRIVAL'
+    | 'DAILY_GATE_OUT_SUMMARY'
     | 'URGENT_PAYABLE_APPROVAL'
     | 'HEARING_REMINDER'
     | 'DOC_EXPIRY_ALERT'
@@ -1487,6 +1504,14 @@ export interface AppNotification {
   targetClientName?: string;
   category?: 'CASE' | 'FINANCE' | 'APPROVAL' | 'TRANSPORTER' | 'GENERAL' | 'CLIENT_REG' | 'SYSTEM' | string;
   read?: boolean;
+  gateOutReport?: {
+    windowLabel: string;
+    windowStartIso: string;
+    windowEndIso: string;
+    totalVehicles: number;
+    totalPayable: number;
+    rows: DailyGateOutVehicleRow[];
+  };
   approvalData?: {
     entityType: 'case' | 'vehicle' | 'finance' | 'client' | 'transporter' | 'document' | 'staff';
     entityId: number | string;

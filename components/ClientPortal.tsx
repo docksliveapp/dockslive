@@ -19,7 +19,7 @@ import {
   LoadingBillData
 } from '../services/pdfExportService';
 import { Case, CaseStatus, Container, FinanceEntry, ExtractedData, MockDocument, UserRole, Client, CaseCharge, AvailableVehicle } from '../types';
-import { getUnifiedCaseStageLabel } from '../services/workflowConfig';
+import { getUnifiedCaseStageLabel, hasCaseCompletedLoadingGateOut, hasCaseArrivedAtDestination } from '../services/workflowConfig';
 import { compressAndPrepareFile, convertImageToPdf } from '../services/fileUtils';
 import TopModeSwitcher, { ModeOption } from './TopModeSwitcher';
 import GoldenAmountWidget from './GoldenAmountWidget';
@@ -60,6 +60,42 @@ export const DEFAULT_ROUTE_RATES: Record<string, number> = {
 export const getRouteRate = (pol: string, pod: string): number => {
   const key = `${pol} -> ${pod}`;
   return DEFAULT_ROUTE_RATES[key] || DEFAULT_ROUTE_RATES["Default Rate"];
+};
+
+const sanitizeCaseForClientPrivacy = (c: Case): Case => {
+  const arrived = hasCaseArrivedAtDestination(c);
+  const sanitizedContainers = Array.isArray(c.containers)
+    ? c.containers.map((cntr) => ({
+        ...cntr,
+        driverName: undefined,
+        driverContact: undefined,
+        transporterName: undefined,
+        vehicleNo: arrived ? cntr.vehicleNo : undefined
+      }))
+    : c.containers;
+
+  const sanitizedExtracted = c.extractedData
+    ? {
+        ...c.extractedData,
+        driverName: undefined,
+        driverCnic: undefined,
+        driverContact: undefined,
+        transporterName: undefined,
+        vehicleNumber: arrived ? c.extractedData.vehicleNumber : undefined
+      }
+    : c.extractedData;
+
+  return {
+    ...c,
+    containers: sanitizedContainers,
+    extractedData: sanitizedExtracted,
+    ...({
+      driverName: undefined,
+      driverContact: undefined,
+      transporterName: undefined,
+      vehicleNo: arrived ? (c as any).vehicleNo : undefined
+    } as any)
+  };
 };
 
 export interface ClientPaymentEntry {
@@ -344,37 +380,39 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       }
     });
 
-    // 2. Company Freight Commercial Invoice
-    list.push({
-      id: 'doc_company_invoice',
-      name: `Company Freight Invoice - ${selectedCase.caseNo}`,
-      category: 'Company Invoice',
-      type: 'pdf',
-      date: selectedCase.createdAt,
-      downloadAction: async () => {
-        const rate = getRouteRate(selectedCase.pol, selectedCase.pod);
-        const cntr = selectedCase.containers?.[0] || { number: 'MSKU-DEFAULT', size: '40ft', weight: 28000 };
-        await downloadContainerInvoicePdf({
-          invoiceNo: `INV-26-${(cntr.number || '0000').slice(-4)}`,
-          clientName: selectedClientName,
-          containerNo: cntr.number,
-          size: (cntr as any).size || '40ft',
-          route: `${selectedCase.pol} -> ${selectedCase.pod}`,
-          rate: rate,
-          date: selectedCase.createdAt,
-          companyName: companyName
-        });
-      }
-    });
+    // 2. Company Freight Commercial Invoice (Generated ONLY at Loading Gate-Out)
+    if (hasCaseCompletedLoadingGateOut(selectedCase)) {
+      list.push({
+        id: 'doc_company_invoice',
+        name: `Company Freight Invoice - ${selectedCase.caseNo}`,
+        category: 'Company Invoice',
+        type: 'pdf',
+        date: (selectedCase as any).loadingPortGateOutTime?.slice(0, 10) || selectedCase.createdAt,
+        downloadAction: async () => {
+          const rate = getRouteRate(selectedCase.pol, selectedCase.pod);
+          const cntr = selectedCase.containers?.[0] || { number: 'MSKU-DEFAULT', size: '40ft', weight: 28000 };
+          await downloadContainerInvoicePdf({
+            invoiceNo: `INV-26-${(cntr.number || '0000').slice(-4)}`,
+            clientName: selectedClientName,
+            containerNo: cntr.number,
+            size: (cntr as any).size || '40ft',
+            route: `${selectedCase.pol} -> ${selectedCase.pod}`,
+            rate: rate,
+            date: (selectedCase as any).loadingPortGateOutTime?.slice(0, 10) || selectedCase.createdAt,
+            companyName: companyName
+          });
+        }
+      });
+    }
 
-    // 3. Official Case Detail Summary Profile PDF
+    // 3. Official Case Detail Summary Profile PDF (Privacy-Sanitized)
     list.push({
       id: 'doc_case_summary',
       name: `Official Case Summary - ${selectedCase.caseNo}`,
       category: 'Case Profile',
       type: 'pdf',
       date: selectedCase.createdAt,
-      downloadAction: () => downloadCasePdf(selectedCase, { onlyCaseDetails: true })
+      downloadAction: () => downloadCasePdf(sanitizeCaseForClientPrivacy(selectedCase), { onlyCaseDetails: true })
     });
 
     // 4. Customs Delivery Order (DO / NOC)
@@ -391,7 +429,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         date: selectedCase.createdAt,
         downloadAction: async () => {
           await downloadCustomsDeliveryOrderPdf({
-            targetCase: selectedCase,
+            targetCase: sanitizeCaseForClientPrivacy(selectedCase),
             branding: { companyName, customLogo: activeLogo }
           });
         }
@@ -400,6 +438,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
     // 5. Loading Bills & Receipts (attached inside selectedCase.loadingBills)
     if (Array.isArray((selectedCase as any).loadingBills)) {
+      const arrivedAtDest = hasCaseArrivedAtDestination(selectedCase);
       (selectedCase as any).loadingBills.forEach((b: any, bIdx: number) => {
         list.push({
           id: `loading_bill_${b.id || bIdx}`,
@@ -413,8 +452,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               caseNo: selectedCase.caseNo,
               clientName: selectedCase.clientName,
               containerNo: b.containerNo || selectedCase.containers?.[0]?.number,
-              vehicleNo: b.vehicleNo || selectedCase.containers?.[0]?.vehicleNo,
-              driverName: b.driverName || selectedCase.containers?.[0]?.driverName,
+              vehicleNo: arrivedAtDest ? (b.vehicleNo || selectedCase.containers?.[0]?.vehicleNo) : undefined,
+              driverName: undefined,
               portTerminal: b.portTerminal || selectedCase.pol,
               date: b.date,
               items: (b.charges || []).map((ch: any) => ({
@@ -643,6 +682,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     return clientCases.reduce((acc, c) => {
       const cTotal = (c.charges || []).reduce((sum, ch) => sum + (Number(ch.amount) || 0), 0);
       if (cTotal > 0) return acc + cTotal;
+      if (!hasCaseCompletedLoadingGateOut(c)) return acc;
       const rate = getRouteRate(c.pol, c.pod);
       return acc + (rate * (c.containers?.length || 1));
     }, 0);
@@ -739,28 +779,25 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     return paymentEligibleCases.find(c => c.caseNo === paymentForm.caseNo) || paymentEligibleCases[0];
   }, [paymentEligibleCases, paymentForm.caseNo]);
 
+  const [paymentFeedback, setPaymentFeedback] = useState<string | null>(null);
+
   // Submit Payment Handler
   const handleConfirmPaidPayment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
-      alert("Please enter a valid amount.");
+      setPaymentFeedback('Please enter a valid payment amount in PKR.');
       return;
     }
 
     const activeClient = selectedClientName;
     const caseItem = selectedCaseForPayment;
     const assignedContainer = caseItem?.containers?.[paymentForm.selectedContainerIndex] || caseItem?.containers?.[0];
+    const arrivedAtDest = caseItem ? hasCaseArrivedAtDestination(caseItem) : false;
 
-    // Determine target recipient based on category
-    let targetRecipient = 'DPL Billing Department';
-    let targetRole = 'ADMIN';
-    if (paymentForm.category === 'Loading Payment') {
-      targetRecipient = (caseItem as any)?.loadingStaffName || (caseItem?.loadingBills?.[0]?.staffName) || 'Port Operations Staff';
-      targetRole = 'LOADING_PORT_STAFF';
-    } else if (paymentForm.category === 'Vehicle Rent') {
-      targetRecipient = assignedContainer?.transporterName || (caseItem as any)?.transporterName || 'Bilal Goods Transport Co.';
-      targetRole = 'TRANSPORTER';
-    }
+    // Route ALL client payment screenshots & submissions strictly to Finance Manager for verification first.
+    // Only AFTER Finance Manager approves will Admin receive the informative "Payment Received" notification.
+    const targetRecipient = 'Finance Verification Desk';
+    const targetRole = 'FINANCE_MANAGER';
 
     const finalBank = paymentForm.bankName === 'Other Bank' ? (paymentForm.customBankName || 'Direct Bank Deposit') : paymentForm.bankName;
 
@@ -778,7 +815,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       status: 'PENDING',
       slipUrl: paymentForm.slipUrl || 'https://placehold.co/600x800/png?text=Payment+Receipt+Proof',
       caseNo: caseItem?.caseNo || '',
-      vehicleNo: assignedContainer?.vehicleNo || '',
+      vehicleNo: arrivedAtDest ? (assignedContainer?.vehicleNo || '') : '',
       targetRecipient: targetRecipient,
       targetRole: targetRole,
       remarks: paymentForm.remarks
@@ -788,12 +825,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
     logActivity(
       `Payment Submitted: PKR ${parseFloat(paymentForm.amount).toLocaleString()} for ${paymentForm.category}`,
-      `Client "${activeClient}" submitted payment request. Routed to ${targetRecipient} for approval.`,
+      `Client "${activeClient}" submitted payment proof. Routed to Finance Manager for verification.`,
       'CLIENT',
       activeClient,
       { caseNo: caseItem?.caseNo, amount: paymentForm.amount }
     );
 
+    const submittedAmountStr = parseFloat(paymentForm.amount).toLocaleString();
     setShowPaidPaymentModal(false);
     setPaymentForm({
       mode: 'BANK',
@@ -808,12 +846,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       selectedContainerIndex: 0
     });
 
-    alert(
-      `Payment Request of PKR ${parseFloat(paymentForm.amount).toLocaleString()} submitted successfully!\n` +
-      `Category: ${paymentForm.category}\n` +
-      `Recipient: ${targetRecipient}\n` +
-      `Status: Awaiting approval. Once approved by ${targetRecipient}, it will be credited to their ledger.`
+    setPaymentFeedback(
+      `Payment proof of PKR ${submittedAmountStr} (${paymentForm.category}) submitted to Finance Manager for verification. Once approved, your ledger will update automatically.`
     );
+    setTimeout(() => setPaymentFeedback(null), 7000);
   };
 
   // Camera slip capture
@@ -825,7 +861,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         videoRef.current.srcObject = stream;
       }
     } catch (err) {
-      alert("Unable to access camera. Please upload slip file directly.");
+      setPaymentFeedback('Unable to access camera. Please upload your payment screenshot file directly.');
       setIsCameraActive(false);
     }
   };
@@ -888,7 +924,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         date: p.date,
         type: 'PAYMENT',
         typeName: tName,
-        recipient: p.targetRecipient || (p.category === 'Loading Payment' ? 'Port Loading Staff' : p.category === 'Vehicle Rent' ? 'Transporter' : 'DPL Company'),
+        recipient: 'Finance Verification Desk',
         caseNo: p.caseNo,
         amount: p.amount,
         status: p.status,
@@ -896,17 +932,20 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       });
     });
 
-    // 2. Add Generated Invoices from Cases
+    // 2. Add Generated Invoices from Cases (ONLY once Loading Gate-Out is completed)
     clientCases.forEach(c => {
+      if (!hasCaseCompletedLoadingGateOut(c)) return;
+      const arrived = hasCaseArrivedAtDestination(c);
       const rate = getRouteRate(c.pol, c.pod);
       (c.containers || [{ number: 'MSKU-DEFAULT' } as any]).forEach((cntr, idx) => {
         const cntrNoStr = cntr.number || c.containerNumber || c.extractedData?.containerNo || 'N/A';
-        const vehNoStr = cntr.vehicleNo || c.extractedData?.vehicleNumber || (c as any).vehicleNo || 'N/A';
+        const vehNoStr = cntr.vehicleNo || c.extractedData?.vehicleNumber || (c as any).vehicleNo || '';
+        const gateOutDateStr = (c as any).loadingPortGateOutTime?.slice(0, 10) || c.createdAt || new Date().toISOString().split('T')[0];
         list.push({
           id: `inv_${c.id}_${idx}`,
-          date: c.createdAt || new Date().toISOString().split('T')[0],
+          date: gateOutDateStr,
           type: 'INVOICE',
-          typeName: `Cntr No: ${cntrNoStr} | Veh No: ${vehNoStr}`,
+          typeName: arrived && vehNoStr ? `Cntr No: ${cntrNoStr} | Veh No: ${vehNoStr}` : `Cntr No: ${cntrNoStr} | In Transit`,
           recipient: 'DPL Company Billing',
           caseNo: c.caseNo,
           containerNo: cntr.number,
@@ -919,7 +958,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             size: (cntr as any).size || '40ft',
             route: `${c.pol} -> ${c.pod}`,
             rate: rate,
-            date: c.createdAt,
+            date: gateOutDateStr,
             companyName: companyName
           })
         });
@@ -1112,25 +1151,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   Due
                 </span>
               )}
-            </button>
-
-            {/* Option 4: Available & Ready Vehicles (Transporters) */}
-            <button
-              onClick={() => {
-                setActiveTab('available_vehicles');
-                setMobileMenuOpen(false);
-              }}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-                activeTab === 'available_vehicles'
-                  ? 'bg-slate-800 text-white border border-white/20 shadow-md font-bold'
-                  : 'text-slate-300 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <Truck size={17} />
-              <span>Available / Ready Fleet</span>
-              <span className="ml-auto text-[11px] font-mono font-bold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full">
-                {availableVehiclesList.length}
-              </span>
             </button>
 
           </nav>
@@ -1817,12 +1837,17 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           </div>
         )}
 
-        {/* ======================================================================= */}
-        {/* PAGE 4: AVAILABLE & READY FLEET (TRANSPORTERS) */}
-        {/* ======================================================================= */}
-        {activeTab === 'available_vehicles' && (
-          <div className="animate-fade-in">
-            <AvailableVehiclesView userRole="CLIENT" />
+        {paymentFeedback && (
+          <div className="fixed bottom-5 right-5 z-50 max-w-md bg-emerald-950/95 border border-emerald-500/40 text-emerald-200 px-4 py-3 rounded-2xl shadow-2xl text-xs flex items-start gap-2.5 animate-fade-in">
+            <CheckCircle2 size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+            <span className="flex-1 leading-relaxed">{paymentFeedback}</span>
+            <button
+              type="button"
+              onClick={() => setPaymentFeedback(null)}
+              className="text-emerald-300 hover:text-white"
+            >
+              <X size={14} />
+            </button>
           </div>
         )}
 
@@ -2034,29 +2059,40 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               </div>
             </div>
 
-            {/* Containers List with Assigned Vehicles */}
+            {/* Containers List (Conflict-of-Interest Privacy Shield: No Driver/Transporter; Vehicle No only after Destination Arrival) */}
             <div className="space-y-2.5">
               <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
-                Assigned Containers & Fleet Carriers ({selectedCase.containers?.length || 1}):
+                Assigned Containers ({selectedCase.containers?.length || 1}):
               </h4>
               <div className="space-y-2">
-                {(selectedCase.containers || []).map((cntr, idx) => (
-                  <div key={cntr.id || idx} className="bg-slate-950 p-3.5 rounded-xl border border-white/10 flex flex-col sm:flex-row justify-between sm:items-center gap-2 text-xs">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-white text-sm">{cntr.number}</span>
-                        <span className="bg-brand-500/20 text-brand-300 text-[10px] px-2 py-0.5 rounded">{cntr.size}</span>
-                        <span className="bg-blue-500/20 text-blue-300 text-[10px] px-2 py-0.5 rounded">{cntr.status}</span>
+                {(selectedCase.containers || []).map((cntr, idx) => {
+                  const arrivedAtDestination = hasCaseArrivedAtDestination(selectedCase);
+                  return (
+                    <div key={cntr.id || idx} className="bg-slate-950 p-3.5 rounded-xl border border-white/10 flex flex-col sm:flex-row justify-between sm:items-center gap-2 text-xs">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-white text-sm">{cntr.number}</span>
+                          <span className="bg-brand-500/20 text-brand-300 text-[10px] px-2 py-0.5 rounded">{cntr.size}</span>
+                          <span className="bg-blue-500/20 text-blue-300 text-[10px] px-2 py-0.5 rounded">{cntr.status}</span>
+                        </div>
+                        <p className="text-gray-400 text-[11px] mt-1">
+                          {arrivedAtDestination && cntr.vehicleNo ? (
+                            <>
+                              🚛 Arrived Vehicle: <strong className="text-emerald-300 font-mono">{cntr.vehicleNo}</strong>
+                            </>
+                          ) : (
+                            <span className="text-amber-300/90">
+                              🛡️ Bonded Carrier Transit — Vehicle number becomes visible upon arrival at destination
+                            </span>
+                          )}
+                        </p>
                       </div>
-                      <p className="text-gray-400 text-[11px] mt-1">
-                        🚗 Vehicle: <strong className="text-white font-mono">{cntr.vehicleNo || 'TL-8842'}</strong> &bull; Driver: {cntr.driverName || 'Muhammad Ismail'} ({cntr.driverContact || '0300-8877665'})
-                      </p>
+                      <div className="text-right font-mono text-gray-300">
+                        {cntr.weight} Kg
+                      </div>
                     </div>
-                    <div className="text-right font-mono text-gray-300">
-                      {cntr.weight} Kg
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -2081,7 +2117,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   </span>
                   <button
                     type="button"
-                    onClick={() => downloadCasePdf(selectedCase, { withInvoice: true, withAttachments: true })}
+                    onClick={() => downloadCasePdf(sanitizeCaseForClientPrivacy(selectedCase), { withInvoice: hasCaseCompletedLoadingGateOut(selectedCase), withAttachments: true })}
                     className="bg-brand-600 hover:bg-brand-500 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95"
                     title="Download Complete Case Dossier & Attachments PDF"
                   >
@@ -2370,8 +2406,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                   {[
                     { id: 'Company Payment (DPL)', label: `Company (${compShort})`, desc: `${compShort} Invoice Settlement` },
-                    { id: 'Loading Payment', label: 'Loading Staff', desc: 'Port Loading Desk' },
-                    { id: 'Vehicle Rent', label: 'Vehicle Rent', desc: 'Transporter Freight' }
+                    { id: 'Loading Payment', label: 'Loading Charges', desc: 'Port Loading Settlement' },
+                    { id: 'Vehicle Rent', label: 'Freight Settlement', desc: 'Bonded Haulage Rent' }
                   ].map((cat, cIdx) => (
                     <button
                       key={`cat_btn_${cat.id}_${cIdx}`}
@@ -2390,10 +2426,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 </div>
               </div>
 
-              {/* Case Selection Dropdown & Search (FOR VEHICLE RENT & LOADING ROUTING) */}
+              {/* Case Selection Dropdown & Search */}
               <div>
                 <label className="text-xs font-semibold text-gray-300 mb-1 block">
-                  Select Associated Case (For Routing to Transporter or Loading Staff):
+                  Select Associated Case:
                 </label>
                 <input
                   type="text"
@@ -2418,19 +2454,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 {selectedCaseForPayment && (
                   <div className="mt-2 p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-gray-300 space-y-1">
                     <p>
-                      🏢 Recipient Routing: <strong className="text-white">
-                        {paymentForm.category === 'Loading Payment' 
-                          ? (selectedCaseForPayment.loadingBills?.[0]?.staffName || 'Port Operations Officer') 
-                          : paymentForm.category === 'Vehicle Rent' 
-                            ? (selectedCaseForPayment.containers?.[0]?.transporterName || 'Bilal Goods Transport Co.') 
-                            : 'DPL Company Accounts'}
-                      </strong>
+                      🏢 Verification Desk: <strong className="text-white">Finance Manager Verification Desk</strong>
                     </p>
-                    <p>
-                      🚗 Vehicle Assigned: <span className="font-mono text-amber-300">
-                        {selectedCaseForPayment.containers?.[0]?.vehicleNo || 'TL-8842'}
-                      </span>
-                    </p>
+                    {hasCaseArrivedAtDestination(selectedCaseForPayment) && selectedCaseForPayment.containers?.[0]?.vehicleNo && (
+                      <p>
+                        🚛 Arrived Vehicle: <span className="font-mono text-emerald-300">
+                          {selectedCaseForPayment.containers[0].vehicleNo}
+                        </span>
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -2566,36 +2598,45 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             </div>
 
             <div className="space-y-2">
-              {clientCases.flatMap(c => (c.containers || []).map((cntr, idx) => {
-                const rate = getRouteRate(c.pol, c.pod);
-                const invNum = `INV-26-${(cntr.number || '0000').slice(-4)}`;
-                return (
-                  <div key={`${c.id}-${idx}`} className="bg-slate-950 p-3 rounded-xl border border-white/10 flex justify-between items-center text-xs">
-                    <div>
-                      <span className="font-mono font-bold text-amber-400 text-sm">{invNum}</span>
-                      <p className="text-gray-400 mt-0.5">
-                        Case: {c.caseNo} &bull; Container: {cntr.number} &bull; Route: {c.pol} &rarr; {c.pod}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => downloadContainerInvoicePdf({
-                        invoiceNo: invNum,
-                        clientName: selectedClientName,
-                        containerNo: cntr.number,
-                        size: (cntr as any).size || '40ft',
-                        route: `${c.pol} -> ${c.pod}`,
-                        rate: rate,
-                        date: c.createdAt,
-                        companyName: companyName
-                      })}
-                      className="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 shadow"
-                    >
-                      <Download size={13} /> Download PDF
-                    </button>
-                  </div>
-                );
-              }))}
+              {clientCases.filter(c => hasCaseCompletedLoadingGateOut(c)).length === 0 ? (
+                <div className="bg-slate-950 p-6 rounded-xl border border-white/10 text-center text-xs text-gray-400">
+                  Invoices are generated automatically as soon as your container completes Loading Port Gate-Out.
+                </div>
+              ) : (
+                clientCases
+                  .filter(c => hasCaseCompletedLoadingGateOut(c))
+                  .flatMap(c => (c.containers || []).map((cntr, idx) => {
+                    const rate = getRouteRate(c.pol, c.pod);
+                    const invNum = `INV-26-${(cntr.number || '0000').slice(-4)}`;
+                    const gateOutDateStr = (c as any).loadingPortGateOutTime?.slice(0, 10) || c.createdAt;
+                    return (
+                      <div key={`${c.id}-${idx}`} className="bg-slate-950 p-3 rounded-xl border border-white/10 flex justify-between items-center text-xs">
+                        <div>
+                          <span className="font-mono font-bold text-amber-400 text-sm">{invNum}</span>
+                          <p className="text-gray-400 mt-0.5">
+                            Case: {c.caseNo} &bull; Container: {cntr.number} &bull; Route: {c.pol} &rarr; {c.pod}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => downloadContainerInvoicePdf({
+                            invoiceNo: invNum,
+                            clientName: selectedClientName,
+                            containerNo: cntr.number,
+                            size: (cntr as any).size || '40ft',
+                            route: `${c.pol} -> ${c.pod}`,
+                            rate: rate,
+                            date: gateOutDateStr,
+                            companyName: companyName
+                          })}
+                          className="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 shadow"
+                        >
+                          <Download size={13} /> Download PDF
+                        </button>
+                      </div>
+                    );
+                  }))
+              )}
             </div>
           </div>
         </div>
