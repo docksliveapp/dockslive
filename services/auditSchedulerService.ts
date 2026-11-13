@@ -326,7 +326,7 @@ export async function runDailyCompanyDocExpiryCheck(): Promise<void> {
     const todayMidnight = new Date(todayStr).getTime();
     snap.forEach((ds) => {
       const docItem = ds.data() as CompanyDocument;
-      if (!docItem.isExplorerDocument) return;
+      if (!matchesActiveCompany(docItem.companyId, activeCompany)) return;
       if (docItem.statusTag === 'Resolved' || docItem.statusTag === 'Archived') return;
 
       const alarmLeadDays =
@@ -334,10 +334,16 @@ export async function runDailyCompanyDocExpiryCheck(): Promise<void> {
           ? docItem.alarmDaysBefore
           : 15;
 
-      const folderLabel = docItem.folderPath || 'Company Documents';
-      const issuedToLabel = docItem.issuedTo || docItem.recipientEntity || docItem.to || 'N/A';
-      const sourceLabel = docItem.sourceOrigin || docItem.senderIssuer || docItem.from || 'N/A';
-      const authorLabel = docItem.createdByAuthor || 'N/A';
+      const folderLabel =
+        docItem.folderPath ||
+        [docItem.rootCategory, docItem.legalCaseTitle, docItem.taxAuthority, docItem.subFolder || docItem.assetGroup]
+          .filter(Boolean)
+          .join(' > ') ||
+        docItem.category ||
+        'Corporate Repository';
+      const issuedToLabel = docItem.recipientEntity || docItem.issuedTo || docItem.to || 'MAK Group';
+      const sourceLabel = docItem.senderIssuer || docItem.sourceOrigin || docItem.from || 'Official Issuer';
+      const authorLabel = docItem.createdByAuthor || docItem.uploadedBy || sourceLabel;
 
       // 1. Validity / Expiry Countdown Alarm
       const effectiveExp = docItem.expiryDate || docItem.validityEndDate;

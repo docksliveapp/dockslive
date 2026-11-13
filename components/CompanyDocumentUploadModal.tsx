@@ -11,9 +11,28 @@ import {
   Trash2,
   Eye,
   FolderOpen,
-  Check
+  Check,
+  Bell
 } from 'lucide-react';
-import { CompanyDocument } from '../types';
+import {
+  CompanyDocument,
+  CorporateDocumentStatus,
+  CorporateLegalCase,
+  CorporateRecipientEntity,
+  CorporateRootCategory,
+  QuotationStatus
+} from '../types';
+import {
+  ASSETS_SUBFOLDERS,
+  DEFAULT_FISCAL_YEARS,
+  DOCUMENT_STATUS_TAGS,
+  MASTER_COMPANY_DOC_FOLDERS,
+  QUOTATION_SERVICE_TYPES,
+  QUOTATION_STATUSES,
+  RECIPIENT_ENTITIES,
+  TAX_AUTHORITIES,
+  getProvisionedLegalSubFolders
+} from '../services/corporateFilingArchitecture';
 import { resolveStoredDocumentDataUrl } from '../services/documentStorage';
 import { safeAppStorage } from '../services/storage';
 
@@ -21,8 +40,14 @@ export interface CompanyDocumentUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (doc: CompanyDocument) => Promise<void>;
-  currentFolderId: string | null;
-  currentFolderPathLabel: string;
+  defaultRootCategory: CorporateRootCategory;
+  legalCases: CorporateLegalCase[];
+  defaultLegalCaseId?: string;
+  defaultSubFolder?: string;
+  defaultTaxAuthority?: 'FBR' | 'SRB' | 'Labour Department' | string;
+  defaultTaxYear?: string;
+  defaultAssetGroup?: 'Security Deposits Tracking' | 'Company Properties & Investments' | string;
+  customMasterFolders?: string[];
   editingDocument?: CompanyDocument | null;
   preDroppedFiles?: File[];
 }
@@ -46,13 +71,20 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
   isOpen,
   onClose,
   onSave,
-  currentFolderId,
-  currentFolderPathLabel,
+  defaultRootCategory,
+  legalCases,
+  defaultLegalCaseId,
+  defaultSubFolder,
+  defaultTaxAuthority,
+  defaultTaxYear,
+  defaultAssetGroup,
+  customMasterFolders = [],
   editingDocument,
   preDroppedFiles
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const todayIso = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const currentYearStr = useMemo(() => String(new Date().getFullYear()), []);
 
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadFileEntry[]>([]);
@@ -61,16 +93,59 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // The Exact 7 Document Metadata Fields
+  // Target Category & Folder Coordinates
+  const [rootCategory, setRootCategory] = useState<CorporateRootCategory>('Company Documents');
+  const [legalCaseId, setLegalCaseId] = useState<string>('');
+  const [subFolder, setSubFolder] = useState<string>('');
+  const [taxAuthority, setTaxAuthority] = useState<string>('FBR');
+  const [taxYear, setTaxYear] = useState<string>(currentYearStr);
+  const [assetGroup, setAssetGroup] = useState<string>('Security Deposits Tracking');
+  const [assetSubType, setAssetSubType] = useState<string>('Bank Guarantee');
+  const [assetValuationPkr, setAssetValuationPkr] = useState<string>('');
+  const [assetLocationOrBank, setAssetLocationOrBank] = useState<string>('');
+  const [quotationClientName, setQuotationClientName] = useState<string>('');
+  const [quotationServiceType, setQuotationServiceType] = useState<string>('Bonded Carrier');
+  const [quotationStatus, setQuotationStatus] = useState<QuotationStatus>('Pending');
+  const [quotationAmountPkr, setQuotationAmountPkr] = useState<string>('');
+
+  // Universal Mandatory Metadata & Smart Alarm Fields
   const [title, setTitle] = useState<string>('');
-  const [createdByAuthor, setCreatedByAuthor] = useState<string>('');
-  const [sourceOrigin, setSourceOrigin] = useState<string>('');
-  const [creationDate, setCreationDate] = useState<string>(todayIso);
-  const [hasExpiryDate, setHasExpiryDate] = useState<boolean>(false);
-  const [expiryDate, setExpiryDate] = useState<string>('');
-  const [hasHearingDate, setHasHearingDate] = useState<boolean>(false);
+  const [referenceNo, setReferenceNo] = useState<string>('');
+  const [senderIssuer, setSenderIssuer] = useState<string>('');
+  const [recipientEntity, setRecipientEntity] = useState<CorporateRecipientEntity | string>('MAK Group');
+  const [issuanceDate, setIssuanceDate] = useState<string>(todayIso);
+  const [unlimitedValidity, setUnlimitedValidity] = useState<boolean>(true);
+  const [validityStartDate, setValidityStartDate] = useState<string>(todayIso);
+  const [validityEndDate, setValidityEndDate] = useState<string>('');
+  const [alarmDaysBefore, setAlarmDaysBefore] = useState<number>(15);
+  const [hearingRequired, setHearingRequired] = useState<boolean>(false);
   const [hearingDate, setHearingDate] = useState<string>('');
-  const [issuedTo, setIssuedTo] = useState<string>('');
+  const [hearingTime, setHearingTime] = useState<string>('');
+  const [hearingNotes, setHearingNotes] = useState<string>('');
+  const [statusTag, setStatusTag] = useState<CorporateDocumentStatus>('Active');
+  const [notes, setNotes] = useState<string>('');
+
+  const selectedLegalCase = useMemo(
+    () => legalCases.find((c) => c.id === legalCaseId) || null,
+    [legalCases, legalCaseId]
+  );
+
+  const availableLegalSubFolders = useMemo(() => {
+    if (selectedLegalCase && Array.isArray(selectedLegalCase.subFolders) && selectedLegalCase.subFolders.length > 0) {
+      return selectedLegalCase.subFolders;
+    }
+    return getProvisionedLegalSubFolders('LOGISTICS_CRIMINAL');
+  }, [selectedLegalCase]);
+
+  const availableCompanyFolders = useMemo(() => {
+    const base = MASTER_COMPANY_DOC_FOLDERS.filter((f) => !f.isSecureVault).map((f) => f.title);
+    return Array.from(new Set([...base, ...customMasterFolders]));
+  }, [customMasterFolders]);
+
+  const selectedAssetConfig = useMemo(
+    () => ASSETS_SUBFOLDERS.find((g) => g.id === assetGroup) || ASSETS_SUBFOLDERS[0],
+    [assetGroup]
+  );
 
   const readFilesIntoState = async (fileList: FileList | File[]) => {
     const rawArray = Array.from(fileList);
@@ -122,33 +197,68 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
     setActivePreviewIdx(0);
 
     if (editingDocument) {
-      setTitle(editingDocument.title || '');
-      setCreatedByAuthor(editingDocument.createdByAuthor || editingDocument.uploadedBy || '');
-      setSourceOrigin(editingDocument.sourceOrigin || editingDocument.senderIssuer || editingDocument.from || '');
-      setCreationDate(
-        editingDocument.creationDate ||
-          editingDocument.issuanceDate ||
-          editingDocument.documentDate ||
-          todayIso
+      const cat: CorporateRootCategory =
+        editingDocument.rootCategory && editingDocument.rootCategory !== 'Finance'
+          ? editingDocument.rootCategory
+          : defaultRootCategory !== 'Finance'
+            ? defaultRootCategory
+            : 'Company Documents';
+
+      setRootCategory(cat);
+      setLegalCaseId(editingDocument.legalCaseId || defaultLegalCaseId || legalCases[0]?.id || '');
+      setSubFolder(editingDocument.subFolder || defaultSubFolder || 'SECP');
+      setTaxAuthority(editingDocument.taxAuthority || defaultTaxAuthority || 'FBR');
+      setTaxYear(editingDocument.taxYear || defaultTaxYear || currentYearStr);
+      setAssetGroup(editingDocument.assetGroup || defaultAssetGroup || 'Security Deposits Tracking');
+      setAssetSubType(editingDocument.assetSubType || 'Bank Guarantee');
+      setAssetValuationPkr(
+        editingDocument.assetValuationPkr ? String(editingDocument.assetValuationPkr) : ''
+      );
+      setAssetLocationOrBank(editingDocument.assetLocationOrBank || '');
+      setQuotationClientName(editingDocument.quotationClientName || '');
+      setQuotationServiceType(editingDocument.quotationServiceType || 'Bonded Carrier');
+      setQuotationStatus(editingDocument.quotationStatus || 'Pending');
+      setQuotationAmountPkr(
+        editingDocument.quotationAmountPkr ? String(editingDocument.quotationAmountPkr) : ''
       );
 
-      const effectiveExp = editingDocument.expiryDate || editingDocument.validityEndDate || '';
+      setTitle(editingDocument.title || '');
+      setReferenceNo(editingDocument.referenceNo || '');
+      setSenderIssuer(
+        editingDocument.senderIssuer || editingDocument.sourceOrigin || editingDocument.from || ''
+      );
+      setRecipientEntity(
+        editingDocument.recipientEntity || editingDocument.issuedTo || editingDocument.to || 'MAK Group'
+      );
+      const docIso =
+        editingDocument.issuanceDate ||
+        editingDocument.creationDate ||
+        editingDocument.documentDate ||
+        todayIso;
+      setIssuanceDate(docIso);
+
+      const expStr = editingDocument.validityEndDate || editingDocument.expiryDate || '';
       const hasExp =
-        editingDocument.hasExpiryDate !== undefined
-          ? editingDocument.hasExpiryDate
-          : Boolean(effectiveExp) && !editingDocument.unlimitedValidity;
-      setHasExpiryDate(hasExp);
-      setExpiryDate(hasExp ? effectiveExp : '');
+        editingDocument.unlimitedValidity !== undefined
+          ? !editingDocument.unlimitedValidity
+          : Boolean(expStr);
+      setUnlimitedValidity(!hasExp);
+      setValidityStartDate(editingDocument.validityStartDate || docIso);
+      setValidityEndDate(hasExp ? expStr : '');
+      setAlarmDaysBefore(
+        typeof editingDocument.alarmDaysBefore === 'number' && editingDocument.alarmDaysBefore > 0
+          ? editingDocument.alarmDaysBefore
+          : 15
+      );
 
-      const effectiveHear = editingDocument.hearingDate || '';
-      const hasHear =
-        editingDocument.hasHearingDate !== undefined
-          ? editingDocument.hasHearingDate
-          : Boolean(effectiveHear);
-      setHasHearingDate(hasHear);
-      setHearingDate(hasHear ? effectiveHear : '');
-
-      setIssuedTo(editingDocument.issuedTo || editingDocument.recipientEntity || editingDocument.to || '');
+      const hearStr = editingDocument.hearingDate || '';
+      const hasHear = Boolean(editingDocument.hearingRequired || editingDocument.hasHearingDate || hearStr);
+      setHearingRequired(hasHear);
+      setHearingDate(hasHear ? hearStr : '');
+      setHearingTime(editingDocument.hearingTime || '');
+      setHearingNotes(editingDocument.hearingNotes || '');
+      setStatusTag(editingDocument.statusTag || 'Active');
+      setNotes(editingDocument.notes || '');
       setUploadedFiles([]);
 
       if (editingDocument.fileUrl || editingDocument.id) {
@@ -165,39 +275,90 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
       return;
     }
 
-    // Fresh upload state
+    // Fresh Upload Initialization
+    const initialRoot: CorporateRootCategory =
+      defaultRootCategory === 'Finance' ? 'Company Documents' : defaultRootCategory;
+    setRootCategory(initialRoot);
+    const initialCaseId = defaultLegalCaseId || legalCases[0]?.id || '';
+    setLegalCaseId(initialCaseId);
+
+    if (initialRoot === 'Legal') {
+      const targetCase = legalCases.find((c) => c.id === initialCaseId);
+      setSubFolder(
+        defaultSubFolder ||
+          targetCase?.subFolders?.[0] ||
+          getProvisionedLegalSubFolders('LOGISTICS_CRIMINAL')[0]
+      );
+    } else if (initialRoot === 'Company Documents') {
+      setSubFolder(defaultSubFolder || 'SECP');
+    } else {
+      setSubFolder(defaultSubFolder || '');
+    }
+
+    setTaxAuthority(defaultTaxAuthority || 'FBR');
+    setTaxYear(defaultTaxYear || currentYearStr);
+    const initAssetGroup = defaultAssetGroup || 'Security Deposits Tracking';
+    setAssetGroup(initAssetGroup);
+    const foundAsset = ASSETS_SUBFOLDERS.find((g) => g.id === initAssetGroup) || ASSETS_SUBFOLDERS[0];
+    setAssetSubType(foundAsset.subTypes[0]);
+    setAssetValuationPkr('');
+    setAssetLocationOrBank('');
+    setQuotationClientName('');
+    setQuotationServiceType('Bonded Carrier');
+    setQuotationStatus('Pending');
+    setQuotationAmountPkr('');
+
     setTitle('');
-    setCreatedByAuthor('');
-    setSourceOrigin('');
-    setCreationDate(todayIso);
-    setHasExpiryDate(false);
-    setExpiryDate('');
-    setHasHearingDate(false);
+    setReferenceNo('');
+    setSenderIssuer(initialRoot === 'Tax' ? (defaultTaxAuthority || 'FBR') : '');
+    setRecipientEntity('MAK Group');
+    setIssuanceDate(todayIso);
+    setUnlimitedValidity(true);
+    setValidityStartDate(todayIso);
+    setValidityEndDate('');
+    setAlarmDaysBefore(15);
+    setHearingRequired(false);
     setHearingDate('');
-    setIssuedTo('');
+    setHearingTime('');
+    setHearingNotes('');
+    setStatusTag('Active');
+    setNotes('');
     setUploadedFiles([]);
     setExistingResolvedUrl('');
 
     if (preDroppedFiles && preDroppedFiles.length > 0) {
       readFilesIntoState(preDroppedFiles);
     }
-  }, [isOpen, editingDocument, preDroppedFiles, todayIso]);
+  }, [
+    isOpen,
+    editingDocument,
+    defaultRootCategory,
+    defaultLegalCaseId,
+    defaultSubFolder,
+    defaultTaxAuthority,
+    defaultTaxYear,
+    defaultAssetGroup,
+    legalCases,
+    preDroppedFiles,
+    todayIso,
+    currentYearStr
+  ]);
 
   const remainingExpiryDays = useMemo(() => {
-    if (!hasExpiryDate || !expiryDate) return null;
-    const endMs = new Date(`${expiryDate}T00:00:00`).getTime();
+    if (unlimitedValidity || !validityEndDate) return null;
+    const endMs = new Date(`${validityEndDate}T00:00:00`).getTime();
     const todayMs = new Date(`${todayIso}T00:00:00`).getTime();
     if (isNaN(endMs)) return null;
     return Math.ceil((endMs - todayMs) / (24 * 60 * 60 * 1000));
-  }, [hasExpiryDate, expiryDate, todayIso]);
+  }, [unlimitedValidity, validityEndDate, todayIso]);
 
   const remainingHearingDays = useMemo(() => {
-    if (!hasHearingDate || !hearingDate) return null;
+    if (!hearingRequired || !hearingDate) return null;
     const hearMs = new Date(`${hearingDate}T00:00:00`).getTime();
     const todayMs = new Date(`${todayIso}T00:00:00`).getTime();
     if (isNaN(hearMs)) return null;
     return Math.ceil((hearMs - todayMs) / (24 * 60 * 60 * 1000));
-  }, [hasHearingDate, hearingDate, todayIso]);
+  }, [hearingRequired, hearingDate, todayIso]);
 
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -208,6 +369,31 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
     }
   };
 
+  const computedHierarchyPath = useMemo(() => {
+    if (rootCategory === 'Legal') {
+      const cTitle = selectedLegalCase?.identifier || 'Unassigned Legal Dossier';
+      return `Dashboard > Legal > ${cTitle} > ${subFolder || 'Proceedings'}`;
+    }
+    if (rootCategory === 'Tax') {
+      return `Dashboard > Tax > ${taxAuthority} > Year ${taxYear}`;
+    }
+    if (rootCategory === 'Assets') {
+      return `Dashboard > Assets > ${assetGroup}`;
+    }
+    if (rootCategory === 'Quotations') {
+      return `Dashboard > Quotations > ${quotationStatus}`;
+    }
+    return `Dashboard > Company Documents > ${subFolder || 'SECP'}`;
+  }, [
+    rootCategory,
+    selectedLegalCase,
+    subFolder,
+    taxAuthority,
+    taxYear,
+    assetGroup,
+    quotationStatus
+  ]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setValidationError(null);
@@ -215,35 +401,39 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
     const hasAttachment =
       uploadedFiles.length > 0 || Boolean(editingDocument?.fileUrl || existingResolvedUrl);
     if (!hasAttachment) {
-      setValidationError('Please select or drop a PDF or Image document to upload.');
+      setValidationError('Please attach or drop a PDF or Image document to upload.');
       return;
     }
     if (!title.trim()) {
       setValidationError('Please enter the Document Title.');
       return;
     }
-    if (!createdByAuthor.trim()) {
-      setValidationError('Please enter who created or prepared this document.');
+    if (rootCategory === 'Legal' && !legalCaseId) {
+      setValidationError('Please create or select a Legal Case Dossier before uploading a Legal document.');
       return;
     }
-    if (!sourceOrigin.trim()) {
-      setValidationError('Please enter the source or origin where this document came from.');
+    if (rootCategory === 'Quotations' && !quotationClientName.trim()) {
+      setValidationError('Please enter the Client Name for this Quotation.');
       return;
     }
-    if (!creationDate) {
-      setValidationError('Please select the Document Creation Date.');
+    if (!senderIssuer.trim()) {
+      setValidationError('Please enter the Sender / Issuing Authority.');
       return;
     }
-    if (hasExpiryDate && !expiryDate) {
-      setValidationError('Please select the Valid Until / Expiry Date, or mark the document as No Expiry.');
+    if (!recipientEntity) {
+      setValidationError('Please select the Recipient Entity.');
       return;
     }
-    if (hasHearingDate && !hearingDate) {
-      setValidationError('Please select the Scheduled Hearing Date, or switch Scheduled Hearing to No.');
+    if (!issuanceDate) {
+      setValidationError('Please select the Issuance Date.');
       return;
     }
-    if (!issuedTo.trim()) {
-      setValidationError('Please enter to whom this document was issued or in whose name it stands.');
+    if (!unlimitedValidity && !validityEndDate) {
+      setValidationError('Please select the Validity End / Expiry Date, or set Validity to No Expiry.');
+      return;
+    }
+    if (hearingRequired && !hearingDate) {
+      setValidationError('Please select the Hearing / Action Date, or set Hearing Required to No.');
       return;
     }
 
@@ -257,58 +447,84 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
         size: f.size
       }));
 
-      const targetFolderId =
-        editingDocument && editingDocument.parentFolderId !== undefined
-          ? editingDocument.parentFolderId
-          : currentFolderId;
-
-      const targetPathLabel =
-        editingDocument && editingDocument.folderPath
-          ? editingDocument.folderPath
-          : currentFolderPathLabel;
-
       const isExpiredNow =
-        hasExpiryDate && remainingExpiryDays !== null && remainingExpiryDays <= 0;
+        !unlimitedValidity && remainingExpiryDays !== null && remainingExpiryDays <= 0;
+
+      const resolvedStatus: CorporateDocumentStatus =
+        statusTag === 'Resolved' || statusTag === 'Archived'
+          ? statusTag
+          : isExpiredNow
+            ? 'Expired'
+            : hearingRequired
+              ? 'Pending Hearing'
+              : statusTag;
 
       const docRecord: CompanyDocument = {
         ...(editingDocument || {}),
         id:
           editingDocument?.id ||
-          `expdoc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        isExplorerDocument: true,
-        parentFolderId: targetFolderId || null,
-        folderPath: targetPathLabel || 'Company Documents',
-        category: targetPathLabel || 'Company Documents',
-        // Exact 7 Document Metadata Fields
+          `cdoc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        rootCategory,
+        category: rootCategory,
+        folderPath: computedHierarchyPath,
+        legalCaseId: rootCategory === 'Legal' ? legalCaseId : undefined,
+        legalCaseTitle: rootCategory === 'Legal' ? selectedLegalCase?.identifier : undefined,
+        legalCaseTrack: rootCategory === 'Legal' ? selectedLegalCase?.caseTrack : undefined,
+        subFolder:
+          rootCategory === 'Legal' || rootCategory === 'Company Documents'
+            ? subFolder
+            : undefined,
+        taxAuthority: rootCategory === 'Tax' ? taxAuthority : undefined,
+        taxYear: rootCategory === 'Tax' ? taxYear.trim() : editSafeTaxYear(rootCategory, taxYear),
+        assetGroup: rootCategory === 'Assets' ? assetGroup : undefined,
+        assetSubType: rootCategory === 'Assets' ? assetSubType : undefined,
+        assetValuationPkr:
+          rootCategory === 'Assets' && Number(assetValuationPkr) > 0
+            ? Number(assetValuationPkr)
+            : undefined,
+        assetLocationOrBank:
+          rootCategory === 'Assets' && assetLocationOrBank.trim()
+            ? assetLocationOrBank.trim()
+            : undefined,
+        quotationClientName:
+          rootCategory === 'Quotations' ? quotationClientName.trim() : undefined,
+        quotationServiceType:
+          rootCategory === 'Quotations' ? quotationServiceType : undefined,
+        quotationStatus: rootCategory === 'Quotations' ? quotationStatus : undefined,
+        quotationAmountPkr:
+          rootCategory === 'Quotations' && Number(quotationAmountPkr) > 0
+            ? Number(quotationAmountPkr)
+            : undefined,
+
+        // Universal Document Metadata
         title: title.trim(),
-        createdByAuthor: createdByAuthor.trim(),
-        sourceOrigin: sourceOrigin.trim(),
-        creationDate,
-        hasExpiryDate,
-        expiryDate: hasExpiryDate ? expiryDate : undefined,
-        hasHearingDate,
-        hearingDate: hasHearingDate ? hearingDate : undefined,
-        issuedTo: issuedTo.trim(),
-        // Synced compatibility & smart notification fields
-        senderIssuer: sourceOrigin.trim(),
-        from: sourceOrigin.trim(),
-        recipientEntity: issuedTo.trim(),
-        to: issuedTo.trim(),
-        issuanceDate: creationDate,
-        documentDate: creationDate,
-        issueDate: creationDate,
-        unlimitedValidity: !hasExpiryDate,
-        hasExpiry: hasExpiryDate,
-        validityStartDate: creationDate,
-        validityEndDate: hasExpiryDate ? expiryDate : undefined,
-        hearingRequired: hasHearingDate,
-        alarmDaysBefore: 15,
-        statusTag: isExpiredNow
-          ? 'Expired'
-          : hasHearingDate
-            ? 'Pending Hearing'
-            : 'Active',
-        // Attachment storage
+        referenceNo: referenceNo.trim() || undefined,
+        senderIssuer: senderIssuer.trim(),
+        sourceOrigin: senderIssuer.trim(),
+        from: senderIssuer.trim(),
+        recipientEntity,
+        issuedTo: String(recipientEntity),
+        to: String(recipientEntity),
+        issuanceDate,
+        creationDate: issuanceDate,
+        documentDate: issuanceDate,
+        issueDate: issuanceDate,
+        unlimitedValidity,
+        hasExpiryDate: !unlimitedValidity,
+        hasExpiry: !unlimitedValidity,
+        validityStartDate: !unlimitedValidity ? validityStartDate || issuanceDate : issuanceDate,
+        validityEndDate: !unlimitedValidity ? validityEndDate : undefined,
+        expiryDate: !unlimitedValidity ? validityEndDate : undefined,
+        alarmDaysBefore: Number(alarmDaysBefore) > 0 ? Number(alarmDaysBefore) : 15,
+        hearingRequired,
+        hasHearingDate: hearingRequired,
+        hearingDate: hearingRequired ? hearingDate : undefined,
+        hearingTime: hearingRequired && hearingTime ? hearingTime : undefined,
+        hearingNotes: hearingRequired && hearingNotes.trim() ? hearingNotes.trim() : undefined,
+        statusTag: resolvedStatus,
+        notes: notes.trim() || undefined,
+
+        // File Attachment Pointers
         fileUrl: primaryUpload ? primaryUpload.dataUrl : editingDocument?.fileUrl,
         fileName: primaryUpload ? primaryUpload.name : editingDocument?.fileName,
         fileType: primaryUpload ? primaryUpload.type : editingDocument?.fileType,
@@ -318,10 +534,14 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
             ? [...(editingDocument?.additionalFiles || []), ...extraUploads]
             : editingDocument?.additionalFiles,
         uploadedAt: editingDocument?.uploadedAt || new Date().toISOString(),
+        createdByAuthor:
+          editingDocument?.createdByAuthor ||
+          safeAppStorage.getItem('dpl_current_user_name') ||
+          'Authorized User',
         uploadedBy:
           editingDocument?.uploadedBy ||
           safeAppStorage.getItem('dpl_current_user_name') ||
-          createdByAuthor.trim()
+          'Authorized User'
       };
 
       await onSave(docRecord);
@@ -348,13 +568,10 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
     previewSrc.startsWith('data:application/pdf') ||
     previewName.endsWith('.pdf');
 
-  const displayTargetFolder =
-    editingDocument?.folderPath || currentFolderPathLabel || 'Company Documents';
-
   return (
     <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto">
-      <div className="w-full max-w-5xl max-h-[94vh] bg-slate-950 border border-white/15 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        {/* Header */}
+      <div className="w-full max-w-6xl max-h-[94vh] bg-slate-950 border border-white/15 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        {/* Modal Header */}
         <div className="px-4 sm:px-6 py-3.5 bg-slate-900 border-b border-white/10 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-400/30 text-sky-400 flex items-center justify-center shrink-0">
@@ -362,12 +579,12 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
             </div>
             <div className="min-w-0">
               <h3 className="text-sm sm:text-base font-bold text-white truncate">
-                {editingDocument ? 'Edit Document Details' : 'Upload File'}
+                {editingDocument ? 'Edit Corporate Document & Metadata' : 'Upload Corporate Document & Metadata'}
               </h3>
               <div className="flex items-center gap-1.5 text-xs text-gray-400 truncate">
                 <FolderOpen size={12} className="text-amber-400 shrink-0" />
-                <span className="truncate" title={displayTargetFolder}>
-                  Location: {displayTargetFolder}
+                <span className="truncate" title={computedHierarchyPath}>
+                  {computedHierarchyPath}
                 </span>
               </div>
             </div>
@@ -390,10 +607,10 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
           </div>
         )}
 
-        {/* Split Body: Left = PDF / Picture Upload & Live Preview | Right = Exact 7 Document Fields */}
+        {/* Two-Column Body: Left = Drag-and-Drop Zone + Instant Live Preview | Right = Universal Metadata Form */}
         <form onSubmit={handleSubmit} className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-          {/* Left Column: File Picker & Live Document Preview */}
-          <div className="w-full lg:w-[42%] border-b lg:border-b-0 lg:border-r border-white/10 p-4 sm:p-5 flex flex-col gap-3.5 overflow-y-auto bg-slate-900/40">
+          {/* Left Column */}
+          <div className="w-full lg:w-[40%] border-b lg:border-b-0 lg:border-r border-white/10 p-4 sm:p-5 flex flex-col gap-3.5 overflow-y-auto bg-slate-900/40">
             <div
               onDragOver={(e) => {
                 e.preventDefault();
@@ -427,17 +644,17 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
                 <Upload size={18} />
               </div>
               <p className="text-xs font-bold text-white">
-                Select or Drop PDF / Image Document
+                Drag & Drop PDF or Image File Here, or Click to Browse
               </p>
               <p className="text-[11px] text-gray-400 mt-0.5">
-                Accepted formats: PDF (.pdf) and Images (JPG, PNG, WEBP)
+                Supports multi-page PDFs and high-resolution scanned images (JPG, PNG, WEBP)
               </p>
             </div>
 
             {uploadedFiles.length > 0 && (
               <div className="space-y-1.5">
                 <div className="text-[11px] font-semibold text-gray-400">
-                  Selected Document Files ({uploadedFiles.length})
+                  Selected Files ({uploadedFiles.length})
                 </div>
                 <div className="space-y-1.5 max-h-28 overflow-y-auto">
                   {uploadedFiles.map((file, idx) => {
@@ -482,12 +699,12 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
               </div>
             )}
 
-            {/* Live Document Preview */}
-            <div className="flex-1 min-h-[250px] rounded-xl border border-white/10 bg-slate-950 overflow-hidden flex flex-col">
+            {/* Live Instant Preview */}
+            <div className="flex-1 min-h-[260px] rounded-xl border border-white/10 bg-slate-950 overflow-hidden flex flex-col">
               <div className="px-3 py-2 border-b border-white/10 bg-slate-900/80 flex items-center justify-between text-[11px] text-gray-400">
                 <div className="flex items-center gap-1.5 font-semibold text-gray-300">
                   <Eye size={13} className="text-sky-400" />
-                  <span>Document Preview</span>
+                  <span>Instant Document Preview</span>
                 </div>
                 <span className="font-mono truncate max-w-[180px]">
                   {activeFile?.name || editingDocument?.fileName || 'No file attached'}
@@ -498,9 +715,9 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
                 {!previewSrc ? (
                   <div className="text-center p-6 space-y-1.5">
                     <FileText size={28} className="mx-auto text-gray-600" />
-                    <p className="text-xs text-gray-400 font-medium">No document attached yet</p>
+                    <p className="text-xs text-gray-400 font-medium">No file selected yet</p>
                     <p className="text-[11px] text-gray-500">
-                      Attach a PDF or picture file above to preview it while entering document details.
+                      Drop or select a PDF or image above to inspect it while tagging metadata.
                     </p>
                   </div>
                 ) : isImagePreview ? (
@@ -528,76 +745,410 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
             </div>
           </div>
 
-          {/* Right Column: Exact 7 Document Metadata Fields */}
+          {/* Right Column: Category Coordinates + Mandatory Universal Metadata */}
           <div className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-4">
-            {/* 1. Document Title */}
-            <div>
-              <label className="block text-xs font-semibold text-gray-200 mb-1.5">
-                1. Document Title *
-              </label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Enter any custom title for this document"
-                className="glass-input w-full rounded-xl px-3.5 py-2.5 text-xs sm:text-sm outline-none"
-                required
-              />
+            {/* Target Root Category & Dynamic Sub-Folder Selectors */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pb-3 border-b border-white/10">
+              <div>
+                <label className="block text-xs font-semibold text-gray-200 mb-1">
+                  Primary Category *
+                </label>
+                <select
+                  value={rootCategory}
+                  onChange={(e) => {
+                    const nextCat = e.target.value as CorporateRootCategory;
+                    setRootCategory(nextCat);
+                    if (nextCat === 'Legal') {
+                      const cObj = legalCases.find((c) => c.id === legalCaseId) || legalCases[0];
+                      if (cObj) {
+                        setLegalCaseId(cObj.id);
+                        setSubFolder(cObj.subFolders?.[0] || 'Police FIR & Proceedings');
+                      }
+                    } else if (nextCat === 'Company Documents') {
+                      setSubFolder('SECP');
+                    }
+                  }}
+                  className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                >
+                  <option value="Legal">Legal</option>
+                  <option value="Tax">Tax</option>
+                  <option value="Assets">Assets</option>
+                  <option value="Company Documents">Company Documents</option>
+                  <option value="Quotations">Quotations</option>
+                </select>
+              </div>
+
+              {rootCategory === 'Legal' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-200 mb-1">
+                      Legal Case Dossier *
+                    </label>
+                    <select
+                      value={legalCaseId}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        setLegalCaseId(nextId);
+                        const nextCase = legalCases.find((c) => c.id === nextId);
+                        if (nextCase?.subFolders?.[0]) setSubFolder(nextCase.subFolders[0]);
+                      }}
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                    >
+                      {legalCases.length === 0 ? (
+                        <option value="">Create a Legal Case first</option>
+                      ) : (
+                        legalCases.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.identifier}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-200 mb-1">
+                      Proceedings Sub-Folder *
+                    </label>
+                    <select
+                      value={subFolder}
+                      onChange={(e) => setSubFolder(e.target.value)}
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                    >
+                      {availableLegalSubFolders.map((sf) => (
+                        <option key={sf} value={sf}>
+                          {sf}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              {rootCategory === 'Tax' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-200 mb-1">
+                      Regulatory Authority *
+                    </label>
+                    <select
+                      value={taxAuthority}
+                      onChange={(e) => {
+                        setTaxAuthority(e.target.value);
+                        if (!senderIssuer || ['FBR', 'SRB', 'Labour Department'].includes(senderIssuer)) {
+                          setSenderIssuer(e.target.value);
+                        }
+                      }}
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                    >
+                      {TAX_AUTHORITIES.map((auth) => (
+                        <option key={auth.id} value={auth.id}>
+                          {auth.title} — {auth.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-200 mb-1">
+                      Tax / Fiscal Year *
+                    </label>
+                    <input
+                      type="text"
+                      list="corporate-fiscal-years"
+                      value={taxYear}
+                      onChange={(e) => setTaxYear(e.target.value)}
+                      placeholder="e.g., 2026"
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs font-mono tabular-nums outline-none"
+                    />
+                    <datalist id="corporate-fiscal-years">
+                      {DEFAULT_FISCAL_YEARS.map((y) => (
+                        <option key={y} value={y} />
+                      ))}
+                    </datalist>
+                  </div>
+                </>
+              )}
+
+              {rootCategory === 'Assets' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-200 mb-1">
+                      Asset Catalog Group *
+                    </label>
+                    <select
+                      value={assetGroup}
+                      onChange={(e) => {
+                        const nextGroup = e.target.value;
+                        setAssetGroup(nextGroup);
+                        const cfg = ASSETS_SUBFOLDERS.find((g) => g.id === nextGroup);
+                        if (cfg?.subTypes?.[0]) setAssetSubType(cfg.subTypes[0]);
+                      }}
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                    >
+                      {ASSETS_SUBFOLDERS.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-200 mb-1">
+                      Asset Classification
+                    </label>
+                    <select
+                      value={assetSubType}
+                      onChange={(e) => setAssetSubType(e.target.value)}
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                    >
+                      {selectedAssetConfig.subTypes.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              {rootCategory === 'Company Documents' && (
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-200 mb-1">
+                    Master Compliance Folder *
+                  </label>
+                  <select
+                    value={subFolder}
+                    onChange={(e) => setSubFolder(e.target.value)}
+                    className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                  >
+                    {availableCompanyFolders.map((folderName) => (
+                      <option key={folderName} value={folderName}>
+                        {folderName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {rootCategory === 'Quotations' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-200 mb-1">
+                      Client Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={quotationClientName}
+                      onChange={(e) => setQuotationClientName(e.target.value)}
+                      placeholder="Client or organization name"
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-200 mb-1">
+                      Quotation Status *
+                    </label>
+                    <select
+                      value={quotationStatus}
+                      onChange={(e) => setQuotationStatus(e.target.value as QuotationStatus)}
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                    >
+                      {QUOTATION_STATUSES.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* 2. Created / Prepared By & 3. Source / Origin */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-gray-200 mb-1.5">
-                  2. Created / Prepared By *
+            {/* Extra Asset / Quotation Financial Row */}
+            {rootCategory === 'Assets' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-200 mb-1">
+                    Deposit / Asset Valuation (PKR)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={assetValuationPkr}
+                    onChange={(e) => setAssetValuationPkr(e.target.value)}
+                    placeholder="Optional value in PKR"
+                    className="glass-input w-full rounded-xl px-3 py-2 text-xs font-mono tabular-nums outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-200 mb-1">
+                    Bank / Port Authority / Property Location
+                  </label>
+                  <input
+                    type="text"
+                    value={assetLocationOrBank}
+                    onChange={(e) => setAssetLocationOrBank(e.target.value)}
+                    placeholder="Bank branch, port authority, or address"
+                    className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                  />
+                </div>
+              </div>
+            )}
+
+            {rootCategory === 'Quotations' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-200 mb-1">
+                    Service Type *
+                  </label>
+                  <select
+                    value={quotationServiceType}
+                    onChange={(e) => setQuotationServiceType(e.target.value)}
+                    className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                  >
+                    {QUOTATION_SERVICE_TYPES.map((srv) => (
+                      <option key={srv} value={srv}>
+                        {srv}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-200 mb-1">
+                    Quoted Commercial Tariff (PKR)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={quotationAmountPkr}
+                    onChange={(e) => setQuotationAmountPkr(e.target.value)}
+                    placeholder="Quoted tariff amount in PKR"
+                    className="glass-input w-full rounded-xl px-3 py-2 text-xs font-mono tabular-nums outline-none"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Document Title & Reference Number */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-gray-200 mb-1">
+                  Document Title *
                 </label>
                 <input
                   type="text"
-                  value={createdByAuthor}
-                  onChange={(e) => setCreatedByAuthor(e.target.value)}
-                  placeholder="Who created or prepared this document"
-                  className="glass-input w-full rounded-xl px-3.5 py-2.5 text-xs sm:text-sm outline-none"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Official document title or filing subject"
+                  className="glass-input w-full rounded-xl px-3.5 py-2 text-xs sm:text-sm outline-none"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-200 mb-1.5">
-                  3. Document Source / Origin *
+                <label className="block text-xs font-semibold text-gray-200 mb-1">
+                  Reference / Order No.
                 </label>
                 <input
                   type="text"
-                  value={sourceOrigin}
-                  onChange={(e) => setSourceOrigin(e.target.value)}
-                  placeholder="Where this document came from (authority, office, or party)"
-                  className="glass-input w-full rounded-xl px-3.5 py-2.5 text-xs sm:text-sm outline-none"
-                  required
+                  value={referenceNo}
+                  onChange={(e) => setReferenceNo(e.target.value)}
+                  placeholder="Optional reference number"
+                  className="glass-input w-full rounded-xl px-3.5 py-2 text-xs sm:text-sm font-mono outline-none"
                 />
               </div>
             </div>
 
-            {/* 4. Document Creation Date */}
-            <div>
-              <label className="block text-xs font-semibold text-gray-200 mb-1.5">
-                4. Document Creation Date *
-              </label>
-              <div className="relative">
+            {/* Universal Metadata: Sender / Issuer & Recipient Entity */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-200 mb-1">
+                  Sender / Issuing Authority *
+                </label>
+                <input
+                  type="text"
+                  value={senderIssuer}
+                  onChange={(e) => setSenderIssuer(e.target.value)}
+                  placeholder="Issuing authority, court, regulator, bank, or client"
+                  className="glass-input w-full rounded-xl px-3.5 py-2 text-xs sm:text-sm outline-none"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-200 mb-1">
+                  Recipient Entity *
+                </label>
+                <select
+                  value={recipientEntity}
+                  onChange={(e) => setRecipientEntity(e.target.value)}
+                  className="glass-input w-full rounded-xl px-3.5 py-2 text-xs sm:text-sm outline-none"
+                >
+                  {RECIPIENT_ENTITIES.map((ent) => (
+                    <option key={ent.id} value={ent.id}>
+                      {ent.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Issuance Date, Tax/Report Year (optional outside Tax), & Status Tag */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-200 mb-1">
+                  Issuance Date *
+                </label>
                 <input
                   type="date"
-                  value={creationDate}
-                  onChange={(e) => setCreationDate(e.target.value)}
-                  className="glass-input w-full rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-mono tabular-nums outline-none"
+                  value={issuanceDate}
+                  onChange={(e) => setIssuanceDate(e.target.value)}
+                  className="glass-input w-full rounded-xl px-3 py-2 text-xs font-mono tabular-nums outline-none"
                   required
                 />
               </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-200 mb-1">
+                  Tax / Report Year
+                </label>
+                <input
+                  type="text"
+                  value={taxYear}
+                  onChange={(e) => setTaxYear(e.target.value)}
+                  placeholder="e.g., 2026"
+                  className="glass-input w-full rounded-xl px-3 py-2 text-xs font-mono tabular-nums outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-200 mb-1">
+                  Status Tag *
+                </label>
+                <select
+                  value={statusTag}
+                  onChange={(e) => setStatusTag(e.target.value as CorporateDocumentStatus)}
+                  className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                >
+                  {DOCUMENT_STATUS_TAGS.map((tag) => (
+                    <option key={tag} value={tag}>
+                      {tag}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            {/* 5. Document Validity / Expiry */}
-            <div className="pt-2 border-t border-white/10 space-y-2.5">
+            {/* Validity Period & Smart Expiry Alarm */}
+            <div className="pt-2.5 border-t border-white/10 space-y-2.5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <label className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
                   <Calendar size={14} className="text-amber-400 shrink-0" />
-                  <span>5. Document Validity / Expiration</span>
+                  <span>Validity Period & Smart Expiry Alarm</span>
                 </label>
                 <div
                   data-custom-control="true"
@@ -606,70 +1157,106 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
                   <button
                     type="button"
                     onClick={() => {
-                      setHasExpiryDate(false);
-                      setExpiryDate('');
+                      setUnlimitedValidity(true);
+                      setValidityEndDate('');
                     }}
                     className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      !hasExpiryDate
+                      unlimitedValidity
                         ? 'bg-sky-500 text-white'
                         : 'text-gray-400 hover:text-white'
                     }`}
                   >
-                    No Expiry
+                    Perpetual / No Expiry
                   </button>
                   <button
                     type="button"
-                    onClick={() => setHasExpiryDate(true)}
+                    onClick={() => setUnlimitedValidity(false)}
                     className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      hasExpiryDate
+                      !unlimitedValidity
                         ? 'bg-amber-500 text-slate-950'
                         : 'text-gray-400 hover:text-white'
                     }`}
                   >
-                    Expires on Date
+                    Has Validity / Expiry
                   </button>
                 </div>
               </div>
 
-              {hasExpiryDate && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+              {!unlimitedValidity && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
                   <div>
                     <label className="block text-[11px] font-medium text-gray-400 mb-1">
-                      Valid Until / Expiry Date *
+                      Validity Start Date
                     </label>
                     <input
                       type="date"
-                      value={expiryDate}
-                      onChange={(e) => setExpiryDate(e.target.value)}
-                      className="glass-input w-full rounded-xl px-3.5 py-2 text-xs sm:text-sm font-mono tabular-nums outline-none"
-                      required={hasExpiryDate}
+                      value={validityStartDate}
+                      onChange={(e) => setValidityStartDate(e.target.value)}
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs font-mono tabular-nums outline-none"
                     />
                   </div>
-                  <div className="text-xs text-gray-300 font-mono tabular-nums pt-2 sm:pt-5">
-                    {remainingExpiryDays === null ? (
-                      <span className="text-gray-400">Select the expiration date</span>
-                    ) : remainingExpiryDays < 0 ? (
-                      <span className="text-rose-400 font-semibold">
-                        Expired {Math.abs(remainingExpiryDays)} day(s) ago
-                      </span>
-                    ) : remainingExpiryDays === 0 ? (
-                      <span className="text-rose-400 font-semibold">Expires today</span>
-                    ) : (
-                      <span className="text-emerald-400 font-semibold">
-                        Valid for {remainingExpiryDays} more day(s)
-                      </span>
-                    )}
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-400 mb-1">
+                      Validity End / Expiry Date *
+                    </label>
+                    <input
+                      type="date"
+                      value={validityEndDate}
+                      onChange={(e) => setValidityEndDate(e.target.value)}
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs font-mono tabular-nums outline-none"
+                      required={!unlimitedValidity}
+                    />
                   </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-400 mb-1 flex items-center gap-1">
+                      <Bell size={11} className="text-amber-400" />
+                      <span>Alarm Lead Days Before Expiry</span>
+                    </label>
+                    <select
+                      value={alarmDaysBefore}
+                      onChange={(e) => setAlarmDaysBefore(Number(e.target.value))}
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs font-mono tabular-nums outline-none"
+                    >
+                      <option value={7}>7 Days Before Expiry</option>
+                      <option value={15}>15 Days Before Expiry</option>
+                      <option value={30}>30 Days Before Expiry</option>
+                      <option value={60}>60 Days Before Expiry</option>
+                    </select>
+                  </div>
+
+                  {remainingExpiryDays !== null && (
+                    <div className="sm:col-span-3 text-xs font-mono tabular-nums">
+                      {remainingExpiryDays < 0 ? (
+                        <span className="text-rose-400 font-semibold">
+                          Document expired {Math.abs(remainingExpiryDays)} day(s) ago — Expiry alert active
+                        </span>
+                      ) : remainingExpiryDays === 0 ? (
+                        <span className="text-rose-400 font-semibold">
+                          Document expires today — Urgent renewal alert active
+                        </span>
+                      ) : (
+                        <span
+                          className={
+                            remainingExpiryDays <= alarmDaysBefore
+                              ? 'text-amber-400 font-semibold'
+                              : 'text-emerald-400 font-semibold'
+                          }
+                        >
+                          {remainingExpiryDays} day(s) remaining until expiration
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* 6. Scheduled Hearing According to Document */}
-            <div className="pt-2 border-t border-white/10 space-y-2.5">
+            {/* Hearing / Action Date Countdown Alarm */}
+            <div className="pt-2.5 border-t border-white/10 space-y-2.5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <label className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
                   <Gavel size={14} className="text-sky-400 shrink-0" />
-                  <span>6. Scheduled Hearing Date</span>
+                  <span>Scheduled Hearing / Legal Action Date</span>
                 </label>
                 <div
                   data-custom-control="true"
@@ -678,11 +1265,11 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
                   <button
                     type="button"
                     onClick={() => {
-                      setHasHearingDate(false);
+                      setHearingRequired(false);
                       setHearingDate('');
                     }}
                     className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      !hasHearingDate
+                      !hearingRequired
                         ? 'bg-sky-500 text-white'
                         : 'text-gray-400 hover:text-white'
                     }`}
@@ -691,64 +1278,75 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
                   </button>
                   <button
                     type="button"
-                    onClick={() => setHasHearingDate(true)}
+                    onClick={() => setHearingRequired(true)}
                     className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      hasHearingDate
+                      hearingRequired
                         ? 'bg-sky-500 text-white'
                         : 'text-gray-400 hover:text-white'
                     }`}
                   >
-                    Yes — Has Hearing
+                    Scheduled Hearing
                   </button>
                 </div>
               </div>
 
-              {hasHearingDate && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+              {hearingRequired && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
                   <div>
                     <label className="block text-[11px] font-medium text-gray-400 mb-1">
-                      Hearing Date *
+                      Hearing / Action Date *
                     </label>
                     <input
                       type="date"
                       value={hearingDate}
                       onChange={(e) => setHearingDate(e.target.value)}
-                      className="glass-input w-full rounded-xl px-3.5 py-2 text-xs sm:text-sm font-mono tabular-nums outline-none"
-                      required={hasHearingDate}
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs font-mono tabular-nums outline-none"
+                      required={hearingRequired}
                     />
                   </div>
-                  <div className="text-xs text-gray-300 font-mono tabular-nums pt-2 sm:pt-5">
-                    {remainingHearingDays === null ? (
-                      <span className="text-gray-400">Select the scheduled hearing date</span>
-                    ) : remainingHearingDays < 0 ? (
-                      <span className="text-rose-400 font-semibold">
-                        Hearing passed {Math.abs(remainingHearingDays)} day(s) ago
-                      </span>
-                    ) : remainingHearingDays === 0 ? (
-                      <span className="text-amber-400 font-semibold">Hearing scheduled today</span>
-                    ) : (
-                      <span className="text-sky-400 font-semibold">
-                        Scheduled in {remainingHearingDays} day(s)
-                      </span>
-                    )}
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-400 mb-1">
+                      Hearing Time (Optional)
+                    </label>
+                    <input
+                      type="time"
+                      value={hearingTime}
+                      onChange={(e) => setHearingTime(e.target.value)}
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs font-mono tabular-nums outline-none"
+                    />
                   </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-400 mb-1">
+                      Court / Authority Action Note
+                    </label>
+                    <input
+                      type="text"
+                      value={hearingNotes}
+                      onChange={(e) => setHearingNotes(e.target.value)}
+                      placeholder="Bench, collectorate, or counsel note"
+                      className="glass-input w-full rounded-xl px-3 py-2 text-xs outline-none"
+                    />
+                  </div>
+
+                  {remainingHearingDays !== null && (
+                    <div className="sm:col-span-3 text-xs font-mono tabular-nums">
+                      {remainingHearingDays < 0 ? (
+                        <span className="text-rose-400 font-semibold">
+                          Scheduled hearing date passed {Math.abs(remainingHearingDays)} day(s) ago
+                        </span>
+                      ) : remainingHearingDays === 0 ? (
+                        <span className="text-amber-400 font-semibold">
+                          Hearing scheduled TODAY
+                        </span>
+                      ) : (
+                        <span className="text-sky-400 font-semibold">
+                          Countdown: {remainingHearingDays} day(s) remaining until hearing
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-
-            {/* 7. Issued To / In Name Of */}
-            <div className="pt-2 border-t border-white/10">
-              <label className="block text-xs font-semibold text-gray-200 mb-1.5">
-                7. Issued To / Addressed To / In Name Of *
-              </label>
-              <input
-                type="text"
-                value={issuedTo}
-                onChange={(e) => setIssuedTo(e.target.value)}
-                placeholder="Person(s), company, or party to whom this document was given or in whose name it is issued"
-                className="glass-input w-full rounded-xl px-3.5 py-2.5 text-xs sm:text-sm outline-none"
-                required
-              />
             </div>
 
             {/* Footer Action Buttons */}
@@ -767,7 +1365,13 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
                 className="mak-btn px-5 py-2.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
               >
                 <Check size={15} />
-                <span>{isSaving ? 'Saving Document...' : editingDocument ? 'Save Changes' : 'Save & Upload File'}</span>
+                <span>
+                  {isSaving
+                    ? 'Saving Document...'
+                    : editingDocument
+                      ? 'Update Document'
+                      : 'Upload & Save Document'}
+                </span>
               </button>
             </div>
           </div>
@@ -776,3 +1380,9 @@ export const CompanyDocumentUploadModal: React.FC<CompanyDocumentUploadModalProp
     </div>
   );
 };
+
+function editSafeTaxYear(rootCat: CorporateRootCategory, rawYear: string): string | undefined {
+  const clean = (rawYear || '').trim();
+  if (rootCat === 'Tax') return clean || String(new Date().getFullYear());
+  return clean || undefined;
+}

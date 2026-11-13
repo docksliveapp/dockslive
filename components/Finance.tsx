@@ -4,7 +4,7 @@ import {
   Search, Filter, Download, CreditCard, Banknote, Briefcase, X, Save, Calendar, Camera,
   BookOpen, ChevronDown, ChevronUp, CheckCircle2, User, Layers, RefreshCw, AlertCircle, ArrowRight,
   Eye, Loader2, Share2, Upload, Zap, Trash2, Building, Truck, Clock, ShieldCheck, ArrowLeft,
-  ArrowLeftRight, FileSpreadsheet, UserPlus, FileCheck, Paperclip, Mail
+  ArrowLeftRight, FileSpreadsheet, UserPlus, FileCheck, Paperclip, Mail, MapPin
 } from 'lucide-react';
 import Logo from './Logo';
 import { LegalDocumentHeader, LegalDocumentFooter } from './LegalDocumentHeader';
@@ -63,6 +63,7 @@ import { getStandardChargesForCategory } from '../services/customsComplianceServ
 import { getCategoryArrangements, getArrangementCharges } from '../services/categoryTariffService';
 import { useActiveCompany, getActiveCompanyPrefix } from '../services/companyService';
 import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
+import { FranchiseManagement } from './FranchiseManagement';
 
 const INITIAL_FINANCE_DATA: FinanceEntry[] = [];
 
@@ -1794,6 +1795,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     { id: 'transporter_ledger', label: 'Transporter / Broker', icon: Truck },
     { id: 'staff_ledger', label: 'Staff Ledger', icon: User, count: salaryStaffList.length },
     { id: 'vendor_ledger', label: 'Vendors & Utilities', icon: Building, count: vendors.length },
+    { id: 'franchises', label: 'Franchises', icon: MapPin },
     { id: 'recurring', label: 'Monthly Fixed & Recurring', icon: RefreshCw, count: recurringTemplates.filter(t => t.isActive).length },
     { id: 'income_tax', label: 'Income Tax & FBR', icon: FileCheck }
   ];
@@ -6972,6 +6974,14 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 </div>
               </div>
             </div>
+          </div>
+        );
+      }
+
+      case 'franchises': {
+        return (
+          <div className="p-4 sm:p-6">
+            <FranchiseManagement />
           </div>
         );
       }

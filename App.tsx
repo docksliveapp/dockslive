@@ -736,6 +736,8 @@ const App: React.FC = () => {
           currentRole === UserRole.ADMIN ||
           currentRoles.includes(UserRole.DOCUMENTATION_MANAGER) ||
           currentRole === UserRole.DOCUMENTATION_MANAGER ||
+          currentRoles.includes(UserRole.FINANCE_MANAGER) ||
+          currentRole === UserRole.FINANCE_MANAGER ||
           currentRoles.includes(UserRole.VEHICLE_MANAGER) ||
           currentRole === UserRole.VEHICLE_MANAGER;
         if (!canAccessCompanyDocs) {
@@ -744,12 +746,19 @@ const App: React.FC = () => {
               <ShieldAlert className="w-12 h-12 text-amber-400 mx-auto mb-3" />
               <h3 className="text-lg font-bold text-white mb-1">Access Restricted</h3>
               <p className="text-xs text-gray-400 leading-relaxed">
-                Company Documents management and uploads are restricted to Documentation Managers and Administrators.
+                Corporate Documents and Franchise Management are restricted to authorized Managers and Administrators.
               </p>
             </div>
           );
         }
-        return <CompanyDocuments />;
+        return (
+          <CompanyDocuments
+            onNavigateToFinance={(tabId) => {
+              setNavigationFilter(tabId ? { tab: tabId } : null);
+              setActiveView('finance');
+            }}
+          />
+        );
       }
       case 'cases':
         return (

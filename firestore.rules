@@ -265,6 +265,18 @@ service cloud.firestore {
       allow delete: if isValidDocId(staffId);
     }
 
+    // Registered Destination Franchises & Real-Time Franchise Port Ledgers
+    match /franchises/{franchiseId} {
+      allow read: if true;
+      allow create, update: if isValidDocId(franchiseId) && isValidPayload();
+      allow delete: if isValidDocId(franchiseId);
+    }
+    match /franchise_ledger_entries/{entryId} {
+      allow read: if true;
+      allow create, update: if isValidDocId(entryId) && isValidPayload();
+      allow delete: if isValidDocId(entryId);
+    }
+
     // Admin Authorizations
     match /admins/{adminId} {
       allow read: if true;

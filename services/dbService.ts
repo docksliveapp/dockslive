@@ -20,7 +20,8 @@ import {
   getActiveDbUserSession,
   clearActiveDbUserSession
 } from './firebase';
-import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, CompanyExplorerFolder, CorporateLegalCase, CorporateVaultCredential, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver, SalaryStaffMember } from '../types';
+import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, CompanyExplorerFolder, CorporateLegalCase, CorporateVaultCredential, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver, SalaryStaffMember, FranchiseProfile, FranchiseLedgerEntry } from '../types';
+import { doesDestinationMatchFranchise } from './corporateFilingArchitecture';
 import { saveVendor } from './vendorService';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
@@ -543,6 +544,7 @@ export async function saveCaseToFirestore(newCase: Case): Promise<void> {
     const savedCaseObj = { ...newCase, id: docId };
     dispatchCaseLifecycleNotifications(savedCaseObj, null, true);
     recordVehicleTripFromCase(savedCaseObj).catch(() => {});
+    syncFranchiseContainerCharges({ cases: [savedCaseObj] }).catch(() => {});
   } catch (error) {
     console.warn(`Firestore saveCase warning for ${docId}:`, error);
   }
@@ -588,6 +590,7 @@ export async function updateCaseInFirestore(caseItem: Case): Promise<void> {
     const mergedCase = prevCase ? { ...prevCase, ...caseItem } : caseItem;
     dispatchCaseLifecycleNotifications(mergedCase, prevCase, false);
     recordVehicleTripFromCase(mergedCase).catch(() => {});
+    syncFranchiseContainerCharges({ cases: [mergedCase] }).catch(() => {});
   } catch (error) {
     console.warn(`Firestore updateCase warning for ${docId}:`, error);
   }
@@ -5068,8 +5071,12 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
     { name: 'receivables', type: 'finances' },
     { name: 'recurring_templates', type: 'finances' },
     { name: 'staff_ledgers', type: 'finances' },
+    { name: 'franchises', type: 'finances' },
+    { name: 'franchise_ledger_entries', type: 'finances' },
     { name: 'company_documents', type: 'cases' },
-    { name: 'company_document_folders', type: 'cases' }
+    { name: 'company_document_folders', type: 'cases' },
+    { name: 'corporate_legal_cases', type: 'cases' },
+    { name: 'corporate_vault_credentials', type: 'cases' }
   ] as const;
 
   const wipePromises = collectionsToCheck.map(async (item) => {
@@ -5868,7 +5875,10 @@ export function subscribeToCorporateLegalCases(
       safeAppStorage.setJSON(CORPORATE_LEGAL_CASES_KEY, list);
       onData(list);
     },
-    (error) => {
+    (error: any) => {
+      if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+        handleFirestoreError(error, OperationType.LIST, path);
+      }
       console.warn(`Firestore subscription notice on ${path}:`, error);
       if (onError) onError(error);
       onData(safeAppStorage.getJSON<CorporateLegalCase[]>(CORPORATE_LEGAL_CASES_KEY, []));
@@ -5889,7 +5899,10 @@ export async function saveCorporateLegalCaseToFirestore(legalCase: CorporateLega
 
   try {
     await setDoc(doc(db, path, caseId), sanitizeForFirestore(record), { merge: true });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+      handleFirestoreError(error, OperationType.WRITE, `${path}/${caseId}`);
+    }
     console.warn(`Firestore saveCorporateLegalCase warning for ${caseId}:`, error);
   }
 
@@ -5904,7 +5917,10 @@ export async function deleteCorporateLegalCaseFromFirestore(caseId: string): Pro
   const path = 'corporate_legal_cases';
   try {
     await deleteDoc(doc(db, path, caseId));
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+      handleFirestoreError(error, OperationType.DELETE, `${path}/${caseId}`);
+    }
     console.warn(`Firestore deleteCorporateLegalCase warning for ${caseId}:`, error);
   }
   const current = safeAppStorage.getJSON<CorporateLegalCase[]>(CORPORATE_LEGAL_CASES_KEY, []);
@@ -5927,7 +5943,10 @@ export function subscribeToCorporateVaultCredentials(
       safeAppStorage.setJSON(CORPORATE_VAULT_CREDS_KEY, list);
       onData(list);
     },
-    (error) => {
+    (error: any) => {
+      if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+        handleFirestoreError(error, OperationType.LIST, path);
+      }
       console.warn(`Firestore subscription notice on ${path}:`, error);
       if (onError) onError(error);
       onData(safeAppStorage.getJSON<CorporateVaultCredential[]>(CORPORATE_VAULT_CREDS_KEY, []));
@@ -5948,7 +5967,10 @@ export async function saveCorporateVaultCredentialToFirestore(cred: CorporateVau
 
   try {
     await setDoc(doc(db, path, credId), sanitizeForFirestore(record), { merge: true });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+      handleFirestoreError(error, OperationType.WRITE, `${path}/${credId}`);
+    }
     console.warn(`Firestore saveCorporateVaultCredential warning for ${credId}:`, error);
   }
 
@@ -5963,7 +5985,10 @@ export async function deleteCorporateVaultCredentialFromFirestore(credId: string
   const path = 'corporate_vault_credentials';
   try {
     await deleteDoc(doc(db, path, credId));
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+      handleFirestoreError(error, OperationType.DELETE, `${path}/${credId}`);
+    }
     console.warn(`Firestore deleteCorporateVaultCredential warning for ${credId}:`, error);
   }
   const current = safeAppStorage.getJSON<CorporateVaultCredential[]>(CORPORATE_VAULT_CREDS_KEY, []);
@@ -6613,4 +6638,439 @@ export async function syncCompletedMonthSalaryStaffToPayables(options?: {
     isSyncingCompletedSalaries = false;
   }
 }
+
+// ============================================================================
+// FRANCHISE MANAGEMENT & REAL-TIME AUTOMATED CONTAINER DISPATCH/UNLOAD LEDGER
+// ============================================================================
+const FRANCHISES_STORAGE_KEY = 'dpl_franchises';
+const FRANCHISE_LEDGER_STORAGE_KEY = 'dpl_franchise_ledger_entries';
+
+export function subscribeToFranchises(
+  onData: (franchises: FranchiseProfile[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const path = 'franchises';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const activeCompany = getActiveCompanyId();
+      const allList: FranchiseProfile[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data() as FranchiseProfile;
+        if (d && d.businessTitle) {
+          allList.push({
+            ...d,
+            id: d.id || docSnap.id,
+            portStaff: Array.isArray(d.portStaff) ? d.portStaff : [],
+            allocatedCities: Array.isArray(d.allocatedCities) ? d.allocatedCities : [],
+            allocatedDryPorts: Array.isArray(d.allocatedDryPorts) ? d.allocatedDryPorts : []
+          });
+        }
+      });
+      allList.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      safeAppStorage.setJSON(FRANCHISES_STORAGE_KEY, allList);
+      onData(allList.filter((item) => matchesActiveCompany(item.companyId, activeCompany)));
+    },
+    (error: any) => {
+      if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+        handleFirestoreError(error, OperationType.LIST, path);
+      }
+      console.warn(`Firestore subscription notice on ${path}:`, error);
+      if (onError) onError(error);
+      const activeCompany = getActiveCompanyId();
+      const fallback = safeAppStorage.getJSON<FranchiseProfile[]>(FRANCHISES_STORAGE_KEY, []) || [];
+      onData(fallback.filter((item) => matchesActiveCompany(item.companyId, activeCompany)));
+    }
+  );
+}
+
+export async function saveFranchiseToFirestore(franchise: FranchiseProfile): Promise<FranchiseProfile> {
+  const path = 'franchises';
+  const franchiseId = franchise.id || `fr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const activeCompany = getActiveCompanyId();
+
+  const docSlots: Array<{ url?: string; name?: string; slotKey: string }> = [
+    { url: franchise.idCardDocUrl, name: franchise.idCardDocName, slotKey: 'idcard' },
+    { url: franchise.ntnCertificateUrl, name: franchise.ntnCertificateName, slotKey: 'ntn' },
+    { url: franchise.franchiseAgreementUrl, name: franchise.franchiseAgreementName, slotKey: 'agreement' }
+  ];
+
+  for (const slot of docSlots) {
+    if (slot.url && slot.url.startsWith('data:')) {
+      saveDocumentToIndexedDB({
+        key: `${franchiseId}_${slot.slotKey}`,
+        id: `${franchiseId}_${slot.slotKey}`,
+        name: slot.name || `${franchise.businessTitle}_${slot.slotKey}`,
+        type: slot.url.startsWith('data:application/pdf') ? 'application/pdf' : 'image/jpeg',
+        size: slot.url.length,
+        dataUrl: slot.url
+      }).catch(() => {});
+    }
+  }
+
+  const normalized: FranchiseProfile = {
+    ...franchise,
+    id: franchiseId,
+    companyId: franchise.companyId || activeCompany,
+    businessTitle: (franchise.businessTitle || '').trim(),
+    ownerName: (franchise.ownerName || '').trim(),
+    contactNumber: (franchise.contactNumber || '').trim(),
+    idCardNumber: (franchise.idCardNumber || '').trim(),
+    portStaff: Array.isArray(franchise.portStaff) ? franchise.portStaff : [],
+    allocatedCities: Array.isArray(franchise.allocatedCities) ? franchise.allocatedCities : [],
+    allocatedDryPorts: Array.isArray(franchise.allocatedDryPorts) ? franchise.allocatedDryPorts : [],
+    perContainerAmount: Number(franchise.perContainerAmount) || 0,
+    fixedMonthlyAmount: Number(franchise.fixedMonthlyAmount) || 0,
+    status: franchise.status || 'ACTIVE',
+    createdAt: franchise.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    const cloudReady = await offloadLargeDataUrlsToCloudChunks(normalized, `franchise_${franchiseId}`);
+    await setDoc(doc(db, path, franchiseId), sanitizeForFirestore(cloudReady), { merge: true });
+  } catch (error: any) {
+    if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+      handleFirestoreError(error, OperationType.WRITE, `${path}/${franchiseId}`);
+    }
+    console.warn(`Firestore saveFranchise warning for ${franchiseId}:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<FranchiseProfile[]>(FRANCHISES_STORAGE_KEY, []) || [];
+  const updated = [normalized, ...current.filter((f) => f.id !== franchiseId)];
+  safeAppStorage.setJSON(FRANCHISES_STORAGE_KEY, updated);
+
+  // Immediately synchronize dispatched/unloaded container charges for this franchise
+  syncFranchiseContainerCharges({ franchises: [normalized] }).catch(() => {});
+
+  return normalized;
+}
+
+export async function deleteFranchiseFromFirestore(franchiseId: string): Promise<void> {
+  const path = 'franchises';
+  try {
+    await deleteDoc(doc(db, path, franchiseId));
+  } catch (error: any) {
+    if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+      handleFirestoreError(error, OperationType.DELETE, `${path}/${franchiseId}`);
+    }
+    console.warn(`Firestore deleteFranchise warning for ${franchiseId}:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<FranchiseProfile[]>(FRANCHISES_STORAGE_KEY, []) || [];
+  safeAppStorage.setJSON(
+    FRANCHISES_STORAGE_KEY,
+    current.filter((f) => f.id !== franchiseId)
+  );
+}
+
+export function subscribeToFranchiseLedgerEntries(
+  onData: (entries: FranchiseLedgerEntry[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const path = 'franchise_ledger_entries';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const activeCompany = getActiveCompanyId();
+      const allEntries: FranchiseLedgerEntry[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data() as FranchiseLedgerEntry;
+        if (d && d.franchiseId) {
+          allEntries.push({ ...d, id: d.id || docSnap.id });
+        }
+      });
+      allEntries.sort((a, b) => new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime());
+      safeAppStorage.setJSON(FRANCHISE_LEDGER_STORAGE_KEY, allEntries);
+      onData(allEntries.filter((e) => matchesActiveCompany(e.companyId, activeCompany)));
+    },
+    (error: any) => {
+      if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+        handleFirestoreError(error, OperationType.LIST, path);
+      }
+      console.warn(`Firestore subscription notice on ${path}:`, error);
+      if (onError) onError(error);
+      const activeCompany = getActiveCompanyId();
+      const fallback = safeAppStorage.getJSON<FranchiseLedgerEntry[]>(FRANCHISE_LEDGER_STORAGE_KEY, []) || [];
+      onData(fallback.filter((e) => matchesActiveCompany(e.companyId, activeCompany)));
+    }
+  );
+}
+
+export async function saveFranchiseLedgerEntryToFirestore(
+  entry: FranchiseLedgerEntry
+): Promise<FranchiseLedgerEntry> {
+  const path = 'franchise_ledger_entries';
+  const entryId = entry.id || `frled_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const activeCompany = getActiveCompanyId();
+  const normalized: FranchiseLedgerEntry = {
+    ...entry,
+    id: entryId,
+    companyId: entry.companyId || activeCompany,
+    amount: Number(entry.amount) || 0,
+    date: entry.date || new Date().toISOString().split('T')[0],
+    createdAt: entry.createdAt || new Date().toISOString()
+  };
+
+  try {
+    await setDoc(doc(db, path, entryId), sanitizeForFirestore(normalized), { merge: true });
+  } catch (error: any) {
+    if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+      handleFirestoreError(error, OperationType.WRITE, `${path}/${entryId}`);
+    }
+    console.warn(`Firestore saveFranchiseLedgerEntry warning for ${entryId}:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<FranchiseLedgerEntry[]>(FRANCHISE_LEDGER_STORAGE_KEY, []) || [];
+  const updated = [normalized, ...current.filter((e) => e.id !== entryId)];
+  safeAppStorage.setJSON(FRANCHISE_LEDGER_STORAGE_KEY, updated);
+
+  return normalized;
+}
+
+export async function deleteFranchiseLedgerEntryFromFirestore(entryId: string): Promise<void> {
+  const path = 'franchise_ledger_entries';
+  try {
+    await deleteDoc(doc(db, path, entryId));
+  } catch (error: any) {
+    if (error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions')) {
+      handleFirestoreError(error, OperationType.DELETE, `${path}/${entryId}`);
+    }
+    console.warn(`Firestore deleteFranchiseLedgerEntry warning for ${entryId}:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<FranchiseLedgerEntry[]>(FRANCHISE_LEDGER_STORAGE_KEY, []) || [];
+  safeAppStorage.setJSON(
+    FRANCHISE_LEDGER_STORAGE_KEY,
+    current.filter((e) => e.id !== entryId)
+  );
+}
+
+function isCaseDispatchedOrUnloadedForFranchise(c: Case): boolean {
+  const statusStr = String(c.status || '').trim();
+  if (
+    statusStr.toUpperCase() === 'CANCELLED' ||
+    statusStr.toUpperCase() === 'REJECTED' ||
+    c.approvalStatus === 'REJECTED'
+  ) {
+    return false;
+  }
+
+  if (hasCaseCompletedLoadingGateOut(c) || hasCaseArrivedAtDestination(c)) {
+    return true;
+  }
+
+  const dispatchedStages = new Set([
+    'Loading Port Processing',
+    'In Transit',
+    'Destination Port Arrival',
+    'Case Completed'
+  ]);
+  if (dispatchedStages.has(statusStr)) {
+    return true;
+  }
+
+  const destStep =
+    c.workflowDetails?.['Destination Port Arrival'] ||
+    c.workflowDetails?.['DESTINATION_PORT_ARRIVAL'];
+  if (destStep?.containerUnloadedToggled || destStep?.destinationGateInToggled) {
+    return true;
+  }
+
+  if (
+    Array.isArray(c.containers) &&
+    c.containers.some(
+      (cn) => cn.status === 'Loaded' || cn.status === 'In Transit' || cn.status === 'Delivered'
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Automated Real-Time Franchise Container Ledger Integration:
+ * Whenever a container/case is dispatched or unloaded to a designated destination or dry port,
+ * calculates (containerCount × perContainerAmount) and debits the matching franchise's ledger
+ * using a deterministic ID so updates stay idempotent and never double-bill.
+ */
+export async function syncFranchiseContainerCharges(options?: {
+  cases?: Case[];
+  franchises?: FranchiseProfile[];
+}): Promise<number> {
+  try {
+    const activeCompany = getActiveCompanyId();
+
+    let franchisesPool: FranchiseProfile[] = options?.franchises || [];
+    if (franchisesPool.length === 0) {
+      franchisesPool = safeAppStorage.getJSON<FranchiseProfile[]>(FRANCHISES_STORAGE_KEY, []) || [];
+      if (franchisesPool.length === 0 && db) {
+        const fSnap = await getDocs(collection(db, 'franchises')).catch(() => null);
+        if (fSnap) {
+          fSnap.forEach((ds) => {
+            const d = ds.data() as FranchiseProfile;
+            if (d && d.businessTitle) franchisesPool.push({ ...d, id: d.id || ds.id });
+          });
+        }
+      }
+    }
+
+    const activePerContainerFranchises = franchisesPool.filter(
+      (f) =>
+        f &&
+        f.status === 'ACTIVE' &&
+        f.billingType === 'PER_CONTAINER' &&
+        Number(f.perContainerAmount) > 0 &&
+        matchesActiveCompany(f.companyId, activeCompany)
+    );
+
+    if (activePerContainerFranchises.length === 0) return 0;
+
+    let casesPool: Case[] = options?.cases || [];
+    if (casesPool.length === 0) {
+      casesPool = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []) || [];
+      if (casesPool.length === 0 && db) {
+        const cSnap = await getDocs(collection(db, 'cases')).catch(() => null);
+        if (cSnap) {
+          cSnap.forEach((ds) => {
+            casesPool.push({ ...(ds.data() as Case), id: ds.id });
+          });
+        }
+      }
+    }
+
+    const existingEntries =
+      safeAppStorage.getJSON<FranchiseLedgerEntry[]>(FRANCHISE_LEDGER_STORAGE_KEY, []) || [];
+    const existingById = new Map<string, FranchiseLedgerEntry>();
+    for (const e of existingEntries) {
+      if (e?.id) existingById.set(e.id, e);
+    }
+
+    let syncedCount = 0;
+
+    for (const c of casesPool) {
+      if (!matchesActiveCompany((c as any).companyId, activeCompany)) continue;
+      if (!isCaseDispatchedOrUnloadedForFranchise(c)) continue;
+
+      const podRaw = (
+        c.pod ||
+        c.extractedData?.pod ||
+        c.extractedData?.placeOfDelivery ||
+        c.workflowDetails?.['Destination Port Arrival']?.destinationPortName ||
+        c.extractedData?.dropoffDestination ||
+        ''
+      ).trim();
+
+      if (!podRaw) continue;
+
+      const caseNo = (c.caseNo || c.caseNumber || c.id || '').trim();
+      if (!caseNo) continue;
+
+      const containerList = Array.isArray(c.containers) && c.containers.length > 0 ? c.containers : [];
+      const containerCount = Math.max(1, containerList.length);
+      const containerNumbers =
+        containerList
+          .map((cn) => cn.number)
+          .filter(Boolean)
+          .join(', ') ||
+        c.containerNumber ||
+        c.extractedData?.containerNo ||
+        'Assigned Container';
+
+      const dispatchDate = (
+        c.destinationUnloadAndGateOutTime ||
+        c.destinationPortArrivalTime ||
+        c.loadingPortGateOutTime ||
+        c.registrationDate ||
+        c.createdAt ||
+        new Date().toISOString()
+      ).slice(0, 10);
+
+      for (const franchise of activePerContainerFranchises) {
+        if (!doesDestinationMatchFranchise(podRaw, franchise)) continue;
+
+        const rate = Number(franchise.perContainerAmount) || 0;
+        const totalDebit = containerCount * rate;
+        const safeFranchiseId = franchise.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const safeCaseKey = caseNo.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const deterministicEntryId = `frled_${safeFranchiseId}_${safeCaseKey}`;
+
+        const prevEntry = existingById.get(deterministicEntryId);
+        if (
+          prevEntry &&
+          Number(prevEntry.amount) === totalDebit &&
+          Number(prevEntry.containerCount) === containerCount &&
+          prevEntry.pod === podRaw
+        ) {
+          continue;
+        }
+
+        const debitEntry: FranchiseLedgerEntry = {
+          id: deterministicEntryId,
+          companyId: franchise.companyId || activeCompany,
+          franchiseId: franchise.id,
+          franchiseName: franchise.businessTitle,
+          date: dispatchDate,
+          type: 'DEBIT',
+          amount: totalDebit,
+          description: `Auto-Debit on Container Dispatch/Unloading: ${containerCount} Container(s) [${containerNumbers}] × PKR ${rate.toLocaleString()}/container — Case #${caseNo} (${podRaw})`,
+          reference: `AUTO-CNTR-${caseNo}`,
+          caseId: c.id,
+          caseNo,
+          pod: podRaw,
+          containerCount,
+          containerNumbers,
+          ratePerContainer: rate,
+          autoGenerated: true,
+          createdAt: prevEntry?.createdAt || new Date().toISOString()
+        };
+
+        await saveFranchiseLedgerEntryToFirestore(debitEntry);
+        syncedCount++;
+      }
+    }
+
+    return syncedCount;
+  } catch (err) {
+    console.warn('syncFranchiseContainerCharges notice:', err);
+    return 0;
+  }
+}
+
+export async function postMonthlyFixedFranchiseCharge(
+  franchise: FranchiseProfile,
+  yearMonth?: string
+): Promise<FranchiseLedgerEntry | null> {
+  if (!franchise || franchise.billingType !== 'FIXED_MONTHLY') return null;
+  const amount = Number(franchise.fixedMonthlyAmount) || 0;
+  if (amount <= 0) return null;
+
+  const now = new Date();
+  const ym =
+    yearMonth || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const safeFranchiseId = franchise.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const deterministicId = `frled_fixed_${safeFranchiseId}_${ym}`;
+
+  const entry: FranchiseLedgerEntry = {
+    id: deterministicId,
+    companyId: franchise.companyId || getActiveCompanyId(),
+    franchiseId: franchise.id,
+    franchiseName: franchise.businessTitle,
+    date: `${ym}-01`,
+    type: 'DEBIT',
+    amount,
+    description: `Fixed Monthly Franchise Allocation Charge (${ym}) — ${
+      franchise.allocationMode === 'CITY'
+        ? `City Coverage: ${(franchise.allocatedCities || []).join(', ')}`
+        : `Dry Ports: ${(franchise.allocatedDryPorts || []).join(', ')}`
+    }`,
+    reference: `FIXED-${ym}`,
+    autoGenerated: true,
+    createdAt: new Date().toISOString()
+  };
+
+  return saveFranchiseLedgerEntryToFirestore(entry);
+}
+
 

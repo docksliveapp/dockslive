@@ -19,6 +19,7 @@ import {
   setDoc, 
   getDocs, 
   getDoc, 
+  getDocFromServer,
   updateDoc, 
   deleteDoc, 
   query, 
@@ -109,7 +110,7 @@ export async function testFirestoreConnection(): Promise<boolean> {
   }
 
   try {
-    const checkPromise = getDoc(doc(db, 'test', 'connection'));
+    const checkPromise = getDocFromServer(doc(db, 'test', 'connection'));
     const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
     const snap = await Promise.race([checkPromise, timeoutPromise]);
     if (snap && 'metadata' in snap) {
@@ -117,6 +118,9 @@ export async function testFirestoreConnection(): Promise<boolean> {
     }
     return false;
   } catch (error: any) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error('Please check your Firebase configuration.');
+    }
     return false;
   }
 }
