@@ -178,34 +178,47 @@
     },
     "CompanyDocument": {
       "title": "CompanyDocument",
-      "description": "Archived corporate filing, legal case exhibit, tax return, asset record, compliance document, or quotation with smart alarm metadata",
+      "description": "Explorer document file (PDF or image) stored at root or inside nested folders with 7 core document metadata attributes and automated expiry/hearing alarms",
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Unique document identifier", "maxLength": 160 },
         "title": { "type": "string", "description": "Document title", "maxLength": 240 },
-        "rootCategory": { "type": "string", "description": "Primary root category (Legal, Tax, Assets, Company Documents, Quotations)", "enum": ["Legal", "Tax", "Assets", "Company Documents", "Quotations"] },
-        "category": { "type": "string", "description": "Legacy or display classification category", "maxLength": 120 },
-        "subFolder": { "type": "string", "description": "Sub-folder inside Legal Case, Tax Authority, Asset Group, or Master Repository", "maxLength": 160 },
-        "legalCaseId": { "type": "string", "description": "Parent Legal Case dossier ID", "maxLength": 160 },
-        "legalCaseTitle": { "type": "string", "description": "Parent Legal Case identifier or title", "maxLength": 200 },
-        "taxAuthority": { "type": "string", "description": "Regulatory tax authority (FBR, SRB, Labour Department)", "maxLength": 60 },
-        "taxYear": { "type": "string", "description": "Applicable fiscal or tax report year", "maxLength": 20 },
-        "assetGroup": { "type": "string", "description": "Asset catalog sub-group", "maxLength": 100 },
-        "senderIssuer": { "type": "string", "description": "Issuing authority, court, bank, or sender", "maxLength": 180 },
-        "recipientEntity": { "type": "string", "description": "Receiving MAK Group entity (Docks, Truckit, Muhib, Vantage, MAK Group)", "maxLength": 80 },
-        "issuanceDate": { "type": "string", "description": "Document issuance date (YYYY-MM-DD)", "maxLength": 30 },
-        "validityStartDate": { "type": "string", "description": "Validity start date (YYYY-MM-DD)", "maxLength": 30 },
+        "isExplorerDocument": { "type": "boolean", "description": "Marks document as part of the Windows Explorer hierarchy" },
+        "parentFolderId": { "type": "string", "description": "Parent folder ID, or empty/null when placed at Root", "maxLength": 160 },
+        "folderPath": { "type": "string", "description": "Human-readable breadcrumb path of parent folders", "maxLength": 500 },
+        "createdByAuthor": { "type": "string", "description": "Person, officer, or entity who created/prepared the document", "maxLength": 200 },
+        "sourceOrigin": { "type": "string", "description": "Authority, office, or party from where the document originated", "maxLength": 200 },
+        "creationDate": { "type": "string", "description": "Date when the document was created (YYYY-MM-DD)", "maxLength": 30 },
+        "hasExpiryDate": { "type": "boolean", "description": "Whether the document has an expiration/validity end date" },
+        "expiryDate": { "type": "string", "description": "Document expiration date (YYYY-MM-DD)", "maxLength": 30 },
+        "hasHearingDate": { "type": "boolean", "description": "Whether the document has a scheduled hearing date" },
+        "hearingDate": { "type": "string", "description": "Scheduled hearing date (YYYY-MM-DD)", "maxLength": 30 },
+        "issuedTo": { "type": "string", "description": "Person(s) or entity to whom the document was issued or in whose name it stands", "maxLength": 240 },
+        "category": { "type": "string", "description": "Folder classification label", "maxLength": 200 },
+        "senderIssuer": { "type": "string", "description": "Source or issuing authority", "maxLength": 200 },
+        "recipientEntity": { "type": "string", "description": "Issued-to person or entity", "maxLength": 240 },
+        "issuanceDate": { "type": "string", "description": "Document creation/issuance date (YYYY-MM-DD)", "maxLength": 30 },
         "validityEndDate": { "type": "string", "description": "Expiry or validity end date (YYYY-MM-DD)", "maxLength": 30 },
         "alarmDaysBefore": { "type": "number", "description": "Lead days before expiry/hearing to trigger alarm" },
-        "hearingDate": { "type": "string", "description": "Scheduled court hearing or action date (YYYY-MM-DD)", "maxLength": 30 },
-        "statusTag": { "type": "string", "description": "Lifecycle status tag", "enum": ["Active", "Expired", "Pending Hearing", "Resolved", "Archived"] },
-        "quotationClientName": { "type": "string", "description": "Client name for commercial quotation", "maxLength": 160 },
-        "quotationServiceType": { "type": "string", "description": "Quoted logistics/clearance service type", "maxLength": 100 },
-        "quotationStatus": { "type": "string", "description": "Quotation outcome status", "enum": ["Pending", "Accepted", "Rejected"] },
         "fileUrl": { "type": "string", "description": "URL or chunk storage link", "maxLength": 150000 },
         "uploadedAt": { "type": "string", "description": "Upload timestamp", "maxLength": 50 }
       },
-      "required": ["title", "category"]
+      "required": ["title"]
+    },
+    "CompanyDocumentFolder": {
+      "title": "CompanyDocumentFolder",
+      "description": "Recursive Windows Explorer-style folder in Company Documents supporting unlimited nested sub-folders",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique folder identifier", "maxLength": 160 },
+        "companyId": { "type": "string", "description": "Workspace company identifier", "maxLength": 60 },
+        "title": { "type": "string", "description": "Folder display title", "maxLength": 240 },
+        "parentFolderId": { "type": "string", "description": "Parent folder ID when nested, or empty/null at Root", "maxLength": 160 },
+        "createdAt": { "type": "string", "description": "ISO timestamp when folder was created", "maxLength": 50 },
+        "updatedAt": { "type": "string", "description": "ISO timestamp when folder was updated", "maxLength": 50 },
+        "createdBy": { "type": "string", "description": "User who created the folder", "maxLength": 150 }
+      },
+      "required": ["id", "title", "createdAt"]
     },
     "CorporateLegalCase": {
       "title": "CorporateLegalCase",
@@ -433,7 +446,11 @@
     },
     "/company_documents/{docId}": {
       "schema": "CompanyDocument",
-      "description": "Official corporate filings, legal exhibits, tax returns, assets, and quotations"
+      "description": "Explorer document files (PDF and images) stored at Root or inside nested folders"
+    },
+    "/company_document_folders/{folderId}": {
+      "schema": "CompanyDocumentFolder",
+      "description": "Recursive Windows Explorer-style folders supporting unlimited nested sub-folders"
     },
     "/corporate_legal_cases/{legalCaseId}": {
       "schema": "CorporateLegalCase",

@@ -20,7 +20,7 @@ import {
   getActiveDbUserSession,
   clearActiveDbUserSession
 } from './firebase';
-import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, CorporateLegalCase, CorporateVaultCredential, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver, SalaryStaffMember } from '../types';
+import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, CompanyExplorerFolder, CorporateLegalCase, CorporateVaultCredential, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver, SalaryStaffMember } from '../types';
 import { saveVendor } from './vendorService';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
@@ -4872,6 +4872,7 @@ export async function wipeCompleteDatabase(): Promise<{
     'staff_private_ledgers',
     'destination_staff',
     'company_documents',
+    'company_document_folders',
     'personal_ledger_accounts',
     'personal_ledger_entries',
     'work_drafts'
@@ -4968,7 +4969,7 @@ export async function wipeCompleteDatabase(): Promise<{
     'dpl_reg_draft_active', 'dpl_reg_step', 'dpl_reg_caseno', 'dpl_reg_formdata', 
     'dpl_reg_docs', 'dpl_reg_updated_at', 'dpl_reg_view', 'dpl_vehicles_data', 'dpl_registered_clients',
     'dpl_selected_case', 'dpl_selected_case_id', 'dpl_finance_active_tab', 'dpl_dashboard_timeframe',
-    'dpl_ports', 'dpl_company_docs', 'dpl_company_documents', 'dpl_last_cloud_backup_time'
+    'dpl_ports', 'dpl_company_docs', 'dpl_company_documents', 'dpl_company_explorer_folders', 'dpl_last_cloud_backup_time'
   ];
 
   explicitKeys.forEach((k) => {
@@ -5067,7 +5068,8 @@ export async function wipeCompanyDatabase(companyId: CompanyId): Promise<{
     { name: 'receivables', type: 'finances' },
     { name: 'recurring_templates', type: 'finances' },
     { name: 'staff_ledgers', type: 'finances' },
-    { name: 'company_documents', type: 'cases' }
+    { name: 'company_documents', type: 'cases' },
+    { name: 'company_document_folders', type: 'cases' }
   ] as const;
 
   const wipePromises = collectionsToCheck.map(async (item) => {
@@ -5665,10 +5667,18 @@ export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocume
       typeof documentItem.alarmDaysBefore === 'number' && documentItem.alarmDaysBefore > 0
         ? documentItem.alarmDaysBefore
         : 15;
-    const effectiveExpiry = documentItem.validityEndDate || documentItem.expiryDate;
+    const effectiveExpiry = documentItem.expiryDate || documentItem.validityEndDate;
+    const hasExpiry =
+      documentItem.hasExpiryDate !== undefined
+        ? documentItem.hasExpiryDate
+        : !documentItem.unlimitedValidity;
     const isClosedDoc = documentItem.statusTag === 'Resolved' || documentItem.statusTag === 'Archived';
+    const folderLabel = documentItem.folderPath || documentItem.category || 'Company Documents';
+    const authorLabel = documentItem.createdByAuthor || 'N/A';
+    const sourceLabel = documentItem.sourceOrigin || documentItem.senderIssuer || documentItem.from || 'N/A';
+    const issuedToLabel = documentItem.issuedTo || documentItem.recipientEntity || documentItem.to || 'N/A';
 
-    if (!documentItem.unlimitedValidity && effectiveExpiry && !isClosedDoc) {
+    if (hasExpiry && effectiveExpiry && !isClosedDoc) {
       const todayTime = new Date(new Date().toISOString().split('T')[0]).getTime();
       const expTime = new Date(effectiveExpiry).getTime();
       if (!isNaN(expTime)) {
@@ -5682,14 +5692,14 @@ export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocume
                 : `Expiry Alarm (${diffDays}d left): ${documentItem.title}`,
             description:
               diffDays <= 0
-                ? `"${documentItem.title}" (${documentItem.recipientEntity || documentItem.to || 'MAK Group'}) expired on ${effectiveExpiry}.`
-                : `"${documentItem.title}" (${documentItem.rootCategory || documentItem.category || 'Corporate Archive'}) expires in ${diffDays} day(s) on ${effectiveExpiry}.`,
-            details: `Document: ${documentItem.title}\nRoot Category: ${documentItem.rootCategory || documentItem.category || 'Company Documents'}\nFolder: ${documentItem.subFolder || documentItem.taxAuthority || documentItem.assetGroup || 'General'}\nSender / Issuer: ${documentItem.senderIssuer || documentItem.from || 'N/A'}\nRecipient Entity: ${documentItem.recipientEntity || documentItem.to || 'MAK Group'}\nExpiry Date: ${effectiveExpiry}`,
+                ? `"${documentItem.title}" (Issued To: ${issuedToLabel}) expired on ${effectiveExpiry}.`
+                : `"${documentItem.title}" (${folderLabel}) expires in ${diffDays} day(s) on ${effectiveExpiry}.`,
+            details: `Document Title: ${documentItem.title}\nFolder Path: ${folderLabel}\nCreated By: ${authorLabel}\nSource / Origin: ${sourceLabel}\nIssued To: ${issuedToLabel}\nExpiry Date: ${effectiveExpiry}`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             type: 'ALERT',
             notificationSubType: 'DOC_EXPIRY_ALERT',
             status: 'PENDING',
-            actionLabel: 'Open Corporate Archive',
+            actionLabel: 'Open Company Documents',
             priority: 'HIGH',
             targetRole: 'ADMIN,DOCUMENTATION_MANAGER',
             category: 'GENERAL',
@@ -5699,8 +5709,12 @@ export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocume
       }
     }
 
-    // 2. Legal Hearing / Regulatory Action Date Countdown Alarm
-    if (documentItem.hearingDate && !isClosedDoc) {
+    // 2. Scheduled Hearing Date Countdown Alarm
+    const hasHearing =
+      documentItem.hasHearingDate !== undefined
+        ? documentItem.hasHearingDate
+        : Boolean(documentItem.hearingDate);
+    if (hasHearing && documentItem.hearingDate && !isClosedDoc) {
       const todayTime = new Date(new Date().toISOString().split('T')[0]).getTime();
       const hearTime = new Date(documentItem.hearingDate).getTime();
       if (!isNaN(hearTime)) {
@@ -5710,17 +5724,17 @@ export async function saveCompanyDocumentToFirestore(documentItem: CompanyDocume
             id: Date.now() + Math.floor(Math.random() * 1000) + 17,
             title:
               hearDiffDays < 0
-                ? `Hearing Action Overdue (${Math.abs(hearDiffDays)}d): ${documentItem.title}`
+                ? `Hearing Overdue (${Math.abs(hearDiffDays)}d): ${documentItem.title}`
                 : hearDiffDays === 0
-                  ? `Hearing / Action TODAY: ${documentItem.title}`
+                  ? `Hearing Scheduled TODAY: ${documentItem.title}`
                   : `Upcoming Hearing in ${hearDiffDays}d: ${documentItem.title}`,
-            description: `Scheduled Hearing / Action on ${documentItem.hearingDate}${documentItem.hearingTime ? ` at ${documentItem.hearingTime}` : ''} for ${documentItem.legalCaseTitle || documentItem.title} (${documentItem.senderIssuer || documentItem.from || 'Court / Authority'}).`,
-            details: `Case / Document: ${documentItem.legalCaseTitle || documentItem.title}\nSub-Folder: ${documentItem.subFolder || 'Legal Proceedings'}\nIssuer / Forum: ${documentItem.senderIssuer || documentItem.from || 'N/A'}\nEntity: ${documentItem.recipientEntity || documentItem.to || 'MAK Group'}\nHearing Date: ${documentItem.hearingDate}${documentItem.hearingTime ? ` @ ${documentItem.hearingTime}` : ''}${documentItem.hearingNotes ? `\nNotes: ${documentItem.hearingNotes}` : ''}`,
+            description: `Scheduled Hearing on ${documentItem.hearingDate} for "${documentItem.title}" (Source: ${sourceLabel}).`,
+            details: `Document Title: ${documentItem.title}\nFolder Path: ${folderLabel}\nCreated By: ${authorLabel}\nSource / Origin: ${sourceLabel}\nIssued To: ${issuedToLabel}\nHearing Date: ${documentItem.hearingDate}`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             type: 'ACTION',
             notificationSubType: 'LEGAL_HEARING_ALERT',
             status: 'PENDING',
-            actionLabel: 'Review Case Dossier',
+            actionLabel: 'Open Company Documents',
             priority: 'HIGH',
             targetRole: 'ADMIN,DOCUMENTATION_MANAGER',
             category: 'GENERAL',
@@ -5754,6 +5768,82 @@ export async function deleteCompanyDocumentFromFirestore(docId: string): Promise
 
   const current = safeAppStorage.getJSON<CompanyDocument[]>(COMPANY_DOCS_KEY, []);
   safeAppStorage.setJSON(COMPANY_DOCS_KEY, current.filter(d => d.id !== docId));
+}
+
+// =========================================================
+// RECURSIVE WINDOWS EXPLORER FOLDERS FOR COMPANY DOCUMENTS
+// =========================================================
+const COMPANY_EXPLORER_FOLDERS_KEY = 'dpl_company_explorer_folders';
+
+export function subscribeToCompanyExplorerFolders(
+  onData: (folders: CompanyExplorerFolder[]) => void,
+  onError?: (err: any) => void
+) {
+  const path = 'company_document_folders';
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => {
+      const foldersList: CompanyExplorerFolder[] = [];
+      snapshot.forEach((docSnap) => {
+        const raw = docSnap.data() as CompanyExplorerFolder;
+        foldersList.push({
+          ...raw,
+          id: docSnap.id,
+          parentFolderId: raw.parentFolderId || null
+        });
+      });
+      foldersList.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
+      safeAppStorage.setJSON(COMPANY_EXPLORER_FOLDERS_KEY, foldersList);
+      onData(foldersList);
+    },
+    (error) => {
+      console.warn(`Firestore subscription notice on ${path}:`, error);
+      if (onError) onError(error);
+      const fallback = safeAppStorage.getJSON<CompanyExplorerFolder[]>(COMPANY_EXPLORER_FOLDERS_KEY, []);
+      onData(fallback);
+    }
+  );
+}
+
+export async function saveCompanyExplorerFolderToFirestore(folderItem: CompanyExplorerFolder): Promise<void> {
+  const path = 'company_document_folders';
+  const folderId = folderItem.id || `cfolder_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const activeCompany = getActiveCompanyId();
+  const record: CompanyExplorerFolder = {
+    ...folderItem,
+    id: folderId,
+    companyId: folderItem.companyId || activeCompany,
+    parentFolderId: folderItem.parentFolderId || null,
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    await setDoc(doc(db, path, folderId), sanitizeForFirestore(record), { merge: true });
+  } catch (error) {
+    console.warn(`Firestore saveCompanyExplorerFolder warning for ${folderId}:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<CompanyExplorerFolder[]>(COMPANY_EXPLORER_FOLDERS_KEY, []);
+  const idx = current.findIndex((f) => f.id === folderId);
+  if (idx >= 0) current[idx] = record;
+  else current.push(record);
+  current.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
+  safeAppStorage.setJSON(COMPANY_EXPLORER_FOLDERS_KEY, current);
+}
+
+export async function deleteCompanyExplorerFolderFromFirestore(folderId: string): Promise<void> {
+  const path = 'company_document_folders';
+  try {
+    await deleteDoc(doc(db, path, folderId));
+  } catch (error) {
+    console.warn(`Firestore deleteCompanyExplorerFolder warning for ${folderId}:`, error);
+  }
+
+  const current = safeAppStorage.getJSON<CompanyExplorerFolder[]>(COMPANY_EXPLORER_FOLDERS_KEY, []);
+  safeAppStorage.setJSON(
+    COMPANY_EXPLORER_FOLDERS_KEY,
+    current.filter((f) => f.id !== folderId)
+  );
 }
 
 // =========================================================

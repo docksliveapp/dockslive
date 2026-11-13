@@ -165,11 +165,17 @@ service cloud.firestore {
       allow delete: if isValidDocId(brandingId);
     }
 
-    // Company Official Documents Archive
+    // Company Official Documents Archive & Recursive Explorer Folders
     match /company_documents/{docId} {
       allow read: if true;
       allow create, update: if isValidDocId(docId) && isValidPayload();
       allow delete: if isValidDocId(docId);
+    }
+
+    match /company_document_folders/{folderId} {
+      allow read: if true;
+      allow create, update: if isValidDocId(folderId) && isValidPayload();
+      allow delete: if isValidDocId(folderId);
     }
 
     // Dynamic Corporate Legal Case Dossiers

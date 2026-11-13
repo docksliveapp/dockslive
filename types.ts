@@ -453,33 +453,50 @@ export interface CorporateVaultCredential {
   createdBy?: string;
 }
 
+export interface CompanyExplorerFolder {
+  id: string;
+  companyId?: string;
+  title: string;
+  parentFolderId: string | null; // null = Root (Main Page)
+  createdAt: string;
+  updatedAt?: string;
+  createdBy?: string;
+}
+
 export interface CompanyDocument {
   id: string;
   companyId?: string;
   title: string;
-  // Multi-tier hierarchy coordinates
+  // Windows Explorer Recursive Hierarchy Coordinates
+  isExplorerDocument?: boolean;
+  parentFolderId?: string | null; // null = Root (Main Page)
+  folderPath?: string; // e.g. "Company Documents / Legal / High Court"
+  // 7 Core Document Metadata Fields
+  createdByAuthor?: string; // 2. Who created/prepared this document
+  sourceOrigin?: string; // 3. Where did this document come from
+  creationDate?: string; // 4. On what date was this document created (YYYY-MM-DD)
+  hasExpiryDate?: boolean; // 5. Whether this document expires on a specific date
+  hasHearingDate?: boolean; // 6. Whether there is a scheduled hearing according to this document
+  issuedTo?: string; // 7. To whom was this document given / in whose name it is issued
+  // Multi-tier legacy & compatibility coordinates
   rootCategory?: CorporateRootCategory;
   category?: string;
   subcategory?: string;
   subFolder?: string;
-  // Legal hierarchy metadata
   legalCaseId?: string;
   legalCaseTitle?: string;
   legalCaseTrack?: LegalCaseTrack;
-  // Tax hierarchy metadata
   taxAuthority?: 'FBR' | 'SRB' | 'Labour Department' | string;
   taxYear?: string;
-  // Assets hierarchy metadata
   assetGroup?: 'Security Deposits Tracking' | 'Company Properties & Investments' | string;
   assetSubType?: string;
   assetValuationPkr?: number;
   assetLocationOrBank?: string;
-  // Quotations metadata
   quotationClientName?: string;
   quotationServiceType?: string;
   quotationStatus?: QuotationStatus;
   quotationAmountPkr?: number;
-  // Universal mandatory metadata & smart alarm engine
+  // Universal metadata & smart alarm engine
   senderIssuer?: string;
   recipientEntity?: CorporateRecipientEntity | string;
   issuanceDate?: string;

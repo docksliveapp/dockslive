@@ -326,6 +326,7 @@ export async function runDailyCompanyDocExpiryCheck(): Promise<void> {
     const todayMidnight = new Date(todayStr).getTime();
     snap.forEach((ds) => {
       const docItem = ds.data() as CompanyDocument;
+      if (!docItem.isExplorerDocument) return;
       if (docItem.statusTag === 'Resolved' || docItem.statusTag === 'Archived') return;
 
       const alarmLeadDays =
@@ -333,9 +334,15 @@ export async function runDailyCompanyDocExpiryCheck(): Promise<void> {
           ? docItem.alarmDaysBefore
           : 15;
 
+      const folderLabel = docItem.folderPath || 'Company Documents';
+      const issuedToLabel = docItem.issuedTo || docItem.recipientEntity || docItem.to || 'N/A';
+      const sourceLabel = docItem.sourceOrigin || docItem.senderIssuer || docItem.from || 'N/A';
+      const authorLabel = docItem.createdByAuthor || 'N/A';
+
       // 1. Validity / Expiry Countdown Alarm
-      const effectiveExp = docItem.validityEndDate || docItem.expiryDate;
-      if (!docItem.unlimitedValidity && effectiveExp) {
+      const effectiveExp = docItem.expiryDate || docItem.validityEndDate;
+      const hasExpiry = docItem.hasExpiryDate !== undefined ? docItem.hasExpiryDate : !docItem.unlimitedValidity;
+      if (hasExpiry && effectiveExp) {
         const expTime = new Date(effectiveExp).getTime();
         if (!isNaN(expTime)) {
           const diffDays = Math.ceil((expTime - todayMidnight) / (24 * 60 * 60 * 1000));
@@ -350,9 +357,9 @@ export async function runDailyCompanyDocExpiryCheck(): Promise<void> {
                   : `Expiry Alarm (${diffDays}d left): ${docItem.title}`,
               description:
                 diffDays <= 0
-                  ? `Document "${docItem.title}" (${docItem.recipientEntity || docItem.to || 'MAK Group'}) expired on ${effectiveExp}.`
-                  : `Document "${docItem.title}" will expire in ${diffDays} day(s) on ${effectiveExp}.`,
-              details: `Document: ${docItem.title}\nRoot Category: ${docItem.rootCategory || docItem.category || 'Company Document'}\nFolder: ${docItem.subFolder || docItem.taxAuthority || docItem.assetGroup || 'General'}\nExpiry Date: ${effectiveExp}`,
+                  ? `Document "${docItem.title}" (Issued To: ${issuedToLabel}) expired on ${effectiveExp}.`
+                  : `Document "${docItem.title}" (${folderLabel}) will expire in ${diffDays} day(s) on ${effectiveExp}.`,
+              details: `Document Title: ${docItem.title}\nFolder Path: ${folderLabel}\nCreated By: ${authorLabel}\nSource / Origin: ${sourceLabel}\nIssued To: ${issuedToLabel}\nExpiry Date: ${effectiveExp}`,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               type: 'ALERT',
               notificationSubType: 'DOC_EXPIRY_ALERT',
@@ -367,8 +374,9 @@ export async function runDailyCompanyDocExpiryCheck(): Promise<void> {
         }
       }
 
-      // 2. Legal Hearing / Action Date Countdown Alarm
-      if (docItem.hearingDate) {
+      // 2. Scheduled Hearing Date Countdown Alarm
+      const hasHearing = docItem.hasHearingDate !== undefined ? docItem.hasHearingDate : Boolean(docItem.hearingDate);
+      if (hasHearing && docItem.hearingDate) {
         const hearTime = new Date(docItem.hearingDate).getTime();
         if (!isNaN(hearTime)) {
           const hearDiff = Math.ceil((hearTime - todayMidnight) / (24 * 60 * 60 * 1000));
@@ -379,17 +387,17 @@ export async function runDailyCompanyDocExpiryCheck(): Promise<void> {
               id: hearNotifId,
               title:
                 hearDiff < 0
-                  ? `Hearing Action Overdue (${Math.abs(hearDiff)}d): ${docItem.title}`
+                  ? `Hearing Overdue (${Math.abs(hearDiff)}d): ${docItem.title}`
                   : hearDiff === 0
-                    ? `Hearing / Action TODAY: ${docItem.title}`
+                    ? `Hearing Scheduled TODAY: ${docItem.title}`
                     : `Upcoming Hearing in ${hearDiff}d: ${docItem.title}`,
-              description: `Hearing / Action scheduled on ${docItem.hearingDate}${docItem.hearingTime ? ` at ${docItem.hearingTime}` : ''} (${docItem.legalCaseTitle || docItem.senderIssuer || 'Legal Dossier'}).`,
-              details: `Case / Document: ${docItem.legalCaseTitle || docItem.title}\nSub-Folder: ${docItem.subFolder || 'Legal'}\nIssuer / Forum: ${docItem.senderIssuer || docItem.from || 'N/A'}\nHearing Date: ${docItem.hearingDate}`,
+              description: `Hearing scheduled on ${docItem.hearingDate} for "${docItem.title}" (Source: ${sourceLabel}).`,
+              details: `Document Title: ${docItem.title}\nFolder Path: ${folderLabel}\nCreated By: ${authorLabel}\nSource / Origin: ${sourceLabel}\nIssued To: ${issuedToLabel}\nHearing Date: ${docItem.hearingDate}`,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               type: 'ACTION',
               notificationSubType: 'LEGAL_HEARING_ALERT',
               status: 'PENDING',
-              actionLabel: 'Review Case Dossier',
+              actionLabel: 'Open Company Documents',
               priority: 'HIGH',
               targetRole: 'ADMIN,DOCUMENTATION_MANAGER',
               category: 'GENERAL',
