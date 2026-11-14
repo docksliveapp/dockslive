@@ -357,6 +357,7 @@
         "name": { "type": "string", "description": "Full name of staff member", "maxLength": 120 },
         "fatherName": { "type": "string", "description": "Father name of staff member", "maxLength": 120 },
         "designation": { "type": "string", "description": "Job designation of staff member", "maxLength": 100 },
+        "cnic": { "type": "string", "description": "National Identity Card (CNIC / ID Card) number", "maxLength": 40 },
         "primaryContact": { "type": "string", "description": "Primary phone contact number", "maxLength": 40 },
         "residentialContact": { "type": "string", "description": "Residential phone contact number", "maxLength": 40 },
         "residentialAddress": { "type": "string", "description": "Residential address", "maxLength": 300 },

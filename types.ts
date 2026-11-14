@@ -1677,6 +1677,7 @@ export interface SalaryStaffMember {
   name: string;
   fatherName: string;
   designation: string;
+  cnic?: string;
   primaryContact: string;
   residentialContact?: string;
   residentialAddress?: string;

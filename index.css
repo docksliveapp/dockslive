@@ -1270,3 +1270,77 @@ body.theme-pearl .finance-type-btn-active {
     display: none !important;
   }
 }
+
+/* ==========================================================================
+   9. STAFF DIRECTORY HIGH-CLARITY ROW HIGHLIGHTING (DARK & PEARL THEMES)
+   ========================================================================== */
+table.staff-directory-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+table.staff-directory-table thead th {
+  background-color: rgba(30, 41, 59, 0.92);
+  border-bottom: 2px solid rgba(148, 163, 184, 0.35);
+  border-right: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+table.staff-directory-table thead th:last-child,
+table.staff-directory-table tbody td:last-child {
+  border-right: none !important;
+}
+
+table.staff-directory-table tbody tr:nth-child(odd) {
+  background-color: rgba(15, 23, 42, 0.38);
+}
+
+table.staff-directory-table tbody tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.055);
+}
+
+table.staff-directory-table tbody tr.staff-row-suspended {
+  background-color: rgba(180, 83, 9, 0.22);
+}
+
+table.staff-directory-table tbody tr:hover {
+  background-color: rgba(139, 92, 246, 0.18);
+}
+
+table.staff-directory-table tbody td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  border-right: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+body.theme-pearl table.staff-directory-table thead th {
+  background-color: #E2E8F0 !important;
+  color: #0F172A !important;
+  border-bottom: 2px solid #94A3B8 !important;
+  border-right: 1px solid #CBD5E1 !important;
+}
+
+body.theme-pearl table.staff-directory-table tbody tr:nth-child(odd) {
+  background-color: #FFFFFF !important;
+}
+
+body.theme-pearl table.staff-directory-table tbody tr:nth-child(even) {
+  background-color: #EAF0F7 !important;
+}
+
+body.theme-pearl table.staff-directory-table tbody tr.staff-row-suspended {
+  background-color: #FEF3C7 !important;
+}
+
+body.theme-pearl table.staff-directory-table tbody tr:hover {
+  background-color: #DBEAFE !important;
+}
+
+body.theme-pearl table.staff-directory-table tbody td {
+  border-bottom: 1.5px solid #CBD5E1 !important;
+  border-right: 1px solid #DCE3EC !important;
+}
+
+body.theme-pearl table.staff-directory-table tfoot td {
+  background-color: #E2E8F0 !important;
+  border-top: 2px solid #94A3B8 !important;
+}
+

@@ -7031,6 +7031,7 @@ export async function saveSalaryStaffToFirestore(staff: SalaryStaffMember): Prom
     name: (staff.name || '').trim(),
     fatherName: (staff.fatherName || '').trim(),
     designation: (staff.designation || '').trim(),
+    cnic: (staff.cnic || '').trim(),
     primaryContact: (staff.primaryContact || '').trim(),
     residentialContact: (staff.residentialContact || '').trim(),
     residentialAddress: (staff.residentialAddress || '').trim(),

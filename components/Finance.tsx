@@ -291,6 +291,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     name: string;
     fatherName: string;
     designation: string;
+    cnic: string;
     primaryContact: string;
     residentialContact: string;
     residentialAddress: string;
@@ -304,6 +305,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     name: '',
     fatherName: '',
     designation: '',
+    cnic: '',
     primaryContact: '',
     residentialContact: '',
     residentialAddress: '',
@@ -421,6 +423,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       name: '',
       fatherName: '',
       designation: '',
+      cnic: '',
       primaryContact: '',
       residentialContact: '',
       residentialAddress: '',
@@ -441,6 +444,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       name: staff.name || '',
       fatherName: staff.fatherName || '',
       designation: staff.designation || '',
+      cnic: staff.cnic || '',
       primaryContact: staff.primaryContact || '',
       residentialContact: staff.residentialContact || '',
       residentialAddress: staff.residentialAddress || '',
@@ -512,6 +516,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       name: salaryStaffForm.name.trim(),
       fatherName: salaryStaffForm.fatherName.trim(),
       designation: salaryStaffForm.designation.trim(),
+      cnic: salaryStaffForm.cnic.trim(),
       primaryContact: salaryStaffForm.primaryContact.trim(),
       residentialContact: salaryStaffForm.residentialContact.trim(),
       residentialAddress: salaryStaffForm.residentialAddress.trim(),
@@ -641,6 +646,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       'Full Name',
       'Father Name',
       'Designation',
+      'CNIC / ID Card No.',
       'Job Start Date',
       'Primary Contact',
       'Residential Contact',
@@ -653,6 +659,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       s.name || '',
       s.fatherName || '',
       s.designation || '',
+      s.cnic || '',
       s.joiningDate || '',
       s.primaryContact || '',
       s.residentialContact || '',
@@ -692,6 +699,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
       name: salaryStaffForm.name.trim() || 'Employee',
       fatherName: salaryStaffForm.fatherName.trim(),
       designation: salaryStaffForm.designation.trim(),
+      cnic: salaryStaffForm.cnic.trim(),
       primaryContact: salaryStaffForm.primaryContact.trim(),
       residentialContact: salaryStaffForm.residentialContact.trim(),
       residentialAddress: salaryStaffForm.residentialAddress.trim(),
@@ -1081,27 +1089,31 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
           <div class="field-value">${escapeHtml(salaryStaffForm.designation)}</div>
         </div>
         <div class="field-box">
-          <div class="field-label">4. Job Start Date</div>
+          <div class="field-label">4. CNIC / ID Card Number</div>
+          <div class="field-value" style="font-family:ui-monospace,monospace;">${escapeHtml(salaryStaffForm.cnic || 'Not Specified')}</div>
+        </div>
+        <div class="field-box">
+          <div class="field-label">5. Job Start Date</div>
           <div class="field-value">${escapeHtml(joiningDisplay)}</div>
         </div>
         <div class="field-box">
-          <div class="field-label">5. Primary Contact Number</div>
+          <div class="field-label">6. Employment Status</div>
+          <div class="field-value">${salaryStaffForm.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE'}</div>
+        </div>
+        <div class="field-box">
+          <div class="field-label">7. Primary Contact Number</div>
           <div class="field-value" style="font-family:ui-monospace,monospace;">${escapeHtml(salaryStaffForm.primaryContact)}</div>
         </div>
         <div class="field-box">
-          <div class="field-label">6. Residential Contact Number</div>
+          <div class="field-label">8. Residential Contact Number</div>
           <div class="field-value" style="font-family:ui-monospace,monospace;">${escapeHtml(salaryStaffForm.residentialContact)}</div>
         </div>
         <div class="field-box">
-          <div class="field-label" style="color:#047857;">7. Monthly Salary (PKR)</div>
+          <div class="field-label" style="color:#047857;">9. Monthly Salary (PKR)</div>
           <div class="field-value salary">PKR ${Number(salaryStaffForm.totalSalary || 0).toLocaleString()} / Month</div>
         </div>
         <div class="field-box">
-          <div class="field-label">8. Employment Status</div>
-          <div class="field-value">${salaryStaffForm.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE'}</div>
-        </div>
-        <div class="field-box field-full">
-          <div class="field-label">9. Residential Address</div>
+          <div class="field-label">10. Residential Address</div>
           <div class="field-value">${escapeHtml(salaryStaffForm.residentialAddress)}</div>
         </div>
       </div>
@@ -6463,26 +6475,22 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               </div>
 
               <div className="overflow-x-auto custom-scrollbar">
-                <table className="w-full text-left text-xs text-gray-200 min-w-[1260px]">
+                <table className="w-full text-left text-xs text-gray-200 staff-directory-table">
                   <thead className="bg-white/5 text-gray-400 border-b border-white/10 font-semibold">
                     <tr>
-                      <th className="py-2.5 px-3 whitespace-nowrap w-20">S.No</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Full Name</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Father Name</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Designation</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Primary Contact</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Residential Contact</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap text-right">Total Salary</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Joining &amp; Schedule</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Photo &amp; CNIC</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap text-center">Salary History</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap text-center">Daily Time Table</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap text-center">Certificate</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap text-center">Status</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap text-right">Action</th>
+                      <th className="py-2.5 px-1.5 whitespace-nowrap w-14">S.No</th>
+                      <th className="py-2.5 px-1.5 whitespace-nowrap">Full Name</th>
+                      <th className="py-2.5 px-1.5 whitespace-nowrap">Father Name</th>
+                      <th className="py-2.5 px-1.5 whitespace-nowrap">Designation</th>
+                      <th className="py-2.5 px-1.5 whitespace-nowrap text-right">Total Salary</th>
+                      <th className="py-2.5 px-1.5 whitespace-nowrap text-center">Salary History</th>
+                      <th className="py-2.5 px-1.5 whitespace-nowrap text-center">Time Table</th>
+                      <th className="py-2.5 px-1.5 whitespace-nowrap text-center">Certificate</th>
+                      <th className="py-2.5 px-1.5 whitespace-nowrap text-center">Status</th>
+                      <th className="py-2.5 px-1.5 whitespace-nowrap text-right">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5">
+                  <tbody>
                     {sortedSalaryStaffList.map((staff, idx) => {
                       const isSuspended = staff.status === 'SUSPENDED';
                       const isDirector = isDirectorDesignation(staff.designation);
@@ -6528,23 +6536,23 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                           }}
                           className={`group transition-colors h-11 ${
                             isDragged
-                              ? 'opacity-45 bg-purple-500/15'
+                              ? 'opacity-45 bg-purple-500/20'
                               : isDropTarget
-                              ? 'bg-purple-500/20 ring-2 ring-inset ring-purple-400'
+                              ? 'bg-purple-500/25 ring-2 ring-inset ring-purple-400'
                               : isSuspended
-                              ? 'bg-amber-950/15 hover:bg-amber-950/25 opacity-80'
-                              : 'hover:bg-white/5'
+                              ? 'staff-row-suspended opacity-85'
+                              : ''
                           }`}
                         >
-                          <td className="py-2 px-3 font-mono tabular-nums text-gray-400 whitespace-nowrap">
-                            <div className="inline-flex items-center gap-1.5">
+                          <td className="py-2 px-1.5 font-mono tabular-nums text-gray-400 whitespace-nowrap">
+                            <div className="inline-flex items-center gap-1">
                               <span
                                 className="cursor-grab active:cursor-grabbing text-gray-500 hover:text-purple-300 inline-flex items-center"
                                 title="Drag up or down to reorder"
                               >
-                                <GripVertical size={14} />
+                                <GripVertical size={13} />
                               </span>
-                              <span className="min-w-[1.25rem]">{idx + 1}</span>
+                              <span className="min-w-[1.1rem]">{idx + 1}</span>
                               <div className="inline-flex flex-col opacity-55 group-hover:opacity-100 transition-opacity">
                                 <button
                                   type="button"
@@ -6573,8 +6581,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                               </div>
                             </div>
                           </td>
-                          <td className="py-2 px-3 whitespace-nowrap">
-                            <div className="flex items-center gap-2">
+                          <td className="py-2 px-1.5">
+                            <div className="flex items-center gap-1.5 min-w-0">
                               {resolvedPhoto ? (
                                 <button
                                   type="button"
@@ -6587,118 +6595,60 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                                     src={resolvedPhoto}
                                     alt={staff.name}
                                     referrerPolicy="no-referrer"
-                                    className="w-8 h-8 object-cover block"
+                                    className="w-7 h-7 object-cover block"
                                   />
                                 </button>
                               ) : (
-                                <div className="w-8 h-8 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 flex items-center justify-center text-[11px] font-bold shrink-0">
+                                <div className="w-7 h-7 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 flex items-center justify-center text-[11px] font-bold shrink-0">
                                   {(staff.name || 'S').charAt(0).toUpperCase()}
                                 </div>
                               )}
-                              <span className="font-semibold text-white">{staff.name}</span>
+                              <span className="font-semibold text-white leading-tight max-w-[148px] break-words" title={staff.name}>
+                                {staff.name}
+                              </span>
                             </div>
                           </td>
-                          <td className="py-2 px-3 text-gray-300 whitespace-nowrap">
+                          <td className="py-2 px-1.5 text-gray-300 leading-tight max-w-[138px] break-words" title={staff.fatherName || '-'}>
                             {staff.fatherName || '-'}
                           </td>
-                          <td className="py-2 px-3 text-amber-300 font-medium whitespace-nowrap">
+                          <td className="py-2 px-1.5 text-amber-300 font-medium leading-tight max-w-[115px] break-words" title={staff.designation || '-'}>
                             {staff.designation || '-'}
                           </td>
-                          <td className="py-2 px-3 font-mono tabular-nums text-gray-200 whitespace-nowrap">
-                            {staff.primaryContact || '-'}
-                          </td>
-                          <td className="py-2 px-3 font-mono tabular-nums text-gray-300 whitespace-nowrap">
-                            {staff.residentialContact || '-'}
-                          </td>
-                          <td className={`py-2 px-3 text-right font-mono tabular-nums font-bold whitespace-nowrap ${isSuspended ? 'text-gray-400 line-through' : 'text-emerald-400'}`}>
+                          <td className={`py-2 px-1.5 text-right font-mono tabular-nums font-bold whitespace-nowrap ${isSuspended ? 'text-gray-400 line-through' : 'text-emerald-400'}`}>
                             PKR {Number(staff.totalSalary || 0).toLocaleString()}
                           </td>
-                          <td className="py-2 px-3 whitespace-nowrap text-[11px]">
-                            {staff.joiningDate && (
-                              <span className="text-sky-300 font-mono block">
-                                Joined: {staff.joiningDate.split('-').reverse().join('-')}
-                              </span>
-                            )}
-                            {isSuspended ? (
-                              <span className="text-amber-400 font-medium">Paused (Payable Stopped)</span>
-                            ) : (
-                              <span className="text-gray-400">Month-End ({currentMonthLastDay} {currentMonthLabel}) &gt; 12:00 AM</span>
-                            )}
-                          </td>
-                          <td className="py-2 px-3 whitespace-nowrap text-[11px]">
-                            <div className="flex items-center gap-2 text-gray-400">
-                              {staff.photoUrl ? (
-                                <button
-                                  type="button"
-                                  data-custom-control="true"
-                                  onClick={() => openStaffDocPreview(staff.photoUrl!, `${staff.name} — Staff Photo`, `${staff.name}_photo`)}
-                                  className="text-emerald-400 hover:underline font-medium cursor-pointer"
-                                >
-                                  Photo ✓
-                                </button>
-                              ) : (
-                                <span className="text-gray-500">Photo —</span>
-                              )}
-                              <span>·</span>
-                              {staff.cnicFrontUrl ? (
-                                <button
-                                  type="button"
-                                  data-custom-control="true"
-                                  onClick={() => openStaffDocPreview(staff.cnicFrontUrl!, `${staff.name} — ID Card Front`, `${staff.name}_cnic_front`)}
-                                  className="text-emerald-400 hover:underline font-medium cursor-pointer"
-                                >
-                                  Front ✓
-                                </button>
-                              ) : (
-                                <span className="text-gray-500">Front —</span>
-                              )}
-                              <span>·</span>
-                              {staff.cnicBackUrl ? (
-                                <button
-                                  type="button"
-                                  data-custom-control="true"
-                                  onClick={() => openStaffDocPreview(staff.cnicBackUrl!, `${staff.name} — ID Card Back`, `${staff.name}_cnic_back`)}
-                                  className="text-emerald-400 hover:underline font-medium cursor-pointer"
-                                >
-                                  Back ✓
-                                </button>
-                              ) : (
-                                <span className="text-gray-500">Back —</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-2 px-3 text-center whitespace-nowrap">
+                          <td className="py-2 px-1.5 text-center whitespace-nowrap">
                             <button
                               type="button"
                               disabled={downloadingStaffHistoryId === staff.id}
                               onClick={() => handleDownloadStaffSalaryHistory(staff)}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 disabled:opacity-50 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer transition"
+                              className="px-2 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 disabled:opacity-50 text-emerald-300 border border-emerald-500/30 text-[10.5px] font-semibold inline-flex items-center gap-1 cursor-pointer transition"
                               title="Download Employee Salary Payment History PDF"
                             >
                               {downloadingStaffHistoryId === staff.id ? (
-                                <Loader2 size={12} className="animate-spin" />
+                                <Loader2 size={11} className="animate-spin" />
                               ) : (
-                                <Download size={12} />
+                                <Download size={11} />
                               )}
                               <span>Salary History{staffHistoryCount > 0 ? ` (${staffHistoryCount})` : ''}</span>
                             </button>
                           </td>
-                          <td className="py-2 px-3 text-center whitespace-nowrap">
+                          <td className="py-2 px-1.5 text-center whitespace-nowrap">
                             {isDirector ? (
-                              <span className="text-[11px] text-gray-500 font-medium">Director (Exempt)</span>
+                              <span className="text-[10.5px] text-gray-500 font-medium">Director (Exempt)</span>
                             ) : (
                               <div className="inline-flex flex-col items-center gap-0.5">
                                 <button
                                   type="button"
                                   disabled={downloadingStaffTimeTableId === staff.id}
                                   onClick={() => handleDownloadStaffTimeTable(staff)}
-                                  className="px-2.5 py-1 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/35 disabled:opacity-50 text-cyan-300 border border-cyan-500/30 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer transition"
+                                  className="px-2 py-1 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/35 disabled:opacity-50 text-cyan-300 border border-cyan-500/30 text-[10.5px] font-semibold inline-flex items-center gap-1 cursor-pointer transition"
                                   title="Download Employee Daily Entry / Exit Time Table PDF"
                                 >
                                   {downloadingStaffTimeTableId === staff.id ? (
-                                    <Loader2 size={12} className="animate-spin" />
+                                    <Loader2 size={11} className="animate-spin" />
                                   ) : (
-                                    <Download size={12} />
+                                    <Download size={11} />
                                   )}
                                   <span>Time Table{staffAttCount > 0 ? ` (${staffAttCount})` : ''}</span>
                                 </button>
@@ -6709,7 +6659,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                                     return m ? `${m[1].padStart(2, '0')}:${m[2]} ${m[3].toUpperCase()}` : v;
                                   };
                                   return (
-                                    <span className="text-[10px] font-mono text-gray-400">
+                                    <span className="text-[9.5px] font-mono text-gray-400">
                                       {todayAtt.exitTime
                                         ? `In ${fmtHm(todayAtt.entryTime)} · Out ${fmtHm(todayAtt.exitTime)}`
                                         : todayAtt.lunchStartTime && !todayAtt.lunchEndTime
@@ -6721,20 +6671,20 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                               </div>
                             )}
                           </td>
-                          <td className="py-2 px-3 text-center whitespace-nowrap">
+                          <td className="py-2 px-1.5 text-center whitespace-nowrap">
                             <button
                               type="button"
                               onClick={() => setCertificatePickerStaff(staff)}
-                              className="px-2.5 py-1 rounded-lg bg-amber-600/20 hover:bg-amber-600/35 text-amber-300 border border-amber-500/30 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer transition"
+                              className="px-2 py-1 rounded-lg bg-amber-600/20 hover:bg-amber-600/35 text-amber-300 border border-amber-500/30 text-[10.5px] font-semibold inline-flex items-center gap-1 cursor-pointer transition"
                               title="Download Official Bank / Employment / Experience Certificate (Today Date)"
                             >
-                              <Award size={12} />
+                              <Award size={11} />
                               <span>Certificate</span>
                             </button>
                           </td>
-                          <td className="py-2 px-3 text-center whitespace-nowrap">
+                          <td className="py-2 px-1.5 text-center whitespace-nowrap">
                             {isSuspended ? (
-                              <span className="inline-block px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold uppercase tracking-wide">
+                              <span className="inline-block px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold uppercase tracking-wide">
                                 Suspended
                               </span>
                             ) : staff.status === 'INACTIVE' ? (
@@ -6743,11 +6693,11 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                               <span className="text-emerald-400 text-[11px] font-semibold">Active</span>
                             )}
                           </td>
-                          <td className="py-2 px-3 text-right whitespace-nowrap">
+                          <td className="py-2 px-1.5 text-right whitespace-nowrap">
                             <button
                               type="button"
                               onClick={() => handleOpenEditSalaryStaff(staff)}
-                              className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition cursor-pointer"
+                              className="px-2 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold transition cursor-pointer"
                             >
                               Edit
                             </button>
@@ -6757,7 +6707,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     })}
                     {sortedSalaryStaffList.length === 0 && (
                       <tr>
-                        <td colSpan={14} className="p-6 text-center text-gray-400 text-xs">
+                        <td colSpan={10} className="p-6 text-center text-gray-400 text-xs">
                           No office salary staff registered in <strong className="text-white">{activeCompany.name}</strong> yet. Click <strong className="text-purple-300">+ Add Staff</strong> above to register office staff from scratch (salaries start 01 Dec 2026).
                         </td>
                       </tr>
@@ -6766,13 +6716,13 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                   {sortedSalaryStaffList.length > 0 && (
                     <tfoot className="bg-white/5 border-t-2 border-white/10 font-bold text-xs">
                       <tr>
-                        <td colSpan={6} className="py-3 px-3 text-white whitespace-nowrap">
+                        <td colSpan={4} className="py-3 px-1.5 text-white whitespace-nowrap">
                           Monthly Payroll Commitment ({activeCompanyStaffList.length} Active{suspendedCompanyStaffList.length > 0 ? ` · ${suspendedCompanyStaffList.length} Suspended` : ''})
                         </td>
-                        <td className="py-3 px-3 text-right font-mono tabular-nums text-emerald-400 whitespace-nowrap">
+                        <td className="py-3 px-1.5 text-right font-mono tabular-nums text-emerald-400 whitespace-nowrap">
                           PKR {totalMonthlyPayrollCommitment.toLocaleString()}/mo
                         </td>
-                        <td colSpan={7} className="py-3 px-3 text-gray-400 whitespace-nowrap">
+                        <td colSpan={5} className="py-3 px-1.5 text-gray-400 whitespace-nowrap">
                           Posts 1st Next Month (&gt; 12:00 AM)
                         </td>
                       </tr>
@@ -10362,6 +10312,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
           name: salaryStaffForm.name.trim() || 'Employee',
           fatherName: salaryStaffForm.fatherName.trim(),
           designation: salaryStaffForm.designation.trim(),
+          cnic: salaryStaffForm.cnic.trim(),
           primaryContact: salaryStaffForm.primaryContact.trim(),
           residentialContact: salaryStaffForm.residentialContact.trim(),
           residentialAddress: salaryStaffForm.residentialAddress.trim(),
@@ -10872,8 +10823,21 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     </div>
 
                     <div>
+                      <label className="text-amber-300 font-semibold block mb-1">
+                        5. ID Card Number (CNIC)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 42101-1234567-1"
+                        value={salaryStaffForm.cnic}
+                        onChange={(e) => setSalaryStaffForm((prev) => ({ ...prev, cnic: e.target.value }))}
+                        className="w-full bg-black/40 border border-amber-500/35 rounded-xl px-3.5 py-2.5 text-white font-mono outline-none focus:border-amber-400"
+                      />
+                    </div>
+
+                    <div>
                       <label className="text-gray-200 font-semibold block mb-1">
-                        5. Primary Contact Number
+                        6. Primary Contact Number
                       </label>
                       <input
                         type="text"
@@ -10886,7 +10850,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
                     <div>
                       <label className="text-gray-200 font-semibold block mb-1">
-                        6. Residential Contact Number
+                        7. Residential Contact Number
                       </label>
                       <input
                         type="text"
@@ -10899,7 +10863,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
                     <div>
                       <label className="text-emerald-300 font-semibold block mb-1">
-                        7. Total Salary (PKR / Month) <span className="text-red-400">*</span>
+                        8. Total Salary (PKR / Month) <span className="text-red-400">*</span>
                       </label>
                       <input
                         type="number"
@@ -10913,7 +10877,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
 
                     <div className="sm:col-span-2">
                       <label className="text-gray-200 font-semibold block mb-1">
-                        8. Residential Address
+                        9. Residential Address
                       </label>
                       <input
                         type="text"
@@ -11023,9 +10987,37 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               </button>
             </div>
             <div className="p-4 space-y-2.5 text-xs">
-              <p className="text-gray-400 text-[11px] mb-2">
+              <p className="text-gray-400 text-[11px]">
                 Generates a formal official letter PDF dated today on <strong className="text-white">{activeCompany.legalTitle || activeCompany.name}</strong> letterhead:
               </p>
+
+              <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                <div>
+                  <span className="text-gray-400">CNIC No: </span>
+                  <strong className={certificatePickerStaff.cnic ? 'text-amber-300 font-mono' : 'text-red-300'}>
+                    {certificatePickerStaff.cnic || 'Not Entered'}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-gray-400">Joining Date: </span>
+                  <strong className={certificatePickerStaff.joiningDate ? 'text-sky-300 font-mono' : 'text-red-300'}>
+                    {certificatePickerStaff.joiningDate ? certificatePickerStaff.joiningDate.split('-').reverse().join('-') : 'Not Entered'}
+                  </strong>
+                </div>
+                {(!certificatePickerStaff.cnic || !certificatePickerStaff.joiningDate) && !showSalaryStaffModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = certificatePickerStaff;
+                      setCertificatePickerStaff(null);
+                      handleOpenEditSalaryStaff(target);
+                    }}
+                    className="w-full text-left text-[10px] text-amber-300 hover:text-amber-200 underline cursor-pointer mt-0.5"
+                  >
+                    + Add CNIC / Joining Date in Edit Profile first
+                  </button>
+                )}
+              </div>
 
               <button
                 type="button"

@@ -4415,36 +4415,32 @@ export async function downloadStaffProfilePdf(
         ? 'INACTIVE'
         : 'ACTIVE';
     const joiningFormatted = data.staff.joiningDate ? formatPdfDate(data.staff.joiningDate) : 'Not Specified';
+    const cnicFormatted = cleanPdfText(data.staff.cnic || '').trim() || 'Not Specified';
 
     const detailRows: Array<[string, string, string, string]> = [
       ['1. Full Name', cleanPdfText(data.staff.name || '-'), '2. Father Name', cleanPdfText(data.staff.fatherName || '-')],
-      ['3. Designation', cleanPdfText(data.staff.designation || '-'), '4. Job Start Date', joiningFormatted],
-      ['5. Primary Contact', cleanPdfText(data.staff.primaryContact || '-'), '6. Residential Contact', cleanPdfText(data.staff.residentialContact || '-')],
-      [
-        '7. Monthly Salary',
-        `PKR ${Number(data.staff.totalSalary || 0).toLocaleString()} / Month`,
-        '8. Employment Status',
-        statusText
-      ]
+      ['3. Designation', cleanPdfText(data.staff.designation || '-'), '4. CNIC / ID Card No.', cnicFormatted],
+      ['5. Job Start Date', joiningFormatted, '6. Employment Status', statusText],
+      ['7. Primary Contact', cleanPdfText(data.staff.primaryContact || '-'), '8. Residential Contact', cleanPdfText(data.staff.residentialContact || '-')]
     ];
 
     const halfW = (contentW - 3) / 2;
     for (const [l1, v1, l2, v2] of detailRows) {
       doc.setFillColor(248, 250, 252);
       doc.setDrawColor(226, 232, 240);
-      doc.roundedRect(margin, currentY, halfW, 11.5, 1.2, 1.2, 'FD');
-      doc.roundedRect(margin + halfW + 3, currentY, halfW, 11.5, 1.2, 1.2, 'FD');
+      doc.roundedRect(margin, currentY, halfW, 11.2, 1.2, 1.2, 'FD');
+      doc.roundedRect(margin + halfW + 3, currentY, halfW, 11.2, 1.2, 1.2, 'FD');
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(6.2);
       doc.setTextColor(100, 116, 139);
-      doc.text(l1.toUpperCase(), margin + 3, currentY + 4);
-      doc.text(l2.toUpperCase(), margin + halfW + 6, currentY + 4);
+      doc.text(l1.toUpperCase(), margin + 3, currentY + 3.9);
+      doc.text(l2.toUpperCase(), margin + halfW + 6, currentY + 3.9);
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.2);
-      doc.setTextColor(l1.includes('Salary') ? 4 : 15, l1.includes('Salary') ? 120 : 23, l1.includes('Salary') ? 87 : 42);
-      doc.text(v1 || '-', margin + 3, currentY + 9, { maxWidth: halfW - 6 });
+      doc.setTextColor(15, 23, 42);
+      doc.text(v1 || '-', margin + 3, currentY + 8.7, { maxWidth: halfW - 6 });
 
       if (l2.includes('Status')) {
         doc.setTextColor(
@@ -4455,27 +4451,41 @@ export async function downloadStaffProfilePdf(
       } else {
         doc.setTextColor(15, 23, 42);
       }
-      doc.text(v2 || '-', margin + halfW + 6, currentY + 9, { maxWidth: halfW - 6 });
+      doc.text(v2 || '-', margin + halfW + 6, currentY + 8.7, { maxWidth: halfW - 6 });
 
-      currentY += 13;
+      currentY += 12.6;
     }
 
-    // Residential Address (Full Width)
+    // Monthly Salary + Residential Address Row
     const addrText = cleanPdfText(data.staff.residentialAddress || '-');
-    const addrWrapped = doc.splitTextToSize(addrText, contentW - 6);
-    const addrBoxH = addrWrapped.length > 1 ? 15.5 : 11.5;
+    const addrWrapped = doc.splitTextToSize(addrText, halfW + 18);
+    const bottomRowH = addrWrapped.length > 1 ? 14.5 : 11.2;
+    const salaryBoxW = 58;
+    const addrBoxX = margin + salaryBoxW + 3;
+    const addrBoxW = contentW - salaryBoxW - 3;
+
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(margin, currentY, contentW, addrBoxH, 1.2, 1.2, 'FD');
+    doc.roundedRect(margin, currentY, salaryBoxW, bottomRowH, 1.2, 1.2, 'FD');
+    doc.roundedRect(addrBoxX, currentY, addrBoxW, bottomRowH, 1.2, 1.2, 'FD');
+
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6.2);
+    doc.setTextColor(4, 120, 87);
+    doc.text('9. MONTHLY SALARY', margin + 3, currentY + 3.9);
     doc.setTextColor(100, 116, 139);
-    doc.text('9. RESIDENTIAL ADDRESS', margin + 3, currentY + 4);
+    doc.text('10. RESIDENTIAL ADDRESS', addrBoxX + 3, currentY + 3.9);
+
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
+    doc.setFontSize(8.2);
+    doc.setTextColor(4, 120, 87);
+    doc.text(`PKR ${Number(data.staff.totalSalary || 0).toLocaleString()} / Mo`, margin + 3, currentY + 8.7, { maxWidth: salaryBoxW - 6 });
+
+    doc.setFontSize(7.8);
     doc.setTextColor(15, 23, 42);
-    doc.text(addrWrapped.slice(0, 2), margin + 3, currentY + 8.8);
-    currentY += addrBoxH + 5;
+    const addrLinesFinal = doc.splitTextToSize(addrText, addrBoxW - 6);
+    doc.text(addrLinesFinal.slice(0, 2), addrBoxX + 3, currentY + 8.5);
+    currentY += bottomRowH + 5;
 
     let pageNum = 1;
 
@@ -4717,7 +4727,12 @@ export async function downloadStaffSalaryHistoryPdf(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(71, 85, 105);
-    doc.text(`Contact: ${cleanPdfText(data.staff.primaryContact || '-')}`, margin + 3.5, currentY + 15.5);
+    const cnicHistoryText = cleanPdfText(data.staff.cnic || '').trim();
+    doc.text(
+      cnicHistoryText ? `CNIC: ${cnicHistoryText}` : `Contact: ${cleanPdfText(data.staff.primaryContact || '-')}`,
+      margin + 3.5,
+      currentY + 15.5
+    );
     doc.text(`S/O: ${cleanPdfText(data.staff.fatherName || '-')}`, margin + cW + 3.5, currentY + 15.5);
     doc.text(
       `Joined: ${data.staff.joiningDate ? formatPdfDate(data.staff.joiningDate) : 'Not Set'}`,
@@ -5213,6 +5228,7 @@ export async function downloadStaffCertificatePdf(
 
     const staffName = cleanPdfText(data.staff.name || 'Employee').toUpperCase();
     const fatherText = data.staff.fatherName ? `S/O ${cleanPdfText(data.staff.fatherName).toUpperCase()}` : '';
+    const cnicText = cleanPdfText(data.staff.cnic || '').trim();
     const desigText = cleanPdfText(data.staff.designation || 'Staff Member');
     const compLegal = cleanPdfText(company.legalTitle || company.name);
     const joinFormatted = data.staff.joiningDate ? formatPdfDate(data.staff.joiningDate) : '';
@@ -5222,39 +5238,39 @@ export async function downloadStaffCertificatePdf(
     let paragraphs: string[] = [];
     if (data.certificateType === 'BANK') {
       paragraphs = [
-        `This is to certify that Mr./Ms. ${staffName}${fatherText ? ` (${fatherText})` : ''} is a bonafide full-time employee of ${compLegal}, an operating subsidiary under MAK Group of Companies, holding the designation of "${desigText}"${joinFormatted ? ` since ${joinFormatted}` : ''}.`,
+        `This is to certify that Mr./Ms. ${staffName}${fatherText ? ` (${fatherText})` : ''}${cnicText ? `, bearing CNIC / ID Card No. ${cnicText},` : ''} is a bonafide full-time employee of ${compLegal}, an operating subsidiary under MAK Group of Companies, holding the designation of "${desigText}"${joinFormatted ? `, having joined service on ${joinFormatted}` : ''}.`,
         `His/Her present gross monthly remuneration is PKR ${salaryNum.toLocaleString()} (${salaryWords}), disbursed regularly by the Finance & Accounts Department.`,
         `This certificate is issued at the specific request of the employee strictly to facilitate Bank Account Opening and banking KYC verification formalities. The company bears no financial guarantee or liability for personal banking facilities.`
       ];
     } else if (data.certificateType === 'EXPERIENCE') {
       paragraphs = [
-        `This is to certify that Mr./Ms. ${staffName}${fatherText ? ` (${fatherText})` : ''} served with ${compLegal} (MAK Group of Companies) in the capacity of "${desigText}"${joinFormatted ? ` from ${joinFormatted} until ${formatPdfDate(todayYmd)}` : ` until ${formatPdfDate(todayYmd)}`}.`,
+        `This is to certify that Mr./Ms. ${staffName}${fatherText ? ` (${fatherText})` : ''}${cnicText ? `, bearing CNIC / ID Card No. ${cnicText},` : ''} served with ${compLegal} (MAK Group of Companies) in the capacity of "${desigText}"${joinFormatted ? ` from ${joinFormatted} until ${formatPdfDate(todayYmd)}` : ` until ${formatPdfDate(todayYmd)}`}.`,
         `During the period of service, he/she performed assigned operational and administrative responsibilities diligently, maintained professional integrity, and upheld company standards.`,
         `He/She stands relieved of duties in good standing. We extend our best wishes for continued success in all future professional endeavors.`
       ];
     } else {
       paragraphs = [
-        `This is to confirm that Mr./Ms. ${staffName}${fatherText ? ` (${fatherText})` : ''} is currently employed on the permanent payroll of ${compLegal}, a constituent entity of MAK Group of Companies, serving as "${desigText}"${joinFormatted ? ` since ${joinFormatted}` : ''}.`,
+        `This is to confirm that Mr./Ms. ${staffName}${fatherText ? ` (${fatherText})` : ''}${cnicText ? `, bearing CNIC / ID Card No. ${cnicText},` : ''} is currently employed on the permanent payroll of ${compLegal}, a constituent entity of MAK Group of Companies, serving as "${desigText}"${joinFormatted ? `, having joined on ${joinFormatted}` : ''}.`,
         `His/Her monthly salary package is PKR ${salaryNum.toLocaleString()} (${salaryWords}), and his/her employment status is active and in good standing as of ${longDate}.`,
         `This Employment Verification Certificate is issued upon the employee's request for submission to concerned authorities, institutions, or official verification purposes.`
       ];
     }
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.8);
+    doc.setFontSize(9.6);
     doc.setTextColor(30, 41, 59);
     for (const para of paragraphs) {
       const wrapped = doc.splitTextToSize(para, contentW);
-      doc.text(wrapped, margin, currentY, { lineHeightFactor: 1.45 });
-      currentY += wrapped.length * 5.2 + 4.5;
+      doc.text(wrapped, margin, currentY, { lineHeightFactor: 1.42 });
+      currentY += wrapped.length * 5.0 + 4.0;
     }
 
-    currentY += 3;
+    currentY += 2.5;
 
     // Particulars Box
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(203, 213, 225);
-    doc.roundedRect(margin, currentY, contentW, 38, 2, 2, 'FD');
+    doc.roundedRect(margin, currentY, contentW, 43.5, 2, 2, 'FD');
 
     doc.setFillColor(15, 23, 42);
     doc.rect(margin, currentY, contentW, 6.8, 'F');
@@ -5265,13 +5281,14 @@ export async function downloadStaffCertificatePdf(
 
     const pRows: Array<[string, string]> = [
       ['Employee Name', `${staffName}${fatherText ? ` (${fatherText})` : ''}`],
+      ['CNIC / ID Card No.', cnicText || 'Not Specified'],
       ['Designation', desigText],
       ['Date of Joining', joinFormatted || 'Verified on Payroll Record'],
       ['Monthly Salary', `PKR ${salaryNum.toLocaleString()} (${salaryWords})`],
       ['Issued Date / Entity', `${longDate}  |  ${compLegal}`]
     ];
 
-    let pY = currentY + 12;
+    let pY = currentY + 11.8;
     for (const [label, val] of pRows) {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(7.8);
@@ -5283,14 +5300,14 @@ export async function downloadStaffCertificatePdf(
       pY += 5.4;
     }
 
-    currentY += 46;
+    currentY += 50;
 
     // Authorized Signatory Area + Subsidiary Stamp
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(71, 85, 105);
     doc.text(`For and on behalf of ${compLegal},`, margin, currentY);
-    currentY += 14;
+    currentY += 12;
 
     doc.setDrawColor(15, 23, 42);
     doc.setLineWidth(0.4);
