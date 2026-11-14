@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import Logo from './Logo';
 import { useBranding } from '../services/brandingService';
-import { useActiveCompany } from '../services/companyService';
+import { useActiveCompany, useParentGroup, getMainGroupLogoUrl } from '../services/companyService';
 import { Vehicle, Case, FinanceEntry, AvailableVehicle, TransporterRequest, Container, Driver } from '../types';
 import { 
   subscribeToVehicles, 
@@ -53,6 +53,8 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
 }) => {
   const { companyName, subtitle, activeLogo } = useBranding();
   const { activeCompany } = useActiveCompany();
+  const { parentGroup } = useParentGroup();
+  const mainLogoUrl = getMainGroupLogoUrl(parentGroup, 'charcoal');
 
   // Navigation
   const [activeTab, setActiveTab] = useState<'vehicles' | 'drivers' | 'ready_vehicles' | 'finance' | 'assigned_cases'>('vehicles');
@@ -563,11 +565,11 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
           {/* Brand Header */}
           <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="bg-slate-950 p-1 rounded-xl border border-white/10 shrink-0">
+              <div className="bg-transparent shrink-0">
                 <img 
-                  src="/logos/mak_group_logo.svg" 
-                  alt="MAK Group of Companies" 
-                  className="h-9 w-auto object-contain" 
+                  src={mainLogoUrl} 
+                  alt={parentGroup?.name || 'MAK Group of Companies'} 
+                  className="h-9 w-auto max-w-[78px] object-contain drop-shadow" 
                 />
               </div>
               <div className="min-w-0">
@@ -726,9 +728,9 @@ export const TransporterPortal: React.FC<TransporterPortalProps> = ({
               </button>
               <div className="flex items-center gap-2.5 min-w-0">
                 <img 
-                  src="/logos/mak_group_logo.svg" 
-                  alt="MAK Group of Companies" 
-                  className="h-8 w-auto shrink-0 drop-shadow" 
+                  src={mainLogoUrl} 
+                  alt={parentGroup?.name || 'MAK Group of Companies'} 
+                  className="h-8 w-auto max-w-[72px] object-contain shrink-0 drop-shadow" 
                 />
                 <div className="min-w-0">
                   <span className="text-xs sm:text-sm font-black text-amber-300 block tracking-wider uppercase truncate">

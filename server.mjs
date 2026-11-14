@@ -104,7 +104,8 @@ Carefully read EVERY page of the attached document(s) — including multi-page P
 
       const desiredMime = body.responseMimeType === 'text/plain' ? 'text/plain' : 'application/json';
       let apiResponse = null;
-      const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+      let lastModelErr = null;
+      const models = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
       for (const m of models) {
         try {
           const genConfig = {};
@@ -124,8 +125,19 @@ Carefully read EVERY page of the attached document(s) — including multi-page P
           });
           if (apiResponse && apiResponse.text) break;
         } catch (mErr) {
+          lastModelErr = mErr;
           console.warn(`OCR attempt with model ${m} notice:`, mErr);
         }
+      }
+
+      if (!apiResponse || !apiResponse.text) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: lastModelErr?.message || 'AI OCR models could not extract content from this document',
+          })
+        );
+        return;
       }
 
       if (desiredMime === 'text/plain') {

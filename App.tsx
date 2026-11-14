@@ -1216,7 +1216,7 @@ const App: React.FC = () => {
         >
           {/* Logo with Pure Transparent Background - No Black Container Box */}
           <div className="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center p-0 shrink-0 group-hover:scale-105 transition-transform bg-transparent">
-            <Logo variant="icon" className="max-h-full max-w-full object-contain drop-shadow" customSrc={getCompanyLogoUrl(activeCompany.id)} />
+            <Logo variant="icon" className="max-h-full max-w-full object-contain drop-shadow" customSrc={getCompanyLogoUrl(activeCompany.id, appTheme)} />
           </div>
           <div className={`${!desktopSidebarExpanded ? 'lg:hidden' : ''} min-w-0 flex-1`}>
             <h3 className={`font-extrabold text-xs sm:text-sm tracking-wide uppercase leading-tight truncate ${
@@ -1459,10 +1459,10 @@ const App: React.FC = () => {
               className="flex items-center justify-center px-1.5 py-1 min-h-[2.25rem] min-w-[3rem] rounded-xl hover:bg-black/5 dark:hover:bg-white/5 border border-transparent transition-all duration-200 cursor-pointer group shrink-0 max-w-full"
               title={`${activeCompany.name} (Click to switch company)`}
             >
-              {getCompanyLogoUrl(activeCompany.id) ? (
+              {getCompanyLogoUrl(activeCompany.id, appTheme) ? (
                 <Logo
                   variant="full"
-                  customSrc={getCompanyLogoUrl(activeCompany.id)}
+                  customSrc={getCompanyLogoUrl(activeCompany.id, appTheme)}
                   className="h-8 sm:h-11 md:h-14 w-auto max-w-[120px] xs:max-w-[150px] sm:max-w-[220px] md:max-w-[320px] object-contain drop-shadow group-hover:scale-105 transition-transform duration-200"
                 />
               ) : null}

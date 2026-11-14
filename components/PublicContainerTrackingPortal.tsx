@@ -23,8 +23,8 @@ import {
   MatchedContainerItem
 } from '../services/containerTrackingService';
 import { subscribeToCases } from '../services/dbService';
-import { useParentGroup, isUploadedLogo, getCompanyLogoUrl, CompanyId } from '../services/companyService';
-import { useBranding } from '../services/brandingService';
+import { useParentGroup, getMainGroupLogoUrl } from '../services/companyService';
+import { resolvePdfLogoWithMetrics } from '../services/pdfExportService';
 
 interface PublicContainerTrackingPortalProps {
   initialQuery?: string;
@@ -48,12 +48,7 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
   });
 
   const { parentGroup } = useParentGroup();
-  const { customLogo: globalLogo } = useBranding();
-  const mainAppLogo = (parentGroup?.logo && isUploadedLogo(parentGroup.logo))
-    ? parentGroup.logo
-    : (globalLogo && isUploadedLogo(globalLogo))
-    ? globalLogo
-    : '/logos/mak_pearl_white_emblem.svg';
+  const mainAppLogo = getMainGroupLogoUrl(parentGroup);
 
   const [activeSearch, setActiveSearch] = useState<string>(() => {
     if (initialQuery && initialQuery.trim().length >= 4) return initialQuery.trim();
@@ -184,33 +179,57 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
   };
 
   // Generate Official Public Container Tracking Slip PDF
-  const handleDownloadTrackingSlip = (targetContainer: MatchedContainerItem) => {
+  const handleDownloadTrackingSlip = async (targetContainer: MatchedContainerItem) => {
     setIsGeneratingPdf(true);
     try {
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const pageWidth = doc.internal.pageSize.getWidth();
       const margin = 16;
+      const logoMetrics = await resolvePdfLogoWithMetrics();
       let y = 16;
 
       // 1. Header Banner
       doc.setFillColor(15, 23, 42); // slate-900
       doc.rect(0, 0, pageWidth, 40, 'F');
 
+      if (logoMetrics?.dataUrl) {
+        const plateX = 14;
+        const plateY = 7;
+        const plateW = 50;
+        const plateH = 26;
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(plateX, plateY, plateW, plateH, 2.5, 2.5, 'F');
+        const ar = logoMetrics.aspectRatio || 1;
+        const maxW = plateW - 4;
+        const maxH = plateH - 4;
+        let drawW = maxH * ar;
+        let drawH = maxH;
+        if (drawW > maxW) {
+          drawW = maxW;
+          drawH = drawW / ar;
+        }
+        const drawX = plateX + (plateW - drawW) / 2;
+        const drawY = plateY + (plateH - drawH) / 2;
+        doc.addImage(logoMetrics.dataUrl, 'PNG', drawX, drawY, drawW, drawH);
+      }
+
+      const textCenterX = logoMetrics?.dataUrl ? 130 : pageWidth / 2;
+
       doc.setTextColor(245, 158, 11); // amber-500
-      doc.setFontSize(16);
+      doc.setFontSize(15);
       doc.setFont('helvetica', 'bold');
-      doc.text('MAK GROUP OF COMPANIES', pageWidth / 2, y, { align: 'center' });
+      doc.text('MAK GROUP OF COMPANIES', textCenterX, y, { align: 'center' });
 
       y += 6;
-      doc.setFontSize(8.5);
+      doc.setFontSize(7.6);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(203, 213, 225); // slate-300
-      doc.text('DOCKS (PVT) LTD • TRUCKIT • MUHIB INTERNATIONAL • VANTAGE SHIPPING LINE', pageWidth / 2, y, { align: 'center' });
+      doc.text('DOCKS (PVT) LTD • TRUCKIT • MUHIB INTERNATIONAL • VANTAGE SHIPPING LINE', textCenterX, y, { align: 'center' });
 
       y += 5;
-      doc.setFontSize(8);
+      doc.setFontSize(7.5);
       doc.setTextColor(148, 163, 184);
-      doc.text('Public Container Status & Workflow Milestone Verification Slip • status.makpk.online', pageWidth / 2, y, { align: 'center' });
+      doc.text('Public Container Status & Milestone Verification Slip • status.makpk.online', textCenterX, y, { align: 'center' });
 
       y += 18;
 
@@ -395,7 +414,7 @@ export const PublicContainerTrackingPortal: React.FC<PublicContainerTrackingPort
             <img
               src={mainAppLogo}
               alt={parentGroup?.name || 'MAK Group of Companies'}
-              className="w-36 sm:w-44 md:w-48 h-36 sm:h-44 md:h-48 max-h-36 sm:max-h-44 md:max-h-48 object-contain drop-shadow-[0_12px_36px_rgba(0,0,0,0.18)] select-none"
+              className="w-64 sm:w-80 md:w-[360px] h-auto max-h-44 object-contain drop-shadow-[0_12px_36px_rgba(0,0,0,0.18)] select-none"
             />
           </div>
 

@@ -45,7 +45,8 @@ export default defineConfig(({ mode }) => {
             'pwa-maskable-512x512.png',
             'pwa-maskable-512x512-v2.png',
             'pwa-maskable-512x512-v3.png',
-            'mak_pearl_grey_edge.png',
+            'logos/mak_main_logo.png',
+            'logos/mak_main_logo_dark.png',
             'firebase-messaging-sw.js'
           ],
           workbox: {
@@ -167,7 +168,8 @@ Carefully read EVERY page of the attached document(s) — including multi-page P
 
                   const desiredMime = body.responseMimeType === 'text/plain' ? 'text/plain' : 'application/json';
                   let apiResponse: any = null;
-                  const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+                  let lastModelErr: any = null;
+                  const models = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
                   for (const m of models) {
                     try {
                       const genConfig: any = {};
@@ -187,8 +189,18 @@ Carefully read EVERY page of the attached document(s) — including multi-page P
                       });
                       if (apiResponse && apiResponse.text) break;
                     } catch (mErr) {
+                      lastModelErr = mErr;
                       console.warn(`Vite OCR attempt with model ${m} notice:`, mErr);
                     }
+                  }
+
+                  if (!apiResponse || !apiResponse.text) {
+                    res.statusCode = 502;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({
+                      error: lastModelErr?.message || 'AI OCR models could not extract content from this document'
+                    }));
+                    return;
                   }
 
                   if (desiredMime === 'text/plain') {

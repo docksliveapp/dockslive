@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParentGroup, isUploadedLogo } from '../services/companyService';
-import { useBranding, useTransparentLogo } from '../services/brandingService';
-import { safeAppStorage } from '../services/storage';
+import { useParentGroup, getMainGroupLogoUrl } from '../services/companyService';
+import { useTransparentLogo } from '../services/brandingService';
 import { useAppTheme } from './ThemeToggleSwitch';
 
 interface SplashScreenProps {
@@ -10,7 +9,6 @@ interface SplashScreenProps {
 
 const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
   const { parentGroup } = useParentGroup();
-  const { customLogo: brandingLogo } = useBranding();
   const [appTheme] = useAppTheme();
   const isPearl = appTheme === 'pearl';
   const [fadingOut, setFadingOut] = useState(false);
@@ -41,11 +39,9 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
     };
   }, []);
 
-  const storedParentLogo = safeAppStorage.getJSON<any>('mak_parent_group_branding', {})?.logo;
-  const candidateLogo = parentGroup?.logo || brandingLogo || storedParentLogo;
-  const adminUploadedLogo = isUploadedLogo(candidateLogo) ? candidateLogo : null;
-  const cleanedUploadedLogo = useTransparentLogo(adminUploadedLogo);
-  const displayRoundLogo = cleanedUploadedLogo || '/mak_pearl_grey_edge.png';
+  const rawMainLogo = getMainGroupLogoUrl(parentGroup, appTheme);
+  const cleanedMainLogo = useTransparentLogo(rawMainLogo);
+  const displayMainLogo = cleanedMainLogo || rawMainLogo;
 
   return (
     <div
@@ -64,11 +60,11 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
         @keyframes makEmblemEntrance {
           0% {
             opacity: 0;
-            transform: scale(0.72) translateY(14px);
+            transform: scale(0.86) translateY(14px);
           }
           65% {
             opacity: 1;
-            transform: scale(1.04) translateY(-2px);
+            transform: scale(1.02) translateY(-2px);
           }
           100% {
             opacity: 1;
@@ -80,23 +76,7 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             transform: translateY(0px) scale(1);
           }
           50% {
-            transform: translateY(-8px) scale(1.022);
-          }
-        }
-        @keyframes makOrbitCw {
-          from {
-            transform: rotate(0deg);
-          }
-          to {
-            transform: rotate(360deg);
-          }
-        }
-        @keyframes makOrbitCcw {
-          from {
-            transform: rotate(360deg);
-          }
-          to {
-            transform: rotate(0deg);
+            transform: translateY(-6px) scale(1.015);
           }
         }
         @keyframes makAuraBreathe {
@@ -106,7 +86,7 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
           }
           50% {
             opacity: 0.85;
-            transform: scale(1.08);
+            transform: scale(1.06);
           }
         }
         @keyframes makSheenSweep {
@@ -115,7 +95,7 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             opacity: 0;
           }
           25% {
-            opacity: 0.55;
+            opacity: 0.45;
           }
           65% {
             transform: translateX(140%) rotate(25deg);
@@ -126,33 +106,19 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             opacity: 0;
           }
         }
-        @keyframes makRingProgress {
+        @keyframes makProgressBar {
           0% {
-            stroke-dashoffset: 760;
+            width: 0%;
           }
           100% {
-            stroke-dashoffset: 0;
+            width: 100%;
           }
         }
       `}</style>
 
-      {/* Pure Circular Concentric Orbital Rings (No Square or Card Container) */}
+      {/* Main MAK Group Logo Presentation — Preserves Full Wide Aspect Ratio (Zero Circle Crop) */}
       <div
-        className={`absolute w-[290px] h-[290px] sm:w-[390px] sm:h-[390px] lg:w-[450px] lg:h-[450px] rounded-full border pointer-events-none ${
-          isPearl ? 'border-slate-300/55' : 'border-white/10'
-        }`}
-        style={{ animation: 'makOrbitCw 36s linear infinite' }}
-      />
-      <div
-        className={`absolute w-[248px] h-[248px] sm:w-[332px] sm:h-[332px] lg:w-[382px] lg:h-[382px] rounded-full border border-dashed pointer-events-none ${
-          isPearl ? 'border-slate-400/45' : 'border-sky-400/20'
-        }`}
-        style={{ animation: 'makOrbitCcw 24s linear infinite' }}
-      />
-
-      {/* Pure Round Animated Logo Medallion — Zero Square Background */}
-      <div
-        className={`relative flex items-center justify-center z-10 ${
+        className={`relative flex flex-col items-center justify-center z-10 w-full max-w-[460px] ${
           mounted ? 'opacity-100' : 'opacity-0'
         }`}
         style={{
@@ -161,65 +127,45 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             : undefined
         }}
       >
-        {/* Soft Circular Radial Halo Behind Round Logo */}
+        {/* Soft Ambient Radial Aura */}
         <div
-          className="absolute w-56 h-56 sm:w-72 sm:h-72 lg:w-80 lg:h-80 rounded-full pointer-events-none -z-10"
+          className="absolute w-[320px] h-[200px] sm:w-[440px] sm:h-[260px] rounded-full blur-2xl pointer-events-none -z-10"
           style={{
             background: isPearl
-              ? 'radial-gradient(circle, rgba(255,255,255,0.92) 0%, rgba(203,213,225,0.38) 54%, transparent 74%)'
-              : 'radial-gradient(circle, rgba(56,189,248,0.18) 0%, rgba(15,23,42,0.35) 58%, transparent 75%)',
+              ? 'radial-gradient(ellipse, rgba(255,255,255,0.95) 0%, rgba(203,213,225,0.35) 60%, transparent 78%)'
+              : 'radial-gradient(ellipse, rgba(56,189,248,0.16) 0%, rgba(15,23,42,0.25) 60%, transparent 78%)',
             animation: 'makAuraBreathe 2.8s ease-in-out infinite'
           }}
         />
 
-        {/* Circular SVG Progress Sweep Hugging the Round Emblem */}
-        <svg
-          viewBox="0 0 260 260"
-          className="absolute w-56 h-56 sm:w-72 sm:h-72 lg:w-80 lg:h-80 -rotate-90 pointer-events-none"
-          aria-hidden="true"
-        >
-          <circle
-            cx="130"
-            cy="130"
-            r="121"
-            fill="none"
-            stroke={isPearl ? 'rgba(148, 163, 184, 0.22)' : 'rgba(255, 255, 255, 0.08)'}
-            strokeWidth="2"
-          />
-          <circle
-            cx="130"
-            cy="130"
-            r="121"
-            fill="none"
-            stroke={isPearl ? 'rgba(15, 23, 42, 0.65)' : 'rgba(56, 189, 248, 0.75)'}
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeDasharray="760"
-            strokeDashoffset="760"
-            style={{ animation: 'makRingProgress 1.55s cubic-bezier(0.16, 1, 0.3, 1) forwards' }}
-          />
-        </svg>
-
-        {/* Levitating Pure Round Emblem with Clipped Circular Glossy Sheen */}
+        {/* Levitating Wide Logo Display — 100% Frameless & Transparent in Both Pearl & Dark Modes */}
         <div
-          className="relative w-48 h-48 sm:w-60 sm:h-60 lg:w-68 lg:h-68 rounded-full flex items-center justify-center bg-transparent"
+          className="relative overflow-hidden flex items-center justify-center px-2 py-2 bg-transparent transition-all"
           style={{
             animation: mounted ? 'makEmblemLevitate 3.2s ease-in-out 0.72s infinite' : undefined
           }}
         >
           <img
-            src={displayRoundLogo}
+            src={displayMainLogo}
             alt={parentGroup?.name || 'MAK Group of Companies'}
-            className="w-full h-full rounded-full object-contain bg-transparent drop-shadow-[0_18px_36px_rgba(15,23,42,0.22)] select-none"
+            className="w-72 sm:w-96 lg:w-[420px] h-auto max-h-56 object-contain bg-transparent drop-shadow-[0_14px_30px_rgba(15,23,42,0.16)] select-none"
           />
 
-          {/* Circular-Clipped Specular Light Sweep */}
-          <div className="absolute inset-0 rounded-full overflow-hidden pointer-events-none">
+          {/* Subtle Diagonal Specular Light Sweep */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
             <div
-              className="w-1/2 h-[180%] -top-[40%] relative bg-gradient-to-r from-transparent via-white/55 to-transparent"
+              className="w-1/2 h-[180%] -top-[40%] relative bg-gradient-to-r from-transparent via-white/45 to-transparent"
               style={{ animation: 'makSheenSweep 2.1s ease-in-out 0.25s infinite' }}
             />
           </div>
+        </div>
+
+        {/* Sleek Minimal Loading Progress Line */}
+        <div className={`mt-6 w-40 sm:w-48 h-1 rounded-full overflow-hidden ${isPearl ? 'bg-slate-300/60' : 'bg-white/15'}`}>
+          <div
+            className={`h-full rounded-full ${isPearl ? 'bg-slate-800' : 'bg-amber-400'}`}
+            style={{ animation: 'makProgressBar 1.55s cubic-bezier(0.16, 1, 0.3, 1) forwards' }}
+          />
         </div>
       </div>
     </div>

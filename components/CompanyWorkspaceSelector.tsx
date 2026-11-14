@@ -28,8 +28,7 @@ import {
   COMPANIES_LIST, 
   useActiveCompany,
   useParentGroup,
-  isUploadedLogo,
-  getCompanyUploadedLogo,
+  getMainGroupLogoUrl,
   getCompanyLogoUrl
 } from '../services/companyService';
 import { UserRole } from '../types';
@@ -173,7 +172,9 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 }) => {
   const { companyId: currentActiveId } = useActiveCompany();
   const { parentGroup } = useParentGroup();
-  const rawParentLogo = parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? parentGroup.logo : null;
+  const [appTheme] = useAppTheme();
+  const isPearl = appTheme === 'pearl';
+  const rawParentLogo = getMainGroupLogoUrl(parentGroup, appTheme);
   const cleanParentLogo = useTransparentLogo(rawParentLogo);
   const [isAdminManagementOpen, setIsAdminManagementOpen] = useState(false);
   const [adminInitialTab, setAdminInitialTab] = useState<AdminSettingsTab>('users');
@@ -296,9 +297,6 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
         return LayoutGrid;
     }
   };
-
-  const [appTheme] = useAppTheme();
-  const isPearl = appTheme === 'pearl';
 
   const getCompanyCardStyles = (id: CompanyId, isCurrentActive: boolean) => {
     if (isPearl) {
@@ -534,14 +532,12 @@ export const CompanyWorkspaceSelector: React.FC<CompanyWorkspaceSelectorProps> =
 
       {/* 2. CENTER CONGLOMERATE HEADER */}
       <div className="text-center mb-4 sm:mb-6 shrink-0 px-2">
-        <div className="inline-flex items-center justify-center min-h-[2rem] mb-2 bg-transparent transform hover:scale-105 transition-transform duration-300">
-          {(cleanParentLogo || rawParentLogo) ? (
-            <img 
-              src={cleanParentLogo || rawParentLogo || ''} 
-              alt={parentGroup.name} 
-              className="h-20 sm:h-28 w-auto max-w-[240px] sm:max-w-[400px] bg-transparent object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.22)]" 
-            />
-          ) : null}
+        <div className="inline-flex items-center justify-center mb-2 bg-transparent transform hover:scale-105 transition-transform duration-300">
+          <img 
+            src={cleanParentLogo || rawParentLogo} 
+            alt={parentGroup.name} 
+            className="h-20 sm:h-28 w-auto max-w-[260px] sm:max-w-[380px] bg-transparent object-contain drop-shadow-[0_8px_25px_rgba(0,0,0,0.22)]" 
+          />
         </div>
 
         <h1 className={`text-lg sm:text-2xl font-bold tracking-wide font-sans mb-1 break-words ${

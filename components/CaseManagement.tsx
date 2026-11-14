@@ -1748,8 +1748,9 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
         if (docDataUrl && docDataUrl.includes(',')) {
           const b64 = docDataUrl.split(',')[1];
-          docDataCache.set(f.name, { base64: b64, mimeType: docType, name: f.name });
           docDataCache.set(recId, { base64: b64, mimeType: docType, name: f.name });
+          docDataCache.set(`${f.name}-${f.size}`, { base64: b64, mimeType: docType, name: f.name });
+          docDataCache.set(f.name, { base64: b64, mimeType: docType, name: f.name });
           saveDocumentToIndexedDB({
             id: recId,
             name: f.name,
@@ -1859,9 +1860,18 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       }
 
       setReadingProgress(100);
-      setReadingPhase('All International Shipping Fields Read! Opening Form...');
+      const ocrWarningMsg = data && typeof data === 'object' ? data._ocrWarning : '';
+      if (ocrWarningMsg) {
+        setReadingPhase(ocrWarningMsg);
+        setDraftToast(`⚠️ ${ocrWarningMsg}`);
+      } else {
+        setReadingPhase('All Shipping Document Fields Read! Opening Form...');
+      }
 
       if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+        const cleanData: any = { ...data };
+        delete cleanData._ocrWarning;
+        data = cleanData;
         setFormData(prev => {
           const merged = forceOverwrite ? { ...data } : { ...prev.extractedData, ...data };
           let updatedContainers = forceOverwrite ? [] : [...prev.containers];

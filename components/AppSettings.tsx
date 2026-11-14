@@ -8,7 +8,7 @@ import {
 import { enhanceDocumentWithAI, fileToBase64, downloadFile } from '../services/geminiService';
 import { CompanyDocument } from '../types';
 import { useBranding, optimizeLogoImage } from '../services/brandingService';
-import { useActiveCompany, isUploadedLogo } from '../services/companyService';
+import { useActiveCompany, isUploadedLogo, getMainGroupLogoUrl, getMainGroupDocumentLogoUrl } from '../services/companyService';
 import { 
   wipeCompleteDatabase, 
   wipeCompanyDatabase,
@@ -115,8 +115,8 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
     setBrandSubtitle(branding.subtitle || activeCompany?.tagline || '');
     setUseMainLogoAsOfficial(Boolean(branding.useMainLogoAsOfficial));
     if (!logoFile) {
-      if (branding.useMainLogoAsOfficial && parentGroup?.logo) {
-        setLogoPreview(parentGroup.logo);
+      if (branding.useMainLogoAsOfficial) {
+        setLogoPreview(getMainGroupLogoUrl(parentGroup));
       } else {
         setLogoPreview(branding.customLogo || activeCompany?.logo || null);
       }
@@ -1142,8 +1142,11 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
   };
 
   const renderLogoSettings = () => {
-    const effectivePreviewLogo = useMainLogoAsOfficial && parentGroup?.logo && isUploadedLogo(parentGroup.logo)
-      ? parentGroup.logo
+    const effectivePreviewDarkLogo = useMainLogoAsOfficial
+      ? getMainGroupLogoUrl(parentGroup, 'charcoal')
+      : logoPreview;
+    const effectivePreviewPrintLogo = useMainLogoAsOfficial
+      ? getMainGroupDocumentLogoUrl(parentGroup)
       : logoPreview;
 
     return (
@@ -1190,9 +1193,9 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
               onChange={(e) => {
                 const checked = e.target.checked;
                 setUseMainLogoAsOfficial(checked);
-                if (checked && parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
-                  setLogoPreview(parentGroup.logo);
-                } else if (!checked) {
+                if (checked) {
+                  setLogoPreview(getMainGroupLogoUrl(parentGroup));
+                } else {
                   setLogoPreview(branding.customLogo || null);
                 }
               }}
@@ -1236,7 +1239,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
                 <span className="text-[10px] bg-white/10 text-gray-300 px-2 py-0.5 rounded">Digital Screen</span>
               </div>
               <div className="flex items-center justify-center py-4 bg-slate-900/60 rounded-lg border border-white/5">
-                <Logo customSrc={effectivePreviewLogo} className="h-20 sm:h-24 w-auto max-w-[340px]" />
+                <Logo customSrc={effectivePreviewDarkLogo} className="h-20 sm:h-24 w-auto max-w-[340px]" />
               </div>
               <div className="mt-3 text-center">
                 <p className="text-xs text-white font-medium">{brandCompanyName || activeCompany?.legalTitle || activeCompany?.name}</p>
@@ -1253,7 +1256,7 @@ const AppSettings: React.FC<AppSettingsProps> = ({ onReplaySplash }) => {
                 <span className="text-[10px] bg-gray-200 text-gray-800 px-2 py-0.5 rounded font-semibold">Print Output</span>
               </div>
               <div className="flex flex-col items-center justify-center py-3 bg-gray-50 rounded-lg border border-gray-200">
-                <Logo customSrc={effectivePreviewLogo} className="h-20 sm:h-24 w-auto max-w-[340px] mb-2" />
+                <Logo customSrc={effectivePreviewPrintLogo} className="h-20 sm:h-24 w-auto max-w-[340px] mb-2" />
                 <h5 className="text-sm font-bold uppercase text-black tracking-wide">
                   {brandCompanyName || activeCompany?.legalTitle || activeCompany?.name}
                 </h5>

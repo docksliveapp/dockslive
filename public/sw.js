@@ -2,8 +2,8 @@
 // Production Cache-First + Stale-While-Revalidate App Shell Strategy
 // Provides instant offline-capable native launch for Android APK (PWABuilder / TWA), iOS, Windows, and macOS.
 
-const CACHE_NAME = 'mak-group-cache-first-v2026-20';
-const FONT_CACHE_NAME = 'mak-group-fonts-v2026-20';
+const CACHE_NAME = 'mak-group-cache-first-v2026-22';
+const FONT_CACHE_NAME = 'mak-group-fonts-v2026-22';
 
 const CORE_APP_SHELL = [
   '/',
@@ -17,7 +17,8 @@ const CORE_APP_SHELL = [
   '/apple-touch-icon-v3.png',
   '/pwa-192x192-v3.png',
   '/pwa-512x512-v3.png',
-  '/mak_pearl_grey_edge.png'
+  '/logos/mak_main_logo.png',
+  '/logos/mak_main_logo_dark.png'
 ];
 
 self.addEventListener('install', (event) => {

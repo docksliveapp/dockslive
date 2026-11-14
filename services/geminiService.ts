@@ -44,7 +44,7 @@ export async function extractPdfPagesAndTextForOcr(
 
     const pdfDoc = await Promise.race([
       loadingTask.promise,
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000))
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 20000))
     ]);
 
     if (!pdfDoc) {
@@ -71,7 +71,7 @@ export async function extractPdfPagesAndTextForOcr(
 
         // 2. Render page to canvas for scanned PDF visual OCR
         const unscaledViewport = page.getViewport({ scale: 1 });
-        const maxDim = 1350;
+        const maxDim = 1280;
         const scale = Math.min(2.0, Math.max(1.0, maxDim / Math.max(unscaledViewport.width, unscaledViewport.height, 1)));
         const viewport = page.getViewport({ scale });
 
@@ -90,7 +90,7 @@ export async function extractPdfPagesAndTextForOcr(
             canvas
           }).promise;
 
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.80);
           const commaIdx = dataUrl.indexOf(',');
           const jpgB64 = commaIdx >= 0 ? dataUrl.substring(commaIdx + 1) : '';
           if (jpgB64) {
@@ -128,11 +128,16 @@ interface ServerGeminiRequest {
 }
 
 async function callServerGeminiExtract(req: ServerGeminiRequest): Promise<any> {
-  const timeoutMs = req.timeoutMs || 25000;
+  const timeoutMs = req.timeoutMs || 35000;
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = setTimeout(() => {
+    try { controller?.abort(); } catch (_) {}
+  }, timeoutMs);
   try {
-    const fetchPromise = fetch('/api/extract-documents', {
+    const res = await fetch('/api/extract-documents', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: controller ? controller.signal : undefined,
       body: JSON.stringify({
         files: req.files || [],
         extractedText: req.extractedText || '',
@@ -142,8 +147,6 @@ async function callServerGeminiExtract(req: ServerGeminiRequest): Promise<any> {
         systemInstruction: req.systemInstruction
       })
     });
-    const timeoutPromise = new Promise<Response | null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
-    const res = await Promise.race([fetchPromise, timeoutPromise]);
     if (!res || !res.ok) return null;
     const json = await res.json();
     if (json && json.error) {
@@ -154,6 +157,8 @@ async function callServerGeminiExtract(req: ServerGeminiRequest): Promise<any> {
   } catch (err) {
     console.warn('Server Gemini request notice:', err);
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -290,27 +295,19 @@ export const autoFillCaseData = async (
     if (!files || files.length === 0) return {};
 
     const parts: any[] = [];
-    const rawPdfSnippets: string[] = [];
     let combinedPdfExtractedText = '';
     let totalPdfPageCount = 0;
 
-    // Process up to 5 documents with persistent cache, deep retrieval & multi-page PDF rasterization
+    // Process up to 5 documents, always prioritizing fresh File / payload bytes over cache
     for (const item of files.slice(0, 5)) {
       try {
         let b64 = '';
         let mime = '';
         const itemName = item?.name || 'document';
+        const cacheKey = item?.id || (item?.size ? `${itemName}-${item.size}` : itemName);
 
-        // 1. Check in-memory document cache first
-        const cacheKey = item?.id || itemName;
-        const cached = docDataCache.get(cacheKey) || docDataCache.get(itemName);
-        if (cached && cached.base64) {
-          b64 = cached.base64;
-          mime = cached.mimeType;
-        }
-
-        // 2. If not in cache and is a File instance
-        if (!b64 && item instanceof File) {
+        // 1. Read fresh File instance first (never risk returning stale cache on new upload)
+        if (item instanceof File) {
           const processed = await compressAndPrepareFile(item);
           if (processed.base64) {
             b64 = processed.base64;
@@ -325,9 +322,9 @@ export const autoFillCaseData = async (
               dataUrl: `data:${mime};base64,${b64}`
             }).catch(() => {});
           }
-        } 
-        // 3. If item is an object with dataUrl or base64 or url
-        else if (!b64 && item && typeof item === 'object') {
+        }
+        // 2. If item is an object with explicit base64 / dataUrl / url
+        else if (item && typeof item === 'object') {
           if (item.base64) {
             b64 = item.base64;
             mime = item.type || detectMimeType(item).mimeType;
@@ -385,29 +382,22 @@ export const autoFillCaseData = async (
           }
         }
 
+        // 3. Only fall back to in-memory cache if item carried no inline/blob payload
+        if (!b64) {
+          const cached = (item?.id ? docDataCache.get(item.id) : undefined) || docDataCache.get(cacheKey) || docDataCache.get(itemName);
+          if (cached && cached.base64) {
+            b64 = cached.base64;
+            mime = cached.mimeType;
+          }
+        }
+
         if (b64) {
           const finalMime = mime || 'application/pdf';
           const isPdf = finalMime.includes('pdf') || itemName.toLowerCase().endsWith('.pdf');
 
-          try {
-            if (typeof atob !== 'undefined') {
-              const fullBinary = atob(b64);
-              if (isPdf) {
-                const rawPageMatches = fullBinary.match(/\/Type\s*\/Page\b(?!s)/gi);
-                if (rawPageMatches && rawPageMatches.length > 0) {
-                  totalPdfPageCount = Math.max(totalPdfPageCount, rawPageMatches.length);
-                }
-              }
-              const asciiTokens = fullBinary.match(/[A-Za-z0-9\-_.,/:@#() ]{5,}/g);
-              if (asciiTokens && asciiTokens.length > 0) {
-                rawPdfSnippets.push(asciiTokens.slice(0, 4000).join(' '));
-              }
-            }
-          } catch (_) {}
-
           if (isPdf) {
             // Render PDF pages to crisp JPEGs & extract text layer using pdfjs-dist
-            const pdfResult = await extractPdfPagesAndTextForOcr(b64, 14);
+            const pdfResult = await extractPdfPagesAndTextForOcr(b64, 16);
             if (pdfResult.extractedText) {
               combinedPdfExtractedText += '\n' + pdfResult.extractedText;
             }
@@ -446,425 +436,10 @@ export const autoFillCaseData = async (
       }
     }
 
-    // Fallback heuristic extraction if no parts or if AI OCR is unreachable
+    // Pure text-layer regex fallback if AI OCR is unreachable (zero hardcoded sample shipments)
     const runHeuristicExtraction = () => {
       const fileNames = files.map(f => ('name' in f ? f.name : '')).join(' ');
-      const fileSizes = files.map(f => ('size' in f ? Number(f.size) : 0));
-      
-      const decodedSnippet = rawPdfSnippets.join(' ') + ' ' + combinedPdfExtractedText;
-      const combinedCorpus = (fileNames + ' ' + decodedSnippet).toUpperCase();
       const cleanTextCorpus = (fileNames + ' ' + combinedPdfExtractedText).toUpperCase();
-
-      // Sample 00 Check: HASSAN ENTERPRISES / MSKU8338068 / KAPS-TP-56295-30-09-2026 / TLZ825 / EGLV143663514364 / BJ514364 (8-page PDF)
-      const isHassanEnterprisesCase =
-        /MSKU8338068|8338068|KAPS-TP-56295|56295-30-09-2026|TLZ825|TLZ-825|HASSAN\s*ENTERPRISES|EGLV143663514364|143663514364|BJ514364|3694660|EMCSJL1903|2355350|180926145254|EVER\s*LIFTING|016632-30092026|3095116|3277876134835|DOWNLOADFILE[_\s]*\(?21\)?/i.test(combinedCorpus) ||
-        totalPdfPageCount === 8;
-
-      if (isHassanEnterprisesCase) {
-        return {
-          client: 'HASSAN ENTERPRISES',
-          clientName: 'HASSAN ENTERPRISES',
-          consigneeName: 'HASSAN ENTERPRISES',
-          consigneeAddress: 'SHOP NO.14, PIPPAL VEHRA, SHAHALAM MARKET, Lahore Ravi Town',
-          consigneeContact: '042-37667759',
-          consigneeEmail: 'GHOSIAJEWELLERYHOUSE@GMAIL.COM',
-          ntnNumber: '3095116-0',
-          strnNumber: '3277876134835',
-          cargoOwner: 'HASSAN ENTERPRISES',
-          cargoOwnerContact: '042-37667759',
-          shipperName: 'YIWU SHALUO IMPORT & EXPORT CO., LTD',
-          shipperAddress: 'ROOM 2002, NO.1, BUILDING 7, DISTRICT A, OUJIANG GARDEN, CHOUJIANG STREET, YIWU CITY, ZHEJIANG PROVINCE, CHINA',
-          shipperCountry: 'China',
-          shipperContact: '0579-85905912',
-          shipperEmail: '602546845@QQ.COM',
-          notifyPartyName: 'HASSAN ENTERPRISES',
-          notifyPartyAddress: 'SHOP # 14, PIPPAL VEHRA SHAHALAM MARKET, LAHORE PAKISTAN (TEL: 042-37667759)',
-          shippingLine: 'Evergreen Line',
-          shippingAgent: 'SADAT ENTERPRISES (CHAL #9010987) / CHINA MARINE SHIPPING AGENCY NINGBO CO., LTD',
-          clearingAgent: 'Usman Freight Logistics (UFL) (021-32423601, ufl.601@gmail.com)',
-          oceanVessel: 'EVER LIFTING',
-          vesselName: 'EVER LIFTING',
-          voyageNo: '065W',
-          arrivalDate: '2026-09-18',
-          blNumber: 'EGLV143663514364',
-          blDate: '2026-09-07',
-          gdNo: 'KAPS-TP-56295-30-09-2026',
-          gdNumber: 'KAPS-TP-56295-30-09-2026',
-          tpNumber: 'KAPS-TP-56295-30-09-2026',
-          gdDate: '2026-09-30',
-          gdType: 'TP (Transshipment Permit)',
-          cfdNo: 'C-KAPS-016632-30092026',
-          igmNo: 'PKKHISAPT_180926145254',
-          igmDate: '2026-09-18',
-          indexNo: '1241',
-          carrierName: 'TRUCKIT (PRIVATE) LIMITED',
-          vehicleNumber: 'TLZ825',
-          driverName: 'HARIS',
-          containerNo: 'MSKU8338068',
-          containerSize: '40ft',
-          sealNo: 'Bolt-3694660',
-          ccsuSealNo: 'Bolt-3694660',
-          customsSealNo: 'Bolt-3694660',
-          shipperSealNo: 'EMCSJL1903',
-          serialNo: '2355350',
-          sealingDate: '2026-10-02',
-          pccssOfficer: 'Miss Arisha Attari',
-          pol: 'Ningbo, China',
-          pod: 'Karachi Port (SAPT)',
-          placeOfDelivery: 'MCC Appraisement West Lahore-Import (Customs Freight Station, NLC)',
-          pickupDestination: 'South Asia Pakistan Terminals',
-          dropoffDestination: 'Lahore NLC Dry Port',
-          invoiceNo: 'BJ514364',
-          invoiceDate: '2026-09-01',
-          invoiceValue: 24740,
-          invoiceCurrency: 'USD',
-          incoTerms: 'CFR',
-          paymentTerms: 'DA 120 DAYS AFTER SIGHT',
-          bankName: 'Bank Alfalah Limited (BAF)',
-          assessedValuePkr: 7004407,
-          totalDutyTaxesPkr: 4379053,
-          exchangeRate: 277.55,
-          itemName: 'HAIR ACCESSORIES, ARTIFICIAL JEWELLERY, GLASS CHATTAN/BEADS, PLASTIC CAPS/INNER, EMPTY LIP GLOSS CASE, CHATTAN HOLDER MATERIAL, CLUTCH PLATE (MOTOR CYCLE), PAINT',
-          itemDescription: 'HAIR ACCESSORIES (8802 KGS, 355 CTNS), ARTIFICIAL JEWELLERY (130 KGS, 4 CTNS), GLASS CHATTAN/BEADS (7210 KGS, 206 CTNS), PLASTIC CAP/INNER (30 KGS, 2 CTNS), EMPTY LIP GLOSS CASE (648 KGS, 36 CTNS), CHATTAN HOLDER MATERIAL (200 KGS, 10 CTNS), CLUTCH PLATE (MOTOR CYCLE) (1250 KGS, 50 CTNS), PAINT (240 KGS, 6 CTNS) - TOTAL 669 CARTONS',
-          itemType: 'Hair Accessories, Artificial Jewellery, Glass Beads & General Goods',
-          hsCode: '9615.9090, 7117.1900, 7018.1000, 3923.5000, 3923.1000, 8308.9090, 8714.1090, 3208.9090',
-          packagingType: 'CARTONS',
-          packageCount: 669,
-          totalWeight: 18510,
-          grossWeight: 18510,
-          netWeight: 16510,
-          volumeCBM: 68.0,
-          freightTerms: 'Prepaid',
-          suggestedCategory: 'Bonded Carrier',
-          docCategoryDetected: 'PCCSS Form "A" & Transport Note & Goods Declaration (TP) & Usman Freight Logistics Letter & Evergreen Line B/L & Commercial Invoice',
-          containers: [
-            {
-              number: 'MSKU8338068',
-              size: '40ft',
-              weight: 18510,
-              sealNo: 'Bolt-3694660',
-              shipperSealNo: 'EMCSJL1903',
-              vehicleNo: 'TLZ825',
-              driverName: 'HARIS'
-            }
-          ]
-        };
-      }
-
-      // Sample 0A Check: AL-NAQEEB ENTERPRISES / MSKU1177491 / KAPW-TP-58510-01-10-2026 / JW2224 / OOLU2172311460 / BJ177491 (11-page PDF)
-      const isAlNaqeebCase =
-        /MSKU1177491|1177491|KAPW-TP-58510|58510-01-10-2026|JW2224|JW-2224|AL-?NAQEEB|KHALID\s*YAQOOB|OOLU2172311460|2172311460|BJ177491|3697312|OOLKCX5832|2355777|280926151534|YM\s*EXPRESS|1725617|35202-2604271/i.test(combinedCorpus) ||
-        totalPdfPageCount === 11;
-
-      if (isAlNaqeebCase) {
-        return {
-          client: 'AL-NAQEEB ENTERPRISES',
-          clientName: 'AL-NAQEEB ENTERPRISES',
-          consigneeName: 'AL-NAQEEB ENTERPRISES',
-          consigneeAddress: 'SHOP NO.1, PIPPAL VEHRA, SHAHALAM, MARKET, Lahore Ravi Town',
-          consigneeContact: '0092-3009421801-2',
-          consigneeEmail: 'GHOSIAJEWELLERYHOUSE@GMAIL.COM',
-          ntnNumber: '1725617-8',
-          strnNumber: '0302909920482',
-          cargoOwner: 'MUHAMMAD KHALID YAQOOB (AL-NAQEEB ENTERPRISES)',
-          cargoOwnerCnic: '35202-2604271-7',
-          cargoOwnerContact: '0092-3009421801-2',
-          shipperName: 'YIWU SHALUO IMPORT & EXPORT CO., LTD',
-          shipperAddress: 'ROOM NO.2002 NO.1 BUILDING DISTRICT A OUJIANG GARDEN COUJIANG STREET, YIWU ZHEJIANG CHINA',
-          shipperCountry: 'China',
-          shipperEmail: '602546845@QQ.COM',
-          notifyPartyName: 'AL-NAQEEB ENTERPRISES',
-          notifyPartyAddress: 'SHOP NO.1, PIPPAL VEHRA, SHAHALAM MARKET, LAHORE PAKISTAN (TEL: 0092-3009421801-2)',
-          shippingLine: 'OOCL (ORIENT OVERSEAS CONTAINER LINE)',
-          shippingAgent: 'SADAT ENTERPRISES (CHAL #9010987) / OOCL PAKISTAN (PVT) LTD',
-          clearingAgent: 'USMAN FREIGHT LOGISTIC (CHAL #3548, UMAR SIDDIQUE, NIC: 42301-6134145-3, 021-32423601, usmanfreightlogistic@gmail.com)',
-          oceanVessel: 'YM EXPRESS',
-          vesselName: 'YM EXPRESS',
-          voyageNo: '097E / 097W',
-          arrivalDate: '2026-10-02',
-          blNumber: 'OOLU2172311460',
-          blDate: '2026-09-15',
-          gdNo: 'KAPW-TP-58510-01-10-2026',
-          gdNumber: 'KAPW-TP-58510-01-10-2026',
-          tpNumber: 'KAPW-TP-58510-01-10-2026',
-          gdDate: '2026-10-01',
-          gdType: 'TP (Transshipment Permit)',
-          cfdNo: 'C-KAPW-000884-01102026',
-          igmNo: 'PKKHIKICT_280926151534',
-          igmDate: '2026-09-28',
-          indexNo: '1197',
-          carrierName: 'TRUCKIT (PRIVATE) LIMITED',
-          vehicleNumber: 'JW2224',
-          driverName: 'SULEMAN',
-          driverCnic: '42301-6134145-3',
-          containerNo: 'MSKU1177491',
-          containerSize: '45ft',
-          sealNo: 'Bolt-3697312',
-          ccsuSealNo: 'Bolt-3697312',
-          customsSealNo: 'Bolt-3697312',
-          shipperSealNo: 'OOLKCX5832',
-          serialNo: '2355777',
-          sealingDate: '2026-10-04',
-          pccssOfficer: 'Fazal ur Rehman',
-          pol: 'Ningbo, China',
-          pod: 'Karachi International Container Terminal (KICT)',
-          placeOfDelivery: 'MCC Appraisement West Lahore-Import (Lahore NLC Dry Port / CFS NLC)',
-          pickupDestination: 'Karachi International Container Terminal (KICT)',
-          dropoffDestination: 'Lahore NLC Dry Port',
-          invoiceNo: 'BJ177491',
-          invoiceDate: '2026-08-16',
-          invoiceValue: 49209,
-          invoiceCurrency: 'USD',
-          incoTerms: 'CFR',
-          paymentTerms: 'DA 120 DAYS AFTER SIGHT',
-          bankName: 'Meezan Bank Limited (MBL)',
-          assessedValuePkr: 13929602,
-          totalDutyTaxesPkr: 7456273,
-          exchangeRate: 277.5,
-          itemName: 'HAIR ACCESSORIES, ARTIFICIAL JEWELLERY, GLASS CHATTAN/BEADS, CHAIN MATERIAL, PLASTIC NAIL, EMPTY GLASS BOTTLES, PLASTIC CAP/INNER, ZINC INGOT, TISSUE PAPER, EMPTY PACKING, PVC PACKING TAPE, TOYS B/O',
-          itemDescription: 'HAIR ACCESSORIES (5658 KG), ARTIFICIAL JEWELLERY (2970 KG), GLASS CHATTAN/BEADS (6831 KG), CHAIN MATERIAL (823 KG), PLASTIC NAIL (684 KG), EMPTY GLASS BOTTLES (3547 KG), PLASTIC CAP/INNER (1407 KG), ZINC INGOT (1425 KG), TISSUE PAPER (752 KG), EMPTY PACKING (752 KG), PVC PACKING TAPE (405 KG), TOYS B/O (466 KG) - TOTAL 768 CARTONS',
-          itemType: 'Assorted Jewellery, Hair Accessories, Glassware & General Goods',
-          hsCode: '9615.9090, 7117.1900, 7018.1000, 7315.1200, 3926.4090, 7010.9000, 3923.5000, 7901.1100, 4818.2000, 3923.2900, 3919.9090, 9503.0090',
-          packagingType: 'CARTONS',
-          packageCount: 768,
-          totalWeight: 27720,
-          grossWeight: 27720,
-          netWeight: 25720,
-          volumeCBM: 68.0,
-          freightTerms: 'Prepaid',
-          suggestedCategory: 'Bonded Carrier',
-          docCategoryDetected: 'PCCSS Form "A" & Transport Note & KICT Terminal Gate Pass & Goods Declaration (TP) & Usman Freight Logistic Letter & FBR Verification & CNIC & OOCL B/L & Commercial Invoice',
-          containers: [
-            {
-              number: 'MSKU1177491',
-              size: '45ft',
-              weight: 27720,
-              sealNo: 'Bolt-3697312',
-              shipperSealNo: 'OOLKCX5832',
-              vehicleNo: 'JW2224',
-              driverName: 'SULEMAN',
-              driverCnic: '42301-6134145-3'
-            }
-          ]
-        };
-      }
-
-      // Sample 0B Check: M.AZEEM TOYS / TEMU8045938 / KAPS-TP-52611-24-09-2026 / TMT400 / SWA0463766 / SP260807AZ03
-      const isAzeemToysCase =
-        /TEMU8045938|52611-24-09-2026|KAPS-TP-52611|TMT400|TMT-400|M\.?\s*AZEEM\s*TOYS|SWA0463766|SP260807AZ03|3705796|J1462570|040926095902|3240316298463|SHANTOU\s*RIGHT\s*PROCURE|APL\s*SOUTHAMPTON|DOWNLOADFILE[_\s]*\(?19\)?|4F4F7500|LENGTH\s*362727/i.test(combinedCorpus) ||
-        fileSizes.some(sz => sz >= 4650000 && sz <= 4660000);
-
-      if (isAzeemToysCase) {
-        return {
-          client: 'M.AZEEM TOYS',
-          clientName: 'M.AZEEM TOYS',
-          consigneeName: 'M.AZEEM TOYS',
-          consigneeAddress: 'SHOP NO 18, GROUND FLOOR, HAFIZ CENTER, SADAKARAN BAZAR INSIDE MOCHI GATE, LAHORE Data Gunj Bukhsh Town',
-          ntnNumber: '7143785',
-          strnNumber: '3277876172006',
-          shipperName: 'SHANTOU RIGHT PROCURE TRADING CO., LTD.',
-          shipperAddress: '10 ROOM OF A405, FLOOR 4, MAIN BUILDING OF AREA B08 OFFICE BUILDING SHANTOU BONDED ZONE CHINA',
-          shipperContact: '754-88947905',
-          shipperCountry: 'China',
-          shippingLine: 'CMA CGM',
-          shippingAgent: 'PAK MALAYSIA SHIPPING AGENCY (CHAL #1893, 021-34922712)',
-          clearingAgent: 'ROAD KING LOGISTICS (+92 300 9220114 / roadkinglogistics99@gmail.com)',
-          oceanVessel: 'APL SOUTHAMPTON',
-          vesselName: 'APL SOUTHAMPTON',
-          feederVessel: 'AVIOS',
-          voyageNo: '006 / 0P82HS1MA',
-          blNumber: 'SWA0463766',
-          blDate: '2026-08-15',
-          gdNo: 'KAPS-TP-52611-24-09-2026',
-          gdNumber: 'KAPS-TP-52611-24-09-2026',
-          tpNumber: 'KAPS-TP-52611-24-09-2026',
-          gdDate: '2026-09-24',
-          gdType: 'TP (Transshipment Permit)',
-          cfdNo: 'C-KAPS-013535-24092026',
-          igmNo: 'PKKHISAPT_040926095902',
-          igmDate: '2026-09-04',
-          indexNo: '412',
-          carrierName: 'TRUCKIT (PRIVATE) LIMITED',
-          vehicleNumber: 'TMT400',
-          driverName: 'M NAWAZ',
-          driverCnic: '3240316298463',
-          containerNo: 'TEMU8045938',
-          containerSize: '45ft',
-          sealNo: 'Bolt-3705796',
-          ccsuSealNo: 'Bolt-3705796',
-          customsSealNo: 'Bolt-3705796',
-          shipperSealNo: 'J1462570',
-          serialNo: '2357691',
-          sealingDate: '2026-10-17',
-          pccssOfficer: 'Miss Arisha Attari',
-          pol: 'Shantou, China',
-          pod: 'Karachi Port (SAPT)',
-          placeOfDelivery: 'MCC Appraisement, Lahore - Imports (Railway Dry Port Import / LRDP)',
-          pickupDestination: 'South Asia Pakistan Terminals',
-          dropoffDestination: 'Lahore Dry Port',
-          invoiceNo: 'SP260807AZ03',
-          invoiceDate: '2026-08-07',
-          invoiceValue: 8650,
-          invoiceCurrency: 'USD',
-          incoTerms: 'CFR',
-          paymentTerms: 'DP at Sight',
-          bankName: 'Askari Bank LTD',
-          assessedValuePkr: 2449505,
-          totalDutyTaxesPkr: 1836003,
-          exchangeRate: 277.6,
-          itemName: 'TOYS (B/O PLASTIC TOYS, TOY DOLL, RUBBER TOYS, FRICTION PLASTIC TOYS, BALL), CARDBOARD PACKING MATERIAL, PVC PACKING, WATER BUBBLE, CLAY',
-          itemDescription: 'TOYS (B/O PLASTIC TOYS B/O TOY DOLL SIMPLE RUBBER TOYS SIMPLE PLASTIC TOYS FRICTION PLASTIC TOYS BALL ETC) (APPROX GW 5000 KGS), CARDBOARD PACKING MATERIAL (APPROX 43000 PCS), PVC PACKING (APPROX 20000 PCS), WATER BUBBLE (APPROX GW 500 KGS), CLAY (APPROX GW 500 KGS)',
-          itemType: 'Assorted Toys & Packing Materials',
-          hsCode: '9503.0090, 4819.1000, 3926.9099, 3401.2000, 3407.0090',
-          packagingType: 'CARTONS',
-          packageCount: 486,
-          totalWeight: 11174.25,
-          grossWeight: 11174.25,
-          netWeight: 9374.25,
-          tareWeight: 4740,
-          volumeCBM: 75.202,
-          freightTerms: 'Freight Prepaid',
-          suggestedCategory: 'Bonded Carrier',
-          docCategoryDetected: 'PCCSS Form "A" & Transport Note & WeBOC Vehicle Amendment & Goods Declaration (TP) & Road King Logistics Letter & CMA CGM B/L & Commercial Invoice',
-          containers: [
-            {
-              number: 'TEMU8045938',
-              size: '45ft',
-              weight: 11174.25,
-              tareWeight: 4740,
-              sealNo: 'Bolt-3705796',
-              shipperSealNo: 'J1462570',
-              vehicleNo: 'TMT400',
-              driverName: 'M NAWAZ',
-              driverCnic: '3240316298463'
-            }
-          ]
-        };
-      }
-
-      // Sample 1 Check: U.S TRADERS / ECMU8087489 / KAPS-TP-186918 / TLG799 / AZ26-02TH
-      const isUSTradersCase = 
-        /ECMU8087489|8087489|TLG799|TLG-799|186918-01-05-2026|KAPS-TP-186918|SWA0449647|AZ26-02TH|U\.?S\.?\s*TRADERS|YIWU\s*TONGGANG|PRINCE\s*RUPERT|3022896|230426123555/i.test(combinedCorpus);
-
-      if (isUSTradersCase) {
-        return {
-          client: 'U.S TRADERS',
-          clientName: 'U.S TRADERS',
-          consigneeName: 'U.S TRADERS',
-          consigneeAddress: 'SHOP NO. 01, GROUND FLOOR, HE 60 HAVLI PATHRANWALI, INSIDE MOCHI GATE, LAHORE Shalamar Town',
-          consigneeContact: '0092 321 6464924',
-          consigneeEmail: 'usmanrajaa@yahoo.com',
-          ntnNumber: '5041761',
-          shipperName: 'YIWU TONGGANG IMPORT AND EXPORT CO., LTD',
-          shipperAddress: 'Room 119, Building A, No. 266 Chengxin Avenue, Futian Street, Yiwu City, Jinhua City, Zhejiang Province, China',
-          shipperCountry: 'China',
-          shippingLine: 'CMA CGM',
-          oceanVessel: 'COSCO PRINCE RUPERT',
-          vesselName: 'COSCO PRINCE RUPERT',
-          voyageNo: '004',
-          blNumber: 'SWA0449647',
-          blDate: '2026-04-01',
-          gdNo: 'KAPS-TP-186918-01-05-2026',
-          gdNumber: 'KAPS-TP-186918-01-05-2026',
-          tpNumber: 'KAPS-TP-186918-01-05-2026',
-          gdDate: '2026-05-01',
-          igmNo: 'PKKHISAPT_230426123555',
-          igmDate: '2026-04-23',
-          indexNo: '383',
-          carrierName: 'TRUCKIT (PRIVATE) LIMITED',
-          vehicleNumber: 'TLG799',
-          containerNo: 'ECMU8087489',
-          containerSize: '45ft',
-          sealNo: 'Bolt-3580312',
-          ccsuSealNo: 'Bolt-3580312',
-          pol: 'Shantou, China',
-          pod: 'Karachi Port (SAPT)',
-          placeOfDelivery: 'MCC Appraisement West Lahore-Import (CFS NLC)',
-          pickupDestination: 'South Asia Pakistan Terminals',
-          dropoffDestination: 'Lahore NLC Dry Port',
-          invoiceNo: 'AZ26-02TH',
-          invoiceDate: '2026-03-26',
-          invoiceValue: 19356,
-          invoiceCurrency: 'USD',
-          incoTerms: 'CFR',
-          itemName: 'ASSORTED TOYS',
-          itemDescription: 'ASSORTED TOYS, TOY PARTS, RECHARGEABLE FAN, PACKING, MAGNET, WATER BUBBLE, CLAY (460 CARTONS)',
-          itemType: 'Toys & Consumer Goods',
-          hsCode: '9503.0090',
-          packagingType: 'CARTONS',
-          packageCount: 460,
-          totalWeight: 11685,
-          grossWeight: 11685,
-          netWeight: 10185,
-          volumeCBM: 45.0,
-          freightTerms: 'Freight Prepaid',
-          suggestedCategory: 'Bonded Carrier',
-          docCategoryDetected: 'Weighment Certificate (SAPT) & PCCSS Form A & Transport Note & Goods Declaration (TP) & CMA CGM B/L & Commercial Invoice & Packing List',
-          containers: [
-            { 
-              number: 'ECMU8087489', 
-              size: '45ft', 
-              weight: 11685, 
-              sealNo: 'Bolt-3580312',
-              vehicleNo: 'TLG799' 
-            }
-          ]
-        };
-      }
-
-      // Sample 2 Check: ALFA TEXTILE / WHSU5957558 / 027G657324 / ZK1353 / Wan Hai
-      const isAlfaDocument = 
-        /ALFA|WAN[-_ ]?HAI|027G657324|WR720V|ZK1353|WHSU|5957558|BAOFENG|5801|VELVET|DEANS/i.test(combinedCorpus);
-
-      if (isAlfaDocument) {
-        return {
-          client: 'ALFA TEXTILE',
-          clientName: 'ALFA TEXTILE',
-          shippingLine: 'WAN HAI LINES',
-          blNumber: '027G657324',
-          blDate: '2026-06-12',
-          shipperName: 'HANGZHOU BAOFENG IMP. & EXP. CO., LTD',
-          shipperAddress: 'ROOM 401-406, BUILDING 1, 25 FUTANG RD., TANGQI TOWN, LINPING DISTRICT, HANGZHOU, ZHEJIANG, CHINA',
-          shipperCountry: 'China',
-          consigneeName: 'ALFA TEXTILE',
-          consigneeAddress: 'NOURAB GUL MARKET, OPPOSITE MEEZANBANK, ALAMGUDAR, KHYBER BARA, PESHAWAR PAKISTAN',
-          ntnNumber: 'A629270-8',
-          notifyPartyName: 'DEANS GENERAL TRADING LLC',
-          notifyPartyAddress: 'OFFICE 904-77, ABRAJ CENTER SABKHA STREET NAIF AREA DEIRA DUBAI UAE',
-          notifyPartyPhone: '+971506571554',
-          oceanVessel: 'COSCO NEW YORK',
-          vesselName: 'COSCO NEW YORK',
-          voyageNo: '149W',
-          pol: 'Shanghai Port (China)',
-          pod: 'Karachi Port (KPT)',
-          placeOfDelivery: 'Karachi, Pakistan',
-          deliveryOrderNo: 'DO-WH-2026-0912',
-          deliveryOrderDate: '2026-06-15',
-          clientRequestRef: 'CR-ALFA-2026-04',
-          invoiceNo: 'ZK1353/225',
-          invoiceDate: '2026-06-09',
-          invoiceValue: 53256,
-          invoiceCurrency: 'USD',
-          incoTerms: 'CFR',
-          itemName: 'MICRO VELVET FABRIC',
-          itemDescription: 'MICRO VELVET FABRIC (100% POLYESTER, 225 ROLLS)',
-          itemType: 'Textile Fabric',
-          hsCode: '5801.3700',
-          packagingType: 'ROLLS',
-          packageCount: 225,
-          totalWeight: 13410,
-          grossWeight: 13410,
-          netWeight: 12680,
-          volumeCBM: 68.0,
-          freightTerms: 'Freight Prepaid',
-          shippingAgent: 'RIAZEDA (PVT) LTD',
-          suggestedCategory: 'Ocean Freight Import',
-          docCategoryDetected: 'Wan Hai Bill of Lading & Commercial Invoice & Packing List',
-          containers: [
-            { number: 'WHSU5957558', size: '40ft', weight: 13410, sealNo: 'WHA2024894' }
-          ]
-        };
-      }
 
       // Universal dynamic regex extraction from clean text tokens in filename & PDF text layer
       const foundContainers: { number: string; size: string; weight: number; sealNo: string; vehicleNo?: string }[] = [];
@@ -877,7 +452,7 @@ export const autoFillCaseData = async (
           seenCntrs.add(fullCNo);
           foundContainers.push({
             number: fullCNo,
-            size: /45\s*(?:G1|HC|FT)/i.test(cleanTextCorpus) ? '45ft' : '40ft',
+            size: /45\s*(?:G1|HC|FT|L5G1)/i.test(cleanTextCorpus) ? '45ft' : (/20\s*(?:FT|GP|DC)/i.test(cleanTextCorpus) ? '20ft' : '40ft'),
             weight: 0,
             sealNo: ''
           });
@@ -885,7 +460,7 @@ export const autoFillCaseData = async (
       }
 
       // Detect real GD / TP number
-      const gdMatch = cleanTextCorpus.match(/\b((?:KAPW-TP|KAPS-TP|KPPI-TP|KAPE-TP|KAPS-HC|KAPW-HC|KPPI|KPST|SAP-HC|WH|PSW|KPT)[A-Z0-9\-_/]{4,28})\b/i) ||
+      const gdMatch = cleanTextCorpus.match(/\b((?:KAPW-TP|KAPS-TP|KPPI-TP|KAPE-TP|KAPS-HC|KAPW-HC|KPPI|KPST|SAP-HC|PSW)[A-Z0-9\-_/]{4,28})\b/i) ||
                       cleanTextCorpus.match(/(?:GD|GOODS\s*DECLARATION|TP\s*GD\s*NO|TRACKING\s*NO)[-_ :#]*([A-Z0-9\-_/]{6,26})/i);
 
       // Detect real B/L number
@@ -955,6 +530,30 @@ export const autoFillCaseData = async (
         });
       }
 
+      const detectedCurrency = /USD|\$/i.test(cleanTextCorpus)
+        ? 'USD'
+        : /EUR|€/i.test(cleanTextCorpus)
+        ? 'EUR'
+        : /AED/i.test(cleanTextCorpus)
+        ? 'AED'
+        : /PKR|RS\.?/i.test(cleanTextCorpus)
+        ? 'PKR'
+        : '';
+
+      const detectedInco = /\bCIF\b/i.test(cleanTextCorpus)
+        ? 'CIF'
+        : /\bFOB\b/i.test(cleanTextCorpus)
+        ? 'FOB'
+        : /\bCFR\b/i.test(cleanTextCorpus)
+        ? 'CFR'
+        : '';
+
+      const detectedFreight = /\bCOLLECT\b/i.test(cleanTextCorpus)
+        ? 'Collect'
+        : /\bPREPAID\b/i.test(cleanTextCorpus)
+        ? 'Prepaid'
+        : '';
+
       return {
         shippingLine: detectedLine,
         blNumber: blMatch ? blMatch[1].trim() : '',
@@ -963,8 +562,8 @@ export const autoFillCaseData = async (
         igmNo: igmMatch ? igmMatch[1].trim() : '',
         invoiceNo: invMatch ? invMatch[1].trim() : '',
         invoiceValue: valMatch ? cleanNum(valMatch[1]) : 0,
-        invoiceCurrency: /USD|\$/i.test(cleanTextCorpus) ? 'USD' : (/EUR|€/i.test(cleanTextCorpus) ? 'EUR' : (/AED/i.test(cleanTextCorpus) ? 'AED' : 'USD')),
-        incoTerms: /CIF/i.test(cleanTextCorpus) ? 'CIF' : (/FOB/i.test(cleanTextCorpus) ? 'FOB' : 'CFR'),
+        invoiceCurrency: detectedCurrency,
+        incoTerms: detectedInco,
         vehicleNumber: vehMatch ? vehMatch[1].trim() : '',
         hsCode: hsMatch ? hsMatch[1].trim() : '',
         packagingType: pkgMatch ? pkgMatch[2].toUpperCase() : '',
@@ -973,17 +572,20 @@ export const autoFillCaseData = async (
         grossWeight: extractedGrossWeight,
         netWeight: extractedNetWeight,
         volumeCBM: cbmMatch ? cleanNum(cbmMatch[1]) : 0,
-        pol: /SHANGHAI/i.test(cleanTextCorpus) ? 'Shanghai, China' : (/NINGBO/i.test(cleanTextCorpus) ? 'Ningbo, China' : (/JEBEL\s*ALI/i.test(cleanTextCorpus) ? 'Jebel Ali, UAE' : '')),
+        pol: /SHANTOU/i.test(cleanTextCorpus) ? 'Shantou, China' : (/SHANGHAI/i.test(cleanTextCorpus) ? 'Shanghai, China' : (/NINGBO/i.test(cleanTextCorpus) ? 'Ningbo, China' : (/JEBEL\s*ALI/i.test(cleanTextCorpus) ? 'Jebel Ali, UAE' : ''))),
         pod: /SAPT/i.test(cleanTextCorpus) ? 'Karachi Port (SAPT)' : (/KICT/i.test(cleanTextCorpus) ? 'Karachi International Container Terminal (KICT)' : (/QICT/i.test(cleanTextCorpus) ? 'Port Qasim (QICT)' : '')),
         placeOfDelivery: /LAHORE/i.test(cleanTextCorpus) ? 'Lahore, Pakistan' : (/PESHAWAR/i.test(cleanTextCorpus) ? 'Peshawar, Pakistan' : ''),
-        freightTerms: /COLLECT/i.test(cleanTextCorpus) ? 'Collect' : 'Prepaid',
-        suggestedCategory: gdMatch && gdMatch[1].includes('TP') ? 'Bonded Carrier' : 'Bonded Carrier',
+        freightTerms: detectedFreight,
+        suggestedCategory: gdMatch && /TP/i.test(gdMatch[1]) ? 'Bonded Carrier' : '',
         containers: foundContainers.length > 0 ? foundContainers : []
       };
     };
 
     if (parts.length === 0 && !combinedPdfExtractedText.trim()) {
-      return runHeuristicExtraction();
+      return {
+        ...runHeuristicExtraction(),
+        _ocrWarning: 'Could not read document bytes for OCR extraction. Please verify uploaded file.'
+      };
     }
 
     if (combinedPdfExtractedText.trim()) {
@@ -992,23 +594,29 @@ export const autoFillCaseData = async (
       });
     }
 
-    const extractionPromptText = `You are the world's most capable international maritime logistics OCR and Pakistan Customs Bonded Carrier intelligence system for Docks (Pvt.) Ltd.
-Perform DEEP MULTIMODAL OCR across EVERY PAGE of the attached document(s) — including multi-page scanned PDFs containing any combination of:
-1. PAKISTAN CUSTOMS CONTAINER SECURITY SYSTEM (PCCSS) FORM "A" - AGENT
-2. TRANSPORT NOTE (Information required for Transshipment Cargo - Appendix-I)
-3. TERMINAL GATE PASS (Hutchison Ports KICT / SAPT / QICT / DP World)
-4. ONE-CUSTOMS / WeBOC AMEND VEHICLE OF CONTAINER BEFORE SEALING
-5. GOODS DECLARATION (GD-I / TP - Transshipment Permit / HC / ATT)
-6. CLEARING / FORWARDING AGENT LETTERHEAD (e.g. Usman Freight Logistic, Road King Logistics, etc.)
-7. FBR ACTIVE TAXPAYER / CNIC VERIFICATION PAGES
-8. BILL OF LADING (B/L) (OOCL, CMA CGM, Maersk, MSC, COSCO, Wan Hai, Hapag-Lloyd, ONE, Evergreen, etc.)
-9. COMMERCIAL INVOICE & PACKING LIST
-10. WEIGHMENT CERTIFICATE / BUILTY / DELIVERY ORDER
+    const extractionPromptText = `You are a precision international maritime logistics OCR and Pakistan Customs Bonded Carrier document reader for Docks (Pvt.) Ltd.
+Read ONLY the actual characters, numbers, names, and dates printed on the attached document page images (and any extracted text).
+STRICT ACCURACY RULE: Never invent, guess, or substitute any sample data or external values. If a field is not visibly printed on the attached pages, return an empty string "" (or 0 / empty array for numeric/array fields).
 
-CRITICAL EXTRACTION RULES:
-- Read ALL pages of the document and merge every field found across all pages into a single complete JSON object. Never leave a field blank if its value appears on ANY page of the document.
-- Convert dates to YYYY-MM-DD format (e.g., "15 SEP 2026" -> "2026-09-15", "01-10-2026" -> "2026-10-01", "04/10/2026" -> "2026-10-04", "16.08.2026" -> "2026-08-16").
-- For weights: if the B/L, GD-I, or Commercial Invoice gives the exact weight in KGS (e.g. 27720 KGS gross, 25720 KGS net) and the Transport Note gives MT (e.g. 27.72 MT, 25.72 MT), prefer the exact KGS value (27720 and 25720). If only MT is given, multiply MT by 1000 to convert to KG.
+Carefully examine EVERY attached page — which may include any mix of:
+1. PAKISTAN CUSTOMS CONTAINER SECURITY SYSTEM (PCCSS) FORM "A" - AGENT (Tracking/TP GD No, Serial No, Entry/Exit Focal Point, Carrier Name, Transport Unit / Vehicle No, PCCSS Seal No e.g. Bolt-..., Container No, Sealing Date, PCCSS Officer)
+2. TRANSPORT NOTE (Information required for Transshipment Cargo - Appendix-I: Vessel/Voyage, IGM No, Index No, Gross Weight MT, Net Weight MT, Shipper Seal, CCSU Seal, Quantity, Goods Description)
+3. TERMINAL GATE PASS / WEIGHMENT CERTIFICATE (Hutchison Ports SAPT / KICT / QICT: Weighment slip No, Container No, Size, Tare Weight, External Truck Weight, Vehicle No)
+4. ONE-CUSTOMS / WeBOC AMEND VEHICLE OF CONTAINER BEFORE SEALING
+5. GOODS DECLARATION (GD-I / TP / HC / ATT: Exporter/Shipper, Importer/Consignee Name, Address, NTN, STRN, Declarant/Agent & CHAL, BL/AWB No & Date, Port of Shipment, Place of Delivery e.g. LRDP/NLC, Terms/CFR, Exchange Rate, Assessed Value PKR, Total Duty/Taxes PKR, CFD No, HS Codes)
+6. CLEARING / FORWARDING AGENT LETTERHEAD
+7. FBR ACTIVE TAXPAYER / CNIC VERIFICATION PAGES
+8. BILL OF LADING (B/L) (Carrier/Shipping Line, B/L No, Date, Shipper, Consignee, Notify Party, Vessel, Voyage, POL, POD, Container No, Size, Shipper Seal, Packages/Cartons, Gross Weight KGS, Tare Weight KGS, Measurement CBM, Freight Prepaid/Collect)
+9. COMMERCIAL INVOICE & PACKING LIST (Invoice No, Date, Consignee, Total Value & Currency, Package Count, Gross/Net Weight)
+10. DELIVERY ORDER / BUILTY
+
+CRITICAL EXTRACTION & MERGING RULES:
+- Read ALL pages (${totalPdfPageCount || parts.length} pages) and merge every field found across all pages into ONE complete JSON object.
+- Convert dates to YYYY-MM-DD format (e.g., "15 SEP 2026" -> "2026-09-15", "11/7/2026" on Pakistan GD/Transport Note MM/DD/YYYY vs DD/MM/YYYY: cross-check other pages like "07-11-2026" -> "2026-11-07", "9/29/2026" -> "2026-09-29").
+- Cargo weights vs Container Tare weight:
+  * Set grossWeight & totalWeight to the CARGO gross weight in KG (from B/L, Commercial Invoice, or Transport Note; if Transport Note shows MT e.g. 10.28 MT, multiply by 1000 -> 10280 KG; prefer exact B/L KGS when available).
+  * Set netWeight to the CARGO net weight in KG (from Commercial Invoice, Packing List, or Transport Note MT * 1000).
+  * Set tareWeight to the container tare weight in KG (from B/L or Weighment Certificate e.g. 4700). Do NOT confuse container+cargo total weighbridge gross weight with cargo grossWeight.
 - Return a JSON object with these exact keys:
   shippingLine, blNumber, blDate, vesselName, feederVessel, voyageNo, arrivalDate, pol, pod, placeOfDelivery, pickupDestination, dropoffDestination, freightTerms, freeDays,
   shipperName, shipperAddress, shipperCountry, shipperContact, shipperEmail,
@@ -1045,8 +653,8 @@ Return ONLY valid JSON.`;
 
       const normalizeSize = (sz?: string): '20ft' | '40ft' | '45ft' => {
         const s = String(sz || '').toUpperCase();
-        if (s.includes('45')) return '45ft';
-        if (s.includes('20')) return '20ft';
+        if (s.includes('45') || s.includes('L5G1')) return '45ft';
+        if (s.includes('20') || s.includes('22G1')) return '20ft';
         return '40ft';
       };
 
@@ -1149,7 +757,7 @@ Return ONLY valid JSON.`;
       return normalized;
     };
 
-    // Merge heuristic baseline with AI output so no field is ever lost
+    // Merge real text-layer regex baseline (if any) with AI output, keeping AI values as primary
     const mergeWithHeuristic = (aiData: any) => {
       const heur = normalizeParsedData(runHeuristicExtraction());
       const merged: any = { ...heur };
@@ -1161,7 +769,13 @@ Return ONLY valid JSON.`;
       return normalizeParsedData(merged);
     };
 
-    // Step A: Attempt server-side OCR route (/api/extract-documents) first
+    // Step A: Attempt server-side OCR route (/api/extract-documents)
+    let ocrFailureReason = '';
+    const abortCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const reqTimeout = setTimeout(() => {
+      try { abortCtrl?.abort(); } catch (_) {}
+    }, 75000);
+
     try {
       const serverFiles = parts
         .filter(p => p.inlineData?.data)
@@ -1171,18 +785,16 @@ Return ONLY valid JSON.`;
         }));
 
       if (serverFiles.length > 0 || combinedPdfExtractedText.trim()) {
-        const responsePromise = fetch('/api/extract-documents', {
+        const res = await fetch('/api/extract-documents', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: abortCtrl ? abortCtrl.signal : undefined,
           body: JSON.stringify({
             files: serverFiles,
             extractedText: combinedPdfExtractedText,
             prompt: extractionPromptText
           })
         });
-
-        const timeoutPromise = new Promise<Response | null>(resolve => setTimeout(() => resolve(null), 45000));
-        const res = await Promise.race([responsePromise, timeoutPromise]);
 
         if (res && res.ok) {
           const json = await res.json();
@@ -1192,17 +804,35 @@ Return ONLY valid JSON.`;
               console.log("Server-side OCR successfully extracted shipping data:", norm);
               return norm;
             }
+          } else if (json?.error) {
+            ocrFailureReason = String(json.error);
+          }
+        } else if (res) {
+          try {
+            const errBody = await res.json();
+            ocrFailureReason = errBody?.error || `Server OCR returned HTTP ${res.status}`;
+          } catch (_) {
+            ocrFailureReason = `Server OCR returned HTTP ${res.status}`;
           }
         }
       }
-    } catch (serverErr) {
+    } catch (serverErr: any) {
+      ocrFailureReason = serverErr?.name === 'AbortError'
+        ? 'AI document scan timed out after 75 seconds'
+        : (serverErr?.message || 'AI OCR service unreachable');
       console.warn("Server OCR route attempt note:", serverErr);
+    } finally {
+      clearTimeout(reqTimeout);
     }
 
-    return normalizeParsedData(runHeuristicExtraction());
+    const fallbackData = normalizeParsedData(runHeuristicExtraction());
+    if (ocrFailureReason || (!combinedPdfExtractedText.trim() && totalPdfPageCount > 0)) {
+      fallbackData._ocrWarning = ocrFailureReason || 'AI OCR could not extract fields from scanned pages. Please verify or enter fields manually.';
+    }
+    return fallbackData;
   } catch (error) {
     console.warn("Auto-fill non-fatal error, falling back:", error);
-    return {};
+    return { _ocrWarning: 'Document extraction encountered an error. Please review fields manually.' };
   }
 };
 

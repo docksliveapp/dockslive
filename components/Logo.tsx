@@ -17,8 +17,10 @@ const Logo: React.FC<LogoProps> = ({ className = "h-14 sm:h-16 w-auto", customSr
     ? customSrc 
     : (globalLogo || activeCompany?.logo || '');
 
-  const candidateLogo = isUploadedLogo(rawCandidate) ? rawCandidate : null;
-  const cleanLogo = useTransparentLogo(candidateLogo) || candidateLogo;
+  const isMainLogoAsset = typeof rawCandidate === 'string' && rawCandidate.includes('mak_main_logo');
+  const candidateLogo = (isUploadedLogo(rawCandidate) || isMainLogoAsset) ? rawCandidate : null;
+  const processedLogo = useTransparentLogo(isMainLogoAsset ? null : candidateLogo);
+  const cleanLogo = isMainLogoAsset ? candidateLogo : (processedLogo || candidateLogo);
 
   if (cleanLogo && !imgError) {
     return (

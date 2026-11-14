@@ -5,6 +5,21 @@ import { safeAppStorage } from './storage';
 
 export type CompanyId = 'docks' | 'muhib' | 'vantage' | 'truckit';
 
+export const MAIN_GROUP_LOGO_URL = '/logos/mak_main_logo.png';
+export const MAIN_GROUP_DARK_LOGO_URL = '/logos/mak_main_logo_dark.png';
+export const CURRENT_PARENT_LOGO_VERSION = 2;
+
+export function isLegacyRoundLogoUrl(url?: string | null): boolean {
+  if (!url || typeof url !== 'string') return false;
+  const s = url.trim().toLowerCase();
+  return (
+    s.includes('mak_pearl_grey_edge') ||
+    s.includes('mak_pearl_white_emblem') ||
+    s.includes('mak_group_logo') ||
+    s.includes('mak-group-of-companies')
+  );
+}
+
 export function isUploadedLogo(url?: string | null): boolean {
   if (!url || typeof url !== 'string') return false;
   const s = url.trim();
@@ -14,8 +29,8 @@ export function isUploadedLogo(url?: string | null): boolean {
     s === '/favicon.svg' ||
     s.includes('/favicon.svg') ||
     s.includes('docks_logo') ||
-    s.includes('mak_group_logo') ||
-    s.includes('mak_pearl_white_emblem') ||
+    s.includes('mak_main_logo') ||
+    isLegacyRoundLogoUrl(s) ||
     s.includes('muhib_logo') ||
     s.includes('vantage_logo') ||
     s.includes('truckit_logo')
@@ -31,17 +46,14 @@ export function isUploadedLogo(url?: string | null): boolean {
  * it returns the parent conglomerate logo.
  * Returns null if no custom logo has been uploaded.
  */
-export function getCompanyUploadedLogo(companyId: CompanyId): string | null {
+export function getCompanyUploadedLogo(companyId: CompanyId, theme?: string): string | null {
   try {
     const brandingKey = `dpl_company_branding_v1_${companyId}`;
     const stored = safeAppStorage.getRawJSON<any>(brandingKey, {});
 
     // 1. Check if the company opted to use Main Admin Group Logo
     if (stored?.useMainLogoAsOfficial) {
-      const parentGroup = getParentGroupInfo();
-      if (parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
-        return parentGroup.logo;
-      }
+      return getMainGroupLogoUrl(undefined, theme);
     }
 
     // 2. Check company's directly uploaded custom logo
@@ -53,10 +65,7 @@ export function getCompanyUploadedLogo(companyId: CompanyId): string | null {
     if (companyId === 'docks') {
       const docksLegacy = safeAppStorage.getRawJSON<any>('dpl_company_branding_v1', {});
       if (docksLegacy?.useMainLogoAsOfficial) {
-        const parentGroup = getParentGroupInfo();
-        if (parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
-          return parentGroup.logo;
-        }
+        return getMainGroupLogoUrl(undefined, theme);
       }
       if (docksLegacy?.customLogo && isUploadedLogo(docksLegacy.customLogo)) {
         return docksLegacy.customLogo;
@@ -128,6 +137,7 @@ export interface ParentGroupInfo {
   logo: string;
   favicon?: string;
   documentLogo?: string;
+  logoVersion?: number;
   address: string;
   phone: string;
   cell: string;
@@ -137,13 +147,45 @@ export interface ParentGroupInfo {
   updatedBy?: string;
 }
 
-export function getCompanyLogoUrl(companyId?: CompanyId | null): string {
-  if (!companyId) {
-    const pGroup = getParentGroupInfo();
-    return (pGroup?.logo && isUploadedLogo(pGroup.logo)) ? pGroup.logo : '';
+export function getMainGroupLogoUrl(
+  group?: ParentGroupInfo | null,
+  theme?: 'pearl' | 'charcoal' | 'dark' | 'light' | string
+): string {
+  const target = group || getParentGroupInfo();
+  if (
+    target &&
+    (target.logoVersion || 0) >= CURRENT_PARENT_LOGO_VERSION &&
+    target.logo &&
+    !isLegacyRoundLogoUrl(target.logo) &&
+    !target.logo.includes('mak_main_logo')
+  ) {
+    return target.logo;
   }
-  const custom = getCompanyUploadedLogo(companyId);
-  if (custom && isUploadedLogo(custom)) return custom;
+  if (theme === 'charcoal' || theme === 'dark') {
+    return MAIN_GROUP_DARK_LOGO_URL;
+  }
+  return MAIN_GROUP_LOGO_URL;
+}
+
+export function getMainGroupDocumentLogoUrl(group?: ParentGroupInfo | null): string {
+  const target = group || getParentGroupInfo();
+  if (
+    target &&
+    (target.logoVersion || 0) >= CURRENT_PARENT_LOGO_VERSION &&
+    target.documentLogo &&
+    !isLegacyRoundLogoUrl(target.documentLogo)
+  ) {
+    return target.documentLogo;
+  }
+  return getMainGroupLogoUrl(target);
+}
+
+export function getCompanyLogoUrl(companyId?: CompanyId | null, theme?: string): string {
+  if (!companyId) {
+    return getMainGroupLogoUrl(undefined, theme);
+  }
+  const custom = getCompanyUploadedLogo(companyId, theme);
+  if (custom) return custom;
   return '';
 }
 
@@ -171,9 +213,10 @@ export const DEFAULT_PARENT_GROUP: ParentGroupInfo = {
   title: 'MAK GROUP OF COMPANIES',
   tagline: 'Premier Multi-Entity Logistics, Customs & International Trade Conglomerate',
   subtitle: 'DOCKS • TRUCKIT • MUHIB • VANTAGE',
-  logo: '',
+  logo: MAIN_GROUP_LOGO_URL,
   favicon: '',
-  documentLogo: '',
+  documentLogo: MAIN_GROUP_LOGO_URL,
+  logoVersion: CURRENT_PARENT_LOGO_VERSION,
   address: 'Office No 13 1st Floor State Life Building No 7 G-Allana Road Tower Karachi',
   phone: '+92-21-32330103, +92-21-32330104',
   cell: '+92-321-9222883, +92-321-8496006',
@@ -309,15 +352,26 @@ export function applyDynamicFaviconToDOM(faviconUrl?: string | null): void {
 
 export function getParentGroupInfo(): ParentGroupInfo {
   const stored = safeAppStorage.getJSON<Partial<ParentGroupInfo>>(PARENT_GROUP_STORAGE_KEY, {});
-  const cleanLogo = isUploadedLogo(stored.logo) ? stored.logo! : '';
-  const cleanFavicon = isUploadedLogo(stored.favicon) ? stored.favicon! : '';
-  const cleanDocumentLogo = isUploadedLogo(stored.documentLogo) ? stored.documentLogo! : '';
+  const isCurrentVersion = (stored.logoVersion || 0) >= CURRENT_PARENT_LOGO_VERSION;
+  const cleanLogo =
+    isCurrentVersion && isUploadedLogo(stored.logo)
+      ? stored.logo!
+      : MAIN_GROUP_LOGO_URL;
+  const cleanFavicon =
+    isCurrentVersion && isUploadedLogo(stored.favicon)
+      ? stored.favicon!
+      : '';
+  const cleanDocumentLogo =
+    isCurrentVersion && isUploadedLogo(stored.documentLogo)
+      ? stored.documentLogo!
+      : MAIN_GROUP_LOGO_URL;
   const result: ParentGroupInfo = {
     ...DEFAULT_PARENT_GROUP,
     ...stored,
     logo: cleanLogo,
     favicon: cleanFavicon,
     documentLogo: cleanDocumentLogo,
+    logoVersion: CURRENT_PARENT_LOGO_VERSION,
     name: stored.name || DEFAULT_PARENT_GROUP.name,
     title: stored.title || DEFAULT_PARENT_GROUP.title,
     tagline: stored.tagline || DEFAULT_PARENT_GROUP.tagline,
@@ -360,9 +414,20 @@ export function broadcastParentGroupUpdate(newGroup: ParentGroupInfo): void {
 
 export async function saveParentGroupInfo(updates: Partial<ParentGroupInfo>, updatedBy?: string): Promise<ParentGroupInfo> {
   const current = getParentGroupInfo();
+  const nextLogo =
+    updates.logo !== undefined
+      ? (isUploadedLogo(updates.logo) ? updates.logo : MAIN_GROUP_LOGO_URL)
+      : current.logo;
+  const nextDocLogo =
+    updates.documentLogo !== undefined
+      ? (isUploadedLogo(updates.documentLogo) ? updates.documentLogo : MAIN_GROUP_LOGO_URL)
+      : current.documentLogo;
   const merged: ParentGroupInfo = {
     ...current,
     ...updates,
+    logo: nextLogo,
+    documentLogo: nextDocLogo,
+    logoVersion: CURRENT_PARENT_LOGO_VERSION,
     updatedAt: new Date().toISOString(),
     updatedBy: updatedBy || 'System Administrator'
   };
@@ -384,9 +449,10 @@ export async function resetParentGroupInfo(): Promise<ParentGroupInfo> {
   applyDynamicFaviconToDOM(null);
   return saveParentGroupInfo({
     ...DEFAULT_PARENT_GROUP,
-    logo: '',
+    logo: MAIN_GROUP_LOGO_URL,
     favicon: '',
-    documentLogo: ''
+    documentLogo: MAIN_GROUP_LOGO_URL,
+    logoVersion: CURRENT_PARENT_LOGO_VERSION
   });
 }
 
@@ -400,15 +466,19 @@ export function initParentGroupFirestoreSync() {
       if (snap.exists()) {
         const data = snap.data();
         const currentStored = getParentGroupInfo();
-        const resolvedLogo = isUploadedLogo(data.logo)
-          ? data.logo
-          : (isUploadedLogo(currentStored.logo) && data.logo === undefined ? currentStored.logo : '');
-        const resolvedFavicon = isUploadedLogo(data.favicon)
-          ? data.favicon
-          : (isUploadedLogo(currentStored.favicon) && data.favicon === undefined ? currentStored.favicon : '');
-        const resolvedDocLogo = isUploadedLogo(data.documentLogo)
-          ? data.documentLogo
-          : (isUploadedLogo(currentStored.documentLogo) && data.documentLogo === undefined ? currentStored.documentLogo : '');
+        const isCurrentVersion = (data.logoVersion || 0) >= CURRENT_PARENT_LOGO_VERSION;
+        const resolvedLogo =
+          isCurrentVersion && isUploadedLogo(data.logo)
+            ? data.logo
+            : MAIN_GROUP_LOGO_URL;
+        const resolvedFavicon =
+          isCurrentVersion && isUploadedLogo(data.favicon)
+            ? data.favicon
+            : '';
+        const resolvedDocLogo =
+          isCurrentVersion && isUploadedLogo(data.documentLogo)
+            ? data.documentLogo
+            : resolvedLogo;
         const merged: ParentGroupInfo = {
           ...DEFAULT_PARENT_GROUP,
           ...currentStored,
@@ -420,7 +490,8 @@ export function initParentGroupFirestoreSync() {
           address: (data.address && !String(data.address).includes('14-B')) ? data.address : (currentStored.address || DEFAULT_PARENT_GROUP.address),
           logo: resolvedLogo,
           favicon: resolvedFavicon,
-          documentLogo: resolvedDocLogo
+          documentLogo: resolvedDocLogo,
+          logoVersion: CURRENT_PARENT_LOGO_VERSION
         };
         broadcastParentGroupUpdate(merged);
       }

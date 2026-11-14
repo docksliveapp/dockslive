@@ -58,6 +58,7 @@ import {
   GROUP_COMPANIES, 
   COMPANIES_LIST, 
   useParentGroup, 
+  getMainGroupLogoUrl,
   getCompanyLogoUrl,
   isUploadedLogo
 } from '../services/companyService';
@@ -130,9 +131,7 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
   // Parent Group & Branding (Strictly Uploaded Logo Only)
   const { parentGroup } = useParentGroup();
   const { branding } = useBranding();
-  const mainAdminLogoUrl = (parentGroup?.logo && isUploadedLogo(parentGroup.logo))
-    ? parentGroup.logo
-    : '';
+  const mainAdminLogoUrl = getMainGroupLogoUrl(parentGroup, 'charcoal');
 
   // All Companies Live Data
   const [allCases, setAllCases] = useState<Case[]>([]);
@@ -462,14 +461,12 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
             onClick={() => handleSelectView('overview')}
             className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer group"
           >
-            <div className="w-11 h-11 rounded-full flex items-center justify-center p-0.5 shrink-0 bg-transparent group-hover:scale-105 transition-transform">
-              {mainAdminLogoUrl ? (
-                <img 
-                  src={mainAdminLogoUrl} 
-                  alt={parentGroup.name || 'MAK Group of Companies'} 
-                  className="w-full h-full object-contain drop-shadow" 
-                />
-              ) : null}
+            <div className="h-10 w-20 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform bg-transparent">
+              <img 
+                src={mainAdminLogoUrl} 
+                alt={parentGroup.name || 'MAK Group of Companies'} 
+                className="max-h-full max-w-full object-contain drop-shadow" 
+              />
             </div>
             <div className="min-w-0 flex-1">
               <h1 className="font-extrabold text-xs sm:text-sm text-white tracking-wide uppercase truncate leading-tight">
@@ -741,13 +738,13 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
 
             {/* Main App Logo & Title */}
             <div className="flex items-center gap-2 min-w-0">
-              {mainAdminLogoUrl ? (
+              <div className="h-9 flex items-center justify-center shrink-0 bg-transparent">
                 <img 
                   src={mainAdminLogoUrl} 
                   alt={parentGroup.name || 'MAK Group of Companies'} 
-                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-full object-contain drop-shadow shrink-0" 
+                  className="h-7 w-auto max-w-[76px] object-contain drop-shadow" 
                 />
-              ) : null}
+              </div>
               <div className="min-w-0 truncate hidden xs:block sm:block">
                 <h2 className="text-xs sm:text-sm font-semibold text-white tracking-wide truncate">
                   {activeView === 'overview' && 'MAK Group Overview'}
@@ -775,13 +772,13 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
               className="flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-white/5 transition cursor-pointer group"
               title={parentGroup.name || 'MAK Group of Companies'}
             >
-              {mainAdminLogoUrl ? (
+              <div className="h-10 flex items-center justify-center group-hover:scale-105 transition-transform bg-transparent">
                 <img 
                   src={mainAdminLogoUrl} 
                   alt={parentGroup.name || 'MAK Group of Companies'} 
-                  className="h-10 sm:h-11 w-auto object-contain drop-shadow group-hover:scale-105 transition-transform" 
+                  className="h-8 w-auto max-w-[110px] object-contain drop-shadow" 
                 />
-              ) : null}
+              </div>
               <span className="text-xs font-bold tracking-wider uppercase text-slate-200 hidden xl:inline">
                 {parentGroup.title || 'MAK GROUP OF COMPANIES'}
               </span>
@@ -856,14 +853,12 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
               <div className="relative rounded-2xl sm:rounded-3xl p-4 sm:p-6 bg-gradient-to-br from-amber-950/30 via-slate-900 to-[#0e1626] border border-amber-500/25 shadow-xl overflow-hidden">
                 <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-3.5">
                   <div className="flex items-center gap-3.5 sm:gap-4">
-                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center shrink-0 bg-transparent">
-                      {mainAdminLogoUrl ? (
-                        <img 
-                          src={mainAdminLogoUrl} 
-                          alt={parentGroup.name || 'MAK Group of Companies'} 
-                          className="w-full h-full object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.4)]" 
-                        />
-                      ) : null}
+                    <div className="flex items-center justify-center shrink-0 bg-transparent">
+                      <img 
+                        src={mainAdminLogoUrl} 
+                        alt={parentGroup.name || 'MAK Group of Companies'} 
+                        className="h-14 sm:h-18 w-auto max-w-[170px] sm:max-w-[210px] object-contain drop-shadow-lg" 
+                      />
                     </div>
                     <div className="space-y-1.5">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1284,14 +1279,12 @@ export const GroupAdminPortal: React.FC<GroupAdminPortalProps> = ({
               {/* Header Card */}
               <div className="p-6 rounded-3xl bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-950 border border-amber-500/30 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 bg-transparent">
-                    {mainAdminLogoUrl ? (
-                      <img 
-                        src={mainAdminLogoUrl} 
-                        alt={parentGroup.name || 'MAK Group of Companies'} 
-                        className="w-full h-full object-contain drop-shadow" 
-                      />
-                    ) : null}
+                  <div className="flex items-center justify-center shrink-0 bg-transparent">
+                    <img 
+                      src={mainAdminLogoUrl} 
+                      alt={parentGroup.name || 'MAK Group of Companies'} 
+                      className="h-11 w-auto max-w-[140px] object-contain drop-shadow" 
+                    />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">

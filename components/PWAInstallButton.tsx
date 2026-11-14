@@ -126,11 +126,11 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
             {/* Header */}
             <div className="flex justify-between items-start">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center shadow-lg shrink-0 border border-slate-300/60 bg-white">
+                <div className="h-12 flex items-center justify-center shrink-0 bg-transparent">
                   <img
-                    src="/pwa-192x192-v3.png"
+                    src="/logos/mak_main_logo_dark.png"
                     alt="MAK Group of Companies"
-                    className="w-full h-full object-contain"
+                    className="h-full w-auto max-w-[100px] object-contain drop-shadow"
                   />
                 </div>
                 <div>

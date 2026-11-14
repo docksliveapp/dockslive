@@ -12,7 +12,7 @@ import {
   Lock
 } from 'lucide-react';
 import { UserRole } from '../types';
-import { useParentGroup, isUploadedLogo } from '../services/companyService';
+import { useParentGroup, getMainGroupLogoUrl } from '../services/companyService';
 import { useTransparentLogo } from '../services/brandingService';
 import { safeAppStorage } from '../services/storage';
 import { authenticateDatabaseUser } from '../services/dbService';
@@ -42,8 +42,12 @@ const LOCKOUT_DURATION_MS = 30000; // 30 seconds brute-force protection cooldown
 export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({ 
   onSelectMode
 }) => {
+  // Unified App Theme: 'charcoal' (Dark) vs 'pearl' (Pearl White Glassy)
+  const [appTheme] = useAppTheme();
+  const isPearl = appTheme === 'pearl';
+
   const { parentGroup } = useParentGroup();
-  const rawParentLogo = parentGroup?.logo && isUploadedLogo(parentGroup.logo) ? parentGroup.logo : null;
+  const rawParentLogo = getMainGroupLogoUrl(parentGroup, appTheme);
   const cleanParentLogo = useTransparentLogo(rawParentLogo);
 
   // Credentials Form State
@@ -62,10 +66,6 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
 
   const [lastLocationView, setLastLocationView] = useState<string | null>(null);
   const [lastLocationRole, setLastLocationRole] = useState<string | null>(null);
-
-  // Unified App Theme: 'charcoal' (Dark) vs 'pearl' (Pearl White Glassy)
-  const [appTheme] = useAppTheme();
-  const isPearl = appTheme === 'pearl';
 
   useEffect(() => {
     const lastView = safeAppStorage.getItem('dpl_last_location_view');
@@ -233,16 +233,18 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
       />
 
       <div className="min-h-full w-full max-w-[430px] mx-auto flex flex-col justify-center items-center py-4 sm:py-8 relative z-10">
-        {/* Prominent Corporate Logo Area placed closely above Sign In Card (Uploaded Logo Only; empty if none uploaded) */}
+        {/* Prominent Corporate Logo Area placed closely above Sign In Card — 100% Transparent */}
         <div className="w-full flex flex-col items-center text-center mb-4 sm:mb-5 animate-fade-in">
-          <div className="inline-flex items-center justify-center min-h-[3.5rem] bg-transparent transform hover:scale-[1.03] transition-transform duration-300">
-            {(cleanParentLogo || rawParentLogo) ? (
-              <img 
-                src={cleanParentLogo || rawParentLogo || ''} 
-                alt={parentGroup?.name || "MAK Group of Companies"} 
-                className="w-40 sm:w-48 md:w-52 h-40 sm:h-48 md:h-52 max-h-40 sm:max-h-48 md:max-h-52 bg-transparent object-contain drop-shadow-[0_12px_32px_rgba(15,23,42,0.16)] select-none" 
-              />
-            ) : null}
+          <div className="inline-flex items-center justify-center bg-transparent transform hover:scale-[1.03] transition-transform duration-300">
+            <img 
+              src={cleanParentLogo || rawParentLogo} 
+              alt={parentGroup?.name || "MAK Group of Companies"} 
+              className={`w-64 sm:w-80 md:w-[340px] h-auto max-h-40 sm:max-h-44 bg-transparent object-contain select-none ${
+                isPearl
+                  ? 'drop-shadow-[0_12px_28px_rgba(15,23,42,0.14)]'
+                  : 'drop-shadow-[0_12px_28px_rgba(0,0,0,0.45)]'
+              }`} 
+            />
           </div>
         </div>
 

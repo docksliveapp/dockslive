@@ -10,6 +10,7 @@ import {
   CompanyInfo, 
   GROUP_COMPANIES,
   getParentGroupInfo,
+  getMainGroupLogoUrl,
   subscribeToParentGroup,
   isUploadedLogo,
   useParentGroup
@@ -76,8 +77,8 @@ export function getStoredBranding(companyOverride?: CompanyInfo): CompanyBrandin
   // If useMainLogoAsOfficial is checked, use Main Conglomerate Logo
   let companyLogo: string | null = null;
   const isUseMain = Boolean(stored.useMainLogoAsOfficial);
-  if (isUseMain && parentGroup.logo && isUploadedLogo(parentGroup.logo)) {
-    companyLogo = parentGroup.logo;
+  if (isUseMain) {
+    companyLogo = getMainGroupLogoUrl(parentGroup);
   } else if (stored.customLogo && isUploadedLogo(stored.customLogo)) {
     companyLogo = stored.customLogo;
   }
@@ -161,8 +162,8 @@ function ensureFirestoreSubscription() {
           const isUseMain = Boolean(data.useMainLogoAsOfficial);
           const rawCustomLogo = data.customLogo || data.logo || null;
           let effectiveLogo: string | null = null;
-          if (isUseMain && parentGroup.logo && isUploadedLogo(parentGroup.logo)) {
-            effectiveLogo = parentGroup.logo;
+          if (isUseMain) {
+            effectiveLogo = getMainGroupLogoUrl(parentGroup);
           } else if (rawCustomLogo && isUploadedLogo(rawCustomLogo)) {
             effectiveLogo = rawCustomLogo;
           }
@@ -420,6 +421,10 @@ export function useTransparentLogo(logoSrc?: string | null): string | null {
       setCleanSrc(null);
       return;
     }
+    if (logoSrc.includes('mak_main_logo')) {
+      setCleanSrc(logoSrc);
+      return;
+    }
     const cached = transparentLogoCache.get(logoSrc);
     if (cached) {
       setCleanSrc(cached);
@@ -588,8 +593,8 @@ export function useBranding() {
   // If useMainLogoAsOfficial is checked, use Main Group Logo
   let finalLogo: string | null = null;
   const isUseMain = Boolean(branding.useMainLogoAsOfficial);
-  if (isUseMain && parentGroup.logo && isUploadedLogo(parentGroup.logo)) {
-    finalLogo = parentGroup.logo;
+  if (isUseMain) {
+    finalLogo = getMainGroupLogoUrl(parentGroup);
   } else if (branding.customLogo && isUploadedLogo(branding.customLogo)) {
     finalLogo = branding.customLogo;
   }
@@ -614,7 +619,7 @@ export function useBranding() {
     customLogo: finalLogo,
     activeLogo: finalLogo,
     useMainLogoAsOfficial: isUseMain,
-    mainGroupLogo: parentGroup.logo || null,
+    mainGroupLogo: getMainGroupLogoUrl(parentGroup),
     companyName: finalCompanyName,
     subtitle: branding.subtitle || defaultB.subtitle,
     address: branding.address || defaultB.address,

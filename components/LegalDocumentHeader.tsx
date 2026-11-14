@@ -1,5 +1,5 @@
 import React from 'react';
-import { CompanyId, getActiveCompany, GROUP_COMPANIES, DEFAULT_PARENT_GROUP, getParentGroupInfo, getCompanyLogoUrl } from '../services/companyService';
+import { CompanyId, getActiveCompany, GROUP_COMPANIES, DEFAULT_PARENT_GROUP, getParentGroupInfo, getMainGroupDocumentLogoUrl, getCompanyLogoUrl } from '../services/companyService';
 import { formatPdfDate } from '../services/pdfExportService';
 
 export interface LegalDocumentHeaderProps {
@@ -22,7 +22,7 @@ export const LegalDocumentHeader: React.FC<LegalDocumentHeaderProps> = ({
   className = ""
 }) => {
   const parentGroup = getParentGroupInfo();
-  const topLogoUrl = parentGroup.documentLogo || parentGroup.logo || '/logos/mak_group_logo.svg';
+  const topLogoUrl = getMainGroupDocumentLogoUrl(parentGroup);
   const currentDate = formatPdfDate(date);
 
   return (
@@ -40,7 +40,7 @@ export const LegalDocumentHeader: React.FC<LegalDocumentHeaderProps> = ({
           <img 
             src={topLogoUrl} 
             alt="MAK Group of Companies" 
-            className="h-16 sm:h-20 w-auto max-w-[200px] object-contain shrink-0 bg-transparent"
+            className="h-16 sm:h-20 w-auto max-w-[240px] sm:max-w-[270px] object-contain shrink-0 bg-transparent"
           />
           <div className="flex flex-col justify-center">
             <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-slate-900 leading-tight">

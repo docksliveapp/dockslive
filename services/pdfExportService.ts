@@ -7,6 +7,9 @@ import {
   isUploadedLogo,
   getCompanyUploadedLogo,
   getParentGroupInfo,
+  getMainGroupLogoUrl,
+  getMainGroupDocumentLogoUrl,
+  MAIN_GROUP_LOGO_URL,
   DEFAULT_PARENT_GROUP,
   CompanyId,
   GROUP_COMPANIES
@@ -35,8 +38,15 @@ export interface BrandingInfo {
   directorTitle?: string;
 }
 
+export interface RenderedPdfLogo {
+  dataUrl: string;
+  aspectRatio: number;
+  width: number;
+  height: number;
+}
+
 let cachedMakLogoPngUrl: string | null = null;
-const circularLogoCache = new Map<string, string>();
+const preservedLogoCache = new Map<string, RenderedPdfLogo>();
 
 /**
  * Formats any date or ISO timestamp (e.g., "2026-10-26T11:42:23.511Z" or "2026-04-01")
@@ -104,73 +114,75 @@ function normalizeSvgDataUrlForCanvas(sourceUrl: string): string {
 }
 
 /**
- * Renders any logo image URL onto a 100% transparent, un-framed square canvas (object-contain)
- * so the original uploaded logo shape (square, rectangular, circular, or transparent PNG/SVG)
- * is preserved as-is without any circle frame or distortion.
+ * Renders any logo image URL onto a 100% transparent canvas while preserving its exact natural
+ * aspect ratio (e.g., wide horizontal banner or square emblem) with zero square padding or circle cropping.
  */
-async function renderCircularLogoBadgePng(sourceUrl: string): Promise<string> {
-  if (!sourceUrl || typeof window === 'undefined') return '';
-  if (circularLogoCache.has(sourceUrl)) {
-    return circularLogoCache.get(sourceUrl)!;
+async function renderPreservedAspectLogoPng(sourceUrl: string): Promise<RenderedPdfLogo | null> {
+  if (!sourceUrl || typeof window === 'undefined') return null;
+  if (preservedLogoCache.has(sourceUrl)) {
+    return preservedLogoCache.get(sourceUrl)!;
   }
 
   return new Promise((resolve) => {
     try {
       const normalizedSrc = normalizeSvgDataUrlForCanvas(sourceUrl);
       const img = new Image();
-      if (!normalizedSrc.startsWith('data:')) {
+      if (
+        !normalizedSrc.startsWith('data:') &&
+        normalizedSrc.startsWith('http') &&
+        !normalizedSrc.startsWith(window.location.origin)
+      ) {
         img.crossOrigin = 'anonymous';
       }
       img.onload = () => {
         try {
-          const size = 480;
+          const iw = img.naturalWidth || img.width || 480;
+          const ih = img.naturalHeight || img.height || 480;
+          const targetMax = Math.min(1000, Math.max(480, Math.max(iw, ih)));
+          const scale = targetMax / Math.max(iw, ih);
           const canvas = document.createElement('canvas');
-          canvas.width = size;
-          canvas.height = size;
+          canvas.width = Math.max(1, Math.round(iw * scale));
+          canvas.height = Math.max(1, Math.round(ih * scale));
           const ctx = canvas.getContext('2d');
-          if (!ctx) return resolve(sourceUrl);
+          if (!ctx) return resolve(null);
 
-          // Keep 100% transparent background with zero border/circle frame
-          ctx.clearRect(0, 0, size, size);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-          const iw = img.naturalWidth || img.width || size;
-          const ih = img.naturalHeight || img.height || size;
-          const scale = Math.min(size / iw, size / ih);
-          const drawW = iw * scale;
-          const drawH = ih * scale;
-          const drawX = (size - drawW) / 2;
-          const drawY = (size - drawH) / 2;
-
-          ctx.drawImage(img, drawX, drawY, drawW, drawH);
-
-          const outUrl = canvas.toDataURL('image/png');
-          circularLogoCache.set(sourceUrl, outUrl);
-          resolve(outUrl);
+          const dataUrl = canvas.toDataURL('image/png');
+          const result: RenderedPdfLogo = {
+            dataUrl,
+            width: canvas.width,
+            height: canvas.height,
+            aspectRatio: canvas.width / canvas.height,
+          };
+          preservedLogoCache.set(sourceUrl, result);
+          resolve(result);
         } catch {
-          resolve('');
+          resolve(null);
         }
       };
-      img.onerror = () => resolve('');
+      img.onerror = () => resolve(null);
       img.src = normalizedSrc;
     } catch {
-      resolve('');
+      resolve(null);
     }
   });
 }
 
 /**
  * Generates an ultra-crisp, high-DPI transparent PNG of the official MAK Group of Companies logo
- * (or renders the uploaded Main App Document Logo / Main Logo transparently without any circle frame).
+ * (using the uploaded Main App Document Logo / Main Logo, or the default /logos/mak_main_logo.png).
  */
 export async function getMakGroupLetterheadLogoPngUrl(): Promise<string> {
   const parentGroup = getParentGroupInfo();
-  if (parentGroup?.documentLogo && isUploadedLogo(parentGroup.documentLogo)) {
-    const docBadge = await renderCircularLogoBadgePng(parentGroup.documentLogo);
-    if (docBadge) return docBadge;
-  }
-  if (parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
-    const mainBadge = await renderCircularLogoBadgePng(parentGroup.logo);
-    if (mainBadge) return mainBadge;
+  const preferredUrl = getMainGroupDocumentLogoUrl(parentGroup) || getMainGroupLogoUrl(parentGroup) || MAIN_GROUP_LOGO_URL;
+  const preferredRendered = await renderPreservedAspectLogoPng(preferredUrl);
+  if (preferredRendered?.dataUrl) return preferredRendered.dataUrl;
+
+  if (preferredUrl !== MAIN_GROUP_LOGO_URL) {
+    const defaultRendered = await renderPreservedAspectLogoPng(MAIN_GROUP_LOGO_URL);
+    if (defaultRendered?.dataUrl) return defaultRendered.dataUrl;
   }
 
   if (cachedMakLogoPngUrl) return cachedMakLogoPngUrl;
@@ -302,27 +314,33 @@ export async function getCompanyMonogramLogoPngUrl(companyId?: string): Promise<
 }
 
 /**
- * Resolves the TOP letterhead logo strictly from the Main App (MAK Group of Companies) settings:
- * 1. Main App Document Logo (parentGroup.documentLogo) uploaded in Main App Settings
- * 2. Main App Splash/Login Logo (parentGroup.logo) uploaded in Main App Settings
- * 3. Default transparent MAK Group of Companies emblem
+ * Resolves the TOP letterhead logo strictly from the Main App (MAK Group of Companies) settings
+ * along with its natural aspect ratio so wide horizontal logos are never squished into a square:
+ * 1. Main App Document Logo (parentGroup.documentLogo) or Main Logo (parentGroup.logo) if v2 uploaded
+ * 2. Official /logos/mak_main_logo.png
  * Note: Operating subsidiary company logos (DPL, TRK, MHB, VSL) are rendered strictly at the bottom stamp.
  */
-export async function resolvePdfLogoUrl(_customLogo?: string | null): Promise<string> {
+export async function resolvePdfLogoWithMetrics(_customLogo?: string | null): Promise<RenderedPdfLogo | null> {
   const parentGroup = getParentGroupInfo();
-  if (parentGroup?.documentLogo && isUploadedLogo(parentGroup.documentLogo)) {
-    const rendered = await renderCircularLogoBadgePng(parentGroup.documentLogo);
-    if (rendered) return rendered;
+  const preferredUrl = getMainGroupDocumentLogoUrl(parentGroup) || getMainGroupLogoUrl(parentGroup) || MAIN_GROUP_LOGO_URL;
+  const rendered = await renderPreservedAspectLogoPng(preferredUrl);
+  if (rendered?.dataUrl) return rendered;
+
+  if (preferredUrl !== MAIN_GROUP_LOGO_URL) {
+    const fallbackRendered = await renderPreservedAspectLogoPng(MAIN_GROUP_LOGO_URL);
+    if (fallbackRendered?.dataUrl) return fallbackRendered;
   }
-  if (parentGroup?.logo && isUploadedLogo(parentGroup.logo)) {
-    const rendered = await renderCircularLogoBadgePng(parentGroup.logo);
-    if (rendered) return rendered;
+
+  const vectorUrl = await getMakGroupLetterheadLogoPngUrl();
+  if (vectorUrl) {
+    return { dataUrl: vectorUrl, aspectRatio: 1, width: 500, height: 500 };
   }
-  if (DEFAULT_PARENT_GROUP.documentLogo) {
-    const rendered = await renderCircularLogoBadgePng(DEFAULT_PARENT_GROUP.documentLogo);
-    if (rendered) return rendered;
-  }
-  return await getMakGroupLetterheadLogoPngUrl();
+  return null;
+}
+
+export async function resolvePdfLogoUrl(_customLogo?: string | null): Promise<string> {
+  const metrics = await resolvePdfLogoWithMetrics(_customLogo);
+  return metrics?.dataUrl || '';
 }
 
 /**
@@ -365,22 +383,30 @@ export async function drawPdfCorporateHeader(
   doc.setFillColor(accent[0], accent[1], accent[2]);
   doc.rect(0, 4.5, pageWidth, 1.5, 'F');
 
-  // 2. High-Res Circular MAK Group of Companies Logo (1:1 aspect ratio circle)
-  const logoUrl = await resolvePdfLogoUrl(options.branding?.customLogo);
-  const logoDiameter = 18;
+  // 2. High-Res MAK Group of Companies Logo preserving natural aspect ratio (wide or square)
+  const logoMetrics = await resolvePdfLogoWithMetrics(options.branding?.customLogo);
+  const logoAspectRatio = logoMetrics?.aspectRatio || 1;
+  const maxLogoH = 18;
+  const maxLogoW = logoAspectRatio > 1.25 ? 36 : 20;
+  let logoW = maxLogoH * logoAspectRatio;
+  let logoH = maxLogoH;
+  if (logoW > maxLogoW) {
+    logoW = maxLogoW;
+    logoH = logoW / logoAspectRatio;
+  }
   let logoDrawn = false;
 
-  if (logoUrl) {
+  if (logoMetrics?.dataUrl) {
     try {
-      const format = logoUrl.includes('image/jpeg') || logoUrl.includes('image/jpg') ? 'JPEG' : 'PNG';
-      doc.addImage(logoUrl, format, margin, startY, logoDiameter, logoDiameter);
+      const format = logoMetrics.dataUrl.includes('image/jpeg') || logoMetrics.dataUrl.includes('image/jpg') ? 'JPEG' : 'PNG';
+      doc.addImage(logoMetrics.dataUrl, format, margin, startY, logoW, logoH);
       logoDrawn = true;
     } catch (e) {
-      console.warn('Could not draw circular MAK logo into PDF:', e);
+      console.warn('Could not draw MAK logo into PDF:', e);
     }
   }
 
-  const textStartX = logoDrawn ? margin + logoDiameter + 4.5 : margin;
+  const textStartX = logoDrawn ? margin + logoW + 4.5 : margin;
 
   // 3. Clean and prepare right-aligned metadata
   const cleanTitle = cleanPdfText(options.title) || 'OFFICIAL DOCUMENT';
@@ -388,8 +414,8 @@ export async function drawPdfCorporateHeader(
   const cleanDate = options.date ? formatPdfDate(options.date) : undefined;
   const cleanSubRef = options.subRef ? cleanPdfText(options.subRef) : undefined;
 
-  const rightColMaxWidth = 56;
-  const maxLeftWidth = Math.max(85, (pageWidth - margin) - textStartX - rightColMaxWidth - 4);
+  const rightColMaxWidth = 54;
+  const maxLeftWidth = Math.max(76, (pageWidth - margin) - textStartX - rightColMaxWidth - 4);
 
   // 4. Left Column: Unified MAK Group Conglomerate Identity with dynamic Y tracking (zero overlap)
   let currLeftY = startY + 4.2;
@@ -465,8 +491,8 @@ export async function drawPdfCorporateHeader(
     currRightY += (subRefWrapped.length * 3.0);
   }
 
-  // 6. Horizontal Divider Line (strictly computed below both columns and circular logo)
-  const dividerY = Math.max(currLeftY, currRightY, startY + logoDiameter) + 2.8;
+  // 6. Horizontal Divider Line (strictly computed below both columns and logo)
+  const dividerY = Math.max(currLeftY, currRightY, startY + (logoDrawn ? logoH : 0)) + 2.8;
   doc.setDrawColor(203, 213, 225);
   doc.setLineWidth(0.5);
   doc.line(margin, dividerY, pageWidth - margin, dividerY);
@@ -632,63 +658,50 @@ export function resolveOperatingCompanyFromRef(
 }
 
 /**
- * Generates a transparent PNG for a specific operating subsidiary company (Docks, Truckit, Muhib, Vantage)
- * preserving its original uploaded shape without any circle frame.
+ * Generates a transparent PNG with preserved natural aspect ratio for a specific operating
+ * subsidiary company (Docks, Truckit, Muhib, Vantage) while keeping each subsidiary's own logo intact.
  */
-async function getOperatingCompanyCircularLogoPng(
+async function getOperatingCompanyLogoWithMetrics(
   companyId: CompanyId,
   customLogoHint?: string | null
-): Promise<string> {
+): Promise<RenderedPdfLogo | null> {
   const comp = GROUP_COMPANIES[companyId] || getActiveCompany();
+  const activeComp = getActiveCompany();
 
   // 1. Check uploaded logo for this specific operating company in Company Settings
   const uploadedForComp = getCompanyUploadedLogo(companyId);
-  if (uploadedForComp && isUploadedLogo(uploadedForComp)) {
-    const badge = await renderCircularLogoBadgePng(uploadedForComp);
-    if (badge) return badge;
+  if (uploadedForComp && (isUploadedLogo(uploadedForComp) || uploadedForComp.includes('mak_main_logo'))) {
+    const rendered = await renderPreservedAspectLogoPng(uploadedForComp);
+    if (rendered) return rendered;
   }
 
-  // 2. Check stored branding for this company
+  // 2. Check stored branding for this specific company
   const compBranding = getStoredBranding(comp);
+  if (compBranding?.useMainLogoAsOfficial) {
+    return await resolvePdfLogoWithMetrics();
+  }
   if (compBranding?.customLogo && isUploadedLogo(compBranding.customLogo)) {
-    const badge = await renderCircularLogoBadgePng(compBranding.customLogo);
-    if (badge) return badge;
+    const rendered = await renderPreservedAspectLogoPng(compBranding.customLogo);
+    if (rendered) return rendered;
   }
 
-  // 3. Check customLogoHint passed from active view/caller
-  if (customLogoHint && isUploadedLogo(customLogoHint)) {
-    const badge = await renderCircularLogoBadgePng(customLogoHint);
-    if (badge) return badge;
+  // 3. Check customLogoHint passed from active view when matching this company
+  if (customLogoHint && isUploadedLogo(customLogoHint) && companyId === activeComp.id) {
+    const rendered = await renderPreservedAspectLogoPng(customLogoHint);
+    if (rendered) return rendered;
   }
 
-  // 4. Check active company branding / uploaded logo across any configured company slot
-  const activeBranding = getStoredBranding();
-  if (activeBranding?.customLogo && isUploadedLogo(activeBranding.customLogo)) {
-    const badge = await renderCircularLogoBadgePng(activeBranding.customLogo);
-    if (badge) return badge;
-  }
-
-  // 5. Check if any of the 4 company slots has an uploaded logo matching this company
-  const allIds: CompanyId[] = ['docks', 'truckit', 'muhib', 'vantage'];
-  for (const cid of allIds) {
-    const anyUploaded = getCompanyUploadedLogo(cid);
-    if (anyUploaded && isUploadedLogo(anyUploaded)) {
-      const badge = await renderCircularLogoBadgePng(anyUploaded);
-      if (badge) return badge;
-    }
-  }
-
-  // 6. Render the subsidiary company's official SVG emblem transparently if available
+  // 4. Render this subsidiary company's own official SVG emblem cleanly
   if (comp.logo) {
-    const svgBadge = await renderCircularLogoBadgePng(comp.logo);
-    if (svgBadge) return svgBadge;
+    const svgRendered = await renderPreservedAspectLogoPng(comp.logo);
+    if (svgRendered) return svgRendered;
   }
 
-  return await getMakGroupLetterheadLogoPngUrl();
+  return await resolvePdfLogoWithMetrics();
 }
 
 /**
- * Draws the Operating Subsidiary Company attribution block (Circular Logo + Company Name + Official Stamp)
+ * Draws the Operating Subsidiary Company attribution block (Subsidiary Logo + Company Name + Official Stamp)
  * at the bottom of Client Ledgers, Invoices, and Case Dossiers so it is clear which company added the client
  * and managed the case.
  */
@@ -712,13 +725,23 @@ export async function drawIssuingCompanySignatureAndStamp(
   doc.setLineWidth(0.4);
   doc.roundedRect(margin, y, leftBoxW, 22, 2, 2, 'FD');
 
-  // Draw circular subsidiary logo inside left attribution box
+  // Draw subsidiary company's own logo inside left attribution box preserving aspect ratio
   let textStartX = margin + 4;
   try {
-    const subLogoPng = await getOperatingCompanyCircularLogoPng(resolvedId, customLogoHint);
-    if (subLogoPng) {
-      doc.addImage(subLogoPng, 'PNG', margin + 3, y + 2.5, 17, 17);
-      textStartX = margin + 23;
+    const subLogo = await getOperatingCompanyLogoWithMetrics(resolvedId, customLogoHint);
+    if (subLogo?.dataUrl) {
+      const boxMaxW = 24;
+      const boxMaxH = 16;
+      const ar = subLogo.aspectRatio || 1;
+      let drawW = boxMaxH * ar;
+      let drawH = boxMaxH;
+      if (drawW > boxMaxW) {
+        drawW = boxMaxW;
+        drawH = drawW / ar;
+      }
+      const drawY = y + (22 - drawH) / 2;
+      doc.addImage(subLogo.dataUrl, 'PNG', margin + 3, drawY, drawW, drawH);
+      textStartX = margin + 3 + drawW + 3.5;
     }
   } catch (_) {}
 
