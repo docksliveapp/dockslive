@@ -1064,6 +1064,211 @@ export async function compressAndPrepareFile(file: File): Promise<ProcessedDocum
 }
 
 /**
+ * Prepares an original color portrait photo or ID card image (or PDF) WITHOUT applying
+ * OCR document filters (no whitening, no illumination flattening, no binarization, no contrast warp).
+ * Scales down proportionally only if oversized, keeping natural true colors and sharp detail
+ * while remaining safely within Firestore document storage limits.
+ */
+export async function prepareOriginalPhoto(
+  file: File,
+  options?: { maxDimension?: number; maxBytes?: number; quality?: number }
+): Promise<ProcessedDocument> {
+  const maxDimension = options?.maxDimension ?? 1080;
+  const maxBytes = options?.maxBytes ?? 230 * 1024;
+  const initialQuality = options?.quality ?? 0.88;
+  const { mimeType: defaultMimeType, isImage, isPdf } = detectMimeType(file);
+
+  if (!isImage || isPdf) {
+    const base64 = await readAsBase64(file, 15 * 1024 * 1024);
+    const mime = isPdf ? 'application/pdf' : defaultMimeType;
+    const dataUrl = base64 ? `data:${mime};base64,${base64}` : '';
+    return {
+      name: file.name,
+      type: mime,
+      size: file.size,
+      dataUrl,
+      base64,
+      isImage: false,
+    };
+  }
+
+  const readFileAsDataUrl = (): Promise<string> =>
+    new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => resolve((ev.target?.result as string) || '');
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+
+  return new Promise((resolve) => {
+    let objectUrl = '';
+    try {
+      objectUrl = URL.createObjectURL(file);
+    } catch (_) {}
+
+    const img = new Image();
+    const cleanup = () => {
+      if (objectUrl) {
+        try {
+          URL.revokeObjectURL(objectUrl);
+        } catch (_) {}
+      }
+    };
+
+    img.onerror = async () => {
+      cleanup();
+      const rawUrl = await readFileAsDataUrl();
+      const comma = rawUrl.indexOf(',');
+      const b64 = comma >= 0 ? rawUrl.substring(comma + 1) : '';
+      resolve({
+        name: file.name,
+        type: defaultMimeType,
+        size: file.size,
+        dataUrl: rawUrl,
+        base64: b64,
+        isImage: true,
+      });
+    };
+
+    img.onload = async () => {
+      let canvas: HTMLCanvasElement | null = null;
+      try {
+        const origW = img.naturalWidth || img.width;
+        const origH = img.naturalHeight || img.height;
+
+        // If already browser-native format, within dimensions, and under byte budget, keep untouched original bytes
+        const isNativeWebFormat = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(
+          defaultMimeType.toLowerCase()
+        );
+        if (isNativeWebFormat && origW <= maxDimension && origH <= maxDimension && file.size <= maxBytes) {
+          const rawUrl = await readFileAsDataUrl();
+          if (rawUrl) {
+            const comma = rawUrl.indexOf(',');
+            const b64 = comma >= 0 ? rawUrl.substring(comma + 1) : '';
+            cleanup();
+            resolve({
+              name: file.name,
+              type: defaultMimeType,
+              size: file.size,
+              dataUrl: rawUrl,
+              base64: b64,
+              isImage: true,
+            });
+            return;
+          }
+        }
+
+        let targetW = origW;
+        let targetH = origH;
+        if (targetW > maxDimension || targetH > maxDimension) {
+          const ratio = Math.min(maxDimension / targetW, maxDimension / targetH);
+          targetW = Math.max(1, Math.round(targetW * ratio));
+          targetH = Math.max(1, Math.round(targetH * ratio));
+        }
+
+        canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          const rawUrl = await readFileAsDataUrl();
+          const comma = rawUrl.indexOf(',');
+          cleanup();
+          resolve({
+            name: file.name,
+            type: defaultMimeType,
+            size: file.size,
+            dataUrl: rawUrl,
+            base64: comma >= 0 ? rawUrl.substring(comma + 1) : '',
+            isImage: true,
+          });
+          return;
+        }
+
+        const renderToJpeg = (w: number, h: number, q: number): string => {
+          if (!canvas) return '';
+          canvas.width = w;
+          canvas.height = h;
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, w, h);
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, w, h);
+          return canvas.toDataURL('image/jpeg', q);
+        };
+
+        let finalDataUrl = renderToJpeg(targetW, targetH, initialQuality);
+        const getApproxBytes = (url: string) => {
+          const commaIdx = url.indexOf(',');
+          const b64 = commaIdx >= 0 ? url.substring(commaIdx + 1) : '';
+          return Math.round((b64.length * 3) / 4);
+        };
+
+        // Gently step quality only if needed to fit within target byte budget (preserving full natural color)
+        const qualities = [0.82, 0.76, 0.70, 0.64];
+        for (const q of qualities) {
+          if (getApproxBytes(finalDataUrl) <= maxBytes) break;
+          if (q < initialQuality) {
+            finalDataUrl = renderToJpeg(targetW, targetH, q);
+          }
+        }
+
+        // If still larger than maxBytes, resize proportionally once more and encode cleanly
+        if (getApproxBytes(finalDataUrl) > maxBytes && Math.max(targetW, targetH) > 640) {
+          const downScale = Math.sqrt(maxBytes / Math.max(maxBytes + 1, getApproxBytes(finalDataUrl)));
+          const clampScale = Math.max(0.55, Math.min(0.85, downScale));
+          targetW = Math.max(1, Math.round(targetW * clampScale));
+          targetH = Math.max(1, Math.round(targetH * clampScale));
+          finalDataUrl = renderToJpeg(targetW, targetH, 0.78);
+        }
+
+        const commaIdx = finalDataUrl.indexOf(',');
+        const finalBase64 = commaIdx >= 0 ? finalDataUrl.substring(commaIdx + 1) : '';
+        const approxSize = Math.round((finalBase64.length * 3) / 4);
+
+        canvas.width = 0;
+        canvas.height = 0;
+        canvas = null;
+        cleanup();
+
+        resolve({
+          name: file.name.replace(/\.[^/.]+$/, '') + '.jpg',
+          type: 'image/jpeg',
+          size: approxSize,
+          dataUrl: finalDataUrl,
+          base64: finalBase64,
+          isImage: true,
+        });
+      } catch (err) {
+        if (canvas) {
+          try {
+            canvas.width = 0;
+            canvas.height = 0;
+          } catch (_) {}
+        }
+        cleanup();
+        const rawUrl = await readFileAsDataUrl();
+        const comma = rawUrl.indexOf(',');
+        resolve({
+          name: file.name,
+          type: defaultMimeType,
+          size: file.size,
+          dataUrl: rawUrl,
+          base64: comma >= 0 ? rawUrl.substring(comma + 1) : '',
+          isImage: true,
+        });
+      }
+    };
+
+    if (objectUrl) {
+      img.src = objectUrl;
+    } else {
+      readFileAsDataUrl().then((res) => {
+        img.src = res || '';
+      });
+    }
+  });
+}
+
+/**
  * Safely reads a File as raw Base64 string with size limit and timeout
  */
 export function readAsBase64(file: File, maxSizeBytes: number = 10 * 1024 * 1024): Promise<string> {

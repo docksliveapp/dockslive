@@ -40,9 +40,10 @@ import {
   subscribeToSalaryStaff,
   saveSalaryStaffToFirestore,
   deleteSalaryStaffFromFirestore,
-  syncCompletedMonthSalaryStaffToPayables
+  syncCompletedMonthSalaryStaffToPayables,
+  sortSalaryStaffByDesignation
 } from '../services/dbService';
-import { exportCSVFile, compressAndPrepareFile, convertImageToPdf } from '../services/fileUtils';
+import { exportCSVFile, compressAndPrepareFile, convertImageToPdf, prepareOriginalPhoto } from '../services/fileUtils';
 import { analyzeReceiptWithAI } from '../services/geminiService';
 import { safeAppStorage } from '../services/storage';
 import { useBranding } from '../services/brandingService';
@@ -251,6 +252,8 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
   const [deleteSalaryStaffTarget, setDeleteSalaryStaffTarget] = useState<SalaryStaffMember | null>(null);
   const [salaryStaffError, setSalaryStaffError] = useState<string | null>(null);
   const [isSavingSalaryStaff, setIsSavingSalaryStaff] = useState(false);
+  const [uploadingStaffDocField, setUploadingStaffDocField] = useState<'photoUrl' | 'cnicFrontUrl' | 'cnicBackUrl' | null>(null);
+  const [staffDocViewer, setStaffDocViewer] = useState<{ url: string; title: string; filename: string } | null>(null);
   const [salaryStaffForm, setSalaryStaffForm] = useState<{
     name: string;
     fatherName: string;
@@ -274,6 +277,22 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
     cnicFrontUrl: '',
     cnicBackUrl: ''
   });
+
+  const sortedSalaryStaffList = useMemo(
+    () => sortSalaryStaffByDesignation(salaryStaffList),
+    [salaryStaffList]
+  );
+
+  const openStaffDocPreview = (url: string, title: string, baseName: string) => {
+    if (!url) return;
+    const isPdf = url.startsWith('data:application/pdf') || url.toLowerCase().endsWith('.pdf');
+    const safeName = (baseName || 'staff_document').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    setStaffDocViewer({
+      url,
+      title,
+      filename: isPdf ? `${safeName}.pdf` : `${safeName}.jpg`
+    });
+  };
 
   const handleOpenAddSalaryStaff = () => {
     setEditingSalaryStaff(null);
@@ -317,14 +336,25 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploadingStaffDocField(field);
+    setSalaryStaffError(null);
     try {
-      const processed = await compressAndPrepareFile(file);
+      const isPortrait = field === 'photoUrl';
+      const processed = await prepareOriginalPhoto(file, {
+        maxDimension: isPortrait ? 960 : 1400,
+        maxBytes: isPortrait ? 210 * 1024 : 260 * 1024,
+        quality: isPortrait ? 0.88 : 0.86
+      });
       if (processed.dataUrl) {
         setSalaryStaffForm((prev) => ({ ...prev, [field]: processed.dataUrl }));
+      } else {
+        setSalaryStaffError('Could not read the selected file. Please try another image or PDF.');
       }
     } catch (err) {
       console.warn('Salary staff file upload notice:', err);
+      setSalaryStaffError('Failed to process the selected image. Please try again.');
     } finally {
+      setUploadingStaffDocField(null);
       e.target.value = '';
     }
   };
@@ -354,13 +384,15 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         residentialContact: salaryStaffForm.residentialContact.trim(),
         residentialAddress: salaryStaffForm.residentialAddress.trim(),
         totalSalary: numericSalary,
-        photoUrl: salaryStaffForm.photoUrl || undefined,
-        cnicFrontUrl: salaryStaffForm.cnicFrontUrl || undefined,
-        cnicBackUrl: salaryStaffForm.cnicBackUrl || undefined,
+        photoUrl: salaryStaffForm.photoUrl || '',
+        cnicFrontUrl: salaryStaffForm.cnicFrontUrl || '',
+        cnicBackUrl: salaryStaffForm.cnicBackUrl || '',
         status: 'ACTIVE',
         createdAt: editingSalaryStaff?.createdAt || new Date().toISOString()
       });
-      setSalaryStaffList((prev) => [saved, ...prev.filter((s) => s.id !== saved.id)]);
+      setSalaryStaffList((prev) =>
+        sortSalaryStaffByDesignation([saved, ...prev.filter((s) => s.id !== saved.id)])
+      );
       setShowSalaryStaffModal(false);
       setEditingSalaryStaff(null);
       logActivity(
@@ -5155,7 +5187,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         const activeTemplates = recurringTemplates.filter(t => t.isActive && (t.type || 'PAYABLE') === 'PAYABLE');
         const totalTemplatesAmount = activeTemplates.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
 
-        const activeSalaryStaff = salaryStaffList.filter(s => Number(s.totalSalary || 0) > 0);
+        const activeSalaryStaff = sortedSalaryStaffList.filter(s => Number(s.totalSalary || 0) > 0);
         const totalMonthlySalaries = activeSalaryStaff.reduce((sum, s) => sum + (Number(s.totalSalary) || 0), 0);
 
         const totalMonthlyFixedTotal = totalTemplatesAmount + totalMonthlySalaries;
@@ -5525,7 +5557,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         );
 
         const allStaffMembers = Array.from(new Set([
-          ...salaryStaffList.map(s => s.name),
+          ...sortedSalaryStaffList.map(s => s.name),
           ...staffPayables.filter(p => !p.party?.toLowerCase().includes('administrator')).map(p => p.party),
           ...staffExpenses.filter(e => !e.party?.toLowerCase().includes('administrator')).map(e => e.party)
         ])).filter(Boolean);
@@ -5534,7 +5566,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
           staffFilter === 'ALL' || p.party.trim().toLowerCase() === staffFilter.trim().toLowerCase()
         );
 
-        const totalMonthlyPayrollCommitment = salaryStaffList.reduce(
+        const totalMonthlyPayrollCommitment = sortedSalaryStaffList.reduce(
           (sum, s) => sum + (Number(s.totalSalary) || 0),
           0
         );
@@ -5616,10 +5648,10 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
               <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-2 bg-white/[0.03]">
                 <div>
                   <h5 className="text-xs sm:text-sm font-bold text-white">
-                    Salary Staff Directory — {activeCompany.name} Only ({salaryStaffList.length})
+                    Salary Staff Directory — {activeCompany.name} Only ({sortedSalaryStaffList.length})
                   </h5>
                   <p className="text-[11px] text-gray-400">
-                    Each staff member belongs strictly to {activeCompany.name} and auto-posts into Payables after 12:00 AM following the last date of every month.
+                    Sorted designation-wise for {activeCompany.name}; auto-posts into Payables after 12:00 AM following month-end.
                   </p>
                 </div>
               </div>
@@ -5641,7 +5673,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {salaryStaffList.map((staff, idx) => (
+                    {sortedSalaryStaffList.map((staff, idx) => (
                       <tr key={staff.id || idx} className="hover:bg-white/5 transition-colors h-11">
                         <td className="py-2 px-3 font-mono tabular-nums text-gray-400 whitespace-nowrap">
                           {idx + 1}
@@ -5649,14 +5681,22 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                         <td className="py-2 px-3 whitespace-nowrap">
                           <div className="flex items-center gap-2">
                             {staff.photoUrl ? (
-                              <img
-                                src={staff.photoUrl}
-                                alt={staff.name}
-                                referrerPolicy="no-referrer"
-                                className="w-7 h-7 rounded-lg object-cover border border-white/15 shrink-0"
-                              />
+                              <button
+                                type="button"
+                                data-custom-control="true"
+                                onClick={() => openStaffDocPreview(staff.photoUrl!, `${staff.name} — Staff Photo`, `${staff.name}_photo`)}
+                                className="rounded-lg overflow-hidden border border-white/15 shrink-0 cursor-pointer hover:ring-2 hover:ring-sky-400 transition"
+                                title="View Staff Photo"
+                              >
+                                <img
+                                  src={staff.photoUrl}
+                                  alt={staff.name}
+                                  referrerPolicy="no-referrer"
+                                  className="w-8 h-8 object-cover block"
+                                />
+                              </button>
                             ) : (
-                              <div className="w-7 h-7 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 flex items-center justify-center text-[11px] font-bold shrink-0">
+                              <div className="w-8 h-8 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 flex items-center justify-center text-[11px] font-bold shrink-0">
                                 {(staff.name || 'S').charAt(0).toUpperCase()}
                               </div>
                             )}
@@ -5683,17 +5723,44 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                         </td>
                         <td className="py-2 px-3 whitespace-nowrap text-[11px]">
                           <div className="flex items-center gap-2 text-gray-400">
-                            <span className={staff.photoUrl ? 'text-emerald-400' : 'text-gray-500'}>
-                              Photo {staff.photoUrl ? '✓' : '—'}
-                            </span>
+                            {staff.photoUrl ? (
+                              <button
+                                type="button"
+                                data-custom-control="true"
+                                onClick={() => openStaffDocPreview(staff.photoUrl!, `${staff.name} — Staff Photo`, `${staff.name}_photo`)}
+                                className="text-emerald-400 hover:underline font-medium cursor-pointer"
+                              >
+                                Photo ✓
+                              </button>
+                            ) : (
+                              <span className="text-gray-500">Photo —</span>
+                            )}
                             <span>·</span>
-                            <span className={staff.cnicFrontUrl ? 'text-emerald-400' : 'text-gray-500'}>
-                              Front {staff.cnicFrontUrl ? '✓' : '—'}
-                            </span>
+                            {staff.cnicFrontUrl ? (
+                              <button
+                                type="button"
+                                data-custom-control="true"
+                                onClick={() => openStaffDocPreview(staff.cnicFrontUrl!, `${staff.name} — ID Card Front`, `${staff.name}_cnic_front`)}
+                                className="text-emerald-400 hover:underline font-medium cursor-pointer"
+                              >
+                                Front ✓
+                              </button>
+                            ) : (
+                              <span className="text-gray-500">Front —</span>
+                            )}
                             <span>·</span>
-                            <span className={staff.cnicBackUrl ? 'text-emerald-400' : 'text-gray-500'}>
-                              Back {staff.cnicBackUrl ? '✓' : '—'}
-                            </span>
+                            {staff.cnicBackUrl ? (
+                              <button
+                                type="button"
+                                data-custom-control="true"
+                                onClick={() => openStaffDocPreview(staff.cnicBackUrl!, `${staff.name} — ID Card Back`, `${staff.name}_cnic_back`)}
+                                className="text-emerald-400 hover:underline font-medium cursor-pointer"
+                              >
+                                Back ✓
+                              </button>
+                            ) : (
+                              <span className="text-gray-500">Back —</span>
+                            )}
                           </div>
                         </td>
                         <td className="py-2 px-3 text-right whitespace-nowrap">
@@ -5717,7 +5784,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                         </td>
                       </tr>
                     ))}
-                    {salaryStaffList.length === 0 && (
+                    {sortedSalaryStaffList.length === 0 && (
                       <tr>
                         <td colSpan={10} className="p-6 text-center text-gray-400 text-xs">
                           No office salary staff registered in <strong className="text-white">{activeCompany.name}</strong> yet. Click <strong className="text-purple-300">+ Add Staff</strong> above to register office staff from scratch (salaries start 01 Dec 2026).
@@ -5725,11 +5792,11 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                       </tr>
                     )}
                   </tbody>
-                  {salaryStaffList.length > 0 && (
+                  {sortedSalaryStaffList.length > 0 && (
                     <tfoot className="bg-white/5 border-t-2 border-white/10 font-bold text-xs">
                       <tr>
                         <td colSpan={6} className="py-3 px-3 text-white whitespace-nowrap">
-                          Monthly Payroll Commitment ({salaryStaffList.length} Registered Staff)
+                          Monthly Payroll Commitment ({sortedSalaryStaffList.length} Registered Staff)
                         </td>
                         <td className="py-3 px-3 text-right font-mono tabular-nums text-emerald-400 whitespace-nowrap">
                           PKR {totalMonthlyPayrollCommitment.toLocaleString()}/mo
@@ -9298,8 +9365,18 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
         title={directDownloadFilename.toLowerCase().includes('invoice') ? 'Invoice' : 'Payment Receipt'}
       />
 
+      {/* Original Photo & ID Card Viewer Modal (Zero OCR Color Distortion) */}
+      <PdfViewerModal
+        isOpen={!!staffDocViewer}
+        onClose={() => setStaffDocViewer(null)}
+        pdfUrl={staffDocViewer?.url || null}
+        filename={staffDocViewer?.filename || 'staff_document.jpg'}
+        title={staffDocViewer?.title || 'Staff Document'}
+        skipOcrPreprocessing={true}
+      />
+
       {/* ========================================================================= */}
-      {/* ADD / EDIT OFFICE SALARY STAFF MODAL (COMPANY-SCOPED, 9 EXACT FIELDS) */}
+      {/* ADD / EDIT OFFICE SALARY STAFF MODAL (PHOTO TOP-CENTER, ID CARDS, DETAILS, SAVE) */}
       {/* ========================================================================= */}
       {showSalaryStaffModal && (
         <div className="fixed inset-0 z-[10020] bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
@@ -9326,7 +9403,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
             </div>
 
             <form onSubmit={handleSaveSalaryStaff} className="flex flex-col flex-1 min-h-0 overflow-hidden text-xs">
-              <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0 space-y-4">
+              <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 min-h-0 space-y-5">
                 {salaryStaffError && (
                   <div className="p-3 rounded-xl bg-red-500/15 border border-red-500/35 text-red-200 flex items-center gap-2">
                     <AlertCircle size={15} className="shrink-0 text-red-400" />
@@ -9334,10 +9411,300 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                   </div>
                 )}
 
-                <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/25 text-purple-200 text-[11px]">
-                  This staff member belongs exclusively to <strong>{activeCompany.name}</strong> (no software User ID/Password). Their monthly salary generates on the last date of each month and posts automatically into <strong>{activeCompany.name} Payables</strong> after 12:00 AM midnight.
+                {/* 1. TOP CENTER: STAFF PHOTO */}
+                <div className="flex flex-col items-center justify-center text-center pb-4 border-b border-white/10">
+                  <span className="text-xs font-bold text-gray-200 mb-2.5">Staff Photo</span>
+                  <div className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-2xl overflow-hidden border-2 border-white/15 bg-black/30 flex items-center justify-center shadow-sm">
+                    {uploadingStaffDocField === 'photoUrl' ? (
+                      <Loader2 size={24} className="animate-spin text-sky-400" />
+                    ) : salaryStaffForm.photoUrl ? (
+                      <button
+                        type="button"
+                        data-custom-control="true"
+                        onClick={() =>
+                          openStaffDocPreview(
+                            salaryStaffForm.photoUrl,
+                            `${salaryStaffForm.name || 'Staff'} — Original Photo`,
+                            `${salaryStaffForm.name || 'staff'}_photo`
+                          )
+                        }
+                        className="w-full h-full block cursor-pointer"
+                        title="Click to View Full Photo"
+                      >
+                        <img
+                          src={salaryStaffForm.photoUrl}
+                          alt="Staff Photo"
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover block"
+                        />
+                      </button>
+                    ) : (
+                      <User size={40} className="text-gray-500" />
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
+                    {salaryStaffForm.photoUrl && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openStaffDocPreview(
+                            salaryStaffForm.photoUrl,
+                            `${salaryStaffForm.name || 'Staff'} — Original Photo`,
+                            `${salaryStaffForm.name || 'staff'}_photo`
+                          )
+                        }
+                        className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-gray-200 text-[11px] font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+                      >
+                        <Eye size={13} />
+                        <span>View Photo</span>
+                      </button>
+                    )}
+
+                    <label className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer shadow-sm">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleSalaryStaffDocUpload(e, 'photoUrl')}
+                      />
+                      <Upload size={13} />
+                      <span>{salaryStaffForm.photoUrl ? 'Replace Photo' : 'Upload Photo'}</span>
+                    </label>
+
+                    {salaryStaffForm.photoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setSalaryStaffForm((prev) => ({ ...prev, photoUrl: '' }))}
+                        className="px-2.5 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-300 text-[11px] font-semibold inline-flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                        title="Remove Photo"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
+                {/* 2. BELOW PHOTO: ID CARD FRONT & BACK (LIVE PREVIEW + VIEW) */}
+                <div className="space-y-2.5 pb-4 border-b border-white/10">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-gray-200">
+                      ID Card (Front &amp; Back)
+                    </h4>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    {/* ID Card Front */}
+                    <div className="p-3 rounded-2xl bg-black/25 border border-white/10 flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-semibold text-gray-300">ID Card Front</span>
+                        {salaryStaffForm.cnicFrontUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setSalaryStaffForm((prev) => ({ ...prev, cnicFrontUrl: '' }))}
+                            className="text-[11px] text-red-400 hover:text-red-300 font-medium cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+
+                      {uploadingStaffDocField === 'cnicFrontUrl' ? (
+                        <div className="h-36 rounded-xl bg-black/30 border border-dashed border-white/15 flex items-center justify-center">
+                          <Loader2 size={20} className="animate-spin text-sky-400" />
+                        </div>
+                      ) : salaryStaffForm.cnicFrontUrl ? (
+                        <>
+                          {salaryStaffForm.cnicFrontUrl.startsWith('data:application/pdf') ||
+                          salaryStaffForm.cnicFrontUrl.startsWith('chunk://') ? (
+                            <button
+                              type="button"
+                              data-custom-control="true"
+                              onClick={() =>
+                                openStaffDocPreview(
+                                  salaryStaffForm.cnicFrontUrl,
+                                  `${salaryStaffForm.name || 'Staff'} — ID Card Front`,
+                                  `${salaryStaffForm.name || 'staff'}_cnic_front`
+                                )
+                              }
+                              className="h-36 w-full rounded-xl bg-black/30 border border-white/10 flex flex-col items-center justify-center gap-1.5 text-emerald-300 hover:border-sky-400 transition cursor-pointer"
+                            >
+                              <FileCheck size={26} />
+                              <span className="text-[11px] font-semibold">ID Front Document Uploaded</span>
+                              <span className="text-[10px] text-gray-400">Click to View Full Document</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              data-custom-control="true"
+                              onClick={() =>
+                                openStaffDocPreview(
+                                  salaryStaffForm.cnicFrontUrl,
+                                  `${salaryStaffForm.name || 'Staff'} — ID Card Front`,
+                                  `${salaryStaffForm.name || 'staff'}_cnic_front`
+                                )
+                              }
+                              className="h-36 w-full rounded-xl overflow-hidden bg-black/30 border border-white/10 cursor-pointer hover:ring-2 hover:ring-sky-400 transition"
+                              title="Click to View ID Card Front"
+                            >
+                              <img
+                                src={salaryStaffForm.cnicFrontUrl}
+                                alt="ID Card Front"
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-contain block"
+                              />
+                            </button>
+                          )}
+
+                          <div className="flex items-center gap-2 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openStaffDocPreview(
+                                  salaryStaffForm.cnicFrontUrl,
+                                  `${salaryStaffForm.name || 'Staff'} — ID Card Front`,
+                                  `${salaryStaffForm.name || 'staff'}_cnic_front`
+                                )
+                              }
+                              className="flex-1 py-1.5 px-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-gray-200 text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
+                            >
+                              <Eye size={13} />
+                              <span>View Front</span>
+                            </button>
+                            <label className="flex-1 py-1.5 px-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer">
+                              <input
+                                type="file"
+                                accept="image/*,application/pdf"
+                                className="hidden"
+                                onChange={(e) => handleSalaryStaffDocUpload(e, 'cnicFrontUrl')}
+                              />
+                              <Upload size={13} />
+                              <span>Replace</span>
+                            </label>
+                          </div>
+                        </>
+                      ) : (
+                        <label className="h-36 rounded-xl border border-dashed border-white/20 hover:border-purple-400 bg-black/25 hover:bg-black/40 transition flex flex-col items-center justify-center text-center p-3 cursor-pointer">
+                          <input
+                            type="file"
+                            accept="image/*,application/pdf"
+                            className="hidden"
+                            onChange={(e) => handleSalaryStaffDocUpload(e, 'cnicFrontUrl')}
+                          />
+                          <Upload size={18} className="text-gray-400 mb-1.5" />
+                          <span className="text-[11px] text-gray-300 font-semibold">Upload ID Card Front</span>
+                          <span className="text-[10px] text-gray-400 mt-0.5">Image or PDF</span>
+                        </label>
+                      )}
+                    </div>
+
+                    {/* ID Card Back */}
+                    <div className="p-3 rounded-2xl bg-black/25 border border-white/10 flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-semibold text-gray-300">ID Card Back</span>
+                        {salaryStaffForm.cnicBackUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setSalaryStaffForm((prev) => ({ ...prev, cnicBackUrl: '' }))}
+                            className="text-[11px] text-red-400 hover:text-red-300 font-medium cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+
+                      {uploadingStaffDocField === 'cnicBackUrl' ? (
+                        <div className="h-36 rounded-xl bg-black/30 border border-dashed border-white/15 flex items-center justify-center">
+                          <Loader2 size={20} className="animate-spin text-sky-400" />
+                        </div>
+                      ) : salaryStaffForm.cnicBackUrl ? (
+                        <>
+                          {salaryStaffForm.cnicBackUrl.startsWith('data:application/pdf') ||
+                          salaryStaffForm.cnicBackUrl.startsWith('chunk://') ? (
+                            <button
+                              type="button"
+                              data-custom-control="true"
+                              onClick={() =>
+                                openStaffDocPreview(
+                                  salaryStaffForm.cnicBackUrl,
+                                  `${salaryStaffForm.name || 'Staff'} — ID Card Back`,
+                                  `${salaryStaffForm.name || 'staff'}_cnic_back`
+                                )
+                              }
+                              className="h-36 w-full rounded-xl bg-black/30 border border-white/10 flex flex-col items-center justify-center gap-1.5 text-emerald-300 hover:border-sky-400 transition cursor-pointer"
+                            >
+                              <FileCheck size={26} />
+                              <span className="text-[11px] font-semibold">ID Back Document Uploaded</span>
+                              <span className="text-[10px] text-gray-400">Click to View Full Document</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              data-custom-control="true"
+                              onClick={() =>
+                                openStaffDocPreview(
+                                  salaryStaffForm.cnicBackUrl,
+                                  `${salaryStaffForm.name || 'Staff'} — ID Card Back`,
+                                  `${salaryStaffForm.name || 'staff'}_cnic_back`
+                                )
+                              }
+                              className="h-36 w-full rounded-xl overflow-hidden bg-black/30 border border-white/10 cursor-pointer hover:ring-2 hover:ring-sky-400 transition"
+                              title="Click to View ID Card Back"
+                            >
+                              <img
+                                src={salaryStaffForm.cnicBackUrl}
+                                alt="ID Card Back"
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-contain block"
+                              />
+                            </button>
+                          )}
+
+                          <div className="flex items-center gap-2 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openStaffDocPreview(
+                                  salaryStaffForm.cnicBackUrl,
+                                  `${salaryStaffForm.name || 'Staff'} — ID Card Back`,
+                                  `${salaryStaffForm.name || 'staff'}_cnic_back`
+                                )
+                              }
+                              className="flex-1 py-1.5 px-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-gray-200 text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
+                            >
+                              <Eye size={13} />
+                              <span>View Back</span>
+                            </button>
+                            <label className="flex-1 py-1.5 px-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer">
+                              <input
+                                type="file"
+                                accept="image/*,application/pdf"
+                                className="hidden"
+                                onChange={(e) => handleSalaryStaffDocUpload(e, 'cnicBackUrl')}
+                              />
+                              <Upload size={13} />
+                              <span>Replace</span>
+                            </label>
+                          </div>
+                        </>
+                      ) : (
+                        <label className="h-36 rounded-xl border border-dashed border-white/20 hover:border-purple-400 bg-black/25 hover:bg-black/40 transition flex flex-col items-center justify-center text-center p-3 cursor-pointer">
+                          <input
+                            type="file"
+                            accept="image/*,application/pdf"
+                            className="hidden"
+                            onChange={(e) => handleSalaryStaffDocUpload(e, 'cnicBackUrl')}
+                          />
+                          <Upload size={18} className="text-gray-400 mb-1.5" />
+                          <span className="text-[11px] text-gray-300 font-semibold">Upload ID Card Back</span>
+                          <span className="text-[10px] text-gray-400 mt-0.5">Image or PDF</span>
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. BELOW ID CARDS: BAKI STAFF DETAILS */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
                     <label className="text-gray-200 font-semibold block mb-1">
@@ -9371,7 +9738,7 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Office Assistant / Clerk / Peon"
+                      placeholder="e.g. Director / Manager / Port Incharge / Rider"
                       value={salaryStaffForm.designation}
                       onChange={(e) => setSalaryStaffForm((prev) => ({ ...prev, designation: e.target.value }))}
                       className="w-full bg-black/40 border border-white/15 rounded-xl px-3.5 py-2.5 text-white outline-none focus:border-purple-400"
@@ -9432,87 +9799,12 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                   </div>
                 </div>
 
-                {/* Uploads: 8. Photo & 9. ID Card Front / Back */}
-                <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-3">
-                  <h4 className="text-xs font-bold text-gray-200">
-                    8 &amp; 9. Staff Photo &amp; ID Card (Front &amp; Back) Upload
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="space-y-1.5">
-                      <span className="text-gray-300 text-[11px] font-medium block">8. Staff Photo</span>
-                      <label className="flex flex-col items-center justify-center p-3 border border-dashed border-white/20 hover:border-purple-400 rounded-xl cursor-pointer bg-black/30 hover:bg-black/50 transition text-center min-h-[84px]">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => handleSalaryStaffDocUpload(e, 'photoUrl')}
-                        />
-                        {salaryStaffForm.photoUrl ? (
-                          <div className="flex items-center gap-2">
-                            <img
-                              src={salaryStaffForm.photoUrl}
-                              alt="Staff Photo"
-                              referrerPolicy="no-referrer"
-                              className="w-9 h-9 rounded-lg object-cover border border-white/20"
-                            />
-                            <span className="text-[11px] text-emerald-300 font-semibold">Replace Photo</span>
-                          </div>
-                        ) : (
-                          <>
-                            <Upload size={15} className="text-gray-400 mb-1" />
-                            <span className="text-[11px] text-gray-300 font-semibold">Upload Photo</span>
-                          </>
-                        )}
-                      </label>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <span className="text-gray-300 text-[11px] font-medium block">9a. ID Card Front</span>
-                      <label className="flex flex-col items-center justify-center p-3 border border-dashed border-white/20 hover:border-purple-400 rounded-xl cursor-pointer bg-black/30 hover:bg-black/50 transition text-center min-h-[84px]">
-                        <input
-                          type="file"
-                          accept="image/*,application/pdf"
-                          className="hidden"
-                          onChange={(e) => handleSalaryStaffDocUpload(e, 'cnicFrontUrl')}
-                        />
-                        {salaryStaffForm.cnicFrontUrl ? (
-                          <span className="text-[11px] text-emerald-300 font-semibold flex items-center gap-1">
-                            <FileCheck size={14} /> Front Uploaded (Replace)
-                          </span>
-                        ) : (
-                          <>
-                            <Upload size={15} className="text-gray-400 mb-1" />
-                            <span className="text-[11px] text-gray-300 font-semibold">Upload ID Front</span>
-                          </>
-                        )}
-                      </label>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <span className="text-gray-300 text-[11px] font-medium block">9b. ID Card Back</span>
-                      <label className="flex flex-col items-center justify-center p-3 border border-dashed border-white/20 hover:border-purple-400 rounded-xl cursor-pointer bg-black/30 hover:bg-black/50 transition text-center min-h-[84px]">
-                        <input
-                          type="file"
-                          accept="image/*,application/pdf"
-                          className="hidden"
-                          onChange={(e) => handleSalaryStaffDocUpload(e, 'cnicBackUrl')}
-                        />
-                        {salaryStaffForm.cnicBackUrl ? (
-                          <span className="text-[11px] text-emerald-300 font-semibold flex items-center gap-1">
-                            <FileCheck size={14} /> Back Uploaded (Replace)
-                          </span>
-                        ) : (
-                          <>
-                            <Upload size={15} className="text-gray-400 mb-1" />
-                            <span className="text-[11px] text-gray-300 font-semibold">Upload ID Back</span>
-                          </>
-                        )}
-                      </label>
-                    </div>
-                  </div>
+                <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/25 text-purple-200 text-[11px]">
+                  This staff member belongs exclusively to <strong>{activeCompany.name}</strong> (no software User ID/Password). Monthly salary generates at month-end and auto-posts into <strong>{activeCompany.name} Payables</strong> after 12:00 AM midnight.
                 </div>
               </div>
 
+              {/* 4. SABSE NICHE: CANCEL & UPLOAD / SAVE BUTTON */}
               <div className="flex items-center justify-between p-4 border-t border-white/10 bg-slate-950/90 shrink-0">
                 <button
                   type="button"
@@ -9526,16 +9818,16 @@ const Finance: React.FC<FinanceProps> = ({ initialFilter, onActionComplete, cust
                 </button>
                 <button
                   type="submit"
-                  disabled={isSavingSalaryStaff}
-                  className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-purple-600/30 cursor-pointer"
+                  disabled={isSavingSalaryStaff || uploadingStaffDocField !== null}
+                  className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-purple-600/30 cursor-pointer whitespace-nowrap"
                 >
                   <Save size={15} />
                   <span>
                     {isSavingSalaryStaff
                       ? 'Saving...'
                       : editingSalaryStaff
-                      ? 'Update Salary Staff'
-                      : `Add to ${activeCompany.shortName || activeCompany.name} Payroll`}
+                      ? 'Update & Save Staff'
+                      : `Upload & Save to ${activeCompany.shortName || activeCompany.name}`}
                   </span>
                 </button>
               </div>

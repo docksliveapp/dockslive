@@ -14,6 +14,7 @@ export interface PdfViewerModalProps {
   fileType?: SupportedPreviewFormat;
   verificationItems?: DataMappingCheckItem[];
   onDownload?: () => void;
+  skipOcrPreprocessing?: boolean;
 }
 
 /**
@@ -28,7 +29,8 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   title,
   fileType = 'auto',
   verificationItems = [],
-  onDownload
+  onDownload,
+  skipOcrPreprocessing = false
 }) => {
   return (
     <UniversalDocumentPreviewModal
@@ -40,6 +42,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
       fileType={fileType}
       verificationItems={verificationItems}
       onDownload={onDownload}
+      skipOcrPreprocessing={skipOcrPreprocessing}
     />
   );
 };

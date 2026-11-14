@@ -27,6 +27,7 @@ export interface UniversalDocumentPreviewModalProps {
   fileType?: SupportedPreviewFormat;
   verificationItems?: DataMappingCheckItem[];
   onDownload?: () => void;
+  skipOcrPreprocessing?: boolean;
 }
 
 export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewModalProps> = ({
@@ -37,7 +38,8 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
   title,
   fileType = 'auto',
   verificationItems = [],
-  onDownload
+  onDownload,
+  skipOcrPreprocessing = false
 }) => {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -242,31 +244,39 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
           setActiveSheetName(wb.SheetNames[0] || '');
         }
         // 3. Process IMAGE with robust document preprocessing (deskewing, binarization, contrast enhancement)
+        // unless skipOcrPreprocessing is enabled (e.g., original staff photographs & color ID cards)
         else if (detectedFormat === 'image') {
-          try {
-            const prep = await preprocessDocumentForOcr(url, {
-              enableDeskew: true,
-              enableIlluminationNormalization: true,
-              enableContrastEnhancement: true,
-              enableAdaptiveBinarization: true,
-              enableSharpening: true,
-              enableDespeckle: true,
-              maxDeskewAngle: 25
-            });
+          if (skipOcrPreprocessing) {
             if (!isCancelled) {
-              if (prep.dataUrl) setPreviewUrl(prep.dataUrl);
-              if (prep.binarizedDataUrl) setBinarizedPreviewUrl(prep.binarizedDataUrl);
-              setOcrPreprocessingMeta({
-                deskewAngle: prep.deskewAngle,
-                isDeskewed: prep.isDeskewed,
-                contrastEnhanced: prep.contrastEnhanced,
-                sharpened: prep.sharpened,
-                noiseReduced: prep.noiseReduced,
-                processingTimeMs: prep.processingTimeMs
-              });
+              setBinarizedPreviewUrl('');
+              setOcrPreprocessingMeta(null);
             }
-          } catch (prepErr) {
-            console.warn('Image preprocessing in preview notice:', prepErr);
+          } else {
+            try {
+              const prep = await preprocessDocumentForOcr(url, {
+                enableDeskew: true,
+                enableIlluminationNormalization: true,
+                enableContrastEnhancement: true,
+                enableAdaptiveBinarization: true,
+                enableSharpening: true,
+                enableDespeckle: true,
+                maxDeskewAngle: 25
+              });
+              if (!isCancelled) {
+                if (prep.dataUrl) setPreviewUrl(prep.dataUrl);
+                if (prep.binarizedDataUrl) setBinarizedPreviewUrl(prep.binarizedDataUrl);
+                setOcrPreprocessingMeta({
+                  deskewAngle: prep.deskewAngle,
+                  isDeskewed: prep.isDeskewed,
+                  contrastEnhanced: prep.contrastEnhanced,
+                  sharpened: prep.sharpened,
+                  noiseReduced: prep.noiseReduced,
+                  processingTimeMs: prep.processingTimeMs
+                });
+              }
+            } catch (prepErr) {
+              console.warn('Image preprocessing in preview notice:', prepErr);
+            }
           }
         }
       } catch (err: any) {
@@ -289,7 +299,7 @@ export const UniversalDocumentPreviewModal: React.FC<UniversalDocumentPreviewMod
         URL.revokeObjectURL(createdBlobUrl);
       }
     };
-  }, [isOpen, file, detectedFormat]);
+  }, [isOpen, file, detectedFormat, skipOcrPreprocessing]);
 
   if (!isOpen) return null;
 

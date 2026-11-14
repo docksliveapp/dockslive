@@ -6865,8 +6865,50 @@ export function generateUniqueUsernameFromFullName(
 // ============================================================================
 const SALARY_STAFF_STORAGE_KEY = 'dpl_salary_staff';
 
+export function getSalaryStaffDesignationRank(designation?: string): number {
+  const norm = (designation || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!norm || norm === '-' || norm === 'N/A' || norm === 'NONE') return 999;
+
+  if (/\b(CHAIRMAN|CEO|CHIEF EXECUTIVE|MANAGING DIRECTOR|M\.?D\.?|PROPRIETOR|OWNER)\b/.test(norm)) return 10;
+  if (/\bDIRECTOR\b/.test(norm)) return 20;
+  if (/\b(GENERAL MANAGER|G\.?M\.?)\b/.test(norm)) return 30;
+  if (/\bFINANCE\s+MANAGER\b/.test(norm)) return 40;
+  if (/\bOPERATIONS?\s+MANAGER\b/.test(norm)) return 41;
+  if (/\bDOCUMENTATION\s+MANAGER\b/.test(norm)) return 42;
+  if (/\bMANAGER\b/.test(norm)) return 45;
+  if (/\b(HEAD|LEAD|SUPERVISOR|COORDINATOR)\b/.test(norm)) return 50;
+  if (/\bINCHARGE\b/.test(norm)) return 55;
+  if (/\b(ACCOUNTANT|ACCOUNTS\s+OFFICER|OFFICER|EXECUTIVE)\b/.test(norm)) return 60;
+  if (/\b(PORT\s+STAFF|OFFICE\s+STAFF|OFFICE\s+ASSISTANT|ASSISTANT|CLERK|DATA\s+ENTRY|RECEPTIONIST|OPERATOR|STAFF)\b/.test(norm)) return 65;
+  if (/\bDRIVER\b/.test(norm)) return 75;
+  if (/\bRIDER\b/.test(norm)) return 80;
+  if (/\b(GUARD|SECURITY|WATCHMAN|CHOWKIDAR)\b/.test(norm)) return 85;
+  if (/\b(PEON|OFFICE\s+BOY)\b/.test(norm)) return 90;
+  if (/\b(SWEEPER|CLEANER|JANITOR|HELPER)\b/.test(norm)) return 95;
+
+  return 70;
+}
+
+export function sortSalaryStaffByDesignation(items: SalaryStaffMember[]): SalaryStaffMember[] {
+  return [...items].sort((a, b) => {
+    const rankA = getSalaryStaffDesignationRank(a.designation);
+    const rankB = getSalaryStaffDesignationRank(b.designation);
+    if (rankA !== rankB) return rankA - rankB;
+
+    const desA = (a.designation || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    const desB = (b.designation || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    if (desA !== desB) return desA.localeCompare(desB);
+
+    const nameA = (a.name || '').trim().toUpperCase();
+    const nameB = (b.name || '').trim().toUpperCase();
+    return nameA.localeCompare(nameB);
+  });
+}
+
 export function getStoredSalaryStaff(companyIdFilter?: string): SalaryStaffMember[] {
-  const all = safeAppStorage.getJSON<SalaryStaffMember[]>(SALARY_STAFF_STORAGE_KEY, []) || [];
+  const all = sortSalaryStaffByDesignation(
+    safeAppStorage.getJSON<SalaryStaffMember[]>(SALARY_STAFF_STORAGE_KEY, []) || []
+  );
   if (!companyIdFilter) return all;
   return all.filter((s) => (s.companyId || 'docks') === companyIdFilter);
 }
@@ -6884,7 +6926,7 @@ export function subscribeToSalaryStaff(
     const filtered = options?.allCompanies
       ? cachedDocs
       : cachedDocs.filter((s) => (s.companyId || 'docks') === activeCompany);
-    onData(filtered);
+    onData(sortSalaryStaffByDesignation(filtered));
   };
 
   emit();
@@ -6915,7 +6957,10 @@ export function subscribeToSalaryStaff(
           const localOnly = getStoredSalaryStaff().filter(
             (loc) => !firestoreList.some((rem) => rem.id === loc.id)
           );
-          cachedDocs = snapshot.empty && !hasSnapshot ? getStoredSalaryStaff() : [...firestoreList, ...(snapshot.metadata.fromCache ? localOnly : [])];
+          const combined = snapshot.empty && !hasSnapshot
+            ? getStoredSalaryStaff()
+            : [...firestoreList, ...(snapshot.metadata.fromCache ? localOnly : [])];
+          cachedDocs = sortSalaryStaffByDesignation(combined);
           safeAppStorage.setJSON(SALARY_STAFF_STORAGE_KEY, cachedDocs);
           emit();
         },
@@ -6937,9 +6982,39 @@ export function subscribeToSalaryStaff(
 export async function saveSalaryStaffToFirestore(staff: SalaryStaffMember): Promise<SalaryStaffMember> {
   const path = 'salary_staff';
   const activeCompany = getActiveCompanyId();
+  const staffId = staff.id || `sal_staff_${Date.now()}`;
+
+  // Offload oversized attachments (>360KB, e.g. multi-page CNIC PDFs) to cloud chunks so Firestore 1MB doc limit is never exceeded
+  const maybeOffload = async (val: string | undefined, fieldKey: string): Promise<string> => {
+    const cleanVal = (val || '').trim();
+    if (!cleanVal) return '';
+    if (cleanVal.startsWith('data:') && cleanVal.length > 360000) {
+      try {
+        const mimeMatch = cleanVal.match(/^data:([^;]+);/);
+        const chunkUri = await saveDocumentToCloudChunks({
+          docKey: sanitizeCloudDocKey(`salary_staff_${staffId}_${fieldKey}`),
+          name: `${staffId}_${fieldKey}`,
+          mimeType: mimeMatch?.[1] || 'application/octet-stream',
+          size: cleanVal.length,
+          dataUrl: cleanVal
+        });
+        return chunkUri || cleanVal;
+      } catch (err) {
+        console.warn(`Salary staff ${fieldKey} chunk offload notice:`, err);
+      }
+    }
+    return cleanVal;
+  };
+
+  const [photoUrl, cnicFrontUrl, cnicBackUrl] = await Promise.all([
+    maybeOffload(staff.photoUrl, 'photo'),
+    maybeOffload(staff.cnicFrontUrl, 'cnic_front'),
+    maybeOffload(staff.cnicBackUrl, 'cnic_back')
+  ]);
+
   const normalized: SalaryStaffMember = {
     ...staff,
-    id: staff.id || `sal_staff_${Date.now()}`,
+    id: staffId,
     companyId: staff.companyId || activeCompany,
     name: (staff.name || '').trim(),
     fatherName: (staff.fatherName || '').trim(),
@@ -6948,13 +7023,19 @@ export async function saveSalaryStaffToFirestore(staff: SalaryStaffMember): Prom
     residentialContact: (staff.residentialContact || '').trim(),
     residentialAddress: (staff.residentialAddress || '').trim(),
     totalSalary: Number(staff.totalSalary) || 0,
+    photoUrl,
+    cnicFrontUrl,
+    cnicBackUrl,
     status: staff.status || 'ACTIVE',
     createdAt: staff.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
 
   const current = getStoredSalaryStaff();
-  const updated = [normalized, ...current.filter((s) => s.id !== normalized.id)];
+  const updated = sortSalaryStaffByDesignation([
+    normalized,
+    ...current.filter((s) => s.id !== normalized.id)
+  ]);
   safeAppStorage.setJSON(SALARY_STAFF_STORAGE_KEY, updated);
 
   if (db) {
@@ -6962,6 +7043,7 @@ export async function saveSalaryStaffToFirestore(staff: SalaryStaffMember): Prom
       await setDoc(doc(db, path, normalized.id), sanitizeForFirestore(normalized), { merge: true });
     } catch (err) {
       console.warn('saveSalaryStaffToFirestore notice:', err);
+      throw err;
     }
   }
 
