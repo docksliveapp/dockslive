@@ -1071,10 +1071,11 @@ export async function compressAndPrepareFile(file: File): Promise<ProcessedDocum
  */
 export async function prepareOriginalPhoto(
   file: File,
-  options?: { maxDimension?: number; maxBytes?: number; quality?: number }
+  options?: { maxDimension?: number; maxBytes?: number; maxDataUrlLength?: number; quality?: number }
 ): Promise<ProcessedDocument> {
   const maxDimension = options?.maxDimension ?? 1080;
   const maxBytes = options?.maxBytes ?? 230 * 1024;
+  const maxDataUrlLength = options?.maxDataUrlLength ?? Math.floor(maxBytes * 1.38) + 64;
   const initialQuality = options?.quality ?? 0.88;
   const { mimeType: defaultMimeType, isImage, isPdf } = detectMimeType(file);
 
@@ -1136,13 +1137,13 @@ export async function prepareOriginalPhoto(
         const origW = img.naturalWidth || img.width;
         const origH = img.naturalHeight || img.height;
 
-        // If already browser-native format, within dimensions, and under byte budget, keep untouched original bytes
+        // If already browser-native format, within dimensions, and under BOTH byte and Data URL char budget, keep untouched original bytes
         const isNativeWebFormat = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(
           defaultMimeType.toLowerCase()
         );
         if (isNativeWebFormat && origW <= maxDimension && origH <= maxDimension && file.size <= maxBytes) {
           const rawUrl = await readFileAsDataUrl();
-          if (rawUrl) {
+          if (rawUrl && rawUrl.length <= maxDataUrlLength) {
             const comma = rawUrl.indexOf(',');
             const b64 = comma >= 0 ? rawUrl.substring(comma + 1) : '';
             cleanup();
@@ -1195,29 +1196,38 @@ export async function prepareOriginalPhoto(
           return canvas.toDataURL('image/jpeg', q);
         };
 
-        let finalDataUrl = renderToJpeg(targetW, targetH, initialQuality);
         const getApproxBytes = (url: string) => {
           const commaIdx = url.indexOf(',');
           const b64 = commaIdx >= 0 ? url.substring(commaIdx + 1) : '';
           return Math.round((b64.length * 3) / 4);
         };
 
-        // Gently step quality only if needed to fit within target byte budget (preserving full natural color)
-        const qualities = [0.82, 0.76, 0.70, 0.64];
+        const fitsBudget = (url: string) =>
+          url.length > 0 && url.length <= maxDataUrlLength && getApproxBytes(url) <= maxBytes;
+
+        let finalDataUrl = renderToJpeg(targetW, targetH, initialQuality);
+
+        // Gently step quality only if needed to fit within target byte/char budget (preserving full natural color)
+        const qualities = [0.84, 0.78, 0.72, 0.66, 0.58];
         for (const q of qualities) {
-          if (getApproxBytes(finalDataUrl) <= maxBytes) break;
+          if (fitsBudget(finalDataUrl)) break;
           if (q < initialQuality) {
             finalDataUrl = renderToJpeg(targetW, targetH, q);
           }
         }
 
-        // If still larger than maxBytes, resize proportionally once more and encode cleanly
-        if (getApproxBytes(finalDataUrl) > maxBytes && Math.max(targetW, targetH) > 640) {
-          const downScale = Math.sqrt(maxBytes / Math.max(maxBytes + 1, getApproxBytes(finalDataUrl)));
-          const clampScale = Math.max(0.55, Math.min(0.85, downScale));
+        // If still larger than budget, resize proportionally up to two passes while keeping clean readable quality
+        for (let pass = 0; pass < 2 && !fitsBudget(finalDataUrl) && Math.max(targetW, targetH) > 420; pass++) {
+          const charRatio = maxDataUrlLength / Math.max(maxDataUrlLength + 1, finalDataUrl.length);
+          const byteRatio = maxBytes / Math.max(maxBytes + 1, getApproxBytes(finalDataUrl));
+          const downScale = Math.sqrt(Math.min(charRatio, byteRatio)) * 0.94;
+          const clampScale = Math.max(0.5, Math.min(0.85, downScale));
           targetW = Math.max(1, Math.round(targetW * clampScale));
           targetH = Math.max(1, Math.round(targetH * clampScale));
-          finalDataUrl = renderToJpeg(targetW, targetH, 0.78);
+          finalDataUrl = renderToJpeg(targetW, targetH, 0.76);
+          if (!fitsBudget(finalDataUrl)) {
+            finalDataUrl = renderToJpeg(targetW, targetH, 0.66);
+          }
         }
 
         const commaIdx = finalDataUrl.indexOf(',');

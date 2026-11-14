@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import { Case, Container, Vehicle, FinanceEntry } from '../types';
+import { Case, Container, Vehicle, FinanceEntry, SalaryStaffMember, StaffSalaryHistoryRow, StaffAttendanceRecord } from '../types';
 import { getStoredBranding, getDefaultBranding } from './brandingService';
 import { 
   getActiveCompany, 
@@ -4005,4 +4005,1324 @@ export async function downloadDriverIdCardPdf(data: DriverIdCardPdfData) {
 
   return await triggerDirectDownload(doc, filename);
 }
+
+export interface SalaryStaffDirectoryExportData {
+  companyName: string;
+  customLogo?: string | null;
+  generatedDate: string;
+  staffList: SalaryStaffMember[];
+  branding?: BrandingInfo;
+}
+
+export async function downloadSalaryStaffListPdf(
+  data: SalaryStaffDirectoryExportData
+): Promise<{ success: boolean; filename: string; blobUrl: string }> {
+  try {
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4',
+      compress: true
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 12;
+    let currentY = 14;
+
+    const drawHeader = async (pageNum: number) => {
+      currentY = await drawPdfCorporateHeader(doc, {
+        title: 'OFFICE SALARY STAFF DIRECTORY',
+        refNo: cleanPdfText(data.companyName || 'Docks (Pvt.) Ltd.'),
+        date: data.generatedDate,
+        subRef: `Page ${pageNum}`,
+        branding: {
+          companyName: data.companyName,
+          customLogo: data.customLogo,
+          ...data.branding
+        },
+        accentColor: [88, 28, 135]
+      });
+      currentY += 3;
+    };
+
+    await drawHeader(1);
+
+    const activeStaff = data.staffList.filter((s) => s.status !== 'SUSPENDED' && s.status !== 'INACTIVE');
+    const suspendedStaff = data.staffList.filter((s) => s.status === 'SUSPENDED');
+    const totalActivePayroll = activeStaff.reduce((sum, s) => sum + (Number(s.totalSalary) || 0), 0);
+
+    // Summary Strip
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(margin, currentY, pageWidth - margin * 2, 15, 2, 2, 'FD');
+
+    const colW = (pageWidth - margin * 2) / 4;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text('TOTAL REGISTERED STAFF', margin + 5, currentY + 5.2);
+    doc.text('ACTIVE PAYROLL STAFF', margin + colW + 5, currentY + 5.2);
+    doc.text('SUSPENDED STAFF', margin + colW * 2 + 5, currentY + 5.2);
+    doc.text('ACTIVE MONTHLY PAYROLL', margin + colW * 3 + 5, currentY + 5.2);
+
+    doc.setFontSize(9.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`${data.staffList.length} Staff`, margin + 5, currentY + 11.5);
+    doc.setTextColor(22, 163, 74);
+    doc.text(`${activeStaff.length} Active`, margin + colW + 5, currentY + 11.5);
+    doc.setTextColor(180, 83, 9);
+    doc.text(`${suspendedStaff.length} Suspended`, margin + colW * 2 + 5, currentY + 11.5);
+    doc.setTextColor(88, 28, 135);
+    doc.text(`PKR ${totalActivePayroll.toLocaleString()}`, margin + colW * 3 + 5, currentY + 11.5);
+
+    currentY += 19;
+
+    const drawTableHeader = () => {
+      doc.setFillColor(15, 23, 42);
+      doc.rect(margin, currentY, pageWidth - margin * 2, 7.5, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(255, 255, 255);
+      doc.text('S.NO', margin + 2.5, currentY + 5);
+      doc.text('FULL NAME', margin + 14, currentY + 5);
+      doc.text('FATHER NAME', margin + 68, currentY + 5);
+      doc.text('DESIGNATION', margin + 114, currentY + 5);
+      doc.text('PRIMARY CONTACT', margin + 158, currentY + 5);
+      doc.text('RESIDENTIAL CONTACT', margin + 194, currentY + 5);
+      doc.text('MONTHLY SALARY', pageWidth - margin - 26, currentY + 5, { align: 'right' });
+      doc.text('STATUS', pageWidth - margin - 3, currentY + 5, { align: 'right' });
+      currentY += 7.5;
+    };
+
+    drawTableHeader();
+
+    let pageNum = 1;
+    for (let idx = 0; idx < data.staffList.length; idx++) {
+      const s = data.staffList[idx];
+      if (currentY > pageHeight - 26) {
+        drawPdfCorporateFooter(doc, `Page ${pageNum}`, data.branding);
+        doc.addPage();
+        pageNum++;
+        await drawHeader(pageNum);
+        drawTableHeader();
+      }
+
+      const isSuspended = s.status === 'SUSPENDED';
+      if (isSuspended) {
+        doc.setFillColor(254, 243, 199);
+        doc.rect(margin, currentY, pageWidth - margin * 2, 6.8, 'F');
+      } else if (idx % 2 === 1) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(margin, currentY, pageWidth - margin * 2, 6.8, 'F');
+      }
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text(String(idx + 1), margin + 2.5, currentY + 4.7);
+
+      doc.setTextColor(15, 23, 42);
+      doc.text(cleanPdfText(s.name || '-').substring(0, 28), margin + 14, currentY + 4.7);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(51, 65, 85);
+      doc.text(cleanPdfText(s.fatherName || '-').substring(0, 24), margin + 68, currentY + 4.7);
+      doc.text(cleanPdfText(s.designation || '-').substring(0, 24), margin + 114, currentY + 4.7);
+      doc.text(cleanPdfText(s.primaryContact || '-').substring(0, 18), margin + 158, currentY + 4.7);
+      doc.text(cleanPdfText(s.residentialContact || '-').substring(0, 18), margin + 194, currentY + 4.7);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(isSuspended ? 148 : 22, isSuspended ? 163 : 163, isSuspended ? 184 : 74);
+      doc.text(
+        `PKR ${Number(s.totalSalary || 0).toLocaleString()}`,
+        pageWidth - margin - 26,
+        currentY + 4.7,
+        { align: 'right' }
+      );
+
+      doc.setTextColor(isSuspended ? 180 : 22, isSuspended ? 83 : 163, isSuspended ? 9 : 74);
+      doc.text(
+        isSuspended ? 'SUSPENDED' : s.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
+        pageWidth - margin - 3,
+        currentY + 4.7,
+        { align: 'right' }
+      );
+
+      currentY += 6.8;
+    }
+
+    // Total Row
+    doc.setFillColor(241, 245, 249);
+    doc.rect(margin, currentY, pageWidth - margin * 2, 8, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.2);
+    doc.setTextColor(15, 23, 42);
+    doc.text(
+      `Total Active Monthly Payroll Commitment (${activeStaff.length} Active · ${suspendedStaff.length} Suspended)`,
+      margin + 3,
+      currentY + 5.4
+    );
+    doc.setTextColor(22, 163, 74);
+    doc.text(`PKR ${totalActivePayroll.toLocaleString()}/mo`, pageWidth - margin - 26, currentY + 5.4, {
+      align: 'right'
+    });
+
+    drawPdfCorporateFooter(doc, `Page ${pageNum} of ${pageNum}`, data.branding);
+
+    const safeCo = (data.companyName || 'Company').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    const filename = `${safeCo}_Salary_Staff_List_${formatPdfDate(data.generatedDate)}.pdf`;
+    return await triggerDirectDownload(doc, filename);
+  } catch (err) {
+    console.warn('downloadSalaryStaffListPdf error:', err);
+    return { success: false, filename: 'Salary_Staff_List.pdf', blobUrl: '' };
+  }
+}
+
+export interface StaffCompanyDetails {
+  id?: CompanyId | string;
+  name: string;
+  legalTitle?: string;
+  category?: string;
+  address?: string;
+  phone?: string;
+  cell?: string;
+  email?: string;
+  web?: string;
+  prefix?: string;
+  directorName?: string;
+  directorTitle?: string;
+}
+
+function resolveStaffCompanyDetails(companyId?: CompanyId | string, override?: StaffCompanyDetails): StaffCompanyDetails {
+  const active = getActiveCompany();
+  const matched =
+    companyId && (companyId === 'docks' || companyId === 'truckit' || companyId === 'muhib' || companyId === 'vantage')
+      ? GROUP_COMPANIES[companyId]
+      : active;
+  return {
+    id: override?.id || matched.id,
+    name: override?.name || matched.name,
+    legalTitle: override?.legalTitle || matched.legalTitle || matched.name,
+    category: override?.category || matched.category,
+    address: override?.address || matched.address,
+    phone: override?.phone || matched.phone,
+    cell: override?.cell || matched.cell,
+    email: override?.email || matched.email,
+    web: override?.web || matched.web,
+    prefix: override?.prefix || matched.prefix,
+    directorName: override?.directorName || matched.directorName,
+    directorTitle: override?.directorTitle || matched.directorTitle
+  };
+}
+
+function drawEmployingCompanyBanner(doc: jsPDF, y: number, company: StaffCompanyDetails): number {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 14;
+  const width = pageWidth - margin * 2;
+  const legalName = cleanPdfText(company.legalTitle || company.name).toUpperCase();
+  const catText = cleanPdfText(company.category || '');
+  const contactLine = [
+    company.address ? cleanPdfText(company.address) : '',
+    company.phone ? `Tel: ${cleanPdfText(company.phone)}` : '',
+    company.email ? cleanPdfText(company.email) : ''
+  ]
+    .filter(Boolean)
+    .join('  |  ');
+
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.35);
+  doc.roundedRect(margin, y, width, 13.5, 1.5, 1.5, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.4);
+  doc.setTextColor(180, 83, 9);
+  doc.text('EMPLOYING OPERATING COMPANY:', margin + 3.5, y + 4.3);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.4);
+  doc.setTextColor(15, 23, 42);
+  doc.text(legalName, margin + 44, y + 4.3, { maxWidth: width - 48 });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.2);
+  doc.setTextColor(71, 85, 105);
+  const subInfo = catText ? `${catText}  |  ${contactLine}` : contactLine;
+  const wrapped = doc.splitTextToSize(subInfo, width - 7);
+  doc.text(wrapped.slice(0, 2), margin + 3.5, y + 8.3);
+
+  return y + 16.5;
+}
+
+export interface StaffProfilePdfExportData {
+  staff: SalaryStaffMember;
+  companyId?: CompanyId | string;
+  companyInfo?: StaffCompanyDetails;
+  customLogo?: string | null;
+  branding?: BrandingInfo;
+  salaryHistory: StaffSalaryHistoryRow[];
+  includeSalaryHistory: boolean;
+  generatedDate?: string;
+}
+
+export async function downloadStaffProfilePdf(
+  data: StaffProfilePdfExportData
+): Promise<{ success: boolean; filename: string; blobUrl: string }> {
+  try {
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+      compress: true
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 14;
+    const contentW = pageWidth - margin * 2;
+    const company = resolveStaffCompanyDetails(data.companyId || data.staff.companyId, data.companyInfo);
+    const resolvedCompId = resolveOperatingCompanyFromRef(company.id as CompanyId, company.prefix);
+    const genDate = data.generatedDate || new Date().toISOString().slice(0, 10);
+    const shortId = (data.staff.id || 'STAFF').slice(-6).toUpperCase();
+    const refNo = `${company.prefix || 'MAK'}/HR/${shortId}`;
+
+    const drawPageHeader = async (pageNum: number) => {
+      let y = await drawPdfCorporateHeader(doc, {
+        title: 'EMPLOYEE PROFILE & PAYROLL DOSSIER',
+        refNo,
+        date: genDate,
+        subRef: `${cleanPdfText(company.legalTitle || company.name)} | Page ${pageNum}`,
+        branding: {
+          companyName: company.legalTitle || company.name,
+          customLogo: data.customLogo,
+          ...data.branding
+        },
+        accentColor: [88, 28, 135],
+        subject: `OFFICIAL EMPLOYEE RECORD - ${cleanPdfText(data.staff.name || 'STAFF').toUpperCase()}`
+      });
+      y = drawEmployingCompanyBanner(doc, y, company);
+      return y;
+    };
+
+    let currentY = await drawPageHeader(1);
+
+    // 1. TOP LARGE ROW: PROFILE PHOTO + ID CARD FRONT + ID CARD BACK
+    const rowHeight = 50;
+    const gap = 3.5;
+    const photoCardW = 46;
+    const idCardW = (contentW - photoCardW - gap * 2) / 2;
+
+    const [normPhoto, normFront, normBack] = await Promise.all([
+      normalizeImageForJsPdf(data.staff.photoUrl),
+      normalizeImageForJsPdf(data.staff.cnicFrontUrl),
+      normalizeImageForJsPdf(data.staff.cnicBackUrl)
+    ]);
+
+    const drawMediaCard = (
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      title: string,
+      normImg: { dataUrl: string; width: number; height: number } | null,
+      rawUrl?: string
+    ) => {
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(203, 213, 225);
+      doc.setLineWidth(0.35);
+      doc.roundedRect(x, y, w, h, 2, 2, 'FD');
+
+      doc.setFillColor(15, 23, 42);
+      doc.rect(x, y, w, 6.2, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.8);
+      doc.setTextColor(255, 255, 255);
+      doc.text(title.toUpperCase(), x + w / 2, y + 4.3, { align: 'center' });
+
+      const innerPad = 2.5;
+      const boxX = x + innerPad;
+      const boxY = y + 7.8;
+      const boxW = w - innerPad * 2;
+      const boxH = h - 10.2;
+
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(226, 232, 240);
+      doc.rect(boxX, boxY, boxW, boxH, 'FD');
+
+      if (normImg?.dataUrl) {
+        try {
+          const ar = normImg.width / Math.max(1, normImg.height);
+          let drawW = boxW - 1.5;
+          let drawH = drawW / ar;
+          if (drawH > boxH - 1.5) {
+            drawH = boxH - 1.5;
+            drawW = drawH * ar;
+          }
+          const imgX = boxX + (boxW - drawW) / 2;
+          const imgY = boxY + (boxH - drawH) / 2;
+          doc.addImage(normImg.dataUrl, 'JPEG', imgX, imgY, drawW, drawH);
+          return;
+        } catch (_) {}
+      }
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6.5);
+      doc.setTextColor(148, 163, 184);
+      const fallbackMsg = rawUrl?.startsWith('data:application/pdf')
+        ? 'PDF Document Attached'
+        : rawUrl
+        ? 'Media Attached'
+        : 'Not Uploaded';
+      doc.text(fallbackMsg, x + w / 2, boxY + boxH / 2 + 1, { align: 'center' });
+    };
+
+    drawMediaCard(margin, currentY, photoCardW, rowHeight, 'Employee Photo', normPhoto, data.staff.photoUrl);
+    drawMediaCard(
+      margin + photoCardW + gap,
+      currentY,
+      idCardW,
+      rowHeight,
+      'ID Card Front',
+      normFront,
+      data.staff.cnicFrontUrl
+    );
+    drawMediaCard(
+      margin + photoCardW + gap + idCardW + gap,
+      currentY,
+      idCardW,
+      rowHeight,
+      'ID Card Back',
+      normBack,
+      data.staff.cnicBackUrl
+    );
+
+    currentY += rowHeight + 5;
+
+    // 2. CENTER SECTION: COMPLETE EMPLOYEE PROFILE DETAILS
+    doc.setFillColor(15, 23, 42);
+    doc.rect(margin, currentY, contentW, 6.8, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.text('EMPLOYEE PROFILE PARTICULARS', margin + 3.5, currentY + 4.7);
+    currentY += 8.5;
+
+    const statusText =
+      data.staff.status === 'SUSPENDED'
+        ? 'SUSPENDED'
+        : data.staff.status === 'INACTIVE'
+        ? 'INACTIVE'
+        : 'ACTIVE';
+    const joiningFormatted = data.staff.joiningDate ? formatPdfDate(data.staff.joiningDate) : 'Not Specified';
+
+    const detailRows: Array<[string, string, string, string]> = [
+      ['1. Full Name', cleanPdfText(data.staff.name || '-'), '2. Father Name', cleanPdfText(data.staff.fatherName || '-')],
+      ['3. Designation', cleanPdfText(data.staff.designation || '-'), '4. Job Start Date', joiningFormatted],
+      ['5. Primary Contact', cleanPdfText(data.staff.primaryContact || '-'), '6. Residential Contact', cleanPdfText(data.staff.residentialContact || '-')],
+      [
+        '7. Monthly Salary',
+        `PKR ${Number(data.staff.totalSalary || 0).toLocaleString()} / Month`,
+        '8. Employment Status',
+        statusText
+      ]
+    ];
+
+    const halfW = (contentW - 3) / 2;
+    for (const [l1, v1, l2, v2] of detailRows) {
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(margin, currentY, halfW, 11.5, 1.2, 1.2, 'FD');
+      doc.roundedRect(margin + halfW + 3, currentY, halfW, 11.5, 1.2, 1.2, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.2);
+      doc.setTextColor(100, 116, 139);
+      doc.text(l1.toUpperCase(), margin + 3, currentY + 4);
+      doc.text(l2.toUpperCase(), margin + halfW + 6, currentY + 4);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.2);
+      doc.setTextColor(l1.includes('Salary') ? 4 : 15, l1.includes('Salary') ? 120 : 23, l1.includes('Salary') ? 87 : 42);
+      doc.text(v1 || '-', margin + 3, currentY + 9, { maxWidth: halfW - 6 });
+
+      if (l2.includes('Status')) {
+        doc.setTextColor(
+          statusText === 'SUSPENDED' ? 180 : 22,
+          statusText === 'SUSPENDED' ? 83 : 163,
+          statusText === 'SUSPENDED' ? 9 : 74
+        );
+      } else {
+        doc.setTextColor(15, 23, 42);
+      }
+      doc.text(v2 || '-', margin + halfW + 6, currentY + 9, { maxWidth: halfW - 6 });
+
+      currentY += 13;
+    }
+
+    // Residential Address (Full Width)
+    const addrText = cleanPdfText(data.staff.residentialAddress || '-');
+    const addrWrapped = doc.splitTextToSize(addrText, contentW - 6);
+    const addrBoxH = addrWrapped.length > 1 ? 15.5 : 11.5;
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(margin, currentY, contentW, addrBoxH, 1.2, 1.2, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.2);
+    doc.setTextColor(100, 116, 139);
+    doc.text('9. RESIDENTIAL ADDRESS', margin + 3, currentY + 4);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(15, 23, 42);
+    doc.text(addrWrapped.slice(0, 2), margin + 3, currentY + 8.8);
+    currentY += addrBoxH + 5;
+
+    let pageNum = 1;
+
+    // 3. OPTIONAL BOTTOM SECTION: SALARY PAYMENT HISTORY TABLE
+    if (data.includeSalaryHistory) {
+      const historyRows = data.salaryHistory || [];
+      const paidRows = historyRows.filter((r) => r.status === 'PAID');
+      const totalDisbursed = paidRows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+
+      if (currentY > pageHeight - 52) {
+        drawPdfCorporateFooter(doc, `Page ${pageNum}`, data.branding);
+        doc.addPage();
+        pageNum++;
+        currentY = await drawPageHeader(pageNum);
+      }
+
+      doc.setFillColor(88, 28, 135);
+      doc.rect(margin, currentY, contentW, 7, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(255, 255, 255);
+      doc.text(
+        `SALARY PAYMENT HISTORY (${historyRows.length} RECORD${historyRows.length === 1 ? '' : 'S'})`,
+        margin + 3.5,
+        currentY + 4.8
+      );
+      doc.text(
+        `Total Paid: PKR ${totalDisbursed.toLocaleString()}`,
+        pageWidth - margin - 3.5,
+        currentY + 4.8,
+        { align: 'right' }
+      );
+      currentY += 8.2;
+
+      const drawHistoryTableHeader = () => {
+        doc.setFillColor(15, 23, 42);
+        doc.rect(margin, currentY, contentW, 6.8, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.1);
+        doc.setTextColor(255, 255, 255);
+        doc.text('S.NO', margin + 2.5, currentY + 4.6);
+        doc.text('MONTH', margin + 15, currentY + 4.6);
+        doc.text('PAYMENT DATE', margin + 48, currentY + 4.6);
+        doc.text('AMOUNT (PKR)', margin + 105, currentY + 4.6, { align: 'right' });
+        doc.text('PAYMENT MODE', margin + 112, currentY + 4.6);
+        doc.text('STATUS', pageWidth - margin - 3, currentY + 4.6, { align: 'right' });
+        currentY += 6.8;
+      };
+
+      if (historyRows.length === 0) {
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(226, 232, 240);
+        doc.roundedRect(margin, currentY, contentW, 11, 1.2, 1.2, 'FD');
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.8);
+        doc.setTextColor(100, 116, 139);
+        doc.text(
+          'No salary payment history recorded yet. Enter Job Start Date to generate completed historical payments.',
+          pageWidth / 2,
+          currentY + 6.8,
+          { align: 'center' }
+        );
+        currentY += 14;
+      } else {
+        drawHistoryTableHeader();
+
+        for (let i = 0; i < historyRows.length; i++) {
+          const r = historyRows[i];
+          if (currentY > pageHeight - 28) {
+            drawPdfCorporateFooter(doc, `Page ${pageNum}`, data.branding);
+            doc.addPage();
+            pageNum++;
+            currentY = await drawPageHeader(pageNum);
+            drawHistoryTableHeader();
+          }
+
+          if (i % 2 === 1) {
+            doc.setFillColor(248, 250, 252);
+            doc.rect(margin, currentY, contentW, 6.4, 'F');
+          }
+
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(7.2);
+          doc.setTextColor(71, 85, 105);
+          doc.text(String(r.serial), margin + 2.5, currentY + 4.4);
+
+          doc.setTextColor(15, 23, 42);
+          doc.text(cleanPdfText(r.monthLabel), margin + 15, currentY + 4.4);
+
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(51, 65, 85);
+          doc.text(cleanPdfText(r.paymentDate), margin + 48, currentY + 4.4);
+
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(15, 23, 42);
+          doc.text(`PKR ${Number(r.amount || 0).toLocaleString()}`, margin + 105, currentY + 4.4, {
+            align: 'right'
+          });
+
+          const isOnline = r.paymentMode.toLowerCase().includes('online') || r.paymentMode.toLowerCase().includes('bank');
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(isOnline ? 37 : 22, isOnline ? 99 : 163, isOnline ? 235 : 74);
+          doc.text(cleanPdfText(r.paymentMode).substring(0, 32), margin + 112, currentY + 4.4);
+
+          doc.setTextColor(r.status === 'PAID' ? 22 : 180, r.status === 'PAID' ? 163 : 83, r.status === 'PAID' ? 74 : 9);
+          doc.text(r.status, pageWidth - margin - 3, currentY + 4.4, { align: 'right' });
+
+          currentY += 6.4;
+        }
+
+        // Summary Row
+        doc.setFillColor(241, 245, 249);
+        doc.rect(margin, currentY, contentW, 7.6, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.8);
+        doc.setTextColor(15, 23, 42);
+        doc.text(
+          `Total Disbursed (${paidRows.length} Paid Month${paidRows.length === 1 ? '' : 's'})`,
+          margin + 3,
+          currentY + 5.1
+        );
+        doc.setTextColor(22, 163, 74);
+        doc.text(`PKR ${totalDisbursed.toLocaleString()}`, margin + 105, currentY + 5.1, { align: 'right' });
+        currentY += 11;
+      }
+    }
+
+    // 4. BOTTOM SUBSIDIARY OPERATING COMPANY ATTRIBUTION + STAMP
+    if (currentY > pageHeight - 44) {
+      drawPdfCorporateFooter(doc, `Page ${pageNum}`, data.branding);
+      doc.addPage();
+      pageNum++;
+      currentY = await drawPageHeader(pageNum);
+    }
+
+    await drawIssuingCompanySignatureAndStamp(
+      doc,
+      currentY,
+      'OFFICIAL HR RECORD SEAL',
+      resolvedCompId,
+      company.prefix,
+      data.customLogo || data.branding?.customLogo
+    );
+    drawPdfCorporateFooter(doc, `Page ${pageNum} of ${pageNum}`, data.branding);
+
+    const safeCo = (company.name || 'Company').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    const safeStaff = (data.staff.name || 'Staff').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    const suffix = data.includeSalaryHistory ? 'Profile_With_Salary_History' : 'Profile_Only';
+    const filename = `${safeCo}_${safeStaff}_${suffix}_${formatPdfDate(genDate)}.pdf`;
+    return await triggerDirectDownload(doc, filename);
+  } catch (err) {
+    console.warn('downloadStaffProfilePdf error:', err);
+    return { success: false, filename: 'Staff_Profile.pdf', blobUrl: '' };
+  }
+}
+
+export interface StaffSalaryHistoryPdfData {
+  staff: SalaryStaffMember;
+  companyId?: CompanyId | string;
+  companyInfo?: StaffCompanyDetails;
+  customLogo?: string | null;
+  branding?: BrandingInfo;
+  salaryHistory: StaffSalaryHistoryRow[];
+  generatedDate?: string;
+}
+
+export async function downloadStaffSalaryHistoryPdf(
+  data: StaffSalaryHistoryPdfData
+): Promise<{ success: boolean; filename: string; blobUrl: string }> {
+  try {
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+      compress: true
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 14;
+    const contentW = pageWidth - margin * 2;
+    const company = resolveStaffCompanyDetails(data.companyId || data.staff.companyId, data.companyInfo);
+    const resolvedCompId = resolveOperatingCompanyFromRef(company.id as CompanyId, company.prefix);
+    const genDate = data.generatedDate || new Date().toISOString().slice(0, 10);
+    const shortId = (data.staff.id || 'STAFF').slice(-6).toUpperCase();
+
+    const drawPageHeader = async (pageNum: number) => {
+      let y = await drawPdfCorporateHeader(doc, {
+        title: 'EMPLOYEE SALARY PAYMENT HISTORY',
+        refNo: `${company.prefix || 'MAK'}/PAY/${shortId}`,
+        date: genDate,
+        subRef: `${cleanPdfText(company.legalTitle || company.name)} | Page ${pageNum}`,
+        branding: {
+          companyName: company.legalTitle || company.name,
+          customLogo: data.customLogo,
+          ...data.branding
+        },
+        accentColor: [4, 120, 87],
+        subject: `PAYROLL DISBURSEMENT STATEMENT - ${cleanPdfText(data.staff.name || 'STAFF').toUpperCase()}`
+      });
+      y = drawEmployingCompanyBanner(doc, y, company);
+      return y;
+    };
+
+    let currentY = await drawPageHeader(1);
+    const historyRows = data.salaryHistory || [];
+    const paidRows = historyRows.filter((r) => r.status === 'PAID');
+    const totalDisbursed = paidRows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+
+    // Employee Summary Card
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(203, 213, 225);
+    doc.roundedRect(margin, currentY, contentW, 20, 1.5, 1.5, 'FD');
+
+    const cW = contentW / 3;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.2);
+    doc.setTextColor(100, 116, 139);
+    doc.text('EMPLOYEE NAME', margin + 3.5, currentY + 4.5);
+    doc.text('DESIGNATION / FATHER NAME', margin + cW + 3.5, currentY + 4.5);
+    doc.text('MONTHLY RATE & JOINING DATE', margin + cW * 2 + 3.5, currentY + 4.5);
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(cleanPdfText(data.staff.name || '-'), margin + 3.5, currentY + 9.5, { maxWidth: cW - 6 });
+    doc.text(
+      `${cleanPdfText(data.staff.designation || '-')}`,
+      margin + cW + 3.5,
+      currentY + 9.5,
+      { maxWidth: cW - 6 }
+    );
+    doc.setTextColor(4, 120, 87);
+    doc.text(
+      `PKR ${Number(data.staff.totalSalary || 0).toLocaleString()}/mo`,
+      margin + cW * 2 + 3.5,
+      currentY + 9.5
+    );
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Contact: ${cleanPdfText(data.staff.primaryContact || '-')}`, margin + 3.5, currentY + 15.5);
+    doc.text(`S/O: ${cleanPdfText(data.staff.fatherName || '-')}`, margin + cW + 3.5, currentY + 15.5);
+    doc.text(
+      `Joined: ${data.staff.joiningDate ? formatPdfDate(data.staff.joiningDate) : 'Not Set'}`,
+      margin + cW * 2 + 3.5,
+      currentY + 15.5
+    );
+
+    currentY += 24;
+
+    const drawTableHeader = () => {
+      doc.setFillColor(15, 23, 42);
+      doc.rect(margin, currentY, contentW, 7.2, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.2);
+      doc.setTextColor(255, 255, 255);
+      doc.text('S.NO', margin + 2.5, currentY + 4.9);
+      doc.text('SALARY MONTH', margin + 15, currentY + 4.9);
+      doc.text('PAYMENT DATE', margin + 50, currentY + 4.9);
+      doc.text('AMOUNT (PKR)', margin + 106, currentY + 4.9, { align: 'right' });
+      doc.text('PAYMENT MODE', margin + 114, currentY + 4.9);
+      doc.text('STATUS', pageWidth - margin - 3, currentY + 4.9, { align: 'right' });
+      currentY += 7.2;
+    };
+
+    let pageNum = 1;
+    if (historyRows.length === 0) {
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(margin, currentY, contentW, 13, 1.5, 1.5, 'FD');
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.2);
+      doc.setTextColor(100, 116, 139);
+      doc.text(
+        'No completed salary payment records found yet. Set Job Start Date in Edit Staff Profile to populate past Cash Paid history.',
+        pageWidth / 2,
+        currentY + 8,
+        { align: 'center' }
+      );
+      currentY += 17;
+    } else {
+      drawTableHeader();
+      for (let i = 0; i < historyRows.length; i++) {
+        const r = historyRows[i];
+        if (currentY > pageHeight - 28) {
+          drawPdfCorporateFooter(doc, `Page ${pageNum}`, data.branding);
+          doc.addPage();
+          pageNum++;
+          currentY = await drawPageHeader(pageNum);
+          drawTableHeader();
+        }
+        if (i % 2 === 1) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(margin, currentY, contentW, 6.6, 'F');
+        }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.4);
+        doc.setTextColor(71, 85, 105);
+        doc.text(String(r.serial), margin + 2.5, currentY + 4.6);
+
+        doc.setTextColor(15, 23, 42);
+        doc.text(cleanPdfText(r.monthLabel), margin + 15, currentY + 4.6);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 65, 85);
+        doc.text(cleanPdfText(r.paymentDate), margin + 50, currentY + 4.6);
+
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        doc.text(`PKR ${Number(r.amount || 0).toLocaleString()}`, margin + 106, currentY + 4.6, { align: 'right' });
+
+        const isOnline = r.paymentMode.toLowerCase().includes('online') || r.paymentMode.toLowerCase().includes('bank');
+        doc.setTextColor(isOnline ? 37 : 22, isOnline ? 99 : 163, isOnline ? 235 : 74);
+        doc.text(cleanPdfText(r.paymentMode).substring(0, 32), margin + 114, currentY + 4.6);
+
+        doc.setTextColor(r.status === 'PAID' ? 22 : 180, r.status === 'PAID' ? 163 : 83, r.status === 'PAID' ? 74 : 9);
+        doc.text(r.status, pageWidth - margin - 3, currentY + 4.6, { align: 'right' });
+        currentY += 6.6;
+      }
+
+      doc.setFillColor(241, 245, 249);
+      doc.rect(margin, currentY, contentW, 8, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.2);
+      doc.setTextColor(15, 23, 42);
+      doc.text(
+        `Total Paid Salary (${paidRows.length} Completed Month${paidRows.length === 1 ? '' : 's'})`,
+        margin + 3,
+        currentY + 5.4
+      );
+      doc.setTextColor(22, 163, 74);
+      doc.text(`PKR ${totalDisbursed.toLocaleString()}`, margin + 106, currentY + 5.4, { align: 'right' });
+      currentY += 12;
+    }
+
+    if (currentY > pageHeight - 44) {
+      drawPdfCorporateFooter(doc, `Page ${pageNum}`, data.branding);
+      doc.addPage();
+      pageNum++;
+      currentY = await drawPageHeader(pageNum);
+    }
+
+    await drawIssuingCompanySignatureAndStamp(
+      doc,
+      currentY,
+      'PAYROLL VERIFIED SEAL',
+      resolvedCompId,
+      company.prefix,
+      data.customLogo || data.branding?.customLogo
+    );
+    drawPdfCorporateFooter(doc, `Page ${pageNum} of ${pageNum}`, data.branding);
+
+    const safeCo = (company.name || 'Company').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    const safeStaff = (data.staff.name || 'Staff').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    const filename = `${safeCo}_${safeStaff}_Salary_History_${formatPdfDate(genDate)}.pdf`;
+    return await triggerDirectDownload(doc, filename);
+  } catch (err) {
+    console.warn('downloadStaffSalaryHistoryPdf error:', err);
+    return { success: false, filename: 'Salary_History.pdf', blobUrl: '' };
+  }
+}
+
+export interface StaffDailyTimeTablePdfData {
+  staff: SalaryStaffMember;
+  attendanceRecords: StaffAttendanceRecord[];
+  companyId?: CompanyId | string;
+  companyInfo?: StaffCompanyDetails;
+  customLogo?: string | null;
+  branding?: BrandingInfo;
+  generatedDate?: string;
+  fromMonth?: string; // YYYY-MM (defaults to current month)
+  toMonth?: string;   // YYYY-MM (defaults to fromMonth)
+}
+
+function formatPdfClock12h(raw?: string): string {
+  if (!raw) return '-';
+  const s = cleanPdfText(raw).replace(/\u202f/g, ' ').trim();
+  if (!s || s === '-') return '-';
+  // Convert "09:15:20 AM" or "9:15:20 PM" -> "09:15 AM" / "09:15 PM"
+  const m = s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i);
+  if (m) {
+    return `${m[1].padStart(2, '0')}:${m[2]} ${m[3].toUpperCase()}`;
+  }
+  return s;
+}
+
+function enumerateTimeTableMonths(fromYmInput?: string, toYmInput?: string): { year: number; monthIndex: number; ym: string }[] {
+  const now = new Date();
+  const currentYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const validYm = (v?: string) => (v && /^\d{4}-\d{2}$/.test(v.trim()) ? v.trim() : '');
+  let startYm = validYm(fromYmInput) || currentYm;
+  let endYm = validYm(toYmInput) || startYm;
+  if (endYm < startYm) {
+    const tmp = startYm;
+    startYm = endYm;
+    endYm = tmp;
+  }
+
+  const [sy, sm] = startYm.split('-').map((n) => parseInt(n, 10));
+  const [ey, em] = endYm.split('-').map((n) => parseInt(n, 10));
+  const result: { year: number; monthIndex: number; ym: string }[] = [];
+
+  let cy = sy;
+  let cm = sm;
+  let guard = 0;
+  while ((cy < ey || (cy === ey && cm <= em)) && guard < 36) {
+    result.push({
+      year: cy,
+      monthIndex: cm - 1,
+      ym: `${cy}-${String(cm).padStart(2, '0')}`
+    });
+    cm++;
+    if (cm > 12) {
+      cm = 1;
+      cy++;
+    }
+    guard++;
+  }
+  return result;
+}
+
+export async function downloadStaffDailyTimeTablePdf(
+  data: StaffDailyTimeTablePdfData
+): Promise<{ success: boolean; filename: string; blobUrl: string }> {
+  try {
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+      compress: true
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 14;
+    const contentW = pageWidth - margin * 2;
+    const company = resolveStaffCompanyDetails(data.companyId || data.staff.companyId, data.companyInfo);
+    const genDate = data.generatedDate || new Date().toISOString().slice(0, 10);
+    const shortId = (data.staff.id || 'STAFF').slice(-6).toUpperCase();
+
+    const monthsList = enumerateTimeTableMonths(data.fromMonth, data.toMonth);
+    const totalPages = monthsList.length;
+
+    // Index attendance records by YYYY-MM-DD for O(1) lookup per day row
+    const recordByDate = new Map<string, StaffAttendanceRecord>();
+    (data.attendanceRecords || []).forEach((rec) => {
+      if (rec && rec.date) {
+        recordByDate.set(rec.date, rec);
+      }
+    });
+
+    // Strict 5 equal-balanced columns across contentW (182mm):
+    // 1. DAYS (34mm) | 2. ENTRY TIME (37mm) | 3. LUNCH START (37mm) | 4. LUNCH END (37mm) | 5. EXIT (37mm)
+    const colWidths = [34, 37, 37, 37, 37];
+    const colStarts: number[] = [];
+    let accX = margin;
+    for (let c = 0; c < colWidths.length; c++) {
+      colStarts.push(accX);
+      accX += colWidths[c];
+    }
+
+    for (let mIdx = 0; mIdx < monthsList.length; mIdx++) {
+      if (mIdx > 0) {
+        doc.addPage();
+      }
+      const { year, monthIndex, ym } = monthsList[mIdx];
+      const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+      const monthTitle = new Date(year, monthIndex, 1)
+        .toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+        .toUpperCase();
+
+      // 1. Corporate Header + Employing Subsidiary Company Strip
+      let currentY = await drawPdfCorporateHeader(doc, {
+        title: 'EMPLOYEE MONTHLY TIME TABLE',
+        refNo: `${company.prefix || 'MAK'}/TT/${shortId}`,
+        date: genDate,
+        subRef: `${cleanPdfText(company.legalTitle || company.name)} | ${monthTitle}`,
+        branding: {
+          companyName: company.legalTitle || company.name,
+          customLogo: data.customLogo,
+          ...data.branding
+        },
+        accentColor: [14, 116, 144]
+      });
+
+      currentY = drawEmployingCompanyBanner(doc, currentY, company);
+
+      // 2. Centered Header Above Table: Month & Employee Name
+      doc.setFillColor(241, 245, 249);
+      doc.setDrawColor(148, 163, 184);
+      doc.setLineWidth(0.35);
+      doc.roundedRect(margin, currentY, contentW, 12.5, 1.5, 1.5, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text(monthTitle, pageWidth / 2, currentY + 5.2, { align: 'center' });
+
+      const empLine = `${cleanPdfText(data.staff.name || 'STAFF').toUpperCase()}${
+        data.staff.designation ? `  —  ${cleanPdfText(data.staff.designation).toUpperCase()}` : ''
+      }`;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(14, 116, 144);
+      doc.text(empLine, pageWidth / 2, currentY + 10.2, { align: 'center', maxWidth: contentW - 10 });
+
+      currentY += 15;
+
+      // 3. Five-Column Table Header
+      const headerH = 6.6;
+      doc.setFillColor(15, 23, 42);
+      doc.setDrawColor(15, 23, 42);
+      doc.rect(margin, currentY, contentW, headerH, 'FD');
+
+      const colLabels = ['DAYS', 'ENTRY TIME', 'LUNCH START', 'LUNCH END', 'EXIT'];
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.4);
+      doc.setTextColor(255, 255, 255);
+      for (let c = 0; c < 5; c++) {
+        const cx = colStarts[c] + colWidths[c] / 2;
+        doc.text(colLabels[c], cx, currentY + 4.5, { align: 'center' });
+      }
+      currentY += headerH;
+
+      // 4. All Days of the Month Rows (28 / 29 / 30 / 31 rows) - guaranteed 1 page per month
+      const footerReserveY = pageHeight - 31; // Leaves room for attribution + footer
+      const availableTableH = Math.max(120, footerReserveY - currentY);
+      const rowH = Math.min(5.9, Math.floor((availableTableH / daysInMonth) * 100) / 100);
+      const tableTopY = currentY;
+
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dayStr = String(day).padStart(2, '0');
+        const dateKey = `${ym}-${dayStr}`;
+        const dateObj = new Date(year, monthIndex, day);
+        const weekdayShort = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+        const isSunday = dateObj.getDay() === 0;
+        const rec = recordByDate.get(dateKey);
+
+        if (isSunday) {
+          doc.setFillColor(241, 245, 249);
+          doc.rect(margin, currentY, contentW, rowH, 'F');
+        } else if (day % 2 === 0) {
+          doc.setFillColor(249, 250, 251);
+          doc.rect(margin, currentY, contentW, rowH, 'F');
+        }
+
+        // Row bottom border
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.22);
+        doc.line(margin, currentY + rowH, margin + contentW, currentY + rowH);
+
+        const textY = currentY + rowH * 0.68;
+
+        // Col 1: Days
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.1);
+        doc.setTextColor(isSunday ? 180 : 15, isSunday ? 83 : 23, isSunday ? 9 : 42);
+        doc.text(`${dayStr} (${weekdayShort})`, colStarts[0] + colWidths[0] / 2, textY, { align: 'center' });
+
+        // Col 2: Entry Time
+        const entryText = formatPdfClock12h(rec?.entryTime);
+        doc.setFont('helvetica', entryText !== '-' ? 'bold' : 'normal');
+        doc.setFontSize(7.1);
+        doc.setTextColor(entryText !== '-' ? 22 : 148, entryText !== '-' ? 163 : 163, entryText !== '-' ? 74 : 184);
+        doc.text(entryText, colStarts[1] + colWidths[1] / 2, textY, { align: 'center' });
+
+        // Col 3: Lunch Start
+        const lunchStartText = formatPdfClock12h(rec?.lunchStartTime);
+        doc.setFont('helvetica', lunchStartText !== '-' ? 'bold' : 'normal');
+        doc.setTextColor(lunchStartText !== '-' ? 180 : 148, lunchStartText !== '-' ? 83 : 163, lunchStartText !== '-' ? 9 : 184);
+        doc.text(lunchStartText, colStarts[2] + colWidths[2] / 2, textY, { align: 'center' });
+
+        // Col 4: Lunch End
+        const lunchEndText = formatPdfClock12h(rec?.lunchEndTime);
+        doc.setFont('helvetica', lunchEndText !== '-' ? 'bold' : 'normal');
+        doc.setTextColor(lunchEndText !== '-' ? 14 : 148, lunchEndText !== '-' ? 116 : 163, lunchEndText !== '-' ? 144 : 184);
+        doc.text(lunchEndText, colStarts[3] + colWidths[3] / 2, textY, { align: 'center' });
+
+        // Col 5: Exit
+        const exitText = formatPdfClock12h(rec?.exitTime);
+        doc.setFont('helvetica', exitText !== '-' ? 'bold' : 'normal');
+        doc.setTextColor(exitText !== '-' ? 37 : 148, exitText !== '-' ? 99 : 163, exitText !== '-' ? 235 : 184);
+        doc.text(exitText, colStarts[4] + colWidths[4] / 2, textY, { align: 'center' });
+
+        currentY += rowH;
+      }
+
+      // Draw crisp outer & column vertical gridlines around the 5-column table
+      doc.setDrawColor(148, 163, 184);
+      doc.setLineWidth(0.32);
+      doc.rect(margin, tableTopY - headerH, contentW, headerH + rowH * daysInMonth);
+      for (let c = 1; c < 5; c++) {
+        doc.line(colStarts[c], tableTopY - headerH, colStarts[c], tableTopY + rowH * daysInMonth);
+      }
+
+      // Compact Official Verification Strip below table (fits on exact same page)
+      const stripY = Math.min(currentY + 3, pageHeight - 28);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.6);
+      doc.setTextColor(51, 65, 85);
+      doc.text(
+        `Issued by Operating Company: ${cleanPdfText(company.legalTitle || company.name)}`,
+        margin,
+        stripY + 4
+      );
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(
+        `Total Days: ${daysInMonth}   |   Format: 12-Hour (AM/PM)   |   Verified Attendance Sheet`,
+        pageWidth - margin,
+        stripY + 4,
+        { align: 'right' }
+      );
+
+      drawPdfCorporateFooter(doc, `Page ${mIdx + 1} of ${totalPages}`, data.branding);
+    }
+
+    const safeCo = (company.name || 'Company').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    const safeStaff = (data.staff.name || 'Staff').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    const rangeTag =
+      monthsList.length === 1
+        ? monthsList[0].ym
+        : `${monthsList[0].ym}_to_${monthsList[monthsList.length - 1].ym}`;
+    const filename = `${safeCo}_${safeStaff}_Time_Table_${rangeTag}.pdf`;
+    return await triggerDirectDownload(doc, filename);
+  } catch (err) {
+    console.warn('downloadStaffDailyTimeTablePdf error:', err);
+    return { success: false, filename: 'Daily_Time_Table.pdf', blobUrl: '' };
+  }
+}
+
+export type StaffCertificateType = 'BANK' | 'EMPLOYMENT' | 'EXPERIENCE';
+
+export interface StaffCertificatePdfExportData {
+  staff: SalaryStaffMember;
+  certificateType: StaffCertificateType;
+  companyId?: CompanyId | string;
+  companyInfo?: StaffCompanyDetails;
+  customLogo?: string | null;
+  branding?: BrandingInfo;
+  issuedDate?: string;
+}
+
+export async function downloadStaffCertificatePdf(
+  data: StaffCertificatePdfExportData
+): Promise<{ success: boolean; filename: string; blobUrl: string }> {
+  try {
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+      compress: true
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 14;
+    const contentW = pageWidth - margin * 2;
+    const company = resolveStaffCompanyDetails(data.companyId || data.staff.companyId, data.companyInfo);
+    const resolvedCompId = resolveOperatingCompanyFromRef(company.id as CompanyId, company.prefix);
+    const today = new Date();
+    const todayYmd = data.issuedDate || `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const longDate = today.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric'
+    });
+    const shortId = (data.staff.id || 'EMP').slice(-5).toUpperCase();
+    const prefix = company.prefix || 'MAK';
+    const yearStr = String(today.getFullYear());
+
+    const certTitles: Record<StaffCertificateType, { header: string; subject: string; refTag: string; filenameTag: string }> = {
+      BANK: {
+        header: 'BANK ACCOUNT OPENING CERTIFICATE',
+        subject: 'EMPLOYMENT & SALARY VERIFICATION FOR BANK ACCOUNT OPENING',
+        refTag: 'BNK',
+        filenameTag: 'Bank_Account_Certificate'
+      },
+      EMPLOYMENT: {
+        header: 'EMPLOYMENT VERIFICATION CERTIFICATE',
+        subject: 'BONAFIDE EMPLOYMENT & SERVICE CONFIRMATION LETTER',
+        refTag: 'EMP',
+        filenameTag: 'Employment_Certificate'
+      },
+      EXPERIENCE: {
+        header: 'EXPERIENCE & RELIEVING CERTIFICATE',
+        subject: 'CERTIFICATE OF SERVICE, CONDUCT & WORK EXPERIENCE',
+        refTag: 'EXP',
+        filenameTag: 'Experience_Certificate'
+      }
+    };
+
+    const cfg = certTitles[data.certificateType] || certTitles.EMPLOYMENT;
+    const refNo = `${prefix}/HR/${cfg.refTag}/${yearStr}/${shortId}`;
+
+    let currentY = await drawPdfCorporateHeader(doc, {
+      title: cfg.header,
+      refNo,
+      date: todayYmd,
+      subRef: cleanPdfText(company.legalTitle || company.name),
+      branding: {
+        companyName: company.legalTitle || company.name,
+        customLogo: data.customLogo,
+        ...data.branding
+      },
+      accentColor: data.certificateType === 'BANK' ? [4, 120, 87] : data.certificateType === 'EXPERIENCE' ? [180, 83, 9] : [30, 64, 175],
+      subject: cfg.subject
+    });
+
+    currentY = drawEmployingCompanyBanner(doc, currentY, company);
+    currentY += 5;
+
+    // Reference & Dated Row
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Ref No: ${refNo}`, margin, currentY);
+    doc.text(`Dated: ${longDate}`, pageWidth - margin, currentY, { align: 'right' });
+    currentY += 10;
+
+    // Salutation
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.setTextColor(15, 23, 42);
+    const addressee =
+      data.certificateType === 'BANK'
+        ? 'THE BRANCH MANAGER / TO WHOM IT MAY CONCERN'
+        : 'TO WHOM IT MAY CONCERN';
+    doc.text(addressee, margin, currentY);
+    doc.setDrawColor(15, 23, 42);
+    doc.setLineWidth(0.3);
+    doc.line(margin, currentY + 1.5, margin + 88, currentY + 1.5);
+    currentY += 11;
+
+    const staffName = cleanPdfText(data.staff.name || 'Employee').toUpperCase();
+    const fatherText = data.staff.fatherName ? `S/O ${cleanPdfText(data.staff.fatherName).toUpperCase()}` : '';
+    const desigText = cleanPdfText(data.staff.designation || 'Staff Member');
+    const compLegal = cleanPdfText(company.legalTitle || company.name);
+    const joinFormatted = data.staff.joiningDate ? formatPdfDate(data.staff.joiningDate) : '';
+    const salaryNum = Number(data.staff.totalSalary) || 0;
+    const salaryWords = numberToWordsRupees(salaryNum);
+
+    let paragraphs: string[] = [];
+    if (data.certificateType === 'BANK') {
+      paragraphs = [
+        `This is to certify that Mr./Ms. ${staffName}${fatherText ? ` (${fatherText})` : ''} is a bonafide full-time employee of ${compLegal}, an operating subsidiary under MAK Group of Companies, holding the designation of "${desigText}"${joinFormatted ? ` since ${joinFormatted}` : ''}.`,
+        `His/Her present gross monthly remuneration is PKR ${salaryNum.toLocaleString()} (${salaryWords}), disbursed regularly by the Finance & Accounts Department.`,
+        `This certificate is issued at the specific request of the employee strictly to facilitate Bank Account Opening and banking KYC verification formalities. The company bears no financial guarantee or liability for personal banking facilities.`
+      ];
+    } else if (data.certificateType === 'EXPERIENCE') {
+      paragraphs = [
+        `This is to certify that Mr./Ms. ${staffName}${fatherText ? ` (${fatherText})` : ''} served with ${compLegal} (MAK Group of Companies) in the capacity of "${desigText}"${joinFormatted ? ` from ${joinFormatted} until ${formatPdfDate(todayYmd)}` : ` until ${formatPdfDate(todayYmd)}`}.`,
+        `During the period of service, he/she performed assigned operational and administrative responsibilities diligently, maintained professional integrity, and upheld company standards.`,
+        `He/She stands relieved of duties in good standing. We extend our best wishes for continued success in all future professional endeavors.`
+      ];
+    } else {
+      paragraphs = [
+        `This is to confirm that Mr./Ms. ${staffName}${fatherText ? ` (${fatherText})` : ''} is currently employed on the permanent payroll of ${compLegal}, a constituent entity of MAK Group of Companies, serving as "${desigText}"${joinFormatted ? ` since ${joinFormatted}` : ''}.`,
+        `His/Her monthly salary package is PKR ${salaryNum.toLocaleString()} (${salaryWords}), and his/her employment status is active and in good standing as of ${longDate}.`,
+        `This Employment Verification Certificate is issued upon the employee's request for submission to concerned authorities, institutions, or official verification purposes.`
+      ];
+    }
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.8);
+    doc.setTextColor(30, 41, 59);
+    for (const para of paragraphs) {
+      const wrapped = doc.splitTextToSize(para, contentW);
+      doc.text(wrapped, margin, currentY, { lineHeightFactor: 1.45 });
+      currentY += wrapped.length * 5.2 + 4.5;
+    }
+
+    currentY += 3;
+
+    // Particulars Box
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(203, 213, 225);
+    doc.roundedRect(margin, currentY, contentW, 38, 2, 2, 'FD');
+
+    doc.setFillColor(15, 23, 42);
+    doc.rect(margin, currentY, contentW, 6.8, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text('CERTIFIED EMPLOYEE & COMPANY PARTICULARS', margin + 4, currentY + 4.7);
+
+    const pRows: Array<[string, string]> = [
+      ['Employee Name', `${staffName}${fatherText ? ` (${fatherText})` : ''}`],
+      ['Designation', desigText],
+      ['Date of Joining', joinFormatted || 'Verified on Payroll Record'],
+      ['Monthly Salary', `PKR ${salaryNum.toLocaleString()} (${salaryWords})`],
+      ['Issued Date / Entity', `${longDate}  |  ${compLegal}`]
+    ];
+
+    let pY = currentY + 12;
+    for (const [label, val] of pRows) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.8);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`${label}:`, margin + 4, pY);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(cleanPdfText(val), margin + 44, pY, { maxWidth: contentW - 48 });
+      pY += 5.4;
+    }
+
+    currentY += 46;
+
+    // Authorized Signatory Area + Subsidiary Stamp
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`For and on behalf of ${compLegal},`, margin, currentY);
+    currentY += 14;
+
+    doc.setDrawColor(15, 23, 42);
+    doc.setLineWidth(0.4);
+    doc.line(margin, currentY, margin + 56, currentY);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(15, 23, 42);
+    doc.text('Authorized Signatory / HR & Finance', margin, currentY + 4.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`${compLegal} | ${cleanPdfText(company.phone || '')}`, margin, currentY + 8.5);
+
+    const stampY = Math.min(pageHeight - 44, currentY + 14);
+    await drawIssuingCompanySignatureAndStamp(
+      doc,
+      stampY,
+      'OFFICIAL COMPANY SEAL',
+      resolvedCompId,
+      company.prefix,
+      data.customLogo || data.branding?.customLogo
+    );
+    drawPdfCorporateFooter(doc, `Issued ${formatPdfDate(todayYmd)} | Official Corporate Letterhead`, data.branding);
+
+    const safeCo = (company.name || 'Company').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    const safeStaff = (data.staff.name || 'Staff').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    const filename = `${safeCo}_${safeStaff}_${cfg.filenameTag}_${formatPdfDate(todayYmd)}.pdf`;
+    return await triggerDirectDownload(doc, filename);
+  } catch (err) {
+    console.warn('downloadStaffCertificatePdf error:', err);
+    return { success: false, filename: 'Company_Certificate.pdf', blobUrl: '' };
+  }
+}
+
 

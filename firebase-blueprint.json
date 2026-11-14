@@ -360,15 +360,44 @@
         "primaryContact": { "type": "string", "description": "Primary phone contact number", "maxLength": 40 },
         "residentialContact": { "type": "string", "description": "Residential phone contact number", "maxLength": 40 },
         "residentialAddress": { "type": "string", "description": "Residential address", "maxLength": 300 },
+        "joiningDate": { "type": "string", "description": "Employee job start date (YYYY-MM-DD)", "maxLength": 20 },
         "totalSalary": { "type": "number", "description": "Total monthly salary in PKR" },
         "photoUrl": { "type": "string", "description": "Staff profile photo Data URL or link", "maxLength": 750000 },
         "cnicFrontUrl": { "type": "string", "description": "ID card front copy Data URL or link", "maxLength": 750000 },
         "cnicBackUrl": { "type": "string", "description": "ID card back copy Data URL or link", "maxLength": 750000 },
-        "status": { "type": "string", "description": "ACTIVE or INACTIVE payroll status", "maxLength": 20 },
+        "sortOrder": { "type": "number", "description": "Manual drag-and-drop directory sort order" },
+        "status": { "type": "string", "description": "ACTIVE, SUSPENDED, or INACTIVE payroll status", "maxLength": 20 },
         "createdAt": { "type": "string", "description": "ISO timestamp of registration", "maxLength": 50 },
         "updatedAt": { "type": "string", "description": "ISO timestamp of last update", "maxLength": 50 }
       },
       "required": ["id", "companyId", "name", "totalSalary", "status", "createdAt"]
+    },
+    "StaffAttendance": {
+      "title": "StaffAttendance",
+      "description": "Daily live attendance time table record with Entry, Lunch Start, Lunch End, and Exit timestamps",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Composite attendance document ID ({staffId}_{YYYY-MM-DD})", "maxLength": 160 },
+        "companyId": { "type": "string", "description": "Owning company workspace ID", "maxLength": 40 },
+        "staffId": { "type": "string", "description": "Salary staff member ID", "maxLength": 120 },
+        "staffName": { "type": "string", "description": "Employee full name", "maxLength": 120 },
+        "designation": { "type": "string", "description": "Employee job designation", "maxLength": 100 },
+        "date": { "type": "string", "description": "Local attendance date (YYYY-MM-DD)", "maxLength": 20 },
+        "entryTime": { "type": "string", "description": "Formatted live entry clock time", "maxLength": 30 },
+        "entryTimeIso": { "type": "string", "description": "ISO entry timestamp", "maxLength": 50 },
+        "lunchStartTime": { "type": "string", "description": "Formatted live lunch start clock time", "maxLength": 30 },
+        "lunchStartTimeIso": { "type": "string", "description": "ISO lunch start timestamp", "maxLength": 50 },
+        "lunchEndTime": { "type": "string", "description": "Formatted live lunch end clock time", "maxLength": 30 },
+        "lunchEndTimeIso": { "type": "string", "description": "ISO lunch end timestamp", "maxLength": 50 },
+        "lunchDuration": { "type": "string", "description": "Computed lunch duration label", "maxLength": 30 },
+        "exitTime": { "type": "string", "description": "Formatted live exit clock time", "maxLength": 30 },
+        "exitTimeIso": { "type": "string", "description": "ISO exit timestamp", "maxLength": 50 },
+        "workingDuration": { "type": "string", "description": "Computed total shift duration label", "maxLength": 30 },
+        "status": { "type": "string", "description": "ENTERED, ON_LUNCH, RESUMED, or COMPLETED", "enum": ["ENTERED", "ON_LUNCH", "RESUMED", "COMPLETED"] },
+        "createdAt": { "type": "string", "description": "ISO creation timestamp", "maxLength": 50 },
+        "updatedAt": { "type": "string", "description": "ISO update timestamp", "maxLength": 50 }
+      },
+      "required": ["id", "companyId", "staffId", "staffName", "date", "status", "createdAt"]
     },
     "Franchise": {
       "title": "Franchise",
@@ -528,6 +557,10 @@
     "/salary_staff/{staffId}": {
       "schema": "SalaryStaff",
       "description": "Company-scoped non-login office payroll staff managed in Finance Management"
+    },
+    "/staff_attendance/{attId}": {
+      "schema": "StaffAttendance",
+      "description": "Daily live employee Entry, Lunch Start, Lunch End, and Exit attendance records managed by Time Table Manager"
     },
     "/franchises/{franchiseId}": {
       "schema": "Franchise",

@@ -161,6 +161,11 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
 
       if (userRole === UserRole.DRIVER) {
         targetView = 'driver_location';
+      } else if (
+        userRole === UserRole.TIME_TABLE_MANAGER ||
+        userRoles.includes(UserRole.TIME_TABLE_MANAGER)
+      ) {
+        targetView = 'time_table_portal';
       } else if (userRole === UserRole.CLIENT) {
         targetView = 'cases';
       } else if (userRole === UserRole.VENDOR) {

@@ -22,6 +22,7 @@ export const EXCLUSIVE_SYSTEM_ROLES: UserRole[] = [
   UserRole.LOADING_PORT_STAFF,
   UserRole.DESTINATION_PORT_STAFF,
   UserRole.UNLOADING_PORT_STAFF,
+  UserRole.TIME_TABLE_MANAGER,
   UserRole.TRANSPORTER,
   UserRole.CLIENT,
   UserRole.VENDOR
@@ -98,6 +99,15 @@ export const SYSTEM_ROLE_DEFINITIONS: RoleDefinition[] = [
     description: 'Unloading terminal & gate out (Standalone)',
     defaultScope: 'All units',
     badge: 'UNLOAD',
+    exclusive: true
+  },
+  {
+    id: UserRole.TIME_TABLE_MANAGER,
+    name: 'Time Table Manager',
+    shortLabel: 'Time Table Manager',
+    description: 'Entry, Lunch & Exit live attendance sheet (Standalone)',
+    defaultScope: 'All units',
+    badge: 'TIMETABLE',
     exclusive: true
   },
   {

@@ -25,6 +25,7 @@ import { LoadingPortStaffPortal } from './components/LoadingPortStaffPortal';
 import TransporterPortal from './components/TransporterPortal';
 import VendorPortal from './components/VendorPortal';
 import DriverLocationPortal from './components/DriverLocationPortal';
+import { TimeTableManagerPortal } from './components/TimeTableManagerPortal';
 import { AvailableVehiclesView } from './components/AvailableVehiclesView';
 import { ModeOption } from './components/TopModeSwitcher';
 import { AppNotification, UserRole } from './types';
@@ -712,6 +713,21 @@ const App: React.FC = () => {
       );
     }
 
+    // Route Time Table Manager directly to their dedicated standalone employee attendance portal
+    if (
+      currentRole === UserRole.TIME_TABLE_MANAGER ||
+      currentRoles.includes(UserRole.TIME_TABLE_MANAGER)
+    ) {
+      return (
+        <TimeTableManagerPortal
+          onSignOut={handleSignOut}
+          staffUserId={safeAppStorage.getItem('dpl_current_user_id') || 'timetable'}
+          staffUserName={safeAppStorage.getItem('dpl_current_user_name') || 'Time Table Manager'}
+          allowedCompanies={allowedCompanies}
+        />
+      );
+    }
+
     // Route Loading Port Staff and Destination / Unloading Staff directly to their dedicated workspace
     if (
       currentRole === UserRole.LOADING_PORT_STAFF || 
@@ -989,6 +1005,8 @@ const App: React.FC = () => {
             } else {
               const shouldPickCompany = !(
                 payload.role === UserRole.DRIVER ||
+                payload.role === UserRole.TIME_TABLE_MANAGER ||
+                Boolean(payload.roles?.includes(UserRole.TIME_TABLE_MANAGER)) ||
                 payload.role === UserRole.TRANSPORTER || 
                 payload.role === UserRole.CLIENT || 
                 payload.role === UserRole.VENDOR ||
@@ -1066,6 +1084,8 @@ const App: React.FC = () => {
   // Check if current active session is a dedicated full-page portal
   const isDedicatedPortal = 
     currentRole === UserRole.DRIVER ||
+    currentRole === UserRole.TIME_TABLE_MANAGER ||
+    currentRoles.includes(UserRole.TIME_TABLE_MANAGER) ||
     currentRole === UserRole.CLIENT || 
     currentRole === UserRole.TRANSPORTER || 
     currentRole === UserRole.LOADING_PORT_STAFF || 

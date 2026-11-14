@@ -21,7 +21,7 @@ import {
   getActiveDbUserSession,
   clearActiveDbUserSession
 } from './firebase';
-import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, CompanyExplorerFolder, CorporateLegalCase, CorporateVaultCredential, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver, SalaryStaffMember, FranchiseProfile, FranchiseLedgerEntry } from '../types';
+import { Case, FinanceEntry, Vehicle, AppNotification, AppUser, Client, UserRole, RecurringFinanceTemplate, DestinationStaff, StaffLedgerEntry, Vendor, StaffLoadingBill, StaffPrivateLedgerEntry, AvailableVehicle, TransporterRequest, CompanyDocument, CompanyExplorerFolder, CorporateLegalCase, CorporateVaultCredential, DEFAULT_COMPANY_DOCUMENT_CATEGORIES, PersonalLedgerAccount, PersonalLedgerEntry, Driver, SalaryStaffMember, StaffSalaryHistoryRow, StaffAttendanceRecord, FranchiseProfile, FranchiseLedgerEntry } from '../types';
 import { doesDestinationMatchFranchise } from './corporateFilingArchitecture';
 import { saveVendor } from './vendorService';
 import { safeAppStorage } from './storage';
@@ -6891,6 +6891,18 @@ export function getSalaryStaffDesignationRank(designation?: string): number {
 
 export function sortSalaryStaffByDesignation(items: SalaryStaffMember[]): SalaryStaffMember[] {
   return [...items].sort((a, b) => {
+    const orderA = typeof a.sortOrder === 'number' && Number.isFinite(a.sortOrder) ? a.sortOrder : null;
+    const orderB = typeof b.sortOrder === 'number' && Number.isFinite(b.sortOrder) ? b.sortOrder : null;
+    if (orderA !== null && orderB !== null && orderA !== orderB) {
+      return orderA - orderB;
+    }
+    if (orderA !== null && orderB === null) return -1;
+    if (orderA === null && orderB !== null) return 1;
+
+    const salA = Number(a.totalSalary) || 0;
+    const salB = Number(b.totalSalary) || 0;
+    if (salA !== salB) return salB - salA;
+
     const rankA = getSalaryStaffDesignationRank(a.designation);
     const rankB = getSalaryStaffDesignationRank(b.designation);
     if (rankA !== rankB) return rankA - rankB;
@@ -6984,24 +6996,24 @@ export async function saveSalaryStaffToFirestore(staff: SalaryStaffMember): Prom
   const activeCompany = getActiveCompanyId();
   const staffId = staff.id || `sal_staff_${Date.now()}`;
 
-  // Offload oversized attachments (>360KB, e.g. multi-page CNIC PDFs) to cloud chunks so Firestore 1MB doc limit is never exceeded
+  // Offload any attachment > 140,000 chars BEFORE sanitizeForFirestore (which drops > 150,000 char strings)
+  // so no uploaded staff photo or CNIC image/PDF is ever silently wiped during Firestore sync.
   const maybeOffload = async (val: string | undefined, fieldKey: string): Promise<string> => {
     const cleanVal = (val || '').trim();
     if (!cleanVal) return '';
-    if (cleanVal.startsWith('data:') && cleanVal.length > 360000) {
-      try {
-        const mimeMatch = cleanVal.match(/^data:([^;]+);/);
-        const chunkUri = await saveDocumentToCloudChunks({
-          docKey: sanitizeCloudDocKey(`salary_staff_${staffId}_${fieldKey}`),
-          name: `${staffId}_${fieldKey}`,
-          mimeType: mimeMatch?.[1] || 'application/octet-stream',
-          size: cleanVal.length,
-          dataUrl: cleanVal
-        });
-        return chunkUri || cleanVal;
-      } catch (err) {
-        console.warn(`Salary staff ${fieldKey} chunk offload notice:`, err);
+    if (cleanVal.startsWith('data:') && cleanVal.length > 140000) {
+      const mimeMatch = cleanVal.match(/^data:([^;]+);/);
+      const chunkUri = await saveDocumentToCloudChunks({
+        docKey: sanitizeCloudDocKey(`salary_staff_${staffId}_${fieldKey}`),
+        name: `${staffId}_${fieldKey}`,
+        mimeType: mimeMatch?.[1] || 'application/octet-stream',
+        size: cleanVal.length,
+        dataUrl: cleanVal
+      });
+      if (!chunkUri) {
+        throw new Error(`Could not upload large ${fieldKey} attachment to cloud storage.`);
       }
+      return chunkUri;
     }
     return cleanVal;
   };
@@ -7022,10 +7034,14 @@ export async function saveSalaryStaffToFirestore(staff: SalaryStaffMember): Prom
     primaryContact: (staff.primaryContact || '').trim(),
     residentialContact: (staff.residentialContact || '').trim(),
     residentialAddress: (staff.residentialAddress || '').trim(),
+    joiningDate: (staff.joiningDate || '').trim(),
     totalSalary: Number(staff.totalSalary) || 0,
     photoUrl,
     cnicFrontUrl,
     cnicBackUrl,
+    ...(typeof staff.sortOrder === 'number' && Number.isFinite(staff.sortOrder)
+      ? { sortOrder: staff.sortOrder }
+      : {}),
     status: staff.status || 'ACTIVE',
     createdAt: staff.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -7050,6 +7066,43 @@ export async function saveSalaryStaffToFirestore(staff: SalaryStaffMember): Prom
   return normalized;
 }
 
+export async function saveSalaryStaffOrderToFirestore(orderedStaff: SalaryStaffMember[]): Promise<SalaryStaffMember[]> {
+  const path = 'salary_staff';
+  const nowIso = new Date().toISOString();
+
+  const reorderedWithOrder: SalaryStaffMember[] = orderedStaff.map((item, idx) => ({
+    ...item,
+    sortOrder: idx + 1,
+    updatedAt: nowIso
+  }));
+
+  const reorderedMap = new Map(reorderedWithOrder.map((s) => [s.id, s]));
+  const currentAll = getStoredSalaryStaff();
+  const mergedAll = sortSalaryStaffByDesignation([
+    ...reorderedWithOrder,
+    ...currentAll.filter((s) => !reorderedMap.has(s.id))
+  ]);
+  safeAppStorage.setJSON(SALARY_STAFF_STORAGE_KEY, mergedAll);
+
+  if (db && reorderedWithOrder.length > 0) {
+    try {
+      await Promise.all(
+        reorderedWithOrder.map((item) =>
+          setDoc(
+            doc(db, path, item.id),
+            { sortOrder: item.sortOrder, updatedAt: nowIso },
+            { merge: true }
+          )
+        )
+      );
+    } catch (err) {
+      console.warn('saveSalaryStaffOrderToFirestore notice:', err);
+    }
+  }
+
+  return reorderedWithOrder;
+}
+
 export async function deleteSalaryStaffFromFirestore(staffId: string): Promise<void> {
   const path = 'salary_staff';
   const current = getStoredSalaryStaff().filter((s) => s.id !== staffId);
@@ -7062,6 +7115,490 @@ export async function deleteSalaryStaffFromFirestore(staffId: string): Promise<v
       console.warn('deleteSalaryStaffFromFirestore notice:', err);
     }
   }
+}
+
+export function isDirectorDesignation(designation?: string | null): boolean {
+  const d = String(designation || '').trim().toLowerCase();
+  if (!d) return false;
+  return /\bdirectors?\b/i.test(d) || /\bm\.?d\b/i.test(d);
+}
+
+export function formatLocalYmd(dateInput: Date = new Date()): string {
+  const y = dateInput.getFullYear();
+  const m = String(dateInput.getMonth() + 1).padStart(2, '0');
+  const d = String(dateInput.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function formatAttendanceTime12h(dateInput: Date = new Date()): string {
+  return dateInput
+    .toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    })
+    .replace(/\u202f/g, ' ')
+    .trim();
+}
+
+function formatDmyFromYmdOrIso(raw?: string): string {
+  if (!raw) return '-';
+  const datePart = String(raw).trim().split('T')[0].split(' ')[0];
+  const m = datePart.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (m) {
+    return `${m[3].padStart(2, '0')}-${m[2].padStart(2, '0')}-${m[1]}`;
+  }
+  const dmy = datePart.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) {
+    return `${dmy[1].padStart(2, '0')}-${dmy[2].padStart(2, '0')}-${dmy[3]}`;
+  }
+  return datePart;
+}
+
+function parseJoiningYearMonth(raw?: string): { year: number; month: number } | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  const ymd = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (ymd) {
+    const year = parseInt(ymd[1], 10);
+    const month = parseInt(ymd[2], 10);
+    if (year >= 1980 && year <= 2100 && month >= 1 && month <= 12) {
+      return { year, month };
+    }
+  }
+  const dmy = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) {
+    const month = parseInt(dmy[2], 10);
+    const year = parseInt(dmy[3], 10);
+    if (year >= 1980 && year <= 2100 && month >= 1 && month <= 12) {
+      return { year, month };
+    }
+  }
+  return null;
+}
+
+export function buildStaffSalaryPaymentHistory(
+  staff: Partial<SalaryStaffMember>,
+  payables: FinanceEntry[] = [],
+  financeData: FinanceEntry[] = [],
+  nowOverride?: Date
+): StaffSalaryHistoryRow[] {
+  const now = nowOverride || new Date();
+  const todayYmd = formatLocalYmd(now);
+  const staffCompany = staff.companyId || '';
+  const normalizedStaffName = (staff.name || '').trim().toLowerCase();
+  const monthlyRate = Number(staff.totalSalary) || 0;
+
+  // Collect all real recorded salary payables & expenses matching this staff member
+  const candidateEntries = [...(financeData || []), ...(payables || [])].filter((f) => {
+    if (!f) return false;
+    if (staffCompany && f.companyId && f.companyId !== staffCompany) return false;
+    const isSalaryCat =
+      f.category === 'Payroll / Salary' ||
+      f.category === 'Staff Payroll & Salaries' ||
+      Boolean(f.reference && f.reference.startsWith('SAL-')) ||
+      (f.description || '').toLowerCase().includes('salary');
+    if (!isSalaryCat) return false;
+    const refMatch = Boolean(staff.id && f.reference && f.reference.endsWith(`-${staff.id}`));
+    const nameMatch = Boolean(
+      normalizedStaffName &&
+        f.party &&
+        f.party.trim().toLowerCase() === normalizedStaffName
+    );
+    return refMatch || nameMatch;
+  });
+
+  const rowsByYm = new Map<string, Omit<StaffSalaryHistoryRow, 'serial'>>();
+
+  // Index recorded real entries first (preferring PAID expense/payable records)
+  for (const entry of candidateEntries) {
+    let ym = '';
+    const refSalMatch = (entry.reference || '').match(/^SAL-(\d{4}-\d{2})-/);
+    if (refSalMatch) {
+      ym = refSalMatch[1];
+    } else if (entry.date && /^\d{4}-\d{2}-\d{2}/.test(entry.date)) {
+      const entryDatePart = entry.date.slice(0, 10);
+      if (entryDatePart.endsWith('-01') && (entry.description || '').toLowerCase().includes('month')) {
+        // Check if description names the prior month (e.g. "Nov 2026" dated 2026-12-01)
+        const dObj = new Date(
+          Number(entryDatePart.slice(0, 4)),
+          Number(entryDatePart.slice(5, 7)) - 2,
+          1
+        );
+        ym = `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}`;
+      } else {
+        ym = entryDatePart.slice(0, 7);
+      }
+    }
+    if (!ym) continue;
+
+    const existing = rowsByYm.get(ym);
+    const isPaid = entry.status === 'PAID' || entry.type === 'EXPENSE';
+    if (existing && existing.status === 'PAID' && !isPaid) {
+      continue;
+    }
+
+    const [yNum, mNum] = ym.split('-').map((n) => parseInt(n, 10));
+    const monthLabel = new Date(yNum, (mNum || 1) - 1, 1).toLocaleDateString('en-GB', {
+      month: 'short',
+      year: 'numeric'
+    });
+    const modeLabel = isPaid
+      ? entry.paymentMethod === 'BANK'
+        ? entry.bankName
+          ? `Online Transfer (${entry.bankName})`
+          : 'Online Transfer'
+        : 'Cash Paid'
+      : entry.paymentMethod === 'BANK'
+      ? 'Online Transfer (Pending)'
+      : 'Cash (Pending)';
+
+    rowsByYm.set(ym, {
+      yearMonth: ym,
+      monthLabel,
+      paymentDate: formatDmyFromYmdOrIso(entry.date),
+      amount: Number(entry.amount) || monthlyRate,
+      paymentMode: modeLabel,
+      status: isPaid ? 'PAID' : 'PENDING',
+      reference: entry.reference || ''
+    });
+  }
+
+  // Generate completed pre-software historical monthly Cash Paid rows from Job Start Date
+  const parsedStart = parseJoiningYearMonth(staff.joiningDate);
+  if (parsedStart && monthlyRate > 0) {
+    let cursorYear = parsedStart.year;
+    let cursorMonth = parsedStart.month;
+    const suspendCutoffYmd =
+      staff.status === 'SUSPENDED' && staff.updatedAt ? staff.updatedAt.slice(0, 10) : '';
+    let safety = 0;
+
+    while (safety < 240) {
+      safety++;
+      const ym = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}`;
+      const payday = new Date(cursorYear, cursorMonth, 1, 0, 0, 0, 0);
+      const paydayYmd = formatLocalYmd(payday);
+
+      // Stop once the 1st-of-next-month payday is in the future
+      if (paydayYmd > todayYmd) break;
+      if (suspendCutoffYmd && paydayYmd > suspendCutoffYmd) break;
+
+      // For months prior to software auto-payable rollout (2026-12-01), display Cash Paid on 1st of month
+      if (paydayYmd < PAYABLES_EFFECTIVE_START_DATE && !rowsByYm.has(ym)) {
+        const monthLabel = new Date(cursorYear, cursorMonth - 1, 1).toLocaleDateString('en-GB', {
+          month: 'short',
+          year: 'numeric'
+        });
+        rowsByYm.set(ym, {
+          yearMonth: ym,
+          monthLabel,
+          paymentDate: formatDmyFromYmdOrIso(paydayYmd),
+          amount: monthlyRate,
+          paymentMode: 'Cash Paid',
+          status: 'PAID',
+          reference: `CASH-${ym}`
+        });
+      }
+
+      cursorMonth++;
+      if (cursorMonth > 12) {
+        cursorMonth = 1;
+        cursorYear++;
+      }
+    }
+  }
+
+  const ordered = Array.from(rowsByYm.values()).sort((a, b) =>
+    a.yearMonth.localeCompare(b.yearMonth)
+  );
+  return ordered.map((row, idx) => ({
+    serial: idx + 1,
+    ...row
+  }));
+}
+
+const STAFF_ATTENDANCE_STORAGE_KEY = 'dpl_staff_attendance_v1';
+
+function sortAttendanceRecords(list: StaffAttendanceRecord[]): StaffAttendanceRecord[] {
+  return [...(list || [])].sort((a, b) => {
+    const dateCmp = String(b.date || '').localeCompare(String(a.date || ''));
+    if (dateCmp !== 0) return dateCmp;
+    return String(b.entryTimeIso || b.createdAt || '').localeCompare(
+      String(a.entryTimeIso || a.createdAt || '')
+    );
+  });
+}
+
+export function getStoredStaffAttendance(companyIdFilter?: string): StaffAttendanceRecord[] {
+  const all = sortAttendanceRecords(
+    safeAppStorage.getJSON<StaffAttendanceRecord[]>(STAFF_ATTENDANCE_STORAGE_KEY, []) || []
+  );
+  if (!companyIdFilter) return all;
+  return all.filter((r) => (r.companyId || 'docks') === companyIdFilter);
+}
+
+export function subscribeToStaffAttendance(
+  onData: (items: StaffAttendanceRecord[]) => void,
+  options?: { allCompanies?: boolean }
+): () => void {
+  const path = 'staff_attendance';
+  let cachedDocs: StaffAttendanceRecord[] = getStoredStaffAttendance();
+  let hasSnapshot = false;
+
+  const emit = () => {
+    const activeCompany = getActiveCompanyId();
+    const filtered = options?.allCompanies
+      ? cachedDocs
+      : cachedDocs.filter((r) => (r.companyId || 'docks') === activeCompany);
+    onData(sortAttendanceRecords(filtered));
+  };
+
+  emit();
+
+  const unsubCompany = subscribeToActiveCompany(() => {
+    emit();
+  });
+
+  let unsubFirestore = () => {};
+  if (db) {
+    try {
+      unsubFirestore = onSnapshot(
+        collection(db, path),
+        (snapshot) => {
+          hasSnapshot = true;
+          const firestoreList: StaffAttendanceRecord[] = [];
+          snapshot.forEach((docSnap) => {
+            const d = docSnap.data() as StaffAttendanceRecord;
+            if (d && d.staffId && d.date) {
+              firestoreList.push({
+                ...d,
+                id: d.id || docSnap.id,
+                companyId: d.companyId || 'docks'
+              });
+            }
+          });
+          const localOnly = getStoredStaffAttendance().filter(
+            (loc) => !firestoreList.some((rem) => rem.id === loc.id)
+          );
+          const combined =
+            snapshot.empty && !hasSnapshot
+              ? getStoredStaffAttendance()
+              : [...firestoreList, ...(snapshot.metadata.fromCache ? localOnly : [])];
+          cachedDocs = sortAttendanceRecords(combined);
+          safeAppStorage.setJSON(STAFF_ATTENDANCE_STORAGE_KEY, cachedDocs);
+          emit();
+        },
+        (err) => {
+          console.warn('subscribeToStaffAttendance notice:', err);
+        }
+      );
+    } catch (err) {
+      console.warn('subscribeToStaffAttendance setup notice:', err);
+    }
+  }
+
+  return () => {
+    unsubFirestore();
+    unsubCompany();
+  };
+}
+
+function computeWorkingDurationLabel(startIso?: string, endIso?: string): string {
+  if (!startIso || !endIso) return '-';
+  const s = new Date(startIso).getTime();
+  const e = new Date(endIso).getTime();
+  if (isNaN(s) || isNaN(e) || e < s) return '-';
+  const totalMins = Math.max(0, Math.floor((e - s) / 60000));
+  const hrs = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (hrs === 0) return `${mins}m`;
+  return `${hrs}h ${mins}m`;
+}
+
+export async function markStaffAttendanceEntry(
+  staff: SalaryStaffMember,
+  markedBy?: string
+): Promise<StaffAttendanceRecord> {
+  if (isDirectorDesignation(staff.designation)) {
+    throw new Error('Directors are exempt from Daily Time Table attendance.');
+  }
+  const now = new Date();
+  const dateYmd = formatLocalYmd(now);
+  const companyId = staff.companyId || getActiveCompanyId();
+  const recordId = `${staff.id}_${dateYmd}`;
+
+  const currentAll = getStoredStaffAttendance();
+  const existing = currentAll.find((r) => r.id === recordId);
+  if (existing && existing.entryTime) {
+    return existing;
+  }
+
+  const record: StaffAttendanceRecord = {
+    id: recordId,
+    companyId,
+    staffId: staff.id,
+    staffName: staff.name,
+    designation: staff.designation || '',
+    date: dateYmd,
+    entryTime: formatAttendanceTime12h(now),
+    entryTimeIso: now.toISOString(),
+    entryMarkedBy: (markedBy || 'Time Table Manager').trim(),
+    status: 'ENTERED',
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString()
+  };
+
+  const merged = sortAttendanceRecords([
+    record,
+    ...currentAll.filter((r) => r.id !== recordId)
+  ]);
+  safeAppStorage.setJSON(STAFF_ATTENDANCE_STORAGE_KEY, merged);
+
+  if (db) {
+    await setDoc(doc(db, 'staff_attendance', recordId), sanitizeForFirestore(record), { merge: true });
+  }
+
+  return record;
+}
+
+export async function markStaffAttendanceLunchStart(
+  staff: SalaryStaffMember,
+  markedBy?: string
+): Promise<StaffAttendanceRecord> {
+  if (isDirectorDesignation(staff.designation)) {
+    throw new Error('Directors are exempt from Daily Time Table attendance.');
+  }
+  const now = new Date();
+  const dateYmd = formatLocalYmd(now);
+  const recordId = `${staff.id}_${dateYmd}`;
+
+  const currentAll = getStoredStaffAttendance();
+  const existing = currentAll.find((r) => r.id === recordId);
+  if (!existing || !existing.entryTime) {
+    throw new Error('Please mark Entry before starting Lunch break.');
+  }
+  if (existing.exitTime) {
+    throw new Error('Employee has already exited for today.');
+  }
+  if (existing.lunchStartTime) {
+    return existing;
+  }
+
+  const lunchStartIso = now.toISOString();
+  const updatedRecord: StaffAttendanceRecord = {
+    ...existing,
+    lunchStartTime: formatAttendanceTime12h(now),
+    lunchStartTimeIso: lunchStartIso,
+    lunchStartMarkedBy: (markedBy || 'Time Table Manager').trim(),
+    status: 'ON_LUNCH',
+    updatedAt: lunchStartIso
+  };
+
+  const merged = sortAttendanceRecords([
+    updatedRecord,
+    ...currentAll.filter((r) => r.id !== recordId)
+  ]);
+  safeAppStorage.setJSON(STAFF_ATTENDANCE_STORAGE_KEY, merged);
+
+  if (db) {
+    await setDoc(doc(db, 'staff_attendance', recordId), sanitizeForFirestore(updatedRecord), {
+      merge: true
+    });
+  }
+
+  return updatedRecord;
+}
+
+export async function markStaffAttendanceLunchEnd(
+  staff: SalaryStaffMember,
+  markedBy?: string
+): Promise<StaffAttendanceRecord> {
+  if (isDirectorDesignation(staff.designation)) {
+    throw new Error('Directors are exempt from Daily Time Table attendance.');
+  }
+  const now = new Date();
+  const dateYmd = formatLocalYmd(now);
+  const recordId = `${staff.id}_${dateYmd}`;
+
+  const currentAll = getStoredStaffAttendance();
+  const existing = currentAll.find((r) => r.id === recordId);
+  if (!existing || !existing.lunchStartTime) {
+    throw new Error('Please mark Lunch Start before marking Lunch End.');
+  }
+  if (existing.exitTime) {
+    throw new Error('Employee has already exited for today.');
+  }
+  if (existing.lunchEndTime) {
+    return existing;
+  }
+
+  const lunchEndIso = now.toISOString();
+  const updatedRecord: StaffAttendanceRecord = {
+    ...existing,
+    lunchEndTime: formatAttendanceTime12h(now),
+    lunchEndTimeIso: lunchEndIso,
+    lunchEndMarkedBy: (markedBy || 'Time Table Manager').trim(),
+    lunchDuration: computeWorkingDurationLabel(existing.lunchStartTimeIso, lunchEndIso),
+    status: 'RESUMED',
+    updatedAt: lunchEndIso
+  };
+
+  const merged = sortAttendanceRecords([
+    updatedRecord,
+    ...currentAll.filter((r) => r.id !== recordId)
+  ]);
+  safeAppStorage.setJSON(STAFF_ATTENDANCE_STORAGE_KEY, merged);
+
+  if (db) {
+    await setDoc(doc(db, 'staff_attendance', recordId), sanitizeForFirestore(updatedRecord), {
+      merge: true
+    });
+  }
+
+  return updatedRecord;
+}
+
+export async function markStaffAttendanceExit(
+  staff: SalaryStaffMember,
+  markedBy?: string
+): Promise<StaffAttendanceRecord> {
+  const now = new Date();
+  const dateYmd = formatLocalYmd(now);
+  const recordId = `${staff.id}_${dateYmd}`;
+
+  const currentAll = getStoredStaffAttendance();
+  const existing = currentAll.find((r) => r.id === recordId);
+  if (!existing || !existing.entryTime) {
+    throw new Error('Please mark Entry before marking Exit for today.');
+  }
+  if (existing.exitTime) {
+    return existing;
+  }
+
+  const exitIso = now.toISOString();
+  const updatedRecord: StaffAttendanceRecord = {
+    ...existing,
+    exitTime: formatAttendanceTime12h(now),
+    exitTimeIso: exitIso,
+    exitMarkedBy: (markedBy || 'Time Table Manager').trim(),
+    workingDuration: computeWorkingDurationLabel(existing.entryTimeIso, exitIso),
+    status: 'COMPLETED',
+    updatedAt: exitIso
+  };
+
+  const merged = sortAttendanceRecords([
+    updatedRecord,
+    ...currentAll.filter((r) => r.id !== recordId)
+  ]);
+  safeAppStorage.setJSON(STAFF_ATTENDANCE_STORAGE_KEY, merged);
+
+  if (db) {
+    await setDoc(doc(db, 'staff_attendance', recordId), sanitizeForFirestore(updatedRecord), {
+      merge: true
+    });
+  }
+
+  return updatedRecord;
 }
 
 function getLastDayOfYearMonth(year: number, monthOneBased: number): number {
@@ -7109,7 +7646,7 @@ export async function syncCompletedMonthSalaryStaffToPayables(options?: {
     }
 
     const activeStaff = allStaff.filter(
-      (s) => s && s.status !== 'INACTIVE' && Number(s.totalSalary) > 0
+      (s) => s && s.status !== 'SUSPENDED' && s.status !== 'INACTIVE' && Number(s.totalSalary) > 0
     );
     if (activeStaff.length === 0) return [];
 

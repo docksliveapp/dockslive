@@ -444,6 +444,7 @@ const UserManagement: React.FC = () => {
     if (r === UserRole.DESTINATION_PORT_STAFF) return 'Destination Staff';
     if (r === UserRole.UNLOADING_PORT_STAFF) return 'Unloading Staff';
     if (r === UserRole.LOADING_PORT_STAFF) return 'Loading Port Staff';
+    if (r === UserRole.TIME_TABLE_MANAGER) return 'Time Table Manager';
     return String(r)
       .replace(/_/g, ' ')
       .toLowerCase()

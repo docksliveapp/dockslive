@@ -10,6 +10,7 @@ export enum UserRole {
   DOCUMENTATION_MANAGER = 'DOCUMENTATION_MANAGER',
   VEHICLE_MANAGER = 'VEHICLE_MANAGER',
   OFFICE_STAFF = 'OFFICE_STAFF',
+  TIME_TABLE_MANAGER = 'TIME_TABLE_MANAGER',
   CLIENT = 'CLIENT',
   TRANSPORTER = 'TRANSPORTER',
   VENDOR = 'VENDOR',
@@ -1679,11 +1680,50 @@ export interface SalaryStaffMember {
   primaryContact: string;
   residentialContact?: string;
   residentialAddress?: string;
+  joiningDate?: string;
   totalSalary: number;
   photoUrl?: string;
   cnicFrontUrl?: string;
   cnicBackUrl?: string;
-  status: 'ACTIVE' | 'INACTIVE';
+  sortOrder?: number;
+  status: 'ACTIVE' | 'SUSPENDED' | 'INACTIVE';
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface StaffSalaryHistoryRow {
+  serial: number;
+  yearMonth: string;
+  monthLabel: string;
+  paymentDate: string;
+  amount: number;
+  paymentMode: string;
+  status: 'PAID' | 'PENDING';
+  reference?: string;
+}
+
+export interface StaffAttendanceRecord {
+  id: string;
+  companyId: string;
+  staffId: string;
+  staffName: string;
+  designation?: string;
+  date: string; // YYYY-MM-DD
+  entryTime?: string; // Formatted 12h time e.g. 09:15:20 AM
+  entryTimeIso?: string;
+  entryMarkedBy?: string;
+  lunchStartTime?: string; // Formatted 12h time e.g. 01:05:10 PM
+  lunchStartTimeIso?: string;
+  lunchStartMarkedBy?: string;
+  lunchEndTime?: string; // Formatted 12h time e.g. 01:55:40 PM
+  lunchEndTimeIso?: string;
+  lunchEndMarkedBy?: string;
+  lunchDuration?: string;
+  exitTime?: string; // Formatted 12h time e.g. 05:45:10 PM
+  exitTimeIso?: string;
+  exitMarkedBy?: string;
+  workingDuration?: string;
+  status: 'ENTERED' | 'ON_LUNCH' | 'RESUMED' | 'COMPLETED';
   createdAt: string;
   updatedAt?: string;
 }
