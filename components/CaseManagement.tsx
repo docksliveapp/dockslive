@@ -2509,29 +2509,154 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     setShowFilterModal(false);
   };
 
-  // Workflow Tab Filter (All Active, In Progress, Completed, Incident Vault)
-  const [activeWorkflowTab, setActiveWorkflowTab] = useState<'all' | 'in_progress' | 'completed' | 'incident_vault'>('all');
+  // Column-Header Dropdown Filters (all default to '' = "All")
+  const [colCaseNoFilter, setColCaseNoFilter] = useState<string>('');
+  const [colClientFilter, setColClientFilter] = useState<string>('');
+  const [colCategoryFilter, setColCategoryFilter] = useState<string>('');
+  const [colRouteFilter, setColRouteFilter] = useState<string>('');
+  const [colDateFilter, setColDateFilter] = useState<string>('');
+  const [colStatusFilter, setColStatusFilter] = useState<string>('');
+
+  const formatCaseRouteLabel = (c: Case): string => {
+    if (c.pol && c.pod) return `${c.pol.trim()} → ${c.pod.trim()}`;
+    return (c.pod || c.pol || 'Customs Clearance').trim();
+  };
+
+  const formatCaseDateLabel = (c: Case): string => {
+    if (!c.createdAt) return '-';
+    const d = new Date(c.createdAt);
+    return !isNaN(d.getTime())
+      ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+      : String(c.createdAt).split('T')[0];
+  };
 
   const incidentCasesCount = cases.filter(c => c.status === CaseStatus.INCIDENT_STOPPAGE || c.isIncidentVault).length;
-  const completedCasesCount = cases.filter(c => c.status === CaseStatus.COMPLETED && !c.isIncidentVault).length;
-  const inProgressCasesCount = cases.filter(c => c.status !== CaseStatus.COMPLETED && c.status !== CaseStatus.INCIDENT_STOPPAGE && !c.isIncidentVault).length;
+
+  const columnFilterOptions = useMemo(() => {
+    const caseNoSet = new Set<string>();
+    const clientCounts = new Map<string, number>();
+    const categoryCounts = new Map<string, number>();
+    const routeCounts = new Map<string, number>();
+    const dateCounts = new Map<string, number>();
+    const stageCounts = new Map<string, number>();
+    const rawStatusCounts = new Map<string, number>();
+
+    cases.forEach((c) => {
+      const cNo = (c.caseNo || '').trim();
+      if (cNo) caseNoSet.add(cNo);
+
+      const client = (c.clientName || '').trim();
+      if (client) clientCounts.set(client, (clientCounts.get(client) || 0) + 1);
+
+      const cat = (c.category || '').trim();
+      if (cat) categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1);
+
+      const route = formatCaseRouteLabel(c);
+      if (route) routeCounts.set(route, (routeCounts.get(route) || 0) + 1);
+
+      const dateStr = formatCaseDateLabel(c);
+      if (dateStr && dateStr !== '-') dateCounts.set(dateStr, (dateCounts.get(dateStr) || 0) + 1);
+
+      const stage = getUnifiedCaseStageLabel(c);
+      stageCounts.set(stage, (stageCounts.get(stage) || 0) + 1);
+
+      const rawStatus = String(c.status || '').trim();
+      if (rawStatus && rawStatus !== stage && rawStatus !== CaseStatus.COMPLETED && rawStatus !== CaseStatus.INCIDENT_STOPPAGE) {
+        rawStatusCounts.set(rawStatus, (rawStatusCounts.get(rawStatus) || 0) + 1);
+      }
+    });
+
+    const stageOrder = [
+      'Documentation Processing',
+      'Loading Port Processing',
+      'In Transit',
+      'Case Approval Pending',
+      'Completed',
+      CaseStatus.INCIDENT_STOPPAGE,
+      'Cancelled'
+    ];
+
+    const statusOptions: Array<{ value: string; label: string }> = [];
+    stageOrder.forEach((st) => {
+      const cnt = stageCounts.get(st) || 0;
+      if (cnt > 0 || st === 'Completed') {
+        const display =
+          st === 'Completed'
+            ? `Finished / Completed (${cnt})`
+            : st === CaseStatus.INCIDENT_STOPPAGE
+            ? `Incident / Disputed (${cnt})`
+            : `${st} (${cnt})`;
+        statusOptions.push({ value: `STAGE:${st}`, label: display });
+      }
+    });
+
+    Array.from(rawStatusCounts.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .forEach(([raw, cnt]) => {
+        statusOptions.push({ value: `RAW:${raw}`, label: `${raw} (${cnt})` });
+      });
+
+    return {
+      caseNos: Array.from(caseNoSet),
+      clients: Array.from(clientCounts.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([name, count]) => ({ name, count })),
+      categories: Array.from(categoryCounts.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([name, count]) => ({ name, count })),
+      routes: Array.from(routeCounts.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([route, count]) => ({ route, count })),
+      dates: Array.from(dateCounts.entries()).map(([date, count]) => ({ date, count })),
+      statuses: statusOptions
+    };
+  }, [cases]);
+
+  const hasActiveColumnFilters = Boolean(
+    colCaseNoFilter ||
+    colClientFilter ||
+    colCategoryFilter ||
+    colRouteFilter ||
+    colDateFilter ||
+    colStatusFilter
+  );
+
+  const clearAllColumnFilters = () => {
+    setColCaseNoFilter('');
+    setColClientFilter('');
+    setColCategoryFilter('');
+    setColRouteFilter('');
+    setColDateFilter('');
+    setColStatusFilter('');
+  };
 
   // Filtering Logic Combined
   const filteredCases = cases.filter(c => {
-      // Incident Vault separation
-      if (activeWorkflowTab === 'incident_vault') {
-        return c.status === CaseStatus.INCIDENT_STOPPAGE || c.isIncidentVault === true;
-      }
-      // Hide incident stoppage cases from normal lists
-      if (c.status === CaseStatus.INCIDENT_STOPPAGE || c.isIncidentVault === true) {
+      const isIncidentCase = c.status === CaseStatus.INCIDENT_STOPPAGE || c.isIncidentVault === true;
+      if (colStatusFilter === `STAGE:${CaseStatus.INCIDENT_STOPPAGE}`) {
+        if (!isIncidentCase) return false;
+      } else if (isIncidentCase) {
         return false;
       }
 
-      // Workflow Status Tabs
-      if (activeWorkflowTab === 'in_progress' && c.status === CaseStatus.COMPLETED) return false;
-      if (activeWorkflowTab === 'completed' && c.status !== CaseStatus.COMPLETED) return false;
+      // Column Dropdown Filters
+      if (colCaseNoFilter && (c.caseNo || '').trim() !== colCaseNoFilter) return false;
+      if (colClientFilter && (c.clientName || '').trim() !== colClientFilter) return false;
+      if (colCategoryFilter && (c.category || '').trim() !== colCategoryFilter) return false;
+      if (colRouteFilter && formatCaseRouteLabel(c) !== colRouteFilter) return false;
+      if (colDateFilter && formatCaseDateLabel(c) !== colDateFilter) return false;
 
-      // Date Filter
+      if (colStatusFilter && colStatusFilter !== `STAGE:${CaseStatus.INCIDENT_STOPPAGE}`) {
+        if (colStatusFilter.startsWith('STAGE:')) {
+          const targetStage = colStatusFilter.slice(6);
+          if (getUnifiedCaseStageLabel(c) !== targetStage) return false;
+        } else if (colStatusFilter.startsWith('RAW:')) {
+          const targetRaw = colStatusFilter.slice(4);
+          if (String(c.status || '').trim() !== targetRaw) return false;
+        }
+      }
+
+      // Date Filter (from View List / Reports modal)
       if (activeDateFilter) {
           if (c.createdAt < activeDateFilter.start || c.createdAt > activeDateFilter.end) return false;
       }
@@ -3720,90 +3845,74 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
          </div>
        </div>
 
-        {/* Active Filter Indicators */}
-        <div className="flex flex-wrap gap-2">
+        {/* Active Filter Indicators (only shown when filters are active) */}
+        {(activeDateFilter || statusFilter || hasActiveColumnFilters) && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-gray-400">
+              Showing {filteredCases.length} of {cases.length} cases:
+            </span>
             {activeDateFilter && (
-                <div className="flex items-center gap-2 bg-brand-500/10 border border-brand-500/20 px-3 py-1.5 rounded-lg w-fit">
-                    <span className="text-xs text-brand-300">Date Filter: {activeDateFilter.start} to {activeDateFilter.end}</span>
-                    <button onClick={() => setActiveDateFilter(null)} className="text-gray-400 hover:text-white"><X size={14} /></button>
-                </div>
+              <div className="flex items-center gap-2 bg-brand-500/10 border border-brand-500/20 px-3 py-1 rounded-lg w-fit">
+                <span className="text-xs text-brand-300">Date Range: {activeDateFilter.start} to {activeDateFilter.end}</span>
+                <button type="button" onClick={() => setActiveDateFilter(null)} className="text-gray-400 hover:text-white"><X size={14} /></button>
+              </div>
             )}
             {statusFilter && (
-                <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 px-3 py-1.5 rounded-lg w-fit animate-in fade-in">
-                    <span className="text-xs text-yellow-300">Status: {statusFilter}</span>
-                    <button onClick={clearStatusFilter} className="text-gray-400 hover:text-white"><X size={14} /></button>
-                </div>
+              <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 px-3 py-1 rounded-lg w-fit">
+                <span className="text-xs text-yellow-300">Overview: {statusFilter}</span>
+                <button type="button" onClick={clearStatusFilter} className="text-gray-400 hover:text-white"><X size={14} /></button>
+              </div>
             )}
-        </div>
+            {colCaseNoFilter && (
+              <div className="flex items-center gap-1.5 bg-brand-500/10 border border-brand-500/20 px-2.5 py-1 rounded-lg text-xs text-brand-300">
+                <span>Case: {colCaseNoFilter}</span>
+                <button type="button" onClick={() => setColCaseNoFilter('')} className="hover:text-white"><X size={13} /></button>
+              </div>
+            )}
+            {colClientFilter && (
+              <div className="flex items-center gap-1.5 bg-brand-500/10 border border-brand-500/20 px-2.5 py-1 rounded-lg text-xs text-brand-300">
+                <span>Client: {colClientFilter}</span>
+                <button type="button" onClick={() => setColClientFilter('')} className="hover:text-white"><X size={13} /></button>
+              </div>
+            )}
+            {colCategoryFilter && (
+              <div className="flex items-center gap-1.5 bg-brand-500/10 border border-brand-500/20 px-2.5 py-1 rounded-lg text-xs text-brand-300">
+                <span>Category: {colCategoryFilter}</span>
+                <button type="button" onClick={() => setColCategoryFilter('')} className="hover:text-white"><X size={13} /></button>
+              </div>
+            )}
+            {colRouteFilter && (
+              <div className="flex items-center gap-1.5 bg-brand-500/10 border border-brand-500/20 px-2.5 py-1 rounded-lg text-xs text-brand-300">
+                <span>Route: {colRouteFilter}</span>
+                <button type="button" onClick={() => setColRouteFilter('')} className="hover:text-white"><X size={13} /></button>
+              </div>
+            )}
+            {colDateFilter && (
+              <div className="flex items-center gap-1.5 bg-brand-500/10 border border-brand-500/20 px-2.5 py-1 rounded-lg text-xs text-brand-300">
+                <span>Date: {colDateFilter}</span>
+                <button type="button" onClick={() => setColDateFilter('')} className="hover:text-white"><X size={13} /></button>
+              </div>
+            )}
+            {colStatusFilter && (
+              <div className="flex items-center gap-1.5 bg-brand-500/10 border border-brand-500/20 px-2.5 py-1 rounded-lg text-xs text-brand-300">
+                <span>Status: {colStatusFilter.replace(/^(STAGE:|RAW:)/, '')}</span>
+                <button type="button" onClick={() => setColStatusFilter('')} className="hover:text-white"><X size={13} /></button>
+              </div>
+            )}
+            {hasActiveColumnFilters && (
+              <button
+                type="button"
+                onClick={clearAllColumnFilters}
+                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 transition-colors cursor-pointer"
+              >
+                Reset All Filters
+              </button>
+            )}
+          </div>
+        )}
 
-        {/* Workflow & Incident Vault Filtering Tabs */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-white/10 pb-3">
-          <button
-            type="button"
-            onClick={() => setActiveWorkflowTab('all')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 ${
-              activeWorkflowTab === 'all'
-                ? 'bg-brand-600 text-white shadow-md shadow-brand-600/20'
-                : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-white/5'
-            }`}
-          >
-            <span>All Active Cases</span>
-            <span className="px-1.5 py-0.5 rounded-md bg-black/30 text-[10px] font-mono">
-              {cases.length - incidentCasesCount}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveWorkflowTab('in_progress')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 ${
-              activeWorkflowTab === 'in_progress'
-                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
-                : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-white/5'
-            }`}
-          >
-            <span>In Progress (8 Steps)</span>
-            <span className="px-1.5 py-0.5 rounded-md bg-black/30 text-[10px] font-mono">
-              {inProgressCasesCount}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveWorkflowTab('completed')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 ${
-              activeWorkflowTab === 'completed'
-                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
-                : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-white/5'
-            }`}
-          >
-            <span>Completed Dossiers</span>
-            <span className="px-1.5 py-0.5 rounded-md bg-black/30 text-[10px] font-mono">
-              {completedCasesCount}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveWorkflowTab('incident_vault')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeWorkflowTab === 'incident_vault'
-                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/20'
-                : incidentCasesCount > 0
-                ? 'bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 animate-pulse'
-                : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white border border-white/5'
-            }`}
-          >
-            <AlertTriangle size={14} className={incidentCasesCount > 0 ? 'text-rose-400' : 'text-gray-400'} />
-            <span>Incident / Disputed Vault</span>
-            <span className="px-1.5 py-0.5 rounded-md bg-black/30 text-[10px] font-mono">
-              {incidentCasesCount}
-            </span>
-          </button>
-        </div>
-
-        {/* If in Incident Vault, show emergency banner */}
-        {activeWorkflowTab === 'incident_vault' && (
+        {/* If Incident status selected, show emergency banner */}
+        {colStatusFilter === `STAGE:${CaseStatus.INCIDENT_STOPPAGE}` && (
           <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
             <div className="flex items-start gap-3">
               <AlertCircle size={22} className="text-rose-400 shrink-0 mt-0.5" />
@@ -3819,8 +3928,63 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
 
        {/* Case List - Full-Height Open Layout for Mobile & Desktop */}
        <div className="glass-card rounded-2xl overflow-hidden min-h-[calc(100dvh-220px)] flex flex-col">
-         {/* Mobile View: Full-Screen Open List, Clean Date & Full Case No Visibility */}
+         {/* Mobile View: Column Filter Dropdowns + Open List */}
          <div className="block sm:hidden flex-1">
+           <div className="p-3 border-b border-white/10 bg-slate-950/60 grid grid-cols-2 gap-2">
+             <div>
+               <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Client</label>
+               <select
+                 value={colClientFilter}
+                 onChange={(e) => setColClientFilter(e.target.value)}
+                 className="w-full h-9 rounded-lg px-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
+               >
+                 <option value="">All Clients</option>
+                 {columnFilterOptions.clients.map(cl => (
+                   <option key={cl.name} value={cl.name}>{cl.name} ({cl.count})</option>
+                 ))}
+               </select>
+             </div>
+             <div>
+               <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Category</label>
+               <select
+                 value={colCategoryFilter}
+                 onChange={(e) => setColCategoryFilter(e.target.value)}
+                 className="w-full h-9 rounded-lg px-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
+               >
+                 <option value="">All Categories</option>
+                 {columnFilterOptions.categories.map(cat => (
+                   <option key={cat.name} value={cat.name}>{cat.name} ({cat.count})</option>
+                 ))}
+               </select>
+             </div>
+             <div>
+               <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Route</label>
+               <select
+                 value={colRouteFilter}
+                 onChange={(e) => setColRouteFilter(e.target.value)}
+                 className="w-full h-9 rounded-lg px-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
+               >
+                 <option value="">All Routes</option>
+                 {columnFilterOptions.routes.map(rt => (
+                   <option key={rt.route} value={rt.route}>{rt.route} ({rt.count})</option>
+                 ))}
+               </select>
+             </div>
+             <div>
+               <label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Status</label>
+               <select
+                 value={colStatusFilter}
+                 onChange={(e) => setColStatusFilter(e.target.value)}
+                 className="w-full h-9 rounded-lg px-2 text-xs bg-slate-900 text-white border border-white/15 outline-none"
+               >
+                 <option value="">All Statuses</option>
+                 {columnFilterOptions.statuses.map(st => (
+                   <option key={st.value} value={st.value}>{st.label}</option>
+                 ))}
+               </select>
+             </div>
+           </div>
+
            <VirtualizedList
              items={filteredCases}
              itemHeight={106}
@@ -3832,14 +3996,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                </div>
              }
              renderItem={(c) => {
-               const formattedDate = c.createdAt
-                 ? (() => {
-                     const d = new Date(c.createdAt);
-                     return !isNaN(d.getTime())
-                       ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-                       : String(c.createdAt).split('T')[0];
-                   })()
-                 : '';
+               const formattedDate = formatCaseDateLabel(c);
                return (
                  <div 
                    className="p-3.5 hover:bg-white/5 active:bg-white/10 transition-colors cursor-pointer space-y-2 border-b border-white/5"
@@ -3849,7 +4006,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                    <div className="flex items-center justify-between gap-2">
                      <div className="flex items-center gap-2 min-w-0 flex-1">
                        <span className="font-mono font-bold text-xs text-brand-400 truncate">{c.caseNo}</span>
-                       {formattedDate && (
+                       {formattedDate && formattedDate !== '-' && (
                          <span className="text-[10px] text-gray-400 shrink-0">{formattedDate}</span>
                        )}
                      </div>
@@ -3872,7 +4029,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                    {/* Bottom Row: Route (POL -> POD) & View Button */}
                    <div className="flex items-center justify-between pt-1.5 border-t border-white/5 text-[11px] gap-2">
                      <span className="font-mono text-gray-300 truncate">
-                       {c.pol && c.pod ? `${c.pol} → ${c.pod}` : 'Customs Clearance'}
+                       {formatCaseRouteLabel(c)}
                      </span>
                      <span className="text-brand-400 flex items-center gap-1 font-medium text-[11px] shrink-0">
                        <Eye size={12} />
@@ -3885,51 +4042,185 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
            />
          </div>
 
-         {/* Desktop View: Open Full-Height Table */}
+         {/* Desktop View: Open Full-Height Table with Column-Header Dropdown Filters */}
          <div className="hidden sm:block flex-1">
            <VirtualizedTable<Case>
              items={filteredCases}
              rowHeight={64}
              minHeight={520}
-             minTableWidth={1000}
+             minTableWidth={1020}
+             headerCellClassName="px-3"
              getItemKey={(c, idx) => `case_row_${c.id || idx}_${idx}`}
              onRowClick={(c) => { setSelectedCase(c); setView('details'); }}
              columns={[
-               { header: 'Case No', width: '18%' },
-               { header: 'Client', width: '22%' },
-               { header: 'Category', width: '16%' },
-               { header: 'Route', width: '18%' },
-               { header: 'Date', width: '10%' },
-               { header: 'Status', width: '10%' },
-               { header: 'Action', width: '6%', className: 'text-center' }
+               {
+                 width: '17%',
+                 header: (
+                   <div className="flex flex-col gap-1.5 w-full py-0.5">
+                     <span className="text-[10.5px] font-bold uppercase tracking-wider">Case No</span>
+                     <select
+                       aria-label="Filter by Case No"
+                       value={colCaseNoFilter}
+                       onChange={(e) => setColCaseNoFilter(e.target.value)}
+                       onClick={(e) => e.stopPropagation()}
+                       className="w-full h-7 rounded-md px-1.5 text-[11px] font-medium normal-case tracking-normal bg-slate-900 text-white border border-white/15 focus:border-brand-400 outline-none cursor-pointer"
+                     >
+                       <option value="">All ({cases.length})</option>
+                       {columnFilterOptions.caseNos.map((cNo) => (
+                         <option key={cNo} value={cNo}>{cNo}</option>
+                       ))}
+                     </select>
+                   </div>
+                 )
+               },
+               {
+                 width: '21%',
+                 header: (
+                   <div className="flex flex-col gap-1.5 w-full py-0.5">
+                     <span className="text-[10.5px] font-bold uppercase tracking-wider">Client</span>
+                     <select
+                       aria-label="Filter by Client"
+                       value={colClientFilter}
+                       onChange={(e) => setColClientFilter(e.target.value)}
+                       onClick={(e) => e.stopPropagation()}
+                       className="w-full h-7 rounded-md px-1.5 text-[11px] font-medium normal-case tracking-normal bg-slate-900 text-white border border-white/15 focus:border-brand-400 outline-none cursor-pointer"
+                     >
+                       <option value="">All</option>
+                       {columnFilterOptions.clients.map((cl) => (
+                         <option key={cl.name} value={cl.name}>{cl.name} ({cl.count})</option>
+                       ))}
+                     </select>
+                   </div>
+                 )
+               },
+               {
+                 width: '15%',
+                 header: (
+                   <div className="flex flex-col gap-1.5 w-full py-0.5">
+                     <span className="text-[10.5px] font-bold uppercase tracking-wider">Category</span>
+                     <select
+                       aria-label="Filter by Category"
+                       value={colCategoryFilter}
+                       onChange={(e) => setColCategoryFilter(e.target.value)}
+                       onClick={(e) => e.stopPropagation()}
+                       className="w-full h-7 rounded-md px-1.5 text-[11px] font-medium normal-case tracking-normal bg-slate-900 text-white border border-white/15 focus:border-brand-400 outline-none cursor-pointer"
+                     >
+                       <option value="">All</option>
+                       {columnFilterOptions.categories.map((cat) => (
+                         <option key={cat.name} value={cat.name}>{cat.name} ({cat.count})</option>
+                       ))}
+                     </select>
+                   </div>
+                 )
+               },
+               {
+                 width: '19%',
+                 header: (
+                   <div className="flex flex-col gap-1.5 w-full py-0.5">
+                     <span className="text-[10.5px] font-bold uppercase tracking-wider">Route</span>
+                     <select
+                       aria-label="Filter by Route"
+                       value={colRouteFilter}
+                       onChange={(e) => setColRouteFilter(e.target.value)}
+                       onClick={(e) => e.stopPropagation()}
+                       className="w-full h-7 rounded-md px-1.5 text-[11px] font-medium normal-case tracking-normal bg-slate-900 text-white border border-white/15 focus:border-brand-400 outline-none cursor-pointer"
+                     >
+                       <option value="">All</option>
+                       {columnFilterOptions.routes.map((rt) => (
+                         <option key={rt.route} value={rt.route}>{rt.route} ({rt.count})</option>
+                       ))}
+                     </select>
+                   </div>
+                 )
+               },
+               {
+                 width: '11%',
+                 header: (
+                   <div className="flex flex-col gap-1.5 w-full py-0.5">
+                     <span className="text-[10.5px] font-bold uppercase tracking-wider">Date</span>
+                     <select
+                       aria-label="Filter by Date"
+                       value={colDateFilter}
+                       onChange={(e) => setColDateFilter(e.target.value)}
+                       onClick={(e) => e.stopPropagation()}
+                       className="w-full h-7 rounded-md px-1.5 text-[11px] font-medium normal-case tracking-normal bg-slate-900 text-white border border-white/15 focus:border-brand-400 outline-none cursor-pointer"
+                     >
+                       <option value="">All</option>
+                       {columnFilterOptions.dates.map((dt) => (
+                         <option key={dt.date} value={dt.date}>{dt.date} ({dt.count})</option>
+                       ))}
+                     </select>
+                   </div>
+                 )
+               },
+               {
+                 width: '11%',
+                 header: (
+                   <div className="flex flex-col gap-1.5 w-full py-0.5">
+                     <span className="text-[10.5px] font-bold uppercase tracking-wider">Status</span>
+                     <select
+                       aria-label="Filter by Status"
+                       value={colStatusFilter}
+                       onChange={(e) => setColStatusFilter(e.target.value)}
+                       onClick={(e) => e.stopPropagation()}
+                       className="w-full h-7 rounded-md px-1.5 text-[11px] font-medium normal-case tracking-normal bg-slate-900 text-white border border-white/15 focus:border-brand-400 outline-none cursor-pointer"
+                     >
+                       <option value="">All</option>
+                       {columnFilterOptions.statuses.map((st) => (
+                         <option key={st.value} value={st.value}>{st.label}</option>
+                       ))}
+                     </select>
+                   </div>
+                 )
+               },
+               {
+                 width: '6%',
+                 className: 'text-center',
+                 header: (
+                   <div className="flex flex-col items-center justify-between gap-1.5 w-full py-0.5">
+                     <span className="text-[10.5px] font-bold uppercase tracking-wider">Action</span>
+                     {hasActiveColumnFilters ? (
+                       <button
+                         type="button"
+                         data-custom-control="true"
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           clearAllColumnFilters();
+                         }}
+                         className="h-7 px-2 rounded-md text-[10px] font-semibold normal-case bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition-colors cursor-pointer"
+                         title="Clear All Column Filters"
+                       >
+                         Reset
+                       </button>
+                     ) : (
+                       <div className="h-7 flex items-center justify-center text-[10px] text-gray-500 font-normal normal-case">
+                         All
+                       </div>
+                     )}
+                   </div>
+                 )
+               }
              ]}
              renderRow={(c) => {
-               const formattedDate = c.createdAt
-                 ? (() => {
-                     const d = new Date(c.createdAt);
-                     return !isNaN(d.getTime())
-                       ? d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-                       : String(c.createdAt).split('T')[0];
-                   })()
-                 : '-';
+               const formattedDate = formatCaseDateLabel(c);
                return (
                  <>
-                   <div className="p-4 font-mono font-bold text-white group-hover:text-brand-400 transition-colors truncate" style={{ width: '18%', flexShrink: 0 }}>
+                   <div className="px-3 py-3 font-mono font-bold text-white group-hover:text-brand-400 transition-colors truncate" style={{ width: '17%', flexShrink: 0 }}>
                      {c.caseNo}
                    </div>
-                   <div className="p-4 font-medium text-white truncate" style={{ width: '22%', flexShrink: 0 }}>
+                   <div className="px-3 py-3 font-medium text-white truncate" style={{ width: '21%', flexShrink: 0 }}>
                      {c.clientName}
                    </div>
-                   <div className="p-4 text-gray-200 truncate" style={{ width: '16%', flexShrink: 0 }}>
+                   <div className="px-3 py-3 text-gray-200 truncate" style={{ width: '15%', flexShrink: 0 }}>
                      {c.category}
                    </div>
-                   <div className="p-4 text-xs font-mono text-gray-300 truncate" style={{ width: '18%', flexShrink: 0 }}>
+                   <div className="px-3 py-3 text-xs font-mono text-gray-300 truncate" style={{ width: '19%', flexShrink: 0 }}>
                      {c.pol && c.pod ? `${c.pol} → ${c.pod}` : '-'}
                    </div>
-                   <div className="p-4 text-gray-300 text-xs truncate" style={{ width: '10%', flexShrink: 0 }}>
+                   <div className="px-3 py-3 text-gray-300 text-xs truncate" style={{ width: '11%', flexShrink: 0 }}>
                      {formattedDate}
                    </div>
-                   <div className="p-4" style={{ width: '10%', flexShrink: 0 }}>
+                   <div className="px-3 py-2" style={{ width: '11%', flexShrink: 0 }}>
                      <div className="flex flex-col gap-1 items-start">
                        {(() => {
                          const stageLabel = getUnifiedCaseStageLabel(c);
@@ -3954,7 +4245,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                        })()}
                      </div>
                    </div>
-                   <div className="p-4 text-center" style={{ width: '6%', flexShrink: 0 }}>
+                   <div className="px-3 py-3 text-center" style={{ width: '6%', flexShrink: 0 }}>
                      <button className="p-2 hover:bg-white/10 rounded-full text-brand-400 transition-colors">
                        <Eye size={18} />
                      </button>
@@ -9017,7 +9308,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             setSelectedCase(caseWithIncident);
             if (isEditingCase) setEditedCase(caseWithIncident);
             updateCaseInFirestore(caseWithIncident).catch(e => console.warn("Firestore incident error:", e));
-            setActiveWorkflowTab('incident_vault');
+            setColStatusFilter(`STAGE:${CaseStatus.INCIDENT_STOPPAGE}`);
           }}
         />
       )}
