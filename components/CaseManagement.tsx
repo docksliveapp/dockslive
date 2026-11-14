@@ -91,7 +91,7 @@ import {
 import { ClientRegistrationModal } from './ClientRegistrationModal';
 import { SmartCaseSearchModal } from './SmartCaseSearchModal';
 import { logActivity } from '../services/activityLogService';
-import { generateDplCaseNumber, getDestinationCode, getCaseInvoiceNumber } from '../services/caseNumberService';
+import { generateDplCaseNumber, getDestinationCode, getCaseInvoiceNumber, isCaseSerialTaken, parseCaseNoParts } from '../services/caseNumberService';
 import { useActiveCompany, getActiveCompanyPrefix } from '../services/companyService';
 import { CameraDocumentScannerModal } from './CameraDocumentScannerModal';
 import { jsPDF } from 'jspdf';
@@ -127,7 +127,8 @@ import {
   DEFAULT_CLIENTS,
   saveUserWorkDraftToFirestore,
   getUserWorkDraftFromFirestore,
-  deleteUserWorkDraftFromFirestore
+  deleteUserWorkDraftFromFirestore,
+  reserveNextSequentialCaseNumber
 } from '../services/dbService';
 import { sendAppNotification } from '../services/notificationService';
 
@@ -1092,6 +1093,8 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
   const [generatedCaseNo, setGeneratedCaseNo] = useState<string>(() => {
     return safeAppStorage.getItem('dpl_reg_caseno') || '';
   });
+  const [isSubmittingCase, setIsSubmittingCase] = useState(false);
+  const isSubmittingCaseRef = useRef(false);
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
   const [showCustomsGuideModal, setShowCustomsGuideModal] = useState(false);
@@ -1524,15 +1527,22 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     return generateDplCaseNumber(customList || cases, dest, new Date(), currentPrefix);
   };
 
-  // Keep generatedCaseNo synchronized with chosen POD / destination and active subsidiary prefix during registration
+  // Keep generatedCaseNo preview synchronized with chosen POD, active subsidiary prefix, and live cases (never hold an already-used serial!)
   useEffect(() => {
-    if (view === 'register') {
+    if (view === 'register' && !isCaseSubmitted) {
       const dest = formData.pod || formData.extractedData?.dropoffDestination;
-      const currentPrefix = activeCompany?.prefix || getActiveCompanyPrefix();
+      const currentPrefix = (activeCompany?.prefix || getActiveCompanyPrefix() || 'DPL').toUpperCase().trim();
+      const currentYear2Digit = String(new Date().getFullYear()).slice(-2);
+
       if (dest) {
         const destCode = getDestinationCode(dest);
         setGeneratedCaseNo(prev => {
-          if (!prev) {
+          const parsed = parseCaseNoParts(prev);
+          const serialAlreadyTaken = parsed
+            ? (parsed.year2Digit !== currentYear2Digit || isCaseSerialTaken(cases, parsed.serial, currentYear2Digit, currentPrefix))
+            : true;
+
+          if (!prev || serialAlreadyTaken) {
             const fresh = generateDplCaseNumber(cases, dest, new Date(), currentPrefix);
             safeAppStorage.setItem('dpl_reg_caseno', fresh);
             return fresh;
@@ -1554,6 +1564,15 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       } else {
         setGeneratedCaseNo(prev => {
           if (prev) {
+            const parsed = parseCaseNoParts(prev);
+            const serialAlreadyTaken = parsed
+              ? (parsed.year2Digit !== currentYear2Digit || isCaseSerialTaken(cases, parsed.serial, currentYear2Digit, currentPrefix))
+              : false;
+            if (serialAlreadyTaken) {
+              const fresh = generateDplCaseNumber(cases, undefined, new Date(), currentPrefix);
+              safeAppStorage.setItem('dpl_reg_caseno', fresh);
+              return fresh;
+            }
             const parts = prev.split('-');
             if (parts.length === 5 && parts[0] !== currentPrefix) {
               const updated = `${currentPrefix}-${parts.slice(1).join('-')}`;
@@ -1565,7 +1584,7 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         });
       }
     }
-  }, [formData.pod, formData.extractedData?.dropoffDestination, view, cases, activeCompany?.id, activeCompany?.prefix]);
+  }, [formData.pod, formData.extractedData?.dropoffDestination, view, isCaseSubmitted, cases, activeCompany?.id, activeCompany?.prefix]);
 
   const handleResumeDraft = () => {
     const savedStep = parseInt(safeAppStorage.getItem('dpl_reg_step') || '1', 10);
@@ -2021,7 +2040,13 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       clearTimeout(timer4);
       setIsReadingDocuments(false);
       let activeNo = generatedCaseNo;
-      if (!activeNo) {
+      const parsedActive = parseCaseNoParts(activeNo);
+      const currentPrefix = (activeCompany?.prefix || getActiveCompanyPrefix() || 'DPL').toUpperCase().trim();
+      const currentYear2Digit = String(new Date().getFullYear()).slice(-2);
+      const activeTaken = parsedActive
+        ? isCaseSerialTaken(cases, parsedActive.serial, currentYear2Digit, currentPrefix)
+        : true;
+      if (!activeNo || activeTaken) {
         activeNo = generateCaseNumber(undefined, formData.pod);
         setGeneratedCaseNo(activeNo);
         safeAppStorage.setItem('dpl_reg_caseno', activeNo);
@@ -2237,7 +2262,20 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
     });
   };
 
-  const handleFinalSubmit = () => {
+  const handleFinalSubmit = async () => {
+    if (isSubmittingCaseRef.current) return;
+
+    const resolvedClientName = (formData.client || '').trim() || registeredClients[0] || '';
+    if (!resolvedClientName) {
+      alert('Please select the Client Name before registering the case.');
+      setStep(1);
+      return;
+    }
+
+    isSubmittingCaseRef.current = true;
+    setIsSubmittingCase(true);
+
+    try {
       const serializableDocs = uploadedDocs.length > 0 
         ? uploadedDocs.map(d => {
             const cached = docDataCache.get(d.name) || (d.id ? docDataCache.get(d.id) : null);
@@ -2273,22 +2311,21 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         ? formData.charges
         : [];
 
-      // Final sequential verification: ensure case number is strictly unique, sequential, and matches selected POD destination code
+      // Atomic Cloud Case Number Reservation:
+      // Reserves the strictly next unused serial in Firestore across ALL destinations (ISB, PEW, LHR, etc.),
+      // ALL concurrent users/tabs, and both Staff & Client Portal registrations.
       const chosenDest = formData.pod || formData.extractedData?.dropoffDestination || formData.extractedData?.placeOfDelivery;
-      const expectedDestCode = getDestinationCode(chosenDest);
       const currentPrefix = activeCompany?.prefix || getActiveCompanyPrefix();
-      let finalCaseNo = generatedCaseNo;
-      const isTaken = !finalCaseNo || cases.some(c => c.caseNo === finalCaseNo);
-      if (isTaken) {
+      let finalCaseNo = await reserveNextSequentialCaseNumber({
+        destination: chosenDest,
+        targetDate: new Date(),
+        customPrefix: currentPrefix,
+        localCases: cases
+      });
+      const currentYear2Digit = String(new Date().getFullYear()).slice(-2);
+      const reservedParsed = parseCaseNoParts(finalCaseNo);
+      if (reservedParsed && isCaseSerialTaken(cases, reservedParsed.serial, currentYear2Digit, currentPrefix)) {
         finalCaseNo = generateCaseNumber(cases, chosenDest);
-      } else if (chosenDest) {
-        const parts = finalCaseNo.split('-');
-        if (parts.length === 5 && (parts[1] !== expectedDestCode || parts[0] !== currentPrefix)) {
-          const candidateUpdated = `${currentPrefix}-${expectedDestCode}-${parts[2]}-${parts[3]}-${parts[4]}`;
-          finalCaseNo = cases.some(c => c.caseNo === candidateUpdated)
-            ? generateCaseNumber(cases, chosenDest)
-            : candidateUpdated;
-        }
       }
       setGeneratedCaseNo(finalCaseNo);
 
@@ -2378,15 +2415,8 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
         };
       }
 
-      const resolvedClientName = (formData.client || '').trim() || registeredClients[0] || '';
-      if (!resolvedClientName) {
-        alert('Please select the Client Name before registering the case.');
-        setStep(1);
-        return;
-      }
-
       const newCase: Case = {
-          id: Date.now().toString(),
+          id: `${Date.now()}_${Math.floor(Math.random() * 1000)}`,
           caseNo: finalCaseNo,
           clientName: resolvedClientName,
           category: formData.category,
@@ -2415,7 +2445,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       setSubmittedCaseData(newCase);
       safeAppStorage.setJSON('dpl_live_cases', updatedCases);
       window.dispatchEvent(new CustomEvent('dpl_cases_updated', { detail: updatedCases }));
-      saveCaseToFirestore(newCase).catch((e) => console.warn("Firestore saveCase error:", e));
+
+      // Wait briefly for Firestore write so concurrent users see the new case immediately, without stalling offline users
+      await Promise.race([
+        saveCaseToFirestore(newCase).catch((e) => console.warn("Firestore saveCase error:", e)),
+        new Promise<void>((resolve) => setTimeout(resolve, 4000))
+      ]);
 
       // Dispatch notification ONLY for Client Portal registrations -> Operations Manager & Documentation Manager ONLY (NOT Admin!)
       if (requiresApproval) {
@@ -2452,7 +2487,11 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
       setHasDraft(false);
 
       setIsCaseSubmitted(true);
-      setStep(4); 
+      setStep(4);
+    } finally {
+      isSubmittingCaseRef.current = false;
+      setIsSubmittingCase(false);
+    }
   };
 
   // --- Filter Logic ---
@@ -7778,11 +7817,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </button>
             <button
               type="button"
+              disabled={isSubmittingCase}
               onClick={handleFinalSubmit}
-              className="h-10 px-5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer"
+              className="h-10 px-5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer"
             >
-              <CheckCircle size={16} />
-              <span>Finish & Register</span>
+              {isSubmittingCase ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
+              <span>{isSubmittingCase ? 'Assigning Case #...' : 'Finish & Register'}</span>
             </button>
           </div>
         </div>
@@ -8170,11 +8210,12 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
             </button>
             <button
               type="button"
+              disabled={isSubmittingCase}
               onClick={handleFinalSubmit}
-              className="h-11 bg-emerald-600 hover:bg-emerald-500 text-white px-6 sm:px-8 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/25 transition-all cursor-pointer"
+              className="h-11 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed text-white px-6 sm:px-8 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/25 transition-all cursor-pointer"
             >
-              <CheckCircle size={17} />
-              <span>Finish & Register Case</span>
+              {isSubmittingCase ? <Loader2 size={17} className="animate-spin" /> : <CheckCircle size={17} />}
+              <span>{isSubmittingCase ? 'Assigning Case # & Saving...' : 'Finish & Register Case'}</span>
             </button>
           </div>
         </div>
@@ -8295,7 +8336,11 @@ const CaseManagement: React.FC<CaseManagementProps> = ({
                   type="button"
                   onClick={() => {
                     if (step === 1) {
-                      if (!generatedCaseNo) {
+                      const currentPrefix = (activeCompany?.prefix || getActiveCompanyPrefix() || 'DPL').toUpperCase().trim();
+                      const currentYear2Digit = String(new Date().getFullYear()).slice(-2);
+                      const parsedNo = parseCaseNoParts(generatedCaseNo);
+                      const noAlreadyTaken = !generatedCaseNo || !parsedNo || isCaseSerialTaken(cases, parsedNo.serial, currentYear2Digit, currentPrefix);
+                      if (noAlreadyTaken) {
                         const freshCaseNo = generateCaseNumber();
                         setGeneratedCaseNo(freshCaseNo);
                         safeAppStorage.setItem('dpl_reg_caseno', freshCaseNo);

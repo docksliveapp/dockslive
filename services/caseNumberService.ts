@@ -101,10 +101,169 @@ export function getDestinationCode(destination?: string): string {
   return 'LHR';
 }
 
+export interface ParsedCaseNoParts {
+  prefix: string;
+  destCode: string;
+  year2Digit: string;
+  month3Letter: string;
+  serial: number;
+}
+
+/**
+ * Formats a sequential case number: [PREFIX]-[DEST]-[YY]-[MMM]-[SERIAL]
+ */
+export function buildCaseNo(params: {
+  prefix?: string;
+  destCode?: string;
+  year2Digit?: string;
+  month3Letter?: string;
+  serial: number;
+}): string {
+  const now = new Date();
+  const prefix = (params.prefix || getActiveCompanyPrefix() || 'DPL').toUpperCase().trim();
+  const destCode = (params.destCode || 'LHR').toUpperCase().trim();
+  const yy = params.year2Digit || String(now.getFullYear()).slice(-2);
+  const mmm = (params.month3Letter || MONTH_NAMES[now.getMonth()]).toUpperCase();
+  const serialStr = String(Math.max(1, Math.floor(params.serial))).padStart(3, '0');
+  return `${prefix}-${destCode}-${yy}-${mmm}-${serialStr}`;
+}
+
+/**
+ * Parses a case number string into its structural parts.
+ * Supports:
+ * - Standard 5-part format: DPL-ISB-26-NOV-132
+ * - 3-part format: DPL-26-000132
+ * - Legacy 2-part format: DPL-132 (fallbackYear2Digit used when provided)
+ */
+export function parseCaseNoParts(
+  caseNo?: string,
+  fallbackDateStr?: string
+): ParsedCaseNoParts | null {
+  if (!caseNo || typeof caseNo !== 'string') return null;
+  const caseStr = caseNo.trim().toUpperCase();
+  if (!caseStr) return null;
+
+  // Pattern 1: [PREFIX]-[DEST]-[YY]-[MMM]-[SERIAL]
+  const stdMatch = caseStr.match(/^([A-Z]{2,5})-([A-Z0-9]{2,6})-(\d{2})-([A-Z]{3})-(\d+)$/);
+  if (stdMatch) {
+    const serial = parseInt(stdMatch[5], 10);
+    if (!isNaN(serial)) {
+      return {
+        prefix: stdMatch[1],
+        destCode: stdMatch[2],
+        year2Digit: stdMatch[3],
+        month3Letter: stdMatch[4],
+        serial
+      };
+    }
+  }
+
+  // Pattern 2: [PREFIX]-[YY]-(optional MMM-)[SERIAL]
+  const yearMatch = caseStr.match(/^([A-Z]{2,5})-(?:([A-Z0-9]+)-)?(\d{2})-(?:([A-Z]{3})-)?(\d+)$/);
+  if (yearMatch) {
+    const serial = parseInt(yearMatch[5], 10);
+    if (!isNaN(serial)) {
+      return {
+        prefix: yearMatch[1],
+        destCode: yearMatch[2] || 'LHR',
+        year2Digit: yearMatch[3],
+        month3Letter: yearMatch[4] || '',
+        serial
+      };
+    }
+  }
+
+  // Pattern 3: [PREFIX]-[SERIAL] legacy format
+  const legacyMatch = caseStr.match(/^([A-Z]{2,5})-(\d+)$/);
+  if (legacyMatch) {
+    const serial = parseInt(legacyMatch[2], 10);
+    const derivedYy = fallbackDateStr && /^\d{4}/.test(fallbackDateStr)
+      ? fallbackDateStr.slice(2, 4)
+      : String(new Date().getFullYear()).slice(-2);
+    if (!isNaN(serial)) {
+      return {
+        prefix: legacyMatch[1],
+        destCode: 'LHR',
+        year2Digit: derivedYy,
+        month3Letter: '',
+        serial
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns the highest serial number used in the given 2-digit year for the given prefix
+ * across ALL destinations (LHR, ISB, PEW, KHI, etc.) and ALL months.
+ */
+export function getMaxCaseSerialForYear(
+  existingCases: Array<{ caseNo?: string; createdAt?: string; date?: string }>,
+  year2Digit: string,
+  customPrefix?: string
+): number {
+  const targetPrefix = (customPrefix || getActiveCompanyPrefix() || 'DPL').toUpperCase().trim();
+  const targetYear = String(year2Digit).slice(-2);
+  let maxSeq = 0;
+
+  existingCases.forEach(c => {
+    if (!c || !c.caseNo) return;
+    const fallbackDate = c.createdAt || c.date || '';
+    const parsed = parseCaseNoParts(c.caseNo, fallbackDate);
+    if (parsed) {
+      if (parsed.prefix === targetPrefix && parsed.year2Digit === targetYear && parsed.serial > maxSeq) {
+        maxSeq = parsed.serial;
+      }
+      return;
+    }
+
+    // Fallback for malformed custom case strings matching the target prefix
+    const upper = String(c.caseNo).trim().toUpperCase();
+    if (upper.startsWith(`${targetPrefix}-`)) {
+      const parts = upper.split('-');
+      const lastPart = parts[parts.length - 1];
+      const seq = parseInt(lastPart, 10);
+      const yearPart = parts.find(p => /^\d{2}$/.test(p));
+      if (!isNaN(seq) && (!yearPart || yearPart === targetYear) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+  });
+
+  return maxSeq;
+}
+
+/**
+ * Checks whether a given numeric serial is already used by ANY case
+ * in the same prefix & year — regardless of destination code (e.g. ISB vs PEW).
+ */
+export function isCaseSerialTaken(
+  existingCases: Array<{ caseNo?: string; createdAt?: string; date?: string }>,
+  serial: number,
+  year2Digit?: string,
+  customPrefix?: string
+): boolean {
+  if (!serial || isNaN(serial)) return false;
+  const targetPrefix = (customPrefix || getActiveCompanyPrefix() || 'DPL').toUpperCase().trim();
+  const targetYear = (year2Digit || String(new Date().getFullYear()).slice(-2)).slice(-2);
+
+  return existingCases.some(c => {
+    if (!c || !c.caseNo) return false;
+    const parsed = parseCaseNoParts(c.caseNo, c.createdAt || c.date || '');
+    return Boolean(
+      parsed &&
+      parsed.prefix === targetPrefix &&
+      parsed.year2Digit === targetYear &&
+      parsed.serial === serial
+    );
+  });
+}
+
 /**
  * Scans existing cases and generates the next strictly sequential case number
  * format: [PREFIX]-[DEST]-[YY]-[MMM]-[SERIAL] (e.g. DPL-LHR-26-OCT-001, MI-LHR-26-OCT-001, VSL-KHI-26-OCT-001, TRK-LHR-26-OCT-001)
- * Serial resets ONLY when Year changes. Month updates dynamically.
+ * Serial resets ONLY when Year changes. Month & destination do NOT reset the serial.
  */
 export function generateDplCaseNumber(
   existingCases: Array<{ caseNo?: string; createdAt?: string; date?: string }>,
@@ -112,59 +271,19 @@ export function generateDplCaseNumber(
   targetDate: Date = new Date(),
   customPrefix?: string
 ): string {
-  const prefix = customPrefix || getActiveCompanyPrefix();
+  const prefix = (customPrefix || getActiveCompanyPrefix() || 'DPL').toUpperCase().trim();
   const destCode = getDestinationCode(destination);
-  const currentYearFull = targetDate.getFullYear();
-  const currentYear2Digit = String(currentYearFull).slice(-2);
+  const currentYear2Digit = String(targetDate.getFullYear()).slice(-2);
   const currentMonth3Letter = MONTH_NAMES[targetDate.getMonth()];
 
-  let maxSeq = 0;
-
-  existingCases.forEach(c => {
-    if (!c || !c.caseNo) return;
-    const caseStr = String(c.caseNo).trim();
-
-    // Check if this case belongs to the current year
-    let caseYear2Digit: string | null = null;
-
-    // Pattern 1: [PREFIX]-[DEST]-[YY]-[MMM]-[SERIAL] or [PREFIX]-26-000001
-    const yearMatch = caseStr.match(/(?:DPL|MI|VSL|TRK|[A-Z]{2,4})-(?:[A-Z0-9]+-)?(\d{2})-(?:[A-Z]{3}-)?(\d+)/i);
-    if (yearMatch) {
-      caseYear2Digit = yearMatch[1];
-      const seq = parseInt(yearMatch[2], 10);
-      if (caseYear2Digit === currentYear2Digit && !isNaN(seq) && seq > maxSeq) {
-        maxSeq = seq;
-      }
-      return;
-    }
-
-    // Pattern 2: [PREFIX]-(\d+) legacy format
-    const legacyMatch = caseStr.match(/(?:DPL|MI|VSL|TRK|[A-Z]{2,4})-(\d+)/i);
-    if (legacyMatch) {
-      // Check if createdAt is in current year
-      const dateStr = c.createdAt || c.date || '';
-      if (!dateStr || dateStr.startsWith(String(currentYearFull))) {
-        const seq = parseInt(legacyMatch[1], 10);
-        if (!isNaN(seq) && seq > maxSeq) {
-          maxSeq = seq;
-        }
-      }
-      return;
-    }
-
-    // Fallback: extract last numeric group
-    const parts = caseStr.split('-');
-    const lastPart = parts[parts.length - 1];
-    const seq = parseInt(lastPart, 10);
-    if (!isNaN(seq) && seq > maxSeq) {
-      maxSeq = seq;
-    }
+  const maxSeq = getMaxCaseSerialForYear(existingCases, currentYear2Digit, prefix);
+  return buildCaseNo({
+    prefix,
+    destCode,
+    year2Digit: currentYear2Digit,
+    month3Letter: currentMonth3Letter,
+    serial: maxSeq + 1
   });
-
-  const nextSeq = maxSeq + 1;
-  const serialStr = String(nextSeq).padStart(3, '0');
-
-  return `${prefix}-${destCode}-${currentYear2Digit}-${currentMonth3Letter}-${serialStr}`;
 }
 
 /**

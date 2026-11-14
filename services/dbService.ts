@@ -9,7 +9,8 @@ import {
   getDoc,
   query,
   where,
-  writeBatch
+  writeBatch,
+  runTransaction
 } from 'firebase/firestore';
 import { 
   db, 
@@ -26,7 +27,8 @@ import { saveVendor } from './vendorService';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
 import { dedupeAndMergeVehicles, normalizeVehiclePlate, getDeterministicVehicleId } from './documentParserService';
-import { getActiveCompanyId, subscribeToActiveCompany, CompanyId, PARENT_GROUP, GROUP_COMPANIES } from './companyService';
+import { getActiveCompanyId, getActiveCompanyPrefix, subscribeToActiveCompany, CompanyId, PARENT_GROUP, GROUP_COMPANIES } from './companyService';
+import { getDestinationCode, getMaxCaseSerialForYear, buildCaseNo, parseCaseNoParts } from './caseNumberService';
 import { hasCaseCompletedLoadingGateOut, hasCaseArrivedAtDestination } from './workflowConfig';
 import { 
   saveDocumentToIndexedDB, 
@@ -498,10 +500,137 @@ function dispatchCaseLifecycleNotifications(caseItem: Case, prevCase?: Case | nu
   }
 }
 
+const CASE_MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'] as const;
+
+export function recordLocalReservedCaseSerial(caseNo?: string): void {
+  const parsed = parseCaseNoParts(caseNo);
+  if (!parsed || !parsed.serial) return;
+  const storageKey = `dpl_last_reserved_serial_${parsed.prefix}_${parsed.year2Digit}`;
+  const prev = parseInt(safeAppStorage.getItem(storageKey) || '0', 10) || 0;
+  if (parsed.serial > prev) {
+    safeAppStorage.setItem(storageKey, String(parsed.serial));
+  }
+}
+
+/**
+ * Atomically reserves the next strictly unique sequential Case Number via Firestore transaction
+ * across ALL destinations (LHR, ISB, PEW, KHI, etc.), ALL months, and ALL concurrent users/tabs.
+ * Checks:
+ *  1. Firestore `cases` collection (true cloud max serial for `[PREFIX]` + `[YY]`)
+ *  2. Local live cases + same-device reserved serial cache
+ *  3. Atomic counter document `settings/case_counter_[PREFIX]_[YY]` inside `runTransaction`
+ */
+export async function reserveNextSequentialCaseNumber(params: {
+  destination?: string;
+  targetDate?: Date;
+  customPrefix?: string;
+  localCases?: Array<{ caseNo?: string; createdAt?: string; date?: string }>;
+}): Promise<string> {
+  const targetDate = params.targetDate || new Date();
+  const prefix = (params.customPrefix || getActiveCompanyPrefix() || 'DPL').toUpperCase().trim();
+  const destCode = getDestinationCode(params.destination);
+  const yy = String(targetDate.getFullYear()).slice(-2);
+  const mmm = CASE_MONTH_NAMES[targetDate.getMonth()];
+  const storageKey = `dpl_last_reserved_serial_${prefix}_${yy}`;
+
+  // 1. Gather local baseline (UI state + persisted live cache + last locally reserved serial)
+  const storedLiveCases = safeAppStorage.getJSON<Case[]>('dpl_live_cases', []);
+  const combinedLocalCases = [
+    ...(Array.isArray(params.localCases) ? params.localCases : []),
+    ...(Array.isArray(storedLiveCases) ? storedLiveCases : [])
+  ];
+  const localCasesMax = getMaxCaseSerialForYear(combinedLocalCases, yy, prefix);
+  const localReservedMax = parseInt(safeAppStorage.getItem(storageKey) || '0', 10) || 0;
+  let baselineMax = Math.max(localCasesMax, localReservedMax);
+
+  // 2. Scan authoritative Firestore `cases` collection (all companies/clients/destinations)
+  let cloudCasesMax = 0;
+  try {
+    const snap = await Promise.race([
+      getDocs(collection(db, 'cases')),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000))
+    ]);
+    if (snap && 'forEach' in snap) {
+      const cloudCases: Array<{ caseNo?: string; createdAt?: string; date?: string }> = [];
+      snap.forEach((d) => {
+        const data = d.data() as any;
+        if (data?.caseNo) {
+          cloudCases.push({
+            caseNo: data.caseNo,
+            createdAt: data.createdAt,
+            date: data.date
+          });
+        }
+      });
+      cloudCasesMax = getMaxCaseSerialForYear(cloudCases, yy, prefix);
+      if (cloudCasesMax > baselineMax) {
+        baselineMax = cloudCasesMax;
+      }
+    }
+  } catch (err) {
+    console.warn('Cloud max serial lookup notice:', err);
+  }
+
+  // 3. Atomic Firestore Transaction on settings/case_counter_[PREFIX]_[YY]
+  const counterDocId = `case_counter_${prefix}_${yy}`;
+  const counterRef = doc(db, 'settings', counterDocId);
+  try {
+    const reserved = await Promise.race([
+      runTransaction(db, async (tx) => {
+        const counterSnap = await tx.get(counterRef);
+        const storedLast = counterSnap.exists() ? Number(counterSnap.data()?.lastSerial || 0) : 0;
+        const safeStoredLast = Number.isFinite(storedLast) ? storedLast : 0;
+        const currentHighest = Math.max(safeStoredLast, baselineMax);
+        const nextSerial = currentHighest + 1;
+        const finalCaseNo = buildCaseNo({
+          prefix,
+          destCode,
+          year2Digit: yy,
+          month3Letter: mmm,
+          serial: nextSerial
+        });
+        tx.set(
+          counterRef,
+          {
+            prefix,
+            year: yy,
+            lastSerial: nextSerial,
+            lastCaseNo: finalCaseNo,
+            updatedAt: new Date().toISOString()
+          },
+          { merge: true }
+        );
+        return { nextSerial, finalCaseNo };
+      }),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Transaction timeout')), 6500))
+    ]);
+
+    if (reserved && reserved.finalCaseNo) {
+      safeAppStorage.setItem(storageKey, String(reserved.nextSerial));
+      return reserved.finalCaseNo;
+    }
+  } catch (txErr) {
+    console.warn('Atomic case counter transaction fallback:', txErr);
+  }
+
+  // 4. Offline / Timeout Safe Fallback (still monotonic on device via storageKey)
+  const latestLocalReserved = parseInt(safeAppStorage.getItem(storageKey) || '0', 10) || 0;
+  const fallbackSerial = Math.max(baselineMax, cloudCasesMax, latestLocalReserved) + 1;
+  safeAppStorage.setItem(storageKey, String(fallbackSerial));
+  return buildCaseNo({
+    prefix,
+    destCode,
+    year2Digit: yy,
+    month3Letter: mmm,
+    serial: fallbackSerial
+  });
+}
+
 export async function saveCaseToFirestore(newCase: Case): Promise<void> {
   const path = 'cases';
   const docId = newCase.id || String(Date.now());
   const activeCompany = getActiveCompanyId();
+  recordLocalReservedCaseSerial(newCase.caseNo);
 
   // 1. Persist full attachments into IndexedDB immediately
   if (newCase.documents && Array.isArray(newCase.documents)) {
