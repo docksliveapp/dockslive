@@ -9,7 +9,8 @@ import {
   updateFinanceInFirestore,
   updateClientInFirestore,
   saveFinanceToFirestore,
-  saveStaffLedgerEntryToFirestore
+  saveStaffLedgerEntryToFirestore,
+  syncLinkedUserAccountStatus
 } from './dbService';
 import { safeAppStorage } from './storage';
 import { logActivity } from './activityLogService';
@@ -748,6 +749,14 @@ export async function approveActionRequest(notification: AppNotification): Promi
         status: 'ACTIVE'
       } as any);
 
+      await syncLinkedUserAccountStatus({
+        docIdHint: `client_user_${String(entityId)}`,
+        userId: (notification.approvalData as any).userId,
+        contact: (notification.approvalData as any).contact,
+        clientName: notification.approvalData.entityName,
+        status: 'ACTIVE'
+      });
+
       logActivity(
         `Client Registration Approved: ${notification.approvalData.entityName || entityId}`,
         `New client registration request approved. Portal login and tariff access activated.`,
@@ -883,6 +892,17 @@ export async function approveActionRequest(notification: AppNotification): Promi
     }
   } else if (actionType === 'APPROVE_TRANSPORTER') {
     const transporterName = notification.approvalData.entityName || String(entityId);
+    try {
+      await syncLinkedUserAccountStatus({
+        docIdHint: `transporter_user_${String(entityId)}`,
+        userId: (notification.approvalData as any).userId,
+        contact: (notification.approvalData as any).contact,
+        clientName: transporterName,
+        status: 'ACTIVE'
+      });
+    } catch (err) {
+      console.warn("Could not activate transporter user account:", err);
+    }
     logActivity(
       `Transporter Registration Approved: ${transporterName}`,
       `Transporter account "${transporterName}" approved by Administrator.`,

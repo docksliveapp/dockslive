@@ -228,6 +228,7 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
       const newUserIdNum = Date.now() % 10000000;
       await saveUserToFirestore({
         id: newUserIdNum,
+        _docId: `client_user_${clientId}`,
         userId: userId,
         password: cleanPass,
         name: cleanPerson,
@@ -244,7 +245,7 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
         cnicBack: clientDocs.cnicBackUrl,
         ntnDoc: clientDocs.ntnDocUrl,
         businessCard: clientDocs.businessCardUrl
-      });
+      } as any);
 
       // 3. Notify Admins
       await sendAppNotification({
@@ -258,8 +259,10 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
           entityId: clientId,
           entityName: cleanCompany,
           actionType: 'APPROVE_CLIENT',
-          requestedBy: cleanPerson
-        }
+          requestedBy: cleanPerson,
+          userId,
+          contact: cleanPhone
+        } as any
       });
 
       setSubmittedDetails({
@@ -299,6 +302,7 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
       // Save User Account (Auto-assign TRANSPORTER role + persistent docs)
       await saveUserToFirestore({
         id: newUserIdNum,
+        _docId: `transporter_user_${newUserIdNum}`,
         userId: userId,
         password: cleanPass,
         name: cleanOwner,
@@ -315,7 +319,7 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
         cnicBack: transporterDocs.cnicBackUrl,
         ntnDoc: transporterDocs.ntnDocUrl,
         businessCard: transporterDocs.businessCardUrl
-      });
+      } as any);
 
       // Notify Admins
       await sendAppNotification({
@@ -329,8 +333,10 @@ export const NewRegistrationModal: React.FC<NewRegistrationModalProps> = ({
           entityId: String(newUserIdNum),
           entityName: cleanTransport,
           actionType: 'APPROVE_TRANSPORTER',
-          requestedBy: cleanOwner
-        }
+          requestedBy: cleanOwner,
+          userId,
+          contact: cleanPhone
+        } as any
       });
 
       setSubmittedDetails({

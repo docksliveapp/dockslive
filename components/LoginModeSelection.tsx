@@ -15,7 +15,7 @@ import { UserRole } from '../types';
 import { useParentGroup, getMainGroupLogoUrl } from '../services/companyService';
 import { useTransparentLogo } from '../services/brandingService';
 import { safeAppStorage } from '../services/storage';
-import { authenticateDatabaseUser } from '../services/dbService';
+import { authenticateDatabaseUser, prefetchAuthDirectory } from '../services/dbService';
 import { NewRegistrationModal } from './NewRegistrationModal';
 import { ThemeToggleSwitch, useAppTheme } from './ThemeToggleSwitch';
 
@@ -72,6 +72,7 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
     const lastRole = safeAppStorage.getItem('dpl_last_location_role');
     if (lastView && lastView !== 'settings') setLastLocationView(lastView);
     if (lastRole) setLastLocationRole(lastRole);
+    prefetchAuthDirectory().catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -124,7 +125,7 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
         new Promise<never>((_, reject) =>
           setTimeout(
             () => reject(new Error('Network connection is slow. Please tap Sign In once more.')),
-            8000
+            14000
           )
         )
       ]);
@@ -191,14 +192,23 @@ export const LoginModeSelection: React.FC<LoginModeSelectionProps> = ({
       });
     } catch (err: any) {
       console.error('Login failure:', err);
-      const nextAttempts = failedAttempts + 1;
-      setFailedAttempts(nextAttempts);
-      if (nextAttempts >= MAX_FAILED_ATTEMPTS) {
-        const until = Date.now() + LOCKOUT_DURATION_MS;
-        setLockoutUntil(until);
-        setErrorMessage('Multiple unsuccessful sign-in attempts detected. Access temporarily locked for 30 seconds for account security.');
+      const errMsg = String(err?.message || '');
+      const isNetworkIssue =
+        errMsg.toLowerCase().includes('network') ||
+        errMsg.toLowerCase().includes('timeout') ||
+        errMsg.toLowerCase().includes('unable to reach');
+      if (isNetworkIssue) {
+        setErrorMessage(errMsg || 'Network connection is slow. Please tap Sign In once more.');
       } else {
-        setErrorMessage(err?.message || 'Invalid credentials provided. Please verify your User ID and Password.');
+        const nextAttempts = failedAttempts + 1;
+        setFailedAttempts(nextAttempts);
+        if (nextAttempts >= MAX_FAILED_ATTEMPTS) {
+          const until = Date.now() + LOCKOUT_DURATION_MS;
+          setLockoutUntil(until);
+          setErrorMessage('Multiple unsuccessful sign-in attempts detected. Access temporarily locked for 30 seconds for account security.');
+        } else {
+          setErrorMessage(errMsg || 'Invalid credentials provided. Please verify your User ID and Password.');
+        }
       }
     } finally {
       setIsLoading(false);

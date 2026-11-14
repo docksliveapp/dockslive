@@ -20,7 +20,8 @@ import {
   deleteDestinationStaffFromFirestore,
   DEFAULT_DATABASE_USERS,
   DEFAULT_USER_PASSWORD,
-  generateUniqueUsernameFromFullName
+  generateUniqueUsernameFromFullName,
+  syncLinkedUserAccountStatus
 } from '../services/dbService';
 import { saveVendor } from '../services/vendorService';
 
@@ -96,6 +97,7 @@ const UserManagement: React.FC = () => {
   const [isCustomUserIdEdited, setIsCustomUserIdEdited] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [modalActionFeedback, setModalActionFeedback] = useState<string | null>(null);
+  const [isSavingUser, setIsSavingUser] = useState(false);
 
   // Client modal
   const [showClientModal, setShowClientModal] = useState(false);
@@ -336,6 +338,8 @@ const UserManagement: React.FC = () => {
         ? users.map((u) => (String(u.id) === String(editingId) ? userPayload : u))
         : [...users, userPayload];
 
+    if (isSavingUser) return;
+    setIsSavingUser(true);
     setUsers(nextUsers);
     try {
       await saveUserToFirestore(userPayload);
@@ -361,11 +365,13 @@ const UserManagement: React.FC = () => {
           createdAt: new Date().toISOString()
         });
       }
-    } catch (err) {
+      setShowModal(false);
+    } catch (err: any) {
       console.warn('Notice: User saved locally', err);
+      setShowModal(false);
+    } finally {
+      setIsSavingUser(false);
     }
-
-    setShowModal(false);
   };
 
   const confirmDeleteTarget = async () => {
@@ -963,6 +969,13 @@ const UserManagement: React.FC = () => {
                           id: client.id,
                           loginEnabled: true,
                           status: 'ACTIVE' as any
+                        });
+                        await syncLinkedUserAccountStatus({
+                          docIdHint: `client_user_${client.id}`,
+                          userId: client.userId,
+                          contact: client.mobileNumber || client.contact,
+                          clientName: client.name,
+                          status: 'ACTIVE'
                         });
                         setClientsList((prev) =>
                           prev.map((c) =>
@@ -2243,9 +2256,10 @@ const UserManagement: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleSaveUser}
-                  className="px-5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl shadow-lg shadow-brand-600/30 flex items-center gap-2 text-xs font-semibold transition-all cursor-pointer"
+                  disabled={isSavingUser}
+                  className="px-5 py-2 bg-brand-600 hover:bg-brand-500 disabled:opacity-60 text-white rounded-xl shadow-lg shadow-brand-600/30 flex items-center gap-2 text-xs font-semibold transition-all cursor-pointer"
                 >
-                  <Save size={15} /> {isEditing ? 'Update Account' : 'Save User ID'}
+                  <Save size={15} /> {isSavingUser ? 'Saving to Cloud...' : isEditing ? 'Update Account' : 'Save User ID'}
                 </button>
               </div>
             </div>

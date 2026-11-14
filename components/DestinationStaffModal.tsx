@@ -12,6 +12,7 @@ import {
 } from '../services/dbService';
 import { saveVendor } from '../services/vendorService';
 import { AdminRolesAndPrivilegesTable } from './AdminRolesAndPrivilegesTable';
+import { safeAppStorage } from '../services/storage';
 
 interface DestinationStaffModalProps {
   isOpen: boolean;
@@ -183,11 +184,22 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
         createdAt: staffToEdit?.createdAt || new Date().toISOString()
       });
 
-      let createdAppUser: AppUser | undefined;
+      let createdAppUser: (AppUser & { _docId?: string }) | undefined;
       if (loginEnabled && resolvedUserId && resolvedPassword) {
+        const cachedUsers = safeAppStorage.getJSON<Array<AppUser & { _docId?: string }>>('dpl_live_users', []) || [];
+        const destDocId = `dest_user_${String(payload.id)}`;
+        const prevUidLower = (staffToEdit?.userId || resolvedUserId).toLowerCase().trim();
+        const existingLinked = cachedUsers.find(
+          u =>
+            String((u as any)._docId || '') === destDocId ||
+            (u.userId || '').toLowerCase().trim() === prevUidLower ||
+            (u.userId || '').toLowerCase().trim() === resolvedUserId.toLowerCase().trim()
+        );
         createdAppUser = {
-          id: Date.now() % 10000000,
-          userId: resolvedUserId,
+          ...(existingLinked || {}),
+          id: existingLinked?.id || (Date.now() % 10000000),
+          _docId: (existingLinked as any)?._docId || destDocId,
+          userId: resolvedUserId.trim(),
           password: resolvedPassword,
           name: trimmedName,
           role: singleRole,
@@ -195,9 +207,10 @@ export const DestinationStaffModal: React.FC<DestinationStaffModalProps> = ({
           designation: `${formData.role || 'Port Staff'} (${formData.station || 'Station'})`,
           assignedStation: formData.station || 'Karachi Port (KPT)',
           contact: (formData.phone || '').trim(),
-          email: '',
+          email: existingLinked?.email || '',
           status: formData.status === 'INACTIVE' ? 'SUSPENDED' : 'ACTIVE',
-          allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage'],
+          isSuspended: formData.status === 'INACTIVE',
+          allowedCompanies: existingLinked?.allowedCompanies || ['docks', 'truckit', 'muhib', 'vantage'],
           baseSalary: 0,
           defaultPerContainerCharge: Number(formData.defaultPerContainerCharge) || 0
         };

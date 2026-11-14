@@ -33,7 +33,7 @@ import AuthModal from './components/AuthModal';
 import Logo from './components/Logo';
 import { LiveNotificationCenter } from './components/LiveNotificationCenter';
 import { auth, onAuthStateChanged, testFirestoreConnection } from './services/firebase';
-import { subscribeToNotifications, getUserWorkDraftFromFirestore, deleteUserWorkDraftFromFirestore, UserWorkDraft } from './services/dbService';
+import { subscribeToNotifications, getUserWorkDraftFromFirestore, deleteUserWorkDraftFromFirestore, prefetchAuthDirectory, UserWorkDraft } from './services/dbService';
 import { approveActionRequest, rejectActionRequest } from './services/approvalService';
 import { safeSessionStorage, safeLocalStorage, safeAppStorage } from './services/storage';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -245,6 +245,7 @@ const App: React.FC = () => {
   // Failsafe: Ensure splash screen never hangs the app under any browser condition
   useEffect(() => {
     if (showSplash) {
+      prefetchAuthDirectory().catch(() => {});
       const failsafe = setTimeout(() => {
         setShowSplash(false);
         if (!isReplaySplashOnly) {

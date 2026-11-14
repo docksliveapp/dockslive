@@ -20,6 +20,7 @@ import {
   generateUniqueUsernameFromFullName
 } from '../services/dbService';
 import { compressAndPrepareFile } from '../services/fileUtils';
+import { safeAppStorage } from '../services/storage';
 
 export const CASE_CATEGORIES_LIST = [
   "Bonded Carrier",
@@ -501,9 +502,20 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
     try {
       await saveClientToFirestore(clientToSave);
       if (loginEnabled && clientToSave.userId && clientToSave.password) {
-        const clientAppUser: AppUser = {
-          id: Date.now() % 10000000,
-          userId: clientToSave.userId,
+        const cachedUsers = safeAppStorage.getJSON<Array<AppUser & { _docId?: string }>>('dpl_live_users', []) || [];
+        const clientDocId = `client_user_${clientId}`;
+        const prevUidLower = (initialClient?.userId || clientToSave.userId).toLowerCase().trim();
+        const existingLinked = cachedUsers.find(
+          u =>
+            String((u as any)._docId || '') === clientDocId ||
+            (u.userId || '').toLowerCase().trim() === prevUidLower ||
+            (u.userId || '').toLowerCase().trim() === clientToSave.userId!.toLowerCase().trim()
+        );
+        const clientAppUser: AppUser & { _docId?: string } = {
+          ...(existingLinked || {}),
+          id: existingLinked?.id || (Date.now() % 10000000),
+          _docId: (existingLinked as any)?._docId || clientDocId,
+          userId: clientToSave.userId.trim(),
           password: clientToSave.password,
           name: clientToSave.name,
           clientName: clientToSave.name,
@@ -512,8 +524,9 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
           designation: 'Corporate Importer / Client',
           contact: clientToSave.contact || clientToSave.mobileNumber || '',
           email: clientToSave.email || '',
-          status: 'ACTIVE',
-          allowedCompanies: ['docks', 'truckit', 'muhib', 'vantage'],
+          status: (clientToSave as any).status === 'PENDING_APPROVAL' ? 'PENDING_APPROVAL' : 'ACTIVE',
+          isSuspended: false,
+          allowedCompanies: existingLinked?.allowedCompanies || ['docks', 'truckit', 'muhib', 'vantage'],
           baseSalary: 0
         };
         await saveUserToFirestore(clientAppUser);
@@ -569,6 +582,32 @@ export const ClientRegistrationModal: React.FC<ClientRegistrationModalProps> = (
 
     try {
       await saveClientToFirestore(clientToSave);
+      if (clientToSave.userId && clientToSave.password) {
+        const cachedUsers = safeAppStorage.getJSON<Array<AppUser & { _docId?: string }>>('dpl_live_users', []) || [];
+        const clientDocId = `client_user_${clientToSave.id}`;
+        const existingLinked = cachedUsers.find(
+          u =>
+            String((u as any)._docId || '') === clientDocId ||
+            (u.userId || '').toLowerCase().trim() === clientToSave.userId!.toLowerCase().trim()
+        );
+        await saveUserToFirestore({
+          ...(existingLinked || {}),
+          id: existingLinked?.id || (Date.now() % 10000000),
+          _docId: (existingLinked as any)?._docId || clientDocId,
+          userId: clientToSave.userId.trim(),
+          password: clientToSave.password,
+          name: clientToSave.name,
+          clientName: clientToSave.name,
+          role: UserRole.CLIENT,
+          roles: [UserRole.CLIENT],
+          designation: 'Corporate Importer / Client',
+          contact: clientToSave.contact || clientToSave.mobileNumber || '',
+          email: clientToSave.email || '',
+          status: 'ACTIVE',
+          allowedCompanies: existingLinked?.allowedCompanies || ['docks', 'truckit', 'muhib', 'vantage'],
+          baseSalary: 0
+        } as AppUser);
+      }
       setPasswordSaveSuccess(true);
       setTimeout(() => {
         setPasswordSaveSuccess(false);

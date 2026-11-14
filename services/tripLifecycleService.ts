@@ -569,8 +569,8 @@ export async function expireDriverTripCredentialsForCase(
     }
   }
 
-  // 3. Suspend any matching Driver user record in dpl_users_cache / Firestore
-  const allUsers = safeAppStorage.getJSON<AppUser[]>('dpl_users_cache', []) || [];
+  // 3. Suspend any matching Driver user record in dpl_live_users / Firestore
+  const allUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || [];
   for (const u of allUsers) {
     const uId = (u.userId || '').toLowerCase().trim();
     if (u.role === UserRole.DRIVER && uId && expiredDriverUserIds.has(uId)) {

@@ -3186,11 +3186,223 @@ export const DEFAULT_DATABASE_USERS: AppUser[] = [
 ];
 
 let hasSeededInitialUsers = false;
+const PENDING_USER_SYNCS_KEY = 'dpl_pending_user_syncs';
+
+function normalizePhoneLookupVariants(raw?: string): string[] {
+  const digits = String(raw || '').replace(/[^0-9]/g, '');
+  if (!digits || digits.length < 7) return [];
+  const variants = new Set<string>([digits]);
+  if (digits.startsWith('0092') && digits.length >= 12) {
+    const core = digits.slice(4);
+    variants.add(`0${core}`);
+    variants.add(`92${core}`);
+    variants.add(core);
+  } else if (digits.startsWith('92') && digits.length >= 11) {
+    const core = digits.slice(2);
+    variants.add(`0${core}`);
+    variants.add(core);
+  } else if (digits.startsWith('0') && digits.length >= 10) {
+    const core = digits.slice(1);
+    variants.add(`92${core}`);
+    variants.add(core);
+  } else if (digits.length === 10 && digits.startsWith('3')) {
+    variants.add(`0${digits}`);
+    variants.add(`92${digits}`);
+  }
+  return Array.from(variants);
+}
+
+function getPendingUserSyncMap(): Record<string, AppUser & { _docId?: string }> {
+  return safeAppStorage.getJSON<Record<string, AppUser & { _docId?: string }>>(PENDING_USER_SYNCS_KEY, {}) || {};
+}
+
+function markUserPendingSync(docId: string, userObj: AppUser & { _docId?: string }) {
+  try {
+    const map = getPendingUserSyncMap();
+    map[docId] = userObj;
+    safeAppStorage.setJSON(PENDING_USER_SYNCS_KEY, map);
+  } catch (_) {}
+}
+
+function clearUserPendingSync(docId: string) {
+  try {
+    const map = getPendingUserSyncMap();
+    if (map[docId]) {
+      delete map[docId];
+      safeAppStorage.setJSON(PENDING_USER_SYNCS_KEY, map);
+    }
+  } catch (_) {}
+}
+
+/**
+ * Self-heals any locally created/pending users (e.g. saved during offline blips)
+ * by pushing them to Firestore `users` whenever a live snapshot confirms they are missing.
+ */
+async function flushPendingUsersToFirestore(cloudUsers: Array<AppUser & { _docId?: string }>): Promise<void> {
+  try {
+    const deletedUserKeys = new Set<string>(safeAppStorage.getJSON<string[]>('dpl_deleted_user_keys', []) || []);
+    const pendingMap = getPendingUserSyncMap();
+    const localStoredUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || [];
+
+    const toSync = new Map<string, AppUser & { _docId?: string }>();
+
+    // 1. Always retry explicit pending queue entries unless deleted
+    for (const [docId, u] of Object.entries(pendingMap)) {
+      const key = (u.userId || String(u.id || docId)).toLowerCase().trim();
+      if (deletedUserKeys.has(key) || deletedUserKeys.has(String(u.id)) || deletedUserKeys.has(docId)) {
+        clearUserPendingSync(docId);
+        continue;
+      }
+      toSync.set(docId, u);
+    }
+
+    // 2. Self-heal any non-default local user missing from Firestore snapshot
+    for (const localU of localStoredUsers) {
+      const lKey = (localU.userId || String(localU.id)).toLowerCase().trim();
+      const lDocId = String((localU as any)._docId || localU.id);
+      if (deletedUserKeys.has(lKey) || deletedUserKeys.has(String(localU.id)) || deletedUserKeys.has(lDocId)) continue;
+      if (isDefaultOrPlaceholderSystemAccount({ id: localU.id, userId: localU.userId, name: localU.name, role: localU.role })) continue;
+
+      const existsInCloud = cloudUsers.some(
+        r =>
+          String((r as any)._docId || r.id) === lDocId ||
+          String(r.id) === String(localU.id) ||
+          (r.userId && localU.userId && r.userId.toLowerCase().trim() === localU.userId.toLowerCase().trim())
+      );
+      if (!existsInCloud) {
+        toSync.set(lDocId, localU);
+      }
+    }
+
+    if (toSync.size === 0) return;
+
+    await Promise.allSettled(
+      Array.from(toSync.entries()).map(async ([docId, userObj]) => {
+        const payload = sanitizeForFirestore({
+          ...userObj,
+          id: Number(userObj.id) || parseNumericDocId(userObj.id, docId, 0),
+          userId: (userObj.userId || '').trim(),
+          updatedAt: (userObj as any).updatedAt || new Date().toISOString()
+        });
+        delete (payload as any)._docId;
+        await setDoc(doc(db, 'users', docId), payload, { merge: true });
+        clearUserPendingSync(docId);
+      })
+    );
+  } catch (_) {}
+}
+
+let activePrefetchPromise: Promise<void> | null = null;
+let lastPrefetchTimestamp = 0;
+
+/**
+ * Pre-warms Firestore connection and caches all login-eligible collections
+ * (`users`, `clients`, `destination_staff`, `drivers`, `vehicles`) in parallel
+ * while the user is on the Splash / Sign-In screen.
+ */
+export async function prefetchAuthDirectory(force = false): Promise<void> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+  if (!force && activePrefetchPromise) return activePrefetchPromise;
+  if (!force && Date.now() - lastPrefetchTimestamp < 15000) return;
+
+  activePrefetchPromise = (async () => {
+    try {
+      const withWarmTimeout = <T>(p: Promise<T>, ms = 7500): Promise<T> =>
+        Promise.race([
+          p,
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Prefetch timeout')), ms))
+        ]);
+
+      const [usersRes, clientsRes, destRes, driversRes, vehiclesRes] = await Promise.allSettled([
+        withWarmTimeout(getDocs(collection(db, 'users'))),
+        withWarmTimeout(getDocs(collection(db, 'clients'))),
+        withWarmTimeout(getDocs(collection(db, 'destination_staff'))),
+        withWarmTimeout(getDocs(collection(db, 'drivers'))),
+        withWarmTimeout(getDocs(collection(db, 'vehicles')))
+      ]);
+
+      if (usersRes.status === 'fulfilled' && !usersRes.value.empty) {
+        const deletedKeys = new Set<string>(safeAppStorage.getJSON<string[]>('dpl_deleted_user_keys', []) || []);
+        const cloudUsers: AppUser[] = [];
+        let idx = 0;
+        usersRes.value.forEach((docSnap) => {
+          const data = docSnap.data();
+          const docIdStr = String(docSnap.id);
+          const idLower = (data.userId || '').toLowerCase();
+          const nameLower = (data.name || '').toLowerCase();
+          const isDupAdmin =
+            docIdStr === 'admin' ||
+            docIdStr === 'arbab' ||
+            docIdStr === 'behzad' ||
+            docIdStr === '101' ||
+            docIdStr === '102' ||
+            docIdStr === '103' ||
+            (nameLower.includes('arbab khan boby') && docIdStr !== '1' && ['admin', 'arbab', 'behzad'].includes(idLower));
+          if (!isDupAdmin) {
+            cloudUsers.push({
+              ...data,
+              id: parseNumericDocId(data.id, docSnap.id, idx++),
+              _docId: docSnap.id
+            } as AppUser & { _docId?: string });
+          }
+        });
+        // Merge pending/local unsynced users without resurrecting deleted ones
+        const localUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || [];
+        const mergedMap = new Map<string, AppUser>();
+        for (const u of cloudUsers) {
+          const k = (u.userId || String((u as any)._docId || u.id)).toLowerCase().trim();
+          mergedMap.set(k, u);
+        }
+        for (const lu of localUsers) {
+          const k = (lu.userId || String((lu as any)._docId || lu.id)).toLowerCase().trim();
+          if (deletedKeys.has(k) || deletedKeys.has(String(lu.id))) continue;
+          if (!mergedMap.has(k)) mergedMap.set(k, lu);
+        }
+        const mergedList = Array.from(mergedMap.values());
+        if (mergedList.length > 0) {
+          safeAppStorage.setJSON('dpl_live_users', mergedList);
+        }
+        flushPendingUsersToFirestore(cloudUsers).catch(() => {});
+      }
+
+      if (clientsRes.status === 'fulfilled' && !clientsRes.value.empty) {
+        const list: Client[] = [];
+        clientsRes.value.forEach((d) => list.push({ ...d.data(), id: d.id } as Client));
+        safeAppStorage.setJSON('dpl_cached_clients', list);
+      }
+
+      if (destRes.status === 'fulfilled' && !destRes.value.empty) {
+        const list: DestinationStaff[] = [];
+        destRes.value.forEach((d) => list.push({ ...d.data(), id: d.id } as DestinationStaff));
+        safeAppStorage.setJSON('dpl_destination_staff', list);
+      }
+
+      if (driversRes.status === 'fulfilled' && !driversRes.value.empty) {
+        const list: Driver[] = [];
+        driversRes.value.forEach((d) => list.push({ ...d.data(), id: d.id } as Driver));
+        safeAppStorage.setJSON('dpl_live_drivers', list);
+      }
+
+      if (vehiclesRes.status === 'fulfilled' && !vehiclesRes.value.empty) {
+        const list: Vehicle[] = [];
+        vehiclesRes.value.forEach((d) => list.push({ ...d.data(), id: parseNumericDocId(d.data().id, d.id, 0) } as Vehicle));
+        safeAppStorage.setJSON('dpl_live_vehicles', list);
+      }
+
+      lastPrefetchTimestamp = Date.now();
+    } catch (_) {
+    } finally {
+      activePrefetchPromise = null;
+    }
+  })();
+
+  return activePrefetchPromise;
+}
 
 /**
  * Subscribes to live Firestore users collection.
  * Automatically seeds default organization accounts if Firestore users collection is empty,
- * and cleans up duplicate Master Admin alias documents ('admin', 'arbab', 'behzad', '101', '102', '103').
+ * heals any pending local-only users to Firestore, and cleans up duplicate Master Admin alias docs.
  */
 export function subscribeToUsers(
   onData: (users: AppUser[]) => void,
@@ -3217,7 +3429,7 @@ export function subscribeToUsers(
   const unsubSnapshot = onSnapshot(
     collection(db, path),
     async (snapshot) => {
-      if (snapshot.empty && !hasSeededInitialUsers) {
+      if (snapshot.empty && !snapshot.metadata.fromCache && !hasSeededInitialUsers) {
         hasSeededInitialUsers = true;
         try {
           for (const user of DEFAULT_DATABASE_USERS) {
@@ -3259,7 +3471,6 @@ export function subscribeToUsers(
           (nameLower.includes('arbab khan boby') && docIdStr !== '1' && ['admin', 'arbab', 'behzad'].includes(idLower));
 
         if (isDuplicateAdminAlias) {
-          // Asynchronously clean up duplicate admin alias document from Firestore
           deleteDoc(doc(db, path, docSnap.id)).catch(() => {});
         } else {
           const isAdminOrDefaultPlaceholder =
@@ -3283,6 +3494,7 @@ export function subscribeToUsers(
             : undefined;
           rawList.push({
             ...data,
+            userId: typeof data.userId === 'string' ? data.userId.trim() : data.userId,
             role: normalizedPrimaryRole,
             ...(normalizedRoles ? { roles: normalizedRoles } : {}),
             baseSalary: isAdminOrDefaultPlaceholder ? 0 : data.baseSalary,
@@ -3292,14 +3504,21 @@ export function subscribeToUsers(
         }
       });
 
-      // Also merge any locally saved users from safeAppStorage ('dpl_live_users') that may not have synced to Firestore yet
+      // Push any pending/local-only users up to Firestore in background
+      if (!snapshot.metadata.fromCache) {
+        flushPendingUsersToFirestore(rawList).catch(() => {});
+      }
+
+      // Merge locally saved users from safeAppStorage ('dpl_live_users') that may not have synced to Firestore yet
       const localStoredUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || [];
       const deletedUserKeys = new Set<string>(safeAppStorage.getJSON<string[]>('dpl_deleted_user_keys', []) || []);
       for (const localU of localStoredUsers) {
         const lKey = (localU.userId || String(localU.id)).toLowerCase().trim();
-        if (deletedUserKeys.has(lKey) || deletedUserKeys.has(String(localU.id))) continue;
+        const lDocId = String((localU as any)._docId || localU.id);
+        if (deletedUserKeys.has(lKey) || deletedUserKeys.has(String(localU.id)) || deletedUserKeys.has(lDocId)) continue;
         const existsInSnapshot = rawList.some(
           r =>
+            String((r as any)._docId || r.id) === lDocId ||
             String(r.id) === String(localU.id) ||
             (r.userId && localU.userId && r.userId.toLowerCase().trim() === localU.userId.toLowerCase().trim())
         );
@@ -3308,19 +3527,23 @@ export function subscribeToUsers(
         }
       }
 
-      // Deduplicate by lowercase userId (preserving newest updated record if multiple exist, without deleting newly added staff)
+      // Deduplicate by lowercase userId (preserving newest updated record; never let stale deletedUserKeys hide live Firestore users)
       const userMap = new Map<string, AppUser>();
       rawList.sort((a, b) => Number(a.id) - Number(b.id));
       for (const u of rawList) {
         const key = (u.userId || String((u as any)._docId || u.id)).toLowerCase().trim();
-        if (deletedUserKeys.has(key) || deletedUserKeys.has(String(u.id))) continue;
         if (userMap.has(key)) {
           const existing = userMap.get(key)!;
-          // Keep the more recently updated record (or primary admin doc '1')
           if ((existing as any)._docId === '1') {
             continue;
           }
-          userMap.set(key, { ...existing, ...u });
+          const existingTs = (existing as any).updatedAt ? new Date((existing as any).updatedAt).getTime() : 0;
+          const incomingTs = (u as any).updatedAt ? new Date((u as any).updatedAt).getTime() : 0;
+          if (incomingTs >= existingTs) {
+            userMap.set(key, { ...existing, ...u });
+          } else {
+            userMap.set(key, { ...u, ...existing });
+          }
         } else {
           userMap.set(key, u);
         }
@@ -3441,7 +3664,7 @@ export async function authenticateDatabaseUser(
       return adminMasterUser;
     }
 
-    const withAuthTimeout = <T>(p: Promise<T>, ms = 2200): Promise<T> =>
+    const withAuthTimeout = <T>(p: Promise<T>, ms = 8500): Promise<T> =>
       Promise.race([
         p,
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Firestore auth query timeout')), ms))
@@ -3457,7 +3680,18 @@ export async function authenticateDatabaseUser(
       );
     };
 
-    const scoreUserMatch = (u: Partial<AppUser>): number => {
+    const identifierPhoneVariants = new Set(normalizePhoneLookupVariants(rawId));
+
+    const matchesContactPhone = (contactRaw?: string, altRaw?: string): boolean => {
+      if (identifierPhoneVariants.size === 0) return false;
+      const variants = [
+        ...normalizePhoneLookupVariants(contactRaw),
+        ...normalizePhoneLookupVariants(altRaw)
+      ];
+      return variants.some((v) => identifierPhoneVariants.has(v));
+    };
+
+    const scoreUserMatch = (u: Partial<AppUser>, sourcePriority = 0): number => {
       const uIdLower = (u.userId || '').toLowerCase().trim();
       const uIdNoSpaces = uIdLower.replace(/[\s\-_.]/g, '');
       const uEmailLower = (u.email || '').toLowerCase().trim();
@@ -3468,28 +3702,31 @@ export async function authenticateDatabaseUser(
       if (uIdLower && (uIdLower === cleanId || (cleanIdNoSpaces && uIdNoSpaces === cleanIdNoSpaces))) {
         idScore = 150;
       } else if (uEmailLower && uEmailLower === cleanId) {
-        idScore = 120;
-      } else if (uContactClean && cleanIdNoSpaces.length >= 7 && uContactClean === cleanIdNoSpaces) {
-        idScore = 110;
-      } else if (uNameLower && (uNameLower === cleanId || uNameLower.replace(/\s+/g, '') === cleanIdNoSpaces)) {
-        // Only fall back to name match if the user ID does not carry a numbered duplicate suffix like 01 / 02
-        if (!/\d+$/.test(uIdLower)) {
-          idScore = 85;
-        }
+        idScore = 125;
+      } else if (
+        (uContactClean && cleanIdNoSpaces.length >= 7 && uContactClean === cleanIdNoSpaces) ||
+        matchesContactPhone(u.contact, (u as any).whatsappNumber || (u as any).mobileNumber || (u as any).phone)
+      ) {
+        idScore = 115;
+      } else if (uIdLower && matchesContactPhone(u.userId)) {
+        idScore = 135;
+      } else if (uNameLower && (uNameLower === cleanId || (cleanIdNoSpaces.length >= 3 && uNameLower.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces))) {
+        idScore = 90;
       }
 
       if (idScore === 0) return 0;
-      const passBonus = doesPassMatch(u.password) ? 200 : 0;
-      const updatedTs = (u as any).updatedAt ? Math.min(10, Math.floor(new Date((u as any).updatedAt).getTime() / 1e12)) : 0;
-      return idScore + passBonus + updatedTs;
+      const passBonus = doesPassMatch(u.password) ? 250 : 0;
+      const activeBonus = u.status !== 'PENDING_APPROVAL' && u.status !== 'SUSPENDED' ? 20 : 0;
+      return idScore + passBonus + activeBonus + sourcePriority;
     };
 
-    // 1. Collect candidate users from BOTH Firestore `users` (with fast 2.2s timeout) AND synced local `dpl_live_users`
+    // 1. Collect candidates across ALL auth-eligible local caches + live Firestore collections IN PARALLEL
     let matchedUser: AppUser | null = null;
     let bestScore = 0;
+    let expiredTripIdNotice: string | null = null;
 
-    const considerCandidate = (candidate: AppUser) => {
-      const sc = scoreUserMatch(candidate);
+    const considerCandidate = (candidate: AppUser, sourcePriority = 0) => {
+      const sc = scoreUserMatch(candidate, sourcePriority);
       if (sc > 0 && sc >= bestScore) {
         const existingTs = matchedUser && (matchedUser as any).updatedAt
           ? new Date((matchedUser as any).updatedAt).getTime()
@@ -3504,200 +3741,260 @@ export async function authenticateDatabaseUser(
       }
     };
 
-    // Check local synced `dpl_live_users` immediately (shared across tabs on same origin, 0ms)
+    const toClientCandidate = (client: any, fallbackId: string): AppUser | null => {
+      if (!client) return null;
+      if (!(client.loginEnabled || (client.userId && client.password))) return null;
+      return {
+        id: (client.id || fallbackId) as any,
+        _clientDocId: fallbackId,
+        userId: client.userId || client.mobileNumber || client.contact || '',
+        password: client.password || '',
+        name: client.name || client.ownerName || 'Client',
+        role: client.role || UserRole.CLIENT,
+        roles: client.roles || [UserRole.CLIENT],
+        designation: 'Corporate Importer / Client',
+        contact: client.contact || client.mobileNumber || client.phone || '',
+        whatsappNumber: client.whatsappNumber || '',
+        mobileNumber: client.mobileNumber || '',
+        email: client.email || '',
+        status: client.status || 'ACTIVE',
+        clientName: client.name,
+        allowedCompanies: client.allowedCompanies || ['docks', 'truckit', 'muhib', 'vantage'],
+        lastLogin: client.lastLogin || '',
+        updatedAt: client.updatedAt || client.createdAt || ''
+      } as unknown as AppUser;
+    };
+
+    const toDestStaffCandidate = (ds: any, fallbackId: string): AppUser | null => {
+      if (!ds) return null;
+      if (ds.loginEnabled === false) return null;
+      if (!ds.password && !ds.userId) return null;
+      const singleRole = (Array.isArray(ds.roles) && ds.roles[0]) || UserRole.DESTINATION_PORT_STAFF;
+      return {
+        id: (ds.id || fallbackId) as any,
+        _destStaffDocId: fallbackId,
+        userId: ds.userId || ds.phone || ds.contact || '',
+        password: ds.password || DEFAULT_USER_PASSWORD,
+        name: ds.name || 'Destination Staff',
+        role: singleRole,
+        roles: Array.isArray(ds.roles) && ds.roles.length > 0 ? ds.roles : [singleRole],
+        designation: `${ds.role || 'Port Staff'} (${ds.station || 'Station'})`,
+        assignedStation: ds.station || '',
+        contact: ds.phone || ds.contact || '',
+        email: ds.email || '',
+        status: ds.status === 'INACTIVE' || ds.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE',
+        allowedCompanies: ds.allowedCompanies || ['docks', 'truckit', 'muhib', 'vantage'],
+        updatedAt: ds.updatedAt || ds.createdAt || ''
+      } as unknown as AppUser;
+    };
+
+    const checkDriverMatch = (drv: any, fallbackId?: string): AppUser | null => {
+      if (!drv) return null;
+      const dUserId = (drv.userId || '').toLowerCase().trim();
+      const dExpiredId = (drv.lastExpiredTripId || '').toLowerCase().trim();
+      const dPhone = (drv.contact || '').toLowerCase().trim();
+      const dName = (drv.name || '').toLowerCase().trim();
+      const dVeh = (drv.assignedVehicleNo || '').toLowerCase().trim();
+
+      const matchUserId = dUserId && (dUserId === cleanId || dUserId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
+      const matchExpiredId = dExpiredId && (dExpiredId === cleanId || dExpiredId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
+      const matchPhone =
+        (dPhone && (dPhone === cleanId || dPhone.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces)) ||
+        matchesContactPhone(drv.contact);
+      const matchVeh = dVeh && dVeh === cleanId;
+      const matchName = dName && dName === cleanId;
+
+      if (matchUserId || matchExpiredId || matchPhone || matchVeh || matchName) {
+        if (
+          drv.driverLoginStatus === 'SUSPENDED_TRIP_COMPLETED' ||
+          drv.driverLoginStatus === 'EXPIRED' ||
+          drv.loginEnabled === false ||
+          matchExpiredId
+        ) {
+          expiredTripIdNotice = `This Driver Trip Login ID (${drv.lastExpiredTripId || drv.userId || identifier}) has been automatically suspended/expired after trip completion & unloading at destination. Driver permanent data is saved — please generate a new Trip ID & Password for the next trip.`;
+          return null;
+        }
+
+        if (drv.password) {
+          return {
+            id: (drv.id || fallbackId || Date.now()) as any,
+            userId: drv.userId || drv.contact || drv.name,
+            password: drv.password,
+            name: drv.name || 'Trip Driver',
+            role: UserRole.DRIVER,
+            roles: [UserRole.DRIVER],
+            designation: `Trip Driver (${drv.assignedVehicleNo || 'Assigned Vehicle'})`,
+            contact: drv.contact || '',
+            email: '',
+            status: 'ACTIVE',
+            clientName: drv.transporterName || 'Transporter',
+            assignedVehicleNo: drv.assignedVehicleNo || ''
+          } as unknown as AppUser;
+        }
+      }
+      return null;
+    };
+
+    const checkVehicleDriverMatch = (veh: any): AppUser | null => {
+      if (!veh) return null;
+      const vUserId = (veh.driverUserId || '').toLowerCase().trim();
+      const vExpiredId = (veh.lastExpiredTripId || '').toLowerCase().trim();
+      const matchUserId = vUserId && (vUserId === cleanId || vUserId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
+      const matchExpiredId = vExpiredId && (vExpiredId === cleanId || vExpiredId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
+
+      if (matchUserId || matchExpiredId) {
+        if (
+          veh.driverLoginStatus === 'SUSPENDED_TRIP_COMPLETED' ||
+          veh.driverLoginStatus === 'EXPIRED' ||
+          matchExpiredId
+        ) {
+          expiredTripIdNotice = `This Driver Trip Login ID (${veh.lastExpiredTripId || veh.driverUserId || identifier}) for vehicle ${veh.registrationNumber} has been automatically expired/blocked because the trip finished & container was unloaded at destination. A new Trip ID & Password is required for the next trip.`;
+          return null;
+        }
+
+        if (veh.driverPassword) {
+          return {
+            id: (veh.id || Date.now()) as any,
+            userId: veh.driverUserId,
+            password: veh.driverPassword,
+            name: veh.driverName || 'Trip Driver',
+            role: UserRole.DRIVER,
+            roles: [UserRole.DRIVER],
+            designation: `Trip Driver (${veh.registrationNumber || 'Assigned Vehicle'})`,
+            contact: veh.driverContact || '',
+            email: '',
+            status: 'ACTIVE',
+            clientName: veh.transporterName || 'Transporter',
+            assignedVehicleNo: veh.registrationNumber || ''
+          } as unknown as AppUser;
+        }
+      }
+      return null;
+    };
+
+    // 1A. Scan ALL local caches immediately (0ms)
     const localLiveUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || [];
     for (const lu of localLiveUsers) {
-      considerCandidate(lu);
+      considerCandidate(lu, 4);
     }
 
-    // Also query live Firestore `users` (2.2s bounded timeout) so cloud updates from other devices always win
-    try {
-      const snap = await withAuthTimeout(getDocs(collection(db, 'users')), 2200);
-      snap.forEach((docSnap) => {
+    const localClients = [
+      ...(safeAppStorage.getJSON<any[]>('dpl_cached_clients', []) || []),
+      ...(safeAppStorage.getJSON<any[]>('dpl_live_clients', []) || [])
+    ];
+    for (const lc of localClients) {
+      const cCand = toClientCandidate(lc, String(lc.id || lc.name || 'client'));
+      if (cCand) considerCandidate(cCand, 3);
+    }
+
+    const localDestStaff = safeAppStorage.getJSON<DestinationStaff[]>('dpl_destination_staff', []) || [];
+    for (const ds of localDestStaff) {
+      const dsCand = toDestStaffCandidate(ds, String(ds.id || 'dest'));
+      if (dsCand) considerCandidate(dsCand, 3);
+    }
+
+    const localDrivers = safeAppStorage.getJSON<Driver[]>('dpl_live_drivers', []) || [];
+    for (const d of localDrivers) {
+      const m = checkDriverMatch(d, d.id);
+      if (m) considerCandidate(m, 3);
+    }
+
+    const localVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []) || [];
+    for (const v of localVehicles) {
+      const m = checkVehicleDriverMatch(v);
+      if (m) considerCandidate(m, 3);
+    }
+
+    // 1B. Query live Firestore collections IN PARALLEL (never sequential 2s cutoffs!)
+    const [usersSnapRes, clientsSnapRes, destSnapRes, driversSnapRes, vehiclesSnapRes] = await Promise.allSettled([
+      withAuthTimeout(getDocs(collection(db, 'users')), 8500),
+      withAuthTimeout(getDocs(collection(db, 'clients')), 8500),
+      withAuthTimeout(getDocs(collection(db, 'destination_staff')), 8500),
+      withAuthTimeout(getDocs(collection(db, 'drivers')), 8500),
+      withAuthTimeout(getDocs(collection(db, 'vehicles')), 8500)
+    ]);
+
+    let cloudUsersSucceeded = false;
+    let anyCloudReadSucceeded = false;
+
+    if (usersSnapRes.status === 'fulfilled') {
+      cloudUsersSucceeded = true;
+      anyCloudReadSucceeded = true;
+      const cloudUsersList: AppUser[] = [];
+      let idx = 0;
+      usersSnapRes.value.forEach((docSnap) => {
         const u = docSnap.data() as AppUser;
-        considerCandidate({ ...u, id: parseNumericDocId(u.id, docSnap.id, 0), _docId: docSnap.id } as any);
+        const normalized: AppUser & { _docId?: string } = {
+          ...u,
+          userId: typeof u.userId === 'string' ? u.userId.trim() : u.userId,
+          id: parseNumericDocId(u.id, docSnap.id, idx++),
+          _docId: docSnap.id
+        };
+        cloudUsersList.push(normalized);
+        considerCandidate(normalized, 8);
       });
-    } catch (_) {
+      if (cloudUsersList.length > 0) {
+        safeAppStorage.setJSON('dpl_live_users', cloudUsersList);
+      }
+    } else {
       console.log('Firestore users query timed out or offline, using synced local credentials.');
     }
 
-    // 1.5. If not matched, query local + Firestore `clients` collection (bounded 2s timeout)
-    if (!matchedUser) {
-      const checkClientObj = (client: any, fallbackId: string) => {
-        if (client && (client.loginEnabled || (client.userId && client.password))) {
-          const cUserId = (client.userId || '').toLowerCase().trim();
-          const cEmail = (client.email || '').toLowerCase().trim();
-          const cName = (client.name || '').toLowerCase().trim();
-
-          const matchUserId = cUserId && (cUserId === cleanId || cUserId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
-          const matchEmail = cEmail && cEmail === cleanId;
-          const matchName = cName && (cName === cleanId || (cleanId.length >= 4 && cName.includes(cleanId)));
-
-          if (matchUserId || matchEmail || matchName) {
-            matchedUser = {
-              id: (client.id || fallbackId) as any,
-              userId: client.userId,
-              password: client.password,
-              name: client.name,
-              role: client.role || UserRole.CLIENT,
-              roles: client.roles || [UserRole.CLIENT],
-              designation: 'Corporate Importer',
-              contact: client.contact || client.mobileNumber || '',
-              email: client.email || '',
-              status: 'ACTIVE',
-              clientName: client.name,
-              lastLogin: client.lastLogin || ''
-            } as unknown as AppUser;
-          }
-        }
-      };
-
-      const localClients = safeAppStorage.getJSON<any[]>('dpl_live_clients', []) || [];
-      for (const lc of localClients) {
-        if (!matchedUser) checkClientObj(lc, String(lc.id || lc.name || 'client'));
-      }
-
-      if (!matchedUser) {
-        try {
-          const clientSnap = await withAuthTimeout(getDocs(collection(db, 'clients')), 2000);
-          clientSnap.forEach((docSnap) => {
-            if (!matchedUser) checkClientObj(docSnap.data(), docSnap.id);
-          });
-        } catch (dbErr: any) {
-          console.log('Firestore clients query timed out or offline.');
-        }
+    if (clientsSnapRes.status === 'fulfilled') {
+      anyCloudReadSucceeded = true;
+      const cloudClients: Client[] = [];
+      clientsSnapRes.value.forEach((docSnap) => {
+        const data = docSnap.data();
+        cloudClients.push({ ...data, id: docSnap.id } as Client);
+        const cCand = toClientCandidate(data, docSnap.id);
+        if (cCand) considerCandidate(cCand, 7);
+      });
+      if (cloudClients.length > 0) {
+        safeAppStorage.setJSON('dpl_cached_clients', cloudClients);
       }
     }
 
-    // 1.7. If not matched, query Firestore drivers & vehicles collections and local caches (for Driver Trip Login IDs created by Transporters)
-    if (!matchedUser) {
-      let expiredTripIdNotice: string | null = null;
-
-      const checkDriverMatch = (drv: any, fallbackId?: string): AppUser | null => {
-        if (!drv) return null;
-        const dUserId = (drv.userId || '').toLowerCase().trim();
-        const dExpiredId = (drv.lastExpiredTripId || '').toLowerCase().trim();
-        const dPhone = (drv.contact || '').toLowerCase().trim();
-        const dName = (drv.name || '').toLowerCase().trim();
-        const dVeh = (drv.assignedVehicleNo || '').toLowerCase().trim();
-
-        const matchUserId = dUserId && (dUserId === cleanId || dUserId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
-        const matchExpiredId = dExpiredId && (dExpiredId === cleanId || dExpiredId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
-        const matchPhone = dPhone && (dPhone === cleanId || dPhone.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
-        const matchVeh = dVeh && dVeh === cleanId;
-        const matchName = dName && dName === cleanId;
-
-        if (matchUserId || matchExpiredId || matchPhone || matchVeh || matchName) {
-          if (
-            drv.driverLoginStatus === 'SUSPENDED_TRIP_COMPLETED' ||
-            drv.driverLoginStatus === 'EXPIRED' ||
-            drv.loginEnabled === false ||
-            matchExpiredId
-          ) {
-            expiredTripIdNotice = `This Driver Trip Login ID (${drv.lastExpiredTripId || drv.userId || identifier}) has been automatically suspended/expired after trip completion & unloading at destination. Driver permanent data is saved — please generate a new Trip ID & Password for the next trip.`;
-            return null;
-          }
-
-          if (drv.password) {
-            return {
-              id: (drv.id || fallbackId || Date.now()) as any,
-              userId: drv.userId || drv.contact || drv.name,
-              password: drv.password,
-              name: drv.name || 'Trip Driver',
-              role: UserRole.DRIVER,
-              roles: [UserRole.DRIVER],
-              designation: `Trip Driver (${drv.assignedVehicleNo || 'Assigned Vehicle'})`,
-              contact: drv.contact || '',
-              email: '',
-              status: 'ACTIVE',
-              clientName: drv.transporterName || 'Transporter',
-              assignedVehicleNo: drv.assignedVehicleNo || ''
-            } as unknown as AppUser;
-          }
-        }
-        return null;
-      };
-
-      const checkVehicleDriverMatch = (veh: any): AppUser | null => {
-        if (!veh) return null;
-        const vUserId = (veh.driverUserId || '').toLowerCase().trim();
-        const vExpiredId = (veh.lastExpiredTripId || '').toLowerCase().trim();
-        const matchUserId = vUserId && (vUserId === cleanId || vUserId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
-        const matchExpiredId = vExpiredId && (vExpiredId === cleanId || vExpiredId.replace(/[\s\-_.]/g, '') === cleanIdNoSpaces);
-
-        if (matchUserId || matchExpiredId) {
-          if (
-            veh.driverLoginStatus === 'SUSPENDED_TRIP_COMPLETED' ||
-            veh.driverLoginStatus === 'EXPIRED' ||
-            matchExpiredId
-          ) {
-            expiredTripIdNotice = `This Driver Trip Login ID (${veh.lastExpiredTripId || veh.driverUserId || identifier}) for vehicle ${veh.registrationNumber} has been automatically expired/blocked because the trip finished & container was unloaded at destination. A new Trip ID & Password is required for the next trip.`;
-            return null;
-          }
-
-          if (veh.driverPassword) {
-            return {
-              id: (veh.id || Date.now()) as any,
-              userId: veh.driverUserId,
-              password: veh.driverPassword,
-              name: veh.driverName || 'Trip Driver',
-              role: UserRole.DRIVER,
-              roles: [UserRole.DRIVER],
-              designation: `Trip Driver (${veh.registrationNumber || 'Assigned Vehicle'})`,
-              contact: veh.driverContact || '',
-              email: '',
-              status: 'ACTIVE',
-              clientName: veh.transporterName || 'Transporter',
-              assignedVehicleNo: veh.registrationNumber || ''
-            } as unknown as AppUser;
-          }
-        }
-        return null;
-      };
-
-      // Check local cached drivers first for instant response
-      const localDrivers = safeAppStorage.getJSON<Driver[]>('dpl_live_drivers', []) || [];
-      for (const d of localDrivers) {
-        const m = checkDriverMatch(d, d.id);
-        if (m) {
-          matchedUser = m;
-          break;
-        }
-      }
-
-      // Check local cached vehicles for Trip Driver IDs
-      if (!matchedUser) {
-        const localVehicles = safeAppStorage.getJSON<Vehicle[]>('dpl_live_vehicles', []) || [];
-        for (const v of localVehicles) {
-          const m = checkVehicleDriverMatch(v);
-          if (m) {
-            matchedUser = m;
-            break;
-          }
-        }
-      }
-
-      // Also check Firestore drivers collection (bounded 2s timeout)
-      if (!matchedUser && !expiredTripIdNotice) {
-        try {
-          const drvSnap = await withAuthTimeout(getDocs(collection(db, 'drivers')), 2000);
-          drvSnap.forEach((docSnap) => {
-            if (!matchedUser) {
-              const m = checkDriverMatch(docSnap.data(), docSnap.id);
-              if (m) matchedUser = m;
-            }
-          });
-        } catch (drvErr) {
-          console.log('Firestore drivers query timed out or offline.');
-        }
-      }
-
-      if (!matchedUser && expiredTripIdNotice) {
-        throw new Error(expiredTripIdNotice);
+    if (destSnapRes.status === 'fulfilled') {
+      anyCloudReadSucceeded = true;
+      const cloudDest: DestinationStaff[] = [];
+      destSnapRes.value.forEach((docSnap) => {
+        const data = docSnap.data();
+        cloudDest.push({ ...data, id: docSnap.id } as DestinationStaff);
+        const dsCand = toDestStaffCandidate(data, docSnap.id);
+        if (dsCand) considerCandidate(dsCand, 7);
+      });
+      if (cloudDest.length > 0) {
+        safeAppStorage.setJSON('dpl_destination_staff', cloudDest);
       }
     }
 
-    // 2. Fallback to default catalog if database is offline or user not yet in Firestore
+    if (driversSnapRes.status === 'fulfilled') {
+      anyCloudReadSucceeded = true;
+      const cloudDrivers: Driver[] = [];
+      driversSnapRes.value.forEach((docSnap) => {
+        const data = docSnap.data();
+        cloudDrivers.push({ ...data, id: docSnap.id } as Driver);
+        const m = checkDriverMatch(data, docSnap.id);
+        if (m) considerCandidate(m, 7);
+      });
+      if (cloudDrivers.length > 0) {
+        safeAppStorage.setJSON('dpl_live_drivers', cloudDrivers);
+      }
+    }
+
+    if (vehiclesSnapRes.status === 'fulfilled') {
+      anyCloudReadSucceeded = true;
+      vehiclesSnapRes.value.forEach((docSnap) => {
+        const m = checkVehicleDriverMatch(docSnap.data());
+        if (m) considerCandidate(m, 7);
+      });
+    }
+
+    if (!matchedUser && expiredTripIdNotice) {
+      throw new Error(expiredTripIdNotice);
+    }
+
+    // 2. Fallback to default catalog if database is offline or default user not yet seeded in Firestore
     if (!matchedUser) {
       const foundInDefault = DEFAULT_DATABASE_USERS.find(
         (u) => {
@@ -3721,6 +4018,9 @@ export async function authenticateDatabaseUser(
     }
 
     if (!matchedUser) {
+      if (!cloudUsersSucceeded && !anyCloudReadSucceeded) {
+        throw new Error('Unable to reach the cloud database right now (network timeout). Please check your internet connection and tap Sign In again.');
+      }
       throw new Error(`No database account found matching "${identifier}".`);
     }
 
@@ -3795,7 +4095,19 @@ export async function authenticateDatabaseUser(
     // Record lastLogin asynchronously in background — NEVER block user sign-in transition
     (async () => {
       try {
-        if (updatedUser.role === UserRole.CLIENT) {
+        if ((matchedUser as any)._clientDocId) {
+          await setDoc(
+            doc(db, 'clients', String((matchedUser as any)._clientDocId)),
+            sanitizeForFirestore({ lastLogin: updatedUser.lastLogin }),
+            { merge: true }
+          );
+        } else if ((matchedUser as any)._destStaffDocId) {
+          await setDoc(
+            doc(db, 'destination_staff', String((matchedUser as any)._destStaffDocId)),
+            sanitizeForFirestore({ lastLogin: updatedUser.lastLogin }),
+            { merge: true }
+          );
+        } else if (updatedUser.role === UserRole.CLIENT) {
           await setDoc(
             doc(db, 'clients', String(updatedUser.id)),
             sanitizeForFirestore({ lastLogin: updatedUser.lastLogin }),
@@ -3861,22 +4173,26 @@ export async function saveUserToFirestore(user: AppUser): Promise<void> {
   const rawDocId = (user as any)._docId;
   const docId = String(rawDocId || user.id || Date.now());
   const numericId = Number(user.id) || parseNumericDocId(user.id, docId, 0);
+  const cleanUserId = typeof user.userId === 'string' ? user.userId.trim() : user.userId;
   const payload = sanitizeForFirestore({
     ...user,
     id: numericId,
+    userId: cleanUserId,
     updatedAt: new Date().toISOString()
   });
   delete (payload as any)._docId;
 
-  // Immediately persist in local safeAppStorage ('dpl_live_users') so UI lists update instantaneously and never lose new staff
+  const fullLocalRecord = { ...(payload as AppUser), _docId: docId } as AppUser & { _docId?: string };
+
+  // 1. Immediately persist in local safeAppStorage ('dpl_live_users') + pending sync queue
   try {
     const deletedKeys = (safeAppStorage.getJSON<string[]>('dpl_deleted_user_keys', []) || []).filter(
-      k => k !== String(numericId) && k !== (user.userId || '').toLowerCase().trim()
+      k => k !== String(numericId) && k !== docId && k !== (cleanUserId || '').toLowerCase().trim()
     );
     safeAppStorage.setJSON('dpl_deleted_user_keys', deletedKeys);
 
     const existingUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', DEFAULT_DATABASE_USERS) || [];
-    const userKey = (user.userId || String(numericId)).toLowerCase().trim();
+    const userKey = (cleanUserId || String(numericId)).toLowerCase().trim();
     const matchedExisting = existingUsers.find(
       u =>
         String(u.id) === String(numericId) ||
@@ -3895,17 +4211,93 @@ export async function saveUserToFirestore(user: AppUser): Promise<void> {
         String((u as any)._docId || '') !== docId &&
         (u.userId || '').toLowerCase().trim() !== userKey
     );
-    const updatedList = [...filtered, { ...(payload as AppUser), _docId: docId } as AppUser];
+    const updatedList = [...filtered, fullLocalRecord];
     safeAppStorage.setJSON('dpl_live_users', updatedList);
+    markUserPendingSync(docId, fullLocalRecord);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('dpl_users_updated', { detail: payload }));
     }
   } catch (_) {}
 
-  const writeUserOp = setDoc(doc(db, path, docId), payload, { merge: true }).catch((error) => {
-    console.warn(`Firestore saveUser warning:`, error);
-  });
-  await Promise.race([writeUserOp, new Promise<void>((resolve) => setTimeout(resolve, 1800))]);
+  // 2. Persist reliably to Firestore with a 10s bounded wait (never drop at 1.8s)
+  try {
+    await Promise.race([
+      setDoc(doc(db, path, docId), payload, { merge: true }).then(() => {
+        clearUserPendingSync(docId);
+      }),
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error('Cloud user write timeout')), 10000)
+      )
+    ]);
+  } catch (error) {
+    console.warn('Firestore saveUser queued for background sync:', error);
+  }
+}
+
+/**
+ * Synchronizes status or credentials changes from Client / Transporter / Destination Staff approvals
+ * back into the `users` collection so login state always stays consistent across all devices.
+ */
+export async function syncLinkedUserAccountStatus(params: {
+  userId?: string;
+  docIdHint?: string;
+  contact?: string;
+  clientName?: string;
+  status: 'ACTIVE' | 'SUSPENDED' | 'PENDING_APPROVAL' | 'INACTIVE';
+  password?: string;
+}): Promise<void> {
+  try {
+    const cleanUid = (params.userId || '').toLowerCase().trim();
+    const cleanClient = (params.clientName || '').toLowerCase().trim();
+    const phoneVariants = new Set(normalizePhoneLookupVariants(params.contact));
+
+    const matchUser = (u: any): boolean => {
+      if (params.docIdHint && String(u._docId || u.id) === params.docIdHint) return true;
+      if (cleanUid && (u.userId || '').toLowerCase().trim() === cleanUid) return true;
+      if (cleanClient && (u.clientName || '').toLowerCase().trim() === cleanClient) return true;
+      if (phoneVariants.size > 0 && normalizePhoneLookupVariants(u.contact).some(v => phoneVariants.has(v))) return true;
+      return false;
+    };
+
+    const patch: Record<string, any> = {
+      status: params.status,
+      isSuspended: params.status === 'SUSPENDED',
+      updatedAt: new Date().toISOString(),
+      ...(params.password ? { password: params.password.trim() } : {})
+    };
+
+    // Update local cache
+    const localUsers = safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || [];
+    let updatedAnyLocal = false;
+    const nextLocal = localUsers.map((u) => {
+      if (matchUser(u)) {
+        updatedAnyLocal = true;
+        return { ...u, ...patch } as AppUser;
+      }
+      return u;
+    });
+    if (updatedAnyLocal) {
+      safeAppStorage.setJSON('dpl_live_users', nextLocal);
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dpl_users_updated'));
+    }
+
+    // Update Firestore `users` docs matching this record
+    const snap = await executeWithTimeout(getDocs(collection(db, 'users')), 7000, null);
+    if (snap) {
+      const updates: Promise<any>[] = [];
+      snap.forEach((docSnap) => {
+        const d = { ...docSnap.data(), _docId: docSnap.id };
+        if (matchUser(d)) {
+          updates.push(setDoc(doc(db, 'users', docSnap.id), sanitizeForFirestore(patch), { merge: true }));
+        }
+      });
+      if (updates.length > 0) {
+        await Promise.allSettled(updates);
+      }
+    }
+  } catch (err) {
+    console.warn('syncLinkedUserAccountStatus warning:', err);
+  }
 }
 
 export async function deleteUserFromFirestore(
@@ -6320,6 +6712,7 @@ export function generateUniqueUsernameFromFullName(
 
   if (Array.isArray(existingUsers)) collect(existingUsers);
   collect(safeAppStorage.getJSON<AppUser[]>('dpl_live_users', []) || []);
+  collect(safeAppStorage.getJSON<Client[]>('dpl_cached_clients', []) || []);
   collect(safeAppStorage.getJSON<Client[]>('dpl_live_clients', []) || []);
   collect(safeAppStorage.getJSON<DestinationStaff[]>('dpl_destination_staff', []) || []);
 
